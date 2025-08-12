@@ -179,6 +179,16 @@ export async function getReturnPeriods(
 
     const data = await response.json();
 
+    // DEBUG: Log the actual API response structure
+    logger.info("🔍 Return Period API Response", {
+      dataType: Array.isArray(data) ? "array" : typeof data,
+      dataLength: Array.isArray(data) ? data.length : "N/A",
+      firstItem: Array.isArray(data) && data.length > 0 ? data[0] : data,
+      allKeys: Array.isArray(data) && data.length > 0 ?
+        Object.keys(data[0] || {}) :
+        (typeof data === "object" ? Object.keys(data || {}) : []),
+    });
+
     // Ensure data is in array format (following your existing pattern)
     const returnPeriodData = Array.isArray(data) ? data : [data];
 
@@ -346,7 +356,6 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
           firstPoint: seriesData[0],
         });
 
-        // From {validTime, flow} to {validTime, value}
         const values = seriesData
           .filter((point) =>
             point.flow !== null &&
