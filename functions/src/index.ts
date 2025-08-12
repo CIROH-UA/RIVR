@@ -21,7 +21,7 @@ export const checkRiverAlerts = onSchedule({
   // Schedule based on environment
   schedule: process.env.NODE_ENV === "production" ?
     "0 */6 * * *" : // Every 6 hours in production
-    "*/5 * * * *", // Every 5 minutes in development
+    "*/2 * * * *", // Every 2 minutes in development
 
   // Set timezone to handle forecasts consistently
   timeZone: "America/Denver", // Mountain Time (matches NOAA data)

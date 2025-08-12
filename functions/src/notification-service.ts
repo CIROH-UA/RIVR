@@ -206,20 +206,20 @@ async function shouldSendAlert(
       // Apply scale factor for development testing
       const scaledThreshold = thresholdCms / SCALE_FACTOR;
 
-      // Convert forecast to CMS for comparison (NOAA forecasts are in CMS)
-      const forecastCms = userFlowUnit === "cfs" ?
-        maxForecastFlow * 0.0283168 : // CFS to CMS
-        maxForecastFlow;
+      // Forecasts are always CFS, return periods always CMS
+      const forecastCms = maxForecastFlow * 0.0283168;
+      // Always convert CFS → CMS
 
       if (forecastCms > scaledThreshold) {
-        // Convert values to user's preferred unit for notification
+        // Convert values to user's preferred unit for notification display
         const displayForecast = userFlowUnit === "cfs" ?
-          maxForecastFlow :
-          forecastCms;
+          maxForecastFlow : // Show original CFS forecast
+          forecastCms; // Show converted CMS forecast
 
         const displayThreshold = userFlowUnit === "cfs" ?
-          scaledThreshold / 0.0283168 : // CMS to CFS
-          scaledThreshold;
+        // Convert CMS threshold → CFS for display
+          scaledThreshold / 0.0283168 :
+          scaledThreshold; // Show original CMS threshold
 
         logger.info(`🚨 Alert condition met for reach ${reachId}`, {
           riverName,
