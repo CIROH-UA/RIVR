@@ -10,7 +10,7 @@ const NOAA_CONFIG = {
   nwmApiKey: "***REMOVED***",
 
   // Request configuration
-  timeout: 15000, // 15 second timeout
+  timeout: 30000, // 30 second timeout
   headers: {
     "Content-Type": "application/json",
     "User-Agent": "RivrFlow-Functions/1.0",
