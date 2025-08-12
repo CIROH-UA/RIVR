@@ -32,7 +32,7 @@ interface ForecastData {
 }
 
 interface ReturnPeriodData {
-  feature_id: string;
+  feature_id: string | number; // API returns number, but we accept both
   return_period_2?: number;
   return_period_5?: number;
   return_period_10?: number;
@@ -79,7 +79,7 @@ interface NoaaApiResponse {
 }
 
 interface ReturnPeriodItem {
-  feature_id: string;
+  feature_id: string | number; // API returns number, but we accept both
   [key: string]: unknown;
 }
 
@@ -178,16 +178,6 @@ export async function getReturnPeriods(
     }
 
     const data = await response.json();
-
-    // DEBUG: Log the actual API response structure
-    logger.info("🔍 Return Period API Response", {
-      dataType: Array.isArray(data) ? "array" : typeof data,
-      dataLength: Array.isArray(data) ? data.length : "N/A",
-      firstItem: Array.isArray(data) && data.length > 0 ? data[0] : data,
-      allKeys: Array.isArray(data) && data.length > 0 ?
-        Object.keys(data[0] || {}) :
-        (typeof data === "object" ? Object.keys(data || {}) : []),
-    });
 
     // Ensure data is in array format (following your existing pattern)
     const returnPeriodData = Array.isArray(data) ? data : [data];
@@ -356,6 +346,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
           firstPoint: seriesData[0],
         });
 
+        // {validTime, flow} to{validTime, value}
         const values = seriesData
           .filter((point) =>
             point.flow !== null &&
@@ -548,7 +539,8 @@ function isReturnPeriodItem(item: unknown): item is ReturnPeriodData {
     item !== null &&
     typeof item === "object" &&
     "feature_id" in item &&
-    typeof (item as ReturnPeriodItem).feature_id === "string"
+    (typeof (item as ReturnPeriodItem).feature_id === "string" ||
+     typeof (item as ReturnPeriodItem).feature_id === "number")
   );
 }
 
