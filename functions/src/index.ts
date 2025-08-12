@@ -8,7 +8,7 @@ import * as logger from "firebase-functions/logger";
  * Main scheduled function for checking river flood alerts
  *
  * Frequency:
- * - Development: Every 5 minutes (for easy testing)
+ * - Development: Every 2 minutes (for easy testing)
  * - Production: Every 6 hours (to avoid spam)
  *
  * What it does:
