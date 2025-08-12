@@ -2,9 +2,6 @@
 
 import * as logger from "firebase-functions/logger";
 
-// Simple in-memory cache for function duration (resets on each cold start)
-const cache = new Map<string, {data: unknown; expires: number}>();
-
 // NOAA API configuration (matches your exact AppConfig)
 const NOAA_CONFIG = {
   // Base URLs matching your AppConfig exactly
@@ -20,7 +17,7 @@ const NOAA_CONFIG = {
   },
 };
 
-// Updated types to match real NOAA API structure
+// Types to match real NOAA API structure
 interface ForecastValue {
   value: number;
   validTime: string;
@@ -28,17 +25,17 @@ interface ForecastValue {
 
 interface ForecastData {
   values: ForecastValue[];
-  units?: string;
+  units?: string; // Always "ft³/s" (CFS) from NOAA API
 }
 
 interface ReturnPeriodData {
   feature_id: string | number; // API returns number, but we accept both
-  return_period_2?: number;
-  return_period_5?: number;
-  return_period_10?: number;
-  return_period_25?: number;
-  return_period_50?: number;
-  return_period_100?: number;
+  return_period_2?: number; // All return period values are in CMS (m³/s)
+  return_period_5?: number; // All return period values are in CMS (m³/s)
+  return_period_10?: number; // All return period values are in CMS (m³/s)
+  return_period_25?: number; // All return period values are in CMS (m³/s)
+  return_period_50?: number; // All return period values are in CMS (m³/s)
+  return_period_100?: number; // All return period values are in CMS (m³/s)
 }
 
 // Real NOAA API response structures (matching your Flutter app)
@@ -63,11 +60,6 @@ interface NoaaApiResponse {
     mean?: NoaaForecastSeries;
     [memberKey: string]: NoaaForecastSeries | unknown;
   };
-  // Long range forecast structure
-  longRange?: {
-    mean?: NoaaForecastSeries;
-    [memberKey: string]: NoaaForecastSeries | unknown;
-  };
   // Legacy fallback structures
   values?: ForecastValue[];
   units?: string;
@@ -89,26 +81,40 @@ interface ReachResponse {
 }
 
 /**
- * Get forecast data for a reach (uses short-range for notification checks)
+ * Get forecast data for a reach (always fetches fresh data)
+ * Tries both short-range and medium-range forecasts for notifications
+ *
+ * IMPORTANT: Forecast values are ALWAYS in CFS (ft³/s) from NOAA API
+ * Return periods from getReturnPeriods() are ALWAYS in CMS (m³/s)
+ * Conversion factor: CFS * 0.0283168 = CMS
+ *
  * @param {string} reachId - The reach identifier
- * @return {Promise<ForecastData>} Forecast data with values array
+ * @return {Promise<ForecastData>} Forecast data with values array (in CFS)
  */
 export async function getForecast(reachId: string): Promise<ForecastData> {
-  const cacheKey = `forecast:${reachId}`;
-
-  // Check cache first (valid for 1 hour)
-  const cached = getCachedData(cacheKey);
-  if (cached) {
-    logger.info(`📦 Using cached forecast for reach ${reachId}`);
-    return cached as ForecastData;
-  }
-
   try {
-    logger.info(`📡 Fetching forecast for reach ${reachId}`);
+    logger.info(`📡 Fetching fresh forecast for reach ${reachId}`);
 
-    // Use short_range forecast for notification checks (most current/reliable)
-    const url = buildForecastUrl(reachId, "short_range");
-    const response = await fetchWithTimeout(url);
+    // Try short_range first (most current/reliable for notifications)
+    let url = buildForecastUrl(reachId, "short_range");
+    let response = await fetchWithTimeout(url);
+
+    if (response.ok) {
+      const data = await response.json();
+      const forecastData = extractForecastValues(data as NoaaApiResponse);
+
+      if (forecastData.values.length > 0) {
+        logger.info(`✅ Fetched short_range forecast for reach ${reachId}`, {
+          valueCount: forecastData.values.length,
+        });
+        return forecastData;
+      }
+    }
+
+    // Fall back to medium_range if short_range failed or had no data
+    logger.info(`📡 Trying medium_range forecast for reach ${reachId}`);
+    url = buildForecastUrl(reachId, "medium_range");
+    response = await fetchWithTimeout(url);
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -120,14 +126,10 @@ export async function getForecast(reachId: string): Promise<ForecastData> {
     }
 
     const data = await response.json();
-
-    // Extract forecast values from NOAA response structure
     const forecastData = extractForecastValues(data as NoaaApiResponse);
 
-    // Cache the result only if we got valid data
     if (forecastData.values.length > 0) {
-      setCachedData(cacheKey, forecastData);
-      logger.info(`✅ Successfully fetched forecast for reach ${reachId}`, {
+      logger.info(`✅ Fetched medium_range forecast for reach ${reachId}`, {
         valueCount: forecastData.values.length,
       });
     } else {
@@ -144,24 +146,20 @@ export async function getForecast(reachId: string): Promise<ForecastData> {
 }
 
 /**
- * Get return period thresholds for a reach
+ * Get return period thresholds for a reach (always fetches fresh data)
+ *
+ * IMPORTANT: Return period values are ALWAYS in CMS (m³/s) from NWM API
+ * Forecast values from getForecast() are ALWAYS in CFS (ft³/s)
+ * Conversion factor: CFS * 0.0283168 = CMS
+ *
  * @param {string} reachId - The reach identifier
- * @return {Promise<ReturnPeriodData[]>} Array of return period data
+ * @return {Promise<ReturnPeriodData[]>} Array of return period data (in CMS)
  */
 export async function getReturnPeriods(
   reachId: string
 ): Promise<ReturnPeriodData[]> {
-  const cacheKey = `return-periods:${reachId}`;
-
-  // Check cache first (valid for 24 hours - this data changes rarely)
-  const cached = getCachedData(cacheKey);
-  if (cached) {
-    logger.info(`📦 Using cached return periods for reach ${reachId}`);
-    return cached as ReturnPeriodData[];
-  }
-
   try {
-    logger.info(`📡 Fetching return periods for reach ${reachId}`);
+    logger.info(`📡 Fetching fresh return periods for reach ${reachId}`);
 
     const url = buildReturnPeriodUrl(reachId);
     const response = await fetchWithTimeout(url);
@@ -193,9 +191,6 @@ export async function getReturnPeriods(
       return [];
     }
 
-    // Cache the result
-    setCachedData(cacheKey, validData);
-
     logger.info(
       `✅ Successfully fetched return periods for reach ${reachId}`,
       {
@@ -218,21 +213,13 @@ export async function getReturnPeriods(
 }
 
 /**
- * Get river name for notification display
+ * Get river name for notification display (always fetches fresh data)
  * @param {string} reachId - The reach identifier
  * @return {Promise<string>} River name or fallback
  */
 export async function getRiverName(reachId: string): Promise<string> {
-  const cacheKey = `river-name:${reachId}`;
-
-  // Check cache first (valid for 24 hours - names don't change)
-  const cached = getCachedData(cacheKey);
-  if (cached) {
-    return cached as string;
-  }
-
   try {
-    logger.info(`📡 Fetching river name for reach ${reachId}`);
+    logger.info(`📡 Fetching fresh river name for reach ${reachId}`);
 
     const url = buildReachUrl(reachId);
     const response = await fetchWithTimeout(url);
@@ -245,9 +232,6 @@ export async function getRiverName(reachId: string): Promise<string> {
 
     const data = await response.json() as ReachResponse;
     const riverName = data.name || `Reach ${reachId}`;
-
-    // Cache the result
-    setCachedData(cacheKey, riverName);
 
     logger.info(`✅ Successfully fetched river name: ${riverName}`);
     return riverName;
@@ -326,7 +310,8 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 
 /**
  * Extract forecast values from NOAA API response
- * Matches the exact parsing logic from your working Flutter app
+ * UPDATED: Only processes short-range and medium-range forecasts
+ * Returns raw units as provided by NOAA API (typically ft³/s for forecasts)
  * @param {NoaaApiResponse} apiResponse - The NOAA API response
  * @return {ForecastData} Extracted forecast data
  */
@@ -346,7 +331,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
           firstPoint: seriesData[0],
         });
 
-        // {validTime, flow} to{validTime, value}
+        // Convert {validTime, flow} to {validTime, value}
         const values = seriesData
           .filter((point) =>
             point.flow !== null &&
@@ -361,7 +346,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
         if (values.length > 0) {
           return {
             values,
-            units: apiResponse.shortRange.series.units || "cms",
+            units: apiResponse.shortRange.series.units || "ft³/s",
           };
         }
       }
@@ -389,42 +374,15 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
         if (values.length > 0) {
           return {
             values,
-            units: apiResponse.mediumRange.mean.units || "cms",
+            units: apiResponse.mediumRange.mean.units || "ft³/s",
           };
         }
       }
     }
 
-    // STEP 3: Try longRange.mean.data (used by long_range forecast)
-    if (apiResponse.longRange?.mean?.data) {
-      const meanData = apiResponse.longRange.mean.data;
-      if (Array.isArray(meanData) && meanData.length > 0) {
-        logger.info("✅ Found longRange.mean.data", {
-          pointCount: meanData.length,
-        });
-
-        const values = meanData
-          .filter((point) =>
-            point.flow !== null &&
-            point.flow !== undefined &&
-            !isNaN(point.flow)
-          )
-          .map((point) => ({
-            validTime: point.validTime,
-            value: point.flow,
-          }));
-
-        if (values.length > 0) {
-          return {
-            values,
-            units: apiResponse.longRange.mean.units || "cms",
-          };
-        }
-      }
-    }
-
-    // STEP 4: Fall back to ensemble members (member1, member2, etc.)
-    const forecastTypes = ["shortRange", "mediumRange", "longRange"] as const;
+    // STEP 3: Fall back to ensemble members (member1, member2, etc.)
+    // UPDATED: Only check shortRange and mediumRange (no longRange)
+    const forecastTypes = ["shortRange", "mediumRange"] as const;
 
     for (const forecastType of forecastTypes) {
       const forecastSection = apiResponse[forecastType];
@@ -458,7 +416,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
             if (values.length > 0) {
               return {
                 values,
-                units: (memberSection as {units?: string})?.units || "cms",
+                units: (memberSection as {units?: string})?.units || "ft³/s",
               };
             }
           }
@@ -466,7 +424,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
       }
     }
 
-    // STEP 5: Legacy fallback patterns (keep for compatibility)
+    // STEP 4: Legacy fallback patterns (keep for compatibility)
     if (apiResponse.values && Array.isArray(apiResponse.values)) {
       const validValues = apiResponse.values.filter((v) =>
         v.value !== null &&
@@ -479,7 +437,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
         });
         return {
           values: validValues,
-          units: apiResponse.units || "cms",
+          units: apiResponse.units || "ft³/s",
         };
       }
     }
@@ -496,7 +454,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
         });
         return {
           values: validValues,
-          units: apiResponse.forecast.units || "cms",
+          units: apiResponse.forecast.units || "ft³/s",
         };
       }
     }
@@ -508,13 +466,11 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
         Object.keys(apiResponse.shortRange) : null,
       mediumRange: apiResponse.mediumRange ?
         Object.keys(apiResponse.mediumRange) : null,
-      longRange: apiResponse.longRange ?
-        Object.keys(apiResponse.longRange) : null,
     });
 
     return {
       values: [],
-      units: "cms",
+      units: "ft³/s",
     };
   } catch (error) {
     logger.error("❌ Error extracting forecast values", {
@@ -524,7 +480,7 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
 
     return {
       values: [],
-      units: "cms",
+      units: "ft³/s",
     };
   }
 }
@@ -542,59 +498,4 @@ function isReturnPeriodItem(item: unknown): item is ReturnPeriodData {
     (typeof (item as ReturnPeriodItem).feature_id === "string" ||
      typeof (item as ReturnPeriodItem).feature_id === "number")
   );
-}
-
-/**
- * Simple cache management (following your existing patterns)
- * @param {string} key - Cache key
- * @return {unknown|null} Cached data or null
- */
-function getCachedData(key: string): unknown | null {
-  const cached = cache.get(key);
-  if (cached && Date.now() < cached.expires) {
-    return cached.data;
-  }
-
-  // Clean up expired entry
-  if (cached) {
-    cache.delete(key);
-  }
-
-  return null;
-}
-
-/**
- * Set data in cache with expiration
- * @param {string} key - Cache key
- * @param {unknown} data - Data to cache
- * @param {number} maxAge - Maximum age in ms (default 1 hour)
- */
-function setCachedData(
-  key: string,
-  data: unknown,
-  maxAge: number = 60 * 60 * 1000
-): void {
-  cache.set(key, {
-    data,
-    expires: Date.now() + maxAge,
-  });
-}
-
-/**
- * Clear cache (useful for testing)
- */
-export function clearCache(): void {
-  cache.clear();
-  logger.info("🧹 Cache cleared");
-}
-
-/**
- * Get cache stats (useful for monitoring)
- * @return {object} Cache statistics with size and keys
- */
-export function getCacheStats(): {size: number; keys: string[]} {
-  return {
-    size: cache.size,
-    keys: Array.from(cache.keys()),
-  };
 }
