@@ -1,5 +1,6 @@
-// lib/core/services/fcm_service.dart
+// lib/services/fcm_service.dart
 
+import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:rivrflow/core/services/error_service.dart';
 import 'package:rivrflow/features/auth/services/user_settings_service.dart';
@@ -90,7 +91,25 @@ class FCMService {
         return _cachedToken;
       }
 
-      // Get fresh token
+      // iOS: Get APNS token first (required)
+      if (Platform.isIOS) {
+        print('FCM_SERVICE: Getting APNS token first (iOS requirement)');
+        try {
+          final apnsToken = await _messaging.getAPNSToken();
+          if (apnsToken != null) {
+            print(
+              'FCM_SERVICE: APNS token obtained: ${apnsToken.substring(0, 20)}...',
+            );
+          } else {
+            print('FCM_SERVICE: APNS token is null, continuing anyway...');
+          }
+        } catch (e) {
+          print('FCM_SERVICE: Error getting APNS token: $e');
+          // Continue anyway - sometimes this works without explicit APNS token
+        }
+      }
+
+      // Get fresh FCM token
       final token = await _messaging.getToken();
       if (token == null) {
         print('FCM_SERVICE: Failed to get FCM token');
