@@ -1,6 +1,7 @@
 // lib/main.dart
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:provider/provider.dart';
 import 'package:rivrflow/core/pages/navigation_error_page.dart';
 import 'package:rivrflow/features/auth/providers/auth_provider.dart';
@@ -25,11 +26,28 @@ import 'firebase_options.dart';
 import 'features/auth/presentation/pages/auth_coordinator.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+// ADD: Background message handler (must be top-level function)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Initialize Firebase if needed
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  print('FCM_BACKGROUND: Received message: ${message.messageId}');
+  print('FCM_BACKGROUND: Title: ${message.notification?.title}');
+  print('FCM_BACKGROUND: Body: ${message.notification?.body}');
+
+  // Handle the background message (for now, just log it)
+  // In the future, you could update local database or trigger other actions
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase with proper configuration
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // ADD: Register background message handler
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   runApp(const RivrFlowApp());
 }

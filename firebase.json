@@ -1,1 +1,47 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"rivrflow-app","appId":"1:158435993111:android:7b26fd7c38d1fe45121e52","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"rivrflow-app","appId":"1:158435993111:ios:911892f1e3be456f121e52","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"rivrflow-app","configurations":{"android":"1:158435993111:android:7b26fd7c38d1fe45121e52","ios":"1:158435993111:ios:911892f1e3be456f121e52"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "rivrflow-app",
+          "appId": "1:158435993111:android:7b26fd7c38d1fe45121e52",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "rivrflow-app",
+          "appId": "1:158435993111:ios:911892f1e3be456f121e52",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "rivrflow-app",
+          "configurations": {
+            "android": "1:158435993111:android:7b26fd7c38d1fe45121e52",
+            "ios": "1:158435993111:ios:911892f1e3be456f121e52"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run lint",
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
+    }
+  ]
+}
