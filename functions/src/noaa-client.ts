@@ -82,66 +82,91 @@ interface ReachResponse {
 
 /**
  * Get forecast data for a reach (always fetches fresh data)
- * Tries both short-range and medium-range forecasts for notifications
- *
- * IMPORTANT: Forecast values are ALWAYS in CFS (ft³/s) from NOAA API
- * Return periods from getReturnPeriods() are ALWAYS in CMS (m³/s)
- * Conversion factor: CFS * 0.0283168 = CMS
+ * Fetches BOTH short_range AND medium_range forecasts for notifications
+ * Returns structure that matches app's ForecastResponse format
  *
  * @param {string} reachId - The reach identifier
- * @return {Promise<ForecastData>} Forecast data with values array (in CFS)
  */
-export async function getForecast(reachId: string): Promise<ForecastData> {
+export async function getForecast(reachId: string): Promise<{
+  shortRange: ForecastData | null;
+  mediumRange: ForecastData | null;
+}> {
+  logger.info(`📡 Fetching both forecasts for reach ${reachId}`);
+
+  let shortRangeForecast: ForecastData | null = null;
+  let mediumRangeForecast: ForecastData | null = null;
+
+  // Fetch short_range forecast
   try {
-    logger.info(`📡 Fetching fresh forecast for reach ${reachId}`);
+    const shortRangeUrl = buildForecastUrl(reachId, "short_range");
+    const shortRangeResponse = await fetchWithTimeout(shortRangeUrl);
 
-    // Try short_range first (most current/reliable for notifications)
-    let url = buildForecastUrl(reachId, "short_range");
-    let response = await fetchWithTimeout(url);
+    if (shortRangeResponse.ok) {
+      const shortRangeData = await shortRangeResponse.json();
+      const extracted = extractForecastValues(shortRangeData as
+        NoaaApiResponse);
 
-    if (response.ok) {
-      const data = await response.json();
-      const forecastData = extractForecastValues(data as NoaaApiResponse);
-
-      if (forecastData.values.length > 0) {
+      if (extracted.values.length > 0) {
+        shortRangeForecast = extracted;
         logger.info(`✅ Fetched short_range forecast for reach ${reachId}`, {
-          valueCount: forecastData.values.length,
+          valueCount: extracted.values.length,
         });
-        return forecastData;
+      } else {
+        logger.warn(`⚠️ Short_range exists, no valid data for ${reachId}`);
       }
-    }
-
-    // Fall back to medium_range if short_range failed or had no data
-    logger.info(`📡 Trying medium_range forecast for reach ${reachId}`);
-    url = buildForecastUrl(reachId, "medium_range");
-    response = await fetchWithTimeout(url);
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error(`Forecast not available for reach ${reachId}`);
-      }
-      throw new Error(
-        `NOAA API error: ${response.status} - ${response.statusText}`
-      );
-    }
-
-    const data = await response.json();
-    const forecastData = extractForecastValues(data as NoaaApiResponse);
-
-    if (forecastData.values.length > 0) {
-      logger.info(`✅ Fetched medium_range forecast for reach ${reachId}`, {
-        valueCount: forecastData.values.length,
-      });
     } else {
-      logger.warn(`⚠️ No valid forecast data extracted for reach ${reachId}`);
+      logger.warn(`⚠️ Short failed ${reachId}: ${shortRangeResponse.status}`);
     }
-
-    return forecastData;
   } catch (error) {
-    logger.error(`❌ Error fetching forecast for reach ${reachId}`, {
+    logger.warn(`⚠️ Error fetching short_range forecast for ${reachId}`, {
       error: error instanceof Error ? error.message : String(error),
     });
-    throw error;
+  }
+
+  // Fetch medium_range forecast
+  try {
+    const mediumRangeUrl = buildForecastUrl(reachId, "medium_range");
+    const mediumRangeResponse = await fetchWithTimeout(mediumRangeUrl);
+
+    if (mediumRangeResponse.ok) {
+      const mediumRangeData = await mediumRangeResponse.json();
+      const extracted = extractForecastValues(mediumRangeData as
+        NoaaApiResponse);
+
+      if (extracted.values.length > 0) {
+        mediumRangeForecast = extracted;
+        logger.info(`✅ Successfully fetched medium for ${reachId}`, {
+          valueCount: extracted.values.length,
+        });
+      } else {
+        logger.warn(`⚠️ Medium exists, no valid data for reach ${reachId}`);
+      }
+    } else {
+      logger.warn(`⚠️ Medium failed ${reachId}: ${mediumRangeResponse.status}`);
+    }
+  } catch (error) {
+    logger.warn(`⚠️ Error fetching medium forecast for ${reachId}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Check if we got any valid data
+  if (shortRangeForecast || mediumRangeForecast) {
+    logger.info(`✅ Forecast data fetched for reach ${reachId}`, {
+      hasShortRange: !!shortRangeForecast,
+      hasMediumRange: !!mediumRangeForecast,
+      shortRangeValues: shortRangeForecast?.values.length || 0,
+      mediumRangeValues: mediumRangeForecast?.values.length || 0,
+    });
+
+    return {
+      shortRange: shortRangeForecast,
+      mediumRange: mediumRangeForecast,
+    };
+  } else {
+    // No data from either forecast
+    logger.error(`❌ No valid from short or medium ${reachId}`);
+    throw new Error(`No forecast data available for reach ${reachId}`);
   }
 }
 
@@ -310,27 +335,16 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 
 /**
  * Extract forecast values from NOAA API response
- * UPDATED: Only processes short-range and medium-range forecasts
- * Returns raw units as provided by NOAA API (typically ft³/s for forecasts)
+ * Handles shortRange and mediumRange data only
  * @param {NoaaApiResponse} apiResponse - The NOAA API response
  * @return {ForecastData} Extracted forecast data
  */
 function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
   try {
-    // Log the structure for debugging
-    logger.info("🔍 NOAA API Response Structure", {
-      topLevelKeys: Object.keys(apiResponse || {}),
-    });
-
     // STEP 1: Try shortRange.series.data (used by short_range forecast)
     if (apiResponse.shortRange?.series?.data) {
       const seriesData = apiResponse.shortRange.series.data;
       if (Array.isArray(seriesData) && seriesData.length > 0) {
-        logger.info("✅ Found shortRange.series.data", {
-          pointCount: seriesData.length,
-          firstPoint: seriesData[0],
-        });
-
         // Convert {validTime, flow} to {validTime, value}
         const values = seriesData
           .filter((point) =>
@@ -344,6 +358,9 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
           }));
 
         if (values.length > 0) {
+          logger.info("✅ Found shortRange.series.data", {
+            pointCount: values.length,
+          });
           return {
             values,
             units: apiResponse.shortRange.series.units || "ft³/s",
@@ -356,10 +373,6 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
     if (apiResponse.mediumRange?.mean?.data) {
       const meanData = apiResponse.mediumRange.mean.data;
       if (Array.isArray(meanData) && meanData.length > 0) {
-        logger.info("✅ Found mediumRange.mean.data", {
-          pointCount: meanData.length,
-        });
-
         const values = meanData
           .filter((point) =>
             point.flow !== null &&
@@ -372,6 +385,9 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
           }));
 
         if (values.length > 0) {
+          logger.info("✅ Found mediumRange.mean.data", {
+            pointCount: values.length,
+          });
           return {
             values,
             units: apiResponse.mediumRange.mean.units || "ft³/s",
@@ -381,85 +397,43 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
     }
 
     // STEP 3: Fall back to ensemble members (member1, member2, etc.)
-    // UPDATED: Only check shortRange and mediumRange (no longRange)
-    const forecastTypes = ["shortRange", "mediumRange"] as const;
+    if (apiResponse.mediumRange &&
+      typeof apiResponse.mediumRange === "object") {
+      const memberKeys = Object.keys(apiResponse.mediumRange)
+        .filter((key) => key.startsWith("member"))
+        .sort(); // member1, member2, etc.
 
-    for (const forecastType of forecastTypes) {
-      const forecastSection = apiResponse[forecastType];
-      if (forecastSection && typeof forecastSection === "object") {
-        // Look for member1, member2, etc.
-        const memberKeys = Object.keys(forecastSection)
-          .filter((key) => key.startsWith("member"))
-          .sort(); // member1, member2, etc.
+      for (const memberKey of memberKeys) {
+        const memberSection = (apiResponse.mediumRange as
+          Record<string, unknown>)[memberKey];
+        const memberData = (memberSection as
+          {data?: NoaaForecastPoint[]})?.data;
+        if (Array.isArray(memberData) && memberData.length > 0) {
+          const values = memberData
+            .filter((point) =>
+              point.flow !== null &&
+              point.flow !== undefined &&
+              !isNaN(point.flow)
+            )
+            .map((point) => ({
+              validTime: point.validTime,
+              value: point.flow,
+            }));
 
-        for (const memberKey of memberKeys) {
-          const memberSection = (forecastSection as
-            Record<string, unknown>)[memberKey];
-          const memberData = (memberSection as
-            {data?: NoaaForecastPoint[]})?.data;
-          if (Array.isArray(memberData) && memberData.length > 0) {
-            logger.info(`✅ Found ${forecastType}.${memberKey}.data`, {
-              pointCount: memberData.length,
+          if (values.length > 0) {
+            logger.info(`✅ Found mediumRange.${memberKey}.data`, {
+              pointCount: values.length,
             });
-
-            const values = memberData
-              .filter((point) =>
-                point.flow !== null &&
-                point.flow !== undefined &&
-                !isNaN(point.flow)
-              )
-              .map((point) => ({
-                validTime: point.validTime,
-                value: point.flow,
-              }));
-
-            if (values.length > 0) {
-              return {
-                values,
-                units: (memberSection as {units?: string})?.units || "ft³/s",
-              };
-            }
+            return {
+              values,
+              units: (memberSection as {units?: string})?.units || "ft³/s",
+            };
           }
         }
       }
     }
 
-    // STEP 4: Legacy fallback patterns (keep for compatibility)
-    if (apiResponse.values && Array.isArray(apiResponse.values)) {
-      const validValues = apiResponse.values.filter((v) =>
-        v.value !== null &&
-        v.value !== undefined &&
-        !isNaN(v.value)
-      );
-      if (validValues.length > 0) {
-        logger.info("✅ Found legacy values array", {
-          pointCount: validValues.length,
-        });
-        return {
-          values: validValues,
-          units: apiResponse.units || "ft³/s",
-        };
-      }
-    }
-
-    if (apiResponse.forecast?.values) {
-      const validValues = apiResponse.forecast.values.filter((v) =>
-        v.value !== null &&
-        v.value !== undefined &&
-        !isNaN(v.value)
-      );
-      if (validValues.length > 0) {
-        logger.info("✅ Found legacy forecast.values", {
-          pointCount: validValues.length,
-        });
-        return {
-          values: validValues,
-          units: apiResponse.forecast.units || "ft³/s",
-        };
-      }
-    }
-
-    // Log the full structure for debugging if no data found
+    // No forecast data found
     logger.warn("❌ No forecast data found in expected locations", {
       responseKeys: Object.keys(apiResponse || {}),
       shortRange: apiResponse.shortRange ?
@@ -475,7 +449,6 @@ function extractForecastValues(apiResponse: NoaaApiResponse): ForecastData {
   } catch (error) {
     logger.error("❌ Error extracting forecast values", {
       error: error instanceof Error ? error.message : String(error),
-      responseStructure: Object.keys(apiResponse || {}),
     });
 
     return {

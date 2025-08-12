@@ -187,12 +187,12 @@ async function shouldSendAlert(
 
     // Get forecast and return period data in parallel
     const [forecastData, returnPeriodData, riverName] = await Promise.all([
-      getForecast(reachId),
+      getForecast(reachId), // Returns only {shortRange, mediumRange}
       getReturnPeriods(reachId),
       getRiverName(reachId),
     ]);
 
-    // Extract max forecast flow
+    // Extract max flow from BOTH short and medium
     const maxForecastFlow = getMaxForecastFlow(forecastData);
     if (maxForecastFlow === null) {
       logger.warn(`⚠️ No valid forecast data for reach ${reachId}`);
@@ -333,16 +333,31 @@ async function sendAlert(
  * @param {ForecastData} forecastData - Forecast data from NOAA API
  * @return {number|null} Maximum flow value or null if no valid data
  */
-function getMaxForecastFlow(forecastData: ForecastData): number | null {
-  if (!forecastData?.values || !Array.isArray(forecastData.values)) {
-    return null;
+function getMaxForecastFlow(forecastData: {
+  shortRange: ForecastData | null;
+  mediumRange: ForecastData | null;
+}): number | null {
+  let maxFlow = -Infinity;
+
+  // Check short range data
+  if (forecastData.shortRange?.values) {
+    for (const point of forecastData.shortRange.values) {
+      if (point.value > maxFlow && point.value > -9000) {
+        maxFlow = point.value;
+      }
+    }
   }
 
-  const validValues = forecastData.values
-    .map((item) => item.value)
-    .filter((value) => typeof value === "number" && !isNaN(value));
+  // Check medium range data
+  if (forecastData.mediumRange?.values) {
+    for (const point of forecastData.mediumRange.values) {
+      if (point.value > maxFlow && point.value > -9000) {
+        maxFlow = point.value;
+      }
+    }
+  }
 
-  return validValues.length > 0 ? Math.max(...validValues) : null;
+  return maxFlow === -Infinity ? null : maxFlow;
 }
 
 /**

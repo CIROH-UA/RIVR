@@ -8,7 +8,7 @@ import * as logger from "firebase-functions/logger";
  * Main scheduled function for checking river flood alerts
  *
  * Frequency:
- * - Development: Every 2 minutes (for easy testing)
+ * - Development: Every 1 minutes (for easy testing)
  * - Production: Every 6 hours (to avoid spam)
  *
  * What it does:
@@ -19,9 +19,8 @@ import * as logger from "firebase-functions/logger";
  */
 export const checkRiverAlerts = onSchedule({
   // Schedule based on environment
-  schedule: process.env.NODE_ENV === "production" ?
-    "0 */6 * * *" : // Every 6 hours in production
-    "*/2 * * * *", // Every 2 minutes in development
+  schedule: "*/1 * * * *", // Every 1 minutes in development
+  // "0 */6 * * *"  // Every 6 hours in production
 
   // Set timezone to handle forecasts consistently
   timeZone: "America/Denver", // Mountain Time (matches NOAA data)
