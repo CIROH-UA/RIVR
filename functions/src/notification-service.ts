@@ -276,7 +276,7 @@ async function sendAlert(
       notification: {
         title: `🌊 ${alertData.riverName} Flood Alert`,
         body: `Forecast: ${alertData.forecastFlow} ${unitLabel} ` +
-          `(exceeds ${alertData.returnPeriod}-year flood threshold)`,
+          `(exceeds ${alertData.returnPeriod} flood threshold)`,
       },
       data: {
         type: "flood_alert",
