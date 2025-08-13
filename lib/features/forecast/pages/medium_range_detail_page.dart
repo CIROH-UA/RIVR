@@ -81,7 +81,7 @@ class _MediumRangeDetailPageState extends State<MediumRangeDetailPage> {
       arguments: {
         'reachId': _reachId,
         'forecastType': 'medium_range',
-        'title': 'Medium Range Hydrograph',
+        'title': 'Daily Hydrograph',
       },
     );
   }

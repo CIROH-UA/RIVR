@@ -145,9 +145,11 @@ class MapPageState extends State<MapPage> {
               margin: const EdgeInsets.only(top: 8, right: 16),
               child: MapControlButtons(
                 onLayersPressed: _showLayersModal,
-                onStreamsPressed:
-                    _showStreamsModal, // NEW: Wire up streams button
+                onStreamsPressed: _showStreamsModal,
                 onRecenterPressed: _recenterToLocation,
+                // NEW: Add these two lines
+                on3DTogglePressed: _toggle3DTerrain,
+                is3DEnabled: _controlsService.is3DEnabled,
               ),
             ),
           ),
@@ -156,6 +158,12 @@ class MapPageState extends State<MapPage> {
         if (_isLoading) _buildLoadingOverlay(),
       ],
     );
+  }
+
+  /// Toggle 3D terrain on/off
+  Future<void> _toggle3DTerrain() async {
+    await _controlsService.toggle3DTerrain();
+    setState(() {}); // Refresh UI to update button state
   }
 
   Widget _buildMap() {

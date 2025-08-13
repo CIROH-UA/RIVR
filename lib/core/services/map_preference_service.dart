@@ -50,7 +50,7 @@ class MapPreferenceService {
       }
     }
 
-    return MapBaseLayer.streets; // Default fallback
+    return MapBaseLayer.standard;
   }
 
   /// Save manually selected map base layer to storage
@@ -101,9 +101,9 @@ class MapPreferenceService {
   static MapBaseLayer _getAutoMapLayer(Brightness brightness) {
     switch (brightness) {
       case Brightness.light:
-        return MapBaseLayer.streets; // Light theme -> Streets map
+        return MapBaseLayer.standard; // Changed from MapBaseLayer.streets
       case Brightness.dark:
-        return MapBaseLayer.dark; // Dark theme -> Dark map
+        return MapBaseLayer.dark; // Keep dark theme -> dark map
     }
   }
 

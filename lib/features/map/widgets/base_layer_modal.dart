@@ -1,8 +1,8 @@
 // lib/features/map/widgets/base_layer_modal.dart
-
 import 'package:flutter/cupertino.dart';
 
 enum MapBaseLayer {
+  standard('Standard', 'mapbox://styles/mapbox/standard'),
   streets('Streets', 'mapbox://styles/mapbox/streets-v12'),
   satellite('Satellite', 'mapbox://styles/mapbox/satellite-v9'),
   satelliteStreets(
@@ -20,6 +20,8 @@ enum MapBaseLayer {
 
   IconData get icon {
     switch (this) {
+      case MapBaseLayer.standard:
+        return CupertinoIcons.map_fill; // Filled map icon for Standard
       case MapBaseLayer.streets:
         return CupertinoIcons.map;
       case MapBaseLayer.satellite:

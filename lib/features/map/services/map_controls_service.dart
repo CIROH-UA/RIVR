@@ -2,21 +2,25 @@
 
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/map_preference_service.dart';
 import '../../../core/providers/theme_provider.dart';
 import '../widgets/base_layer_modal.dart';
 
 class MapControlsService {
   MapboxMap? _mapboxMap;
-  MapBaseLayer _currentLayer = MapBaseLayer.streets;
+  MapBaseLayer _currentLayer = MapBaseLayer.standard;
   geo.Position? _lastKnownLocation;
+  bool _is3DEnabled = false;
 
   // Default camera settings (you can adjust these based on your app's needs)
   static const double _defaultZoom = 14.0;
   static const int _animationDurationMs = 1000;
+  static const String _terrain3DKey = 'terrain_3d_enabled';
 
   MapBaseLayer get currentLayer => _currentLayer;
   geo.Position? get lastKnownLocation => _lastKnownLocation;
+  bool get is3DEnabled => _is3DEnabled;
 
   void setMapboxMap(MapboxMap mapboxMap) {
     _mapboxMap = mapboxMap;
@@ -35,11 +39,19 @@ class MapControlsService {
         themeProvider,
       );
 
+      // Load 3D terrain preference
+      await _load3DTerrainPreference();
+
       // Apply the style if it's different from current
       if (activeLayer != _currentLayer) {
         await _mapboxMap!.loadStyleURI(activeLayer.styleUrl);
         _currentLayer = activeLayer;
         print('✅ Map initialized with layer: ${activeLayer.displayName}');
+      }
+
+      // Apply 3D terrain if enabled (independent of layer)
+      if (_is3DEnabled) {
+        await _enable3DTerrain();
       }
     } catch (e) {
       print('❌ Error initializing map style: $e');
@@ -70,6 +82,12 @@ class MapControlsService {
       if (activeLayer != _currentLayer) {
         await _mapboxMap!.loadStyleURI(activeLayer.styleUrl);
         _currentLayer = activeLayer;
+
+        // Re-apply 3D terrain if it was enabled (after style change)
+        if (_is3DEnabled) {
+          await _enable3DTerrain();
+        }
+
         print('✅ Map auto-updated for theme: ${activeLayer.displayName}');
       }
     } catch (e) {
@@ -89,12 +107,115 @@ class MapControlsService {
       await _mapboxMap!.loadStyleURI(newLayer.styleUrl);
       _currentLayer = newLayer;
 
+      // Re-apply 3D terrain if it was enabled (after style change)
+      if (_is3DEnabled) {
+        await _enable3DTerrain();
+      }
+
       // Save as manual preference (switches to manual mode)
       await MapPreferenceService.setManualMapLayer(newLayer);
 
       print('✅ Map layer manually changed to: ${newLayer.displayName}');
     } catch (e) {
       print('❌ Error changing map layer: $e');
+    }
+  }
+
+  /// Toggle 3D terrain on/off (public method for UI button)
+  Future<void> toggle3DTerrain() async {
+    if (_is3DEnabled) {
+      await _disable3DTerrain();
+    } else {
+      await _enable3DTerrain();
+    }
+
+    // Save the preference
+    await _save3DTerrainPreference(_is3DEnabled);
+  }
+
+  /// Load 3D terrain preference from storage
+  Future<void> _load3DTerrainPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _is3DEnabled = prefs.getBool(_terrain3DKey) ?? false;
+      print('📱 Loaded 3D terrain preference: $_is3DEnabled');
+    } catch (e) {
+      print('❌ Error loading 3D terrain preference: $e');
+      _is3DEnabled = false;
+    }
+  }
+
+  /// Save 3D terrain preference to storage
+  Future<void> _save3DTerrainPreference(bool enabled) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_terrain3DKey, enabled);
+      print('💾 Saved 3D terrain preference: $enabled');
+    } catch (e) {
+      print('❌ Error saving 3D terrain preference: $e');
+    }
+  }
+
+  /// Enable 3D terrain
+  Future<void> _enable3DTerrain() async {
+    if (_mapboxMap == null) return;
+
+    try {
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final terrainSource = RasterDemSource(
+        id: 'mapbox-dem',
+        url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+        tileSize: 512,
+        maxzoom: 14,
+      );
+
+      await _mapboxMap!.style.addSource(terrainSource);
+      await _mapboxMap!.style.setStyleTerrainProperty("source", "mapbox-dem");
+      await _mapboxMap!.style.setStyleTerrainProperty("exaggeration", 1.5);
+
+      // Tilt camera for 3D effect
+      final currentCamera = await _mapboxMap!.getCameraState();
+      await _mapboxMap!.flyTo(
+        CameraOptions(
+          center: currentCamera.center,
+          zoom: currentCamera.zoom,
+          pitch: 60.0,
+          bearing: currentCamera.bearing,
+        ),
+        MapAnimationOptions(duration: 1500),
+      );
+
+      _is3DEnabled = true;
+      print('✅ 3D terrain enabled');
+    } catch (e) {
+      print('❌ Error enabling 3D terrain: $e');
+    }
+  }
+
+  /// Disable 3D terrain
+  Future<void> _disable3DTerrain() async {
+    if (_mapboxMap == null) return;
+
+    try {
+      await _mapboxMap!.style.removeStyleSource('mapbox-dem');
+
+      // Reset camera to flat view
+      final currentCamera = await _mapboxMap!.getCameraState();
+      await _mapboxMap!.flyTo(
+        CameraOptions(
+          center: currentCamera.center,
+          zoom: currentCamera.zoom,
+          pitch: 0.0,
+          bearing: currentCamera.bearing,
+        ),
+        MapAnimationOptions(duration: 1000),
+      );
+
+      _is3DEnabled = false;
+      print('✅ 3D terrain disabled');
+    } catch (e) {
+      print('❌ Error disabling 3D terrain: $e');
     }
   }
 
@@ -189,6 +310,7 @@ class MapControlsService {
           coordinates: Position(position.longitude, position.latitude),
         ),
         zoom: _defaultZoom,
+        pitch: _is3DEnabled ? 60.0 : 0.0,
       );
 
       // Animate to the new position
