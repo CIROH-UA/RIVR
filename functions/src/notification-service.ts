@@ -278,11 +278,11 @@ async function sendAlert(
 ): Promise<boolean> {
   try {
     // Check if we already sent this alert recently (prevent duplicates)
-    const recentAlert = await checkRecentAlert(user.userId, reachId);
-    if (recentAlert) {
-      logger.info(`🔇 Skipping duplicate alert for ${user.userId}:${reachId}`);
-      return false;
-    }
+    // const recentAlert = await checkRecentAlert(user.userId, reachId);
+    // if (recentAlert) {
+    //   logger.info(`🔇 Skippin duplicate alert ${user.userId}:${reachId}`);
+    //   return false;
+    // }
 
     const unitLabel = user.preferredFlowUnit.toUpperCase();
 
@@ -400,33 +400,33 @@ function extractReturnPeriodThresholds(
   return thresholds;
 }
 
-/**
- * Check if we sent an alert for this user/river in the last 6 hours
- * @param {string} userId - User identifier
- * @param {string} reachId - River reach identifier
- * @return {Promise<boolean>} True if recent alert exists
- */
-async function checkRecentAlert(
-  userId: string,
-  reachId: string
-): Promise<boolean> {
-  try {
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+// /**
+//  * Check if we sent an alert for this user/river in the last 6 hours
+//  * @param {string} userId - User identifier
+//  * @param {string} reachId - River reach identifier
+//  * @return {Promise<boolean>} True if recent alert exists
+//  */
+// async function checkRecentAlert(
+//   userId: string,
+//   reachId: string
+// ): Promise<boolean> {
+//   try {
+//     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
 
-    const recentAlerts = await db.collection("notification_logs")
-      .where("userId", "==", userId)
-      .where("reachId", "==", reachId)
-      .where("sentAt", ">", sixHoursAgo)
-      .limit(1)
-      .get();
+//     const recentAlerts = await db.collection("notification_logs")
+//       .where("userId", "==", userId)
+//       .where("reachId", "==", reachId)
+//       .where("sentAt", ">", sixHoursAgo)
+//       .limit(1)
+//       .get();
 
-    return !recentAlerts.empty;
-  } catch (error) {
-    logger.error("❌ Error checking recent alerts", {error});
-    // If error, allow sending (better to send duplicate than miss alert)
-    return false;
-  }
-}
+//     return !recentAlerts.empty;
+//   } catch (error) {
+//     logger.error("❌ Error checking recent alerts", {error});
+//     // If error, allow sending (better to send duplicate than miss alert)
+//     return false;
+//   }
+// }
 
 /**
  * Log notification to prevent duplicates
