@@ -1,7 +1,10 @@
 // lib/core/providers/favorites_provider.dart
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:rivrflow/core/models/reach_data.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_river.dart';
 import '../services/favorites_service.dart';
 import '../services/forecast_service.dart';
@@ -26,6 +29,11 @@ class FavoritesProvider with ChangeNotifier {
   final Map<String, ({double lat, double lon})> _sessionCoordinates =
       {}; // reachId -> coordinates
 
+  // Session data maps to store custom properties
+  final Map<String, String> _sessionCustomNames = {}; // reachId -> customName
+  final Map<String, String> _sessionCustomImages =
+      {}; // reachId -> customImageAsset
+
   // Track loading state per favorite for individual refresh indicators
   final Set<String> _refreshingReachIds = {};
 
@@ -43,6 +51,9 @@ class FavoritesProvider with ChangeNotifier {
       final reachId = favorite.reachId;
       return favorite.copyWith(
         riverName: _sessionRiverNames[reachId],
+        customName: _sessionCustomNames[reachId], // ✅ Include custom name
+        customImageAsset:
+            _sessionCustomImages[reachId], // ✅ Include custom image
         lastKnownFlow: _sessionFlowData[reachId],
         lastUpdated: _sessionFlowUpdates[reachId],
         latitude: _sessionCoordinates[reachId]?.lat,
@@ -85,6 +96,9 @@ class FavoritesProvider with ChangeNotifier {
     try {
       // Load favorites from cloud storage first
       await _loadFavoritesFromStorage();
+
+      // ✅ LOAD CUSTOM PROPERTIES FROM LOCAL STORAGE
+      await _loadCustomPropertiesFromLocal();
 
       // Start background refresh after short delay (let UI show cached data)
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -217,7 +231,7 @@ class FavoritesProvider with ChangeNotifier {
     }
   }
 
-  /// Remove a favorite river
+  /// Remove a favorite river and clean up custom properties when favorite is removed
   Future<bool> removeFavorite(String reachId) async {
     print('FAVORITES_PROVIDER: Removing favorite: $reachId');
 
@@ -225,12 +239,17 @@ class FavoritesProvider with ChangeNotifier {
       final success = await _favoritesService.removeFavorite(reachId);
       if (!success) return false;
 
-      // Clean up session data
+      // Clean up ALL session data including custom properties
       _sessionRiverNames.remove(reachId);
       _sessionFlowData.remove(reachId);
       _sessionFlowUpdates.remove(reachId);
       _sessionCoordinates.remove(reachId);
+      _sessionCustomNames.remove(reachId); // ✅ Clean up custom name
+      _sessionCustomImages.remove(reachId); // ✅ Clean up custom image
       _refreshingReachIds.remove(reachId);
+
+      // ✅ PERSIST CHANGES TO LOCAL STORAGE
+      await _persistCustomPropertiesToLocal();
 
       // Reload from storage
       await _loadFavoritesFromStorage();
@@ -285,13 +304,32 @@ class FavoritesProvider with ChangeNotifier {
     String? riverName,
     String? customImageAsset,
   }) async {
-    print('FAVORITES_PROVIDER: Updating favorite session data: $reachId');
+    print('FAVORITES_PROVIDER: Updating favorite: $reachId');
 
     try {
-      // Update session data (not persisted to cloud)
+      // Update session data (stored locally)
       if (riverName != null) {
         _sessionRiverNames[reachId] = riverName;
       }
+
+      // ✅ NOW HANDLE CUSTOM NAME
+      if (customName != null) {
+        _sessionCustomNames[reachId] = customName;
+        print(
+          'FAVORITES_PROVIDER: Updated custom name for $reachId: $customName',
+        );
+      }
+
+      // ✅ NOW HANDLE CUSTOM IMAGE
+      if (customImageAsset != null) {
+        _sessionCustomImages[reachId] = customImageAsset;
+        print(
+          'FAVORITES_PROVIDER: Updated custom image for $reachId: $customImageAsset',
+        );
+      }
+
+      // ✅ PERSIST TO LOCAL STORAGE
+      await _persistCustomPropertiesToLocal();
 
       notifyListeners();
       print('FAVORITES_PROVIDER: ✅ Updated favorite session data: $reachId');
@@ -300,6 +338,54 @@ class FavoritesProvider with ChangeNotifier {
       print('FAVORITES_PROVIDER: ❌ Error updating favorite: $e');
       _setError(e.toString());
       return false;
+    }
+  }
+
+  /// Persist custom properties to SharedPreferences for persistence across app restarts
+  Future<void> _persistCustomPropertiesToLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Convert maps to JSON and save
+      await prefs.setString(
+        'favorites_custom_names',
+        json.encode(_sessionCustomNames),
+      );
+      await prefs.setString(
+        'favorites_custom_images',
+        json.encode(_sessionCustomImages),
+      );
+
+      print('FAVORITES_PROVIDER: ✅ Custom properties persisted locally');
+    } catch (e) {
+      print('FAVORITES_PROVIDER: ❌ Error persisting custom properties: $e');
+    }
+  }
+
+  /// Load custom properties from SharedPreferences on app start
+  Future<void> _loadCustomPropertiesFromLocal() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Load custom names
+      final namesJson = prefs.getString('favorites_custom_names');
+      if (namesJson != null) {
+        final namesMap = json.decode(namesJson) as Map<String, dynamic>;
+        _sessionCustomNames.addAll(namesMap.cast<String, String>());
+      }
+
+      // Load custom images
+      final imagesJson = prefs.getString('favorites_custom_images');
+      if (imagesJson != null) {
+        final imagesMap = json.decode(imagesJson) as Map<String, dynamic>;
+        _sessionCustomImages.addAll(imagesMap.cast<String, String>());
+      }
+
+      print(
+        'FAVORITES_PROVIDER: ✅ Custom properties loaded from local storage',
+      );
+    } catch (e) {
+      print('FAVORITES_PROVIDER: ❌ Error loading custom properties: $e');
     }
   }
 
