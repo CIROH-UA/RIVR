@@ -309,6 +309,9 @@ class FavoritesProvider with ChangeNotifier {
 
     _clearError();
 
+    // Clear computed caches to force fresh calculations
+    _forecastService.clearComputedCaches();
+
     // Refresh each favorite
     final refreshTasks = _favorites
         .map((favorite) => _refreshSingleFavorite(favorite.reachId))
