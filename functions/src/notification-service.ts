@@ -43,7 +43,7 @@ interface AlertData {
 }
 
 // Scale factor for development testing
-const SCALE_FACTOR = process.env.NODE_ENV === "production" ? 1 : 25;
+const SCALE_FACTOR = 25;
 
 /**
  * Main function: Check all users for river alerts
@@ -194,21 +194,36 @@ async function shouldSendAlert(
 
     // Extract max flow from BOTH short and medium
     const maxForecastFlow = getMaxForecastFlow(forecastData);
+
     if (maxForecastFlow === null) {
       logger.warn(`⚠️ No valid forecast data for reach ${reachId}`);
       return null;
     }
 
-    // Check against each return period threshold
+    // Extract thresholds and convert forecast for comparison
     const thresholds = extractReturnPeriodThresholds(returnPeriodData);
+    const forecastCms = maxForecastFlow * 0.0283168;
 
+    // Log the forecast and threshold comparison values
+    logger.info(`🔍 Forecast vs Return Periods comparison for ${riverName}`, {
+      reachId,
+      maxForecastFlow_CFS: Math.round(maxForecastFlow * 100) / 100,
+      maxForecastFlow_CMS: Math.round(forecastCms * 100) / 100,
+      returnPeriods_CMS: Object.entries(thresholds).map(
+        ([period, threshold]) => ({
+          period,
+          threshold_CMS: Math.round(threshold * 100) / 100,
+          scaledThreshold_CMS: Math.round(
+            (threshold / SCALE_FACTOR) * 100) / 100,
+          exceedsThreshold: forecastCms > (threshold / SCALE_FACTOR),
+        })),
+      scaleFactor: SCALE_FACTOR,
+    });
+
+    // Check against each return period threshold
     for (const [returnPeriod, thresholdCms] of Object.entries(thresholds)) {
       // Apply scale factor for development testing
       const scaledThreshold = thresholdCms / SCALE_FACTOR;
-
-      // Forecasts are always CFS, return periods always CMS
-      const forecastCms = maxForecastFlow * 0.0283168;
-      // Always convert CFS → CMS
 
       if (forecastCms > scaledThreshold) {
         // Convert values to user's preferred unit for notification display
