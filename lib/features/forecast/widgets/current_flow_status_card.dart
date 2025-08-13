@@ -1,6 +1,7 @@
 // lib/features/forecast/widgets/current_flow_status_card.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
@@ -176,7 +177,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _getCategoryColor(category),
+            color: _getBadgeBackgroundColor(category),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(
@@ -192,6 +193,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
+  // ✅ UPDATED: Format flow value as integer with comma separators
   Widget _buildFlowValue(double? flow) {
     if (flow == null) {
       return const Text(
@@ -207,11 +209,14 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     // Get current flow unit dynamically
     final currentUnit = _getCurrentFlowUnit();
 
+    // ✅ NEW: Format flow as integer with comma separators
+    final formattedFlow = NumberFormat('#,###').format(flow.round());
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(
-          _formatFlow(flow),
+          formattedFlow, // ✅ Now shows "43,210" instead of "43210.0078125"
           style: const TextStyle(
             color: CupertinoColors.white,
             fontSize: 32,
@@ -304,9 +309,9 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
             borderRadius: BorderRadius.circular(4),
             gradient: LinearGradient(
               colors: [
-                CupertinoColors.systemBlue.withOpacity(0.5),
-                CupertinoColors.systemGreen.withOpacity(0.5),
-                CupertinoColors.systemOrange.withOpacity(0.5),
+                const Color(0xFF4A90E2).withOpacity(0.7), // Enhanced blue
+                const Color(0xFFFFC107).withOpacity(0.7), // Enhanced yellow
+                const Color(0xFFFF9800).withOpacity(0.7), // Enhanced orange
               ],
             ),
           ),
@@ -323,7 +328,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // ✅ FIXED: Use converted return periods for proper unit comparison
+  // ✅ UPDATED: Flow indicator with equal-width zones and accurate flow positioning
   Widget _buildFlowIndicator(
     double currentFlow, // Already converted to user's preferred unit
     dynamic reach,
@@ -336,14 +341,71 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
       return const SizedBox.shrink();
     }
 
-    // ✅ FIXED: Proper type handling for max calculation
-    double maxReturnPeriod = 0.0;
-    for (final value in convertedReturnPeriods.values) {
-      if (value > maxReturnPeriod) {
-        maxReturnPeriod = value;
+    // Get specific return period values for accurate positioning
+    final twoYear = convertedReturnPeriods[2];
+    final fiveYear = convertedReturnPeriods[5];
+    final tenYear = convertedReturnPeriods[10];
+    final twentyFiveYear = convertedReturnPeriods[25];
+
+    // Calculate where the current flow sits relative to return periods
+    double flowPosition = 0.0; // Position as percentage (0.0 to 1.0)
+
+    if (twoYear != null) {
+      if (currentFlow <= twoYear) {
+        // In Normal zone (0-20%)
+        flowPosition = (currentFlow / twoYear) * 0.20;
+      } else if (fiveYear != null && currentFlow <= fiveYear) {
+        // In Action zone (20-40%)
+        flowPosition =
+            0.20 + ((currentFlow - twoYear) / (fiveYear - twoYear)) * 0.20;
+      } else if (tenYear != null && currentFlow <= tenYear) {
+        // In Moderate zone (40-60%)
+        flowPosition =
+            0.40 + ((currentFlow - fiveYear!) / (tenYear - fiveYear)) * 0.20;
+      } else if (twentyFiveYear != null && currentFlow <= twentyFiveYear) {
+        // In Major zone (60-80%)
+        flowPosition =
+            0.60 +
+            ((currentFlow - tenYear!) / (twentyFiveYear - tenYear)) * 0.20;
+      } else {
+        // In Extreme zone (80-100%)
+        if (twentyFiveYear != null) {
+          // Calculate position beyond 25-year, capped at 100%
+          final extraFlow = currentFlow - twentyFiveYear;
+          final extraRange =
+              twentyFiveYear *
+              0.5; // Assume extreme zone is 50% of 25-year value
+          flowPosition =
+              0.80 + (extraFlow / extraRange * 0.20).clamp(0.0, 0.20);
+        } else {
+          flowPosition = 0.90; // Default to near end if no 25-year data
+        }
       }
     }
-    final scale = maxReturnPeriod * 1.1; // 10% padding
+
+    // ✅ CREATE: Equal-width zones (20% each) with smooth transitions
+
+    List<double> stops = [
+      0.0, // Start
+      0.17, 0.24, // Normal to Action transition
+      0.37, 0.44, // Action to Moderate transition
+      0.57, 0.64, // Moderate to Major transition
+      0.77, 0.84, // Major to Extreme transition
+      1.0, // End
+    ];
+
+    List<Color> colors = [
+      const Color(0xFF4A90E2), // Normal blue start
+      const Color(0xFF4A90E2), // Normal blue end
+      const Color(0xFFFFC107), // Action yellow start
+      const Color(0xFFFFC107), // Action yellow end
+      const Color(0xFFFF9800), // Moderate orange start
+      const Color(0xFFFF9800), // Moderate orange end
+      const Color(0xFFF44336), // Major red start
+      const Color(0xFFF44336), // Major red end
+      const Color(0xFF9C27B0), // Extreme purple start
+      const Color(0xFF9C27B0), // Extreme purple end
+    ];
 
     return Column(
       children: [
@@ -351,27 +413,14 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           height: 8,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
-            gradient: const LinearGradient(
-              colors: [
-                CupertinoColors.systemBlue,
-                CupertinoColors.systemGreen,
-                CupertinoColors.systemYellow,
-                CupertinoColors.systemOrange,
-                CupertinoColors.systemRed,
-              ],
-            ),
+            gradient: LinearGradient(stops: stops, colors: colors),
           ),
           child: Stack(
             children: [
-              // Current flow marker
+              // ✅ ACCURATE: Flow marker positioned based on actual return period values
               Positioned(
-                // Now comparing same units to same units ✅
-                left:
-                    (currentFlow /
-                            scale *
-                            MediaQuery.of(context).size.width *
-                            0.8)
-                        .clamp(0, MediaQuery.of(context).size.width * 0.8 - 4),
+                left: (flowPosition * MediaQuery.of(context).size.width * 0.8)
+                    .clamp(0, MediaQuery.of(context).size.width * 0.8 - 4),
                 top: -2,
                 child: Container(
                   width: 4,
@@ -392,28 +441,96 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           ),
         ),
         const SizedBox(height: 4),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Low',
-              style: TextStyle(color: CupertinoColors.white, fontSize: 10),
-            ),
-            Text(
-              'Normal',
-              style: TextStyle(color: CupertinoColors.white, fontSize: 10),
-            ),
-            Text(
-              'High',
-              style: TextStyle(color: CupertinoColors.white, fontSize: 10),
-            ),
-            Text(
-              'Extreme',
-              style: TextStyle(color: CupertinoColors.white, fontSize: 10),
-            ),
-          ],
-        ),
+        // ✅ MAINTAINED: Equal-width zone labels including Extreme
+        _buildEqualWidthZoneLabels(),
       ],
+    );
+  }
+
+  // ✅ NEW: Build equal-width zone labels with Extreme included
+  Widget _buildEqualWidthZoneLabels() {
+    final screenWidth = MediaQuery.of(context).size.width * 0.8;
+
+    return SizedBox(
+      height: 20,
+      child: Stack(
+        children: [
+          // Normal - centered in 0-20% zone
+          Positioned(
+            left:
+                (0.10 * screenWidth -
+                15), // 10% position minus half label width
+            child: const Text(
+              'Normal',
+              style: TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          // Action - centered in 20-40% zone
+          Positioned(
+            left:
+                (0.30 * screenWidth -
+                12), // 30% position minus half label width
+            child: const Text(
+              'Action',
+              style: TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          // Moderate - centered in 40-60% zone
+          Positioned(
+            left:
+                (0.50 * screenWidth -
+                18), // 50% position minus half label width
+            child: const Text(
+              'Moderate',
+              style: TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          // Major - centered in 60-80% zone
+          Positioned(
+            left:
+                (0.70 * screenWidth -
+                12), // 70% position minus half label width
+            child: const Text(
+              'Major',
+              style: TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          // Extreme - centered in 80-100% zone
+          Positioned(
+            left:
+                (0.90 * screenWidth -
+                15), // 90% position minus half label width
+            child: const Text(
+              'Extreme',
+              style: TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -767,33 +884,44 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
+  // Use NOAA return period colors consistently
   List<Color> _getGradientColors(String category) {
     switch (category.toLowerCase()) {
       case 'normal':
-        return [CupertinoColors.systemBlue, CupertinoColors.systemTeal];
+        // Cool blue gradient for normal flows
+        return [const Color(0xFF4A90E2), const Color(0x833579BD)];
+
       case 'elevated':
-        return [CupertinoColors.systemGreen, CupertinoColors.systemYellow];
+        // Enhanced yellow gradient (NOAA Action zone inspired)
+        return [const Color(0xFFFFC107), const Color(0x8AFFB300)];
+
       case 'high':
-        return [CupertinoColors.systemOrange, CupertinoColors.systemRed];
+        // Enhanced orange gradient (NOAA Moderate zone inspired)
+        return [const Color(0xFFFF9800), const Color(0x81FF9100)];
+
       case 'flood risk':
-        return [CupertinoColors.systemRed, CupertinoColors.systemPurple];
+        // Enhanced red gradient (NOAA Major zone inspired)
+        return [const Color(0xFFF44336), const Color(0x79E53835)];
+
       default:
+        // Use a neutral gray for unknown categories
         return [CupertinoColors.systemGrey, CupertinoColors.systemGrey2];
     }
   }
 
-  Color _getCategoryColor(String category) {
+  // ✅ NEW: Get badge background color with better contrast
+  Color _getBadgeBackgroundColor(String category) {
     switch (category.toLowerCase()) {
       case 'normal':
-        return CupertinoColors.systemBlue;
+        return CupertinoColors.white.withOpacity(0.25);
       case 'elevated':
-        return CupertinoColors.systemGreen;
+        return CupertinoColors.black.withOpacity(0.25);
       case 'high':
-        return CupertinoColors.systemOrange;
+        return CupertinoColors.black.withOpacity(0.25);
       case 'flood risk':
-        return CupertinoColors.systemRed;
+        return CupertinoColors.black.withOpacity(0.25);
       default:
-        return CupertinoColors.systemGrey;
+        return CupertinoColors.white.withOpacity(0.25);
     }
   }
 
