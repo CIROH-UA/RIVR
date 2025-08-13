@@ -863,6 +863,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
   void _showRenameDialog(FavoriteRiver favorite) {
     final controller = TextEditingController(text: favorite.customName);
 
+    // Check if there's a default name to restore to
+    final hasDefaultName =
+        favorite.riverName != null && favorite.riverName!.isNotEmpty;
+    final defaultName = favorite.riverName ?? 'Station ${favorite.reachId}';
+
     showCupertinoDialog(
       context: context,
       builder: (context) => CupertinoAlertDialog(
@@ -876,6 +881,33 @@ class _FavoritesPageState extends State<FavoritesPage> {
               textAlign: TextAlign.center,
               autofocus: true,
             ),
+            if (hasDefaultName && favorite.customName != null) ...[
+              const SizedBox(height: 12),
+              CupertinoButton(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                onPressed: () {
+                  controller.text = defaultName;
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      CupertinoIcons.refresh_circled,
+                      size: 16,
+                      color: CupertinoColors.systemBlue,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Restore to "$defaultName"',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: CupertinoColors.systemBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
         actions: [
