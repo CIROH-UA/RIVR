@@ -111,7 +111,7 @@ class ChartPreviewWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6,
+        color: CupertinoColors.systemGrey6.resolveFrom(context),
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(12),
           topRight: Radius.circular(12),
@@ -202,9 +202,9 @@ class ChartPreviewWidget extends StatelessWidget {
   Widget _buildNoDataMessage(BuildContext context) {
     return Center(
       child: Text(
-        'No ${_getForecastDisplayName(forecastType).toLowerCase()} data',
-        style: const TextStyle(
-          color: CupertinoColors.secondaryLabel,
+        'No ${_getForecastDisplayName(forecastType).toLowerCase()} data at the moment',
+        style: TextStyle(
+          color: CupertinoColors.secondaryLabel.resolveFrom(context),
           fontSize: 12,
         ),
       ),
@@ -213,57 +213,167 @@ class ChartPreviewWidget extends StatelessWidget {
 
   List<ChartDataPoint> _extractChartData(ReachDataProvider reachProvider) {
     final forecast = reachProvider.currentForecast;
-    if (forecast == null) return [];
+    if (forecast == null) {
+      print('CHART_PREVIEW: No forecast data available');
+      return [];
+    }
 
-    // Special handling for short_range to get ALL data including past hours
-    if (forecastType == 'short_range') {
-      final forecastSeries = forecast.getPrimaryForecast(forecastType);
-      if (forecastSeries == null || forecastSeries.isEmpty) return [];
+    try {
+      // Special handling for short_range to get ALL data including past hours
+      if (forecastType == 'short_range') {
+        return _extractShortRangeData(forecast);
+      }
 
-      final List<ChartDataPoint> points = [];
-      final now = DateTime.now();
+      // FIXED: Enhanced handling for ensemble forecasts (medium_range, long_range)
+      if (forecastType == 'medium_range' || forecastType == 'long_range') {
+        return _extractEnsembleData(forecast);
+      }
 
-      try {
-        // Use ALL data points (no filtering by time - includes past hours)
-        // Flow data is already in user's preferred unit from backend
-        final data = forecastSeries.data;
+      // For other forecast types, use existing logic
+      return _extractRegularForecastData(forecast);
+    } catch (e) {
+      print('CHART_PREVIEW: Error extracting data for $forecastType: $e');
+      return [];
+    }
+  }
 
-        for (final point in data) {
-          final flow = point.flow;
+  List<ChartDataPoint> _extractShortRangeData(dynamic forecast) {
+    final forecastSeries = forecast.getPrimaryForecast(forecastType);
+    if (forecastSeries == null || forecastSeries.isEmpty) {
+      print('CHART_PREVIEW: No short_range data available');
+      return [];
+    }
 
-          if (flow > -9000) {
-            // Filter out missing data sentinel values
-            // Calculate hours from now (negative values = past hours)
-            final hoursFromNow = point.validTime
-                .difference(now)
-                .inHours
-                .toDouble();
-            points.add(ChartDataPoint(x: hoursFromNow, y: flow));
+    final List<ChartDataPoint> points = [];
+    final now = DateTime.now();
+
+    try {
+      // Use ALL data points (no filtering by time - includes past hours)
+      // Flow data is already in user's preferred unit from backend
+      final data = forecastSeries.data;
+
+      for (final point in data) {
+        final flow = point.flow;
+
+        if (flow > -9000) {
+          // Filter out missing data sentinel values
+          // Calculate hours from now (negative values = past hours)
+          final hoursFromNow = point.validTime
+              .difference(now)
+              .inHours
+              .toDouble();
+          points.add(ChartDataPoint(x: hoursFromNow, y: flow));
+        }
+      }
+
+      // Sort by time to ensure proper order
+      points.sort((a, b) => a.x.compareTo(b.x));
+
+      print(
+        'CHART_PREVIEW: Short-range using ${points.length} total hours including past data',
+      );
+      return points;
+    } catch (e) {
+      print('CHART_PREVIEW: Error extracting short-range data: $e');
+      return [];
+    }
+  }
+
+  // FIXED: New method for handling ensemble data (medium_range, long_range)
+  List<ChartDataPoint> _extractEnsembleData(dynamic forecast) {
+    print('CHART_PREVIEW: Extracting ensemble data for $forecastType');
+
+    // Get the ensemble data map
+    final Map<String, dynamic> ensembleData = forecastType == 'medium_range'
+        ? forecast.mediumRange
+        : forecast.longRange;
+
+    if (ensembleData.isEmpty) {
+      print('CHART_PREVIEW: No ensemble data available for $forecastType');
+      return [];
+    }
+
+    print(
+      'CHART_PREVIEW: Available ensemble series: ${ensembleData.keys.toList()}',
+    );
+
+    // FIXED: Try multiple data sources in order of preference
+    final dataSources = [
+      'mean',
+      ...ensembleData.keys.where((k) => k.startsWith('member')).toList()
+        ..sort(),
+    ];
+
+    for (final dataSource in dataSources) {
+      if (ensembleData.containsKey(dataSource)) {
+        final forecastSeries = ensembleData[dataSource];
+
+        if (forecastSeries != null && forecastSeries.isNotEmpty) {
+          print(
+            'CHART_PREVIEW: Using $dataSource for $forecastType (${forecastSeries.data.length} points)',
+          );
+
+          final points = <ChartDataPoint>[];
+          final now = DateTime.now();
+
+          try {
+            final data = forecastSeries.data;
+
+            for (int i = 0; i < data.length && i < 50; i++) {
+              // Limit points for preview
+              final point = data[i];
+              final flow = point.flow; // Already in user's preferred unit
+
+              if (flow > -9000) {
+                // Filter out missing data sentinel values
+                // Use actual time difference for better chart accuracy
+                final timeFromNow = forecastType == 'medium_range'
+                    ? point.validTime.difference(now).inDays.toDouble()
+                    : point.validTime.difference(now).inHours.toDouble();
+                points.add(ChartDataPoint(x: timeFromNow, y: flow));
+              }
+            }
+
+            if (points.isNotEmpty) {
+              print(
+                'CHART_PREVIEW: Successfully extracted ${points.length} points from $dataSource',
+              );
+              return points;
+            }
+          } catch (e) {
+            print('CHART_PREVIEW: Error processing $dataSource data: $e');
+            continue; // Try next data source
           }
         }
-
-        // Sort by time to ensure proper order
-        points.sort((a, b) => a.x.compareTo(b.x));
-
-        print(
-          'CHART_PREVIEW: Short-range using ${points.length} total hours including past data',
-        );
-        return points;
-      } catch (e) {
-        print('CHART_PREVIEW: Error extracting short-range data: $e');
-        return [];
       }
     }
 
-    // Existing logic for other forecast types (medium_range, long_range)
+    print(
+      'CHART_PREVIEW: No valid data found in any ensemble series for $forecastType',
+    );
+
+    // FALLBACK: Try the original getPrimaryForecast method as last resort
+    print(
+      'CHART_PREVIEW: Attempting fallback to getPrimaryForecast for $forecastType',
+    );
+    return _extractRegularForecastData(forecast);
+  }
+
+  List<ChartDataPoint> _extractRegularForecastData(dynamic forecast) {
+    // Existing logic for other forecast types (analysis_assimilation, medium_range_blend, etc.)
     final forecastSeries = forecast.getPrimaryForecast(forecastType);
-    if (forecastSeries == null || forecastSeries.isEmpty) return [];
+    if (forecastSeries == null || forecastSeries.isEmpty) {
+      print(
+        'CHART_PREVIEW: No $forecastType data available from getPrimaryForecast',
+      );
+      return [];
+    }
 
     final List<ChartDataPoint> points = [];
+    final now = DateTime.now();
 
     try {
       final data = forecastSeries.data;
-      final now = DateTime.now();
 
       for (int i = 0; i < data.length && i < 50; i++) {
         // Limit points for preview
@@ -279,11 +389,15 @@ class ChartPreviewWidget extends StatelessWidget {
           points.add(ChartDataPoint(x: timeFromNow, y: flow));
         }
       }
+
+      print(
+        'CHART_PREVIEW: Extracted ${points.length} points for $forecastType',
+      );
+      return points;
     } catch (e) {
       print('CHART_PREVIEW: Error extracting data for $forecastType: $e');
+      return [];
     }
-
-    return points;
   }
 
   String _getForecastDisplayName(String type) {
@@ -291,13 +405,13 @@ class ChartPreviewWidget extends StatelessWidget {
       case 'analysis_assimilation':
         return 'Current Analysis Preview';
       case 'short_range':
-        return 'Short Range Preview';
+        return 'Hourly Preview';
       case 'medium_range':
-        return 'Medium Range Preview';
+        return 'Daily Preview';
       case 'medium_range_blend':
         return 'Medium Blend Preview';
       case 'long_range':
-        return 'Long Range Preview';
+        return 'Extended Preview';
       default:
         return 'Forecast Preview';
     }
@@ -335,8 +449,14 @@ class _ChartPainter extends CustomPainter {
     final minY = data.map((p) => p.y).reduce((a, b) => a < b ? a : b);
     final maxY = data.map((p) => p.y).reduce((a, b) => a > b ? a : b);
     final maxX = data.map((p) => p.x).reduce((a, b) => a > b ? a : b);
+    final minX = data.map((p) => p.x).reduce((a, b) => a < b ? a : b);
 
-    if (minY == maxY) return; // Avoid division by zero
+    // Handle edge cases for scaling
+    if (minY == maxY || maxX == minX) return; // Avoid division by zero
+
+    // IMPROVED: Better scaling logic that handles negative x values (past data)
+    final xRange = maxX - minX;
+    final yRange = maxY - minY;
 
     // Create path for the line
     final path = Path();
@@ -344,9 +464,8 @@ class _ChartPainter extends CustomPainter {
 
     // Scale first point
     final firstPoint = data.first;
-    final firstX = (firstPoint.x / maxX) * size.width;
-    final firstY =
-        size.height - ((firstPoint.y - minY) / (maxY - minY)) * size.height;
+    final firstX = ((firstPoint.x - minX) / xRange) * size.width;
+    final firstY = size.height - ((firstPoint.y - minY) / yRange) * size.height;
 
     path.moveTo(firstX, firstY);
     fillPath.moveTo(firstX, size.height);
@@ -355,8 +474,8 @@ class _ChartPainter extends CustomPainter {
     // Draw line through all points
     for (int i = 1; i < data.length; i++) {
       final point = data[i];
-      final x = (point.x / maxX) * size.width;
-      final y = size.height - ((point.y - minY) / (maxY - minY)) * size.height;
+      final x = ((point.x - minX) / xRange) * size.width;
+      final y = size.height - ((point.y - minY) / yRange) * size.height;
 
       path.lineTo(x, y);
       fillPath.lineTo(x, y);
@@ -364,7 +483,7 @@ class _ChartPainter extends CustomPainter {
 
     // Complete fill path
     final lastPoint = data.last;
-    final lastX = (lastPoint.x / maxX) * size.width;
+    final lastX = ((lastPoint.x - minX) / xRange) * size.width;
     fillPath.lineTo(lastX, size.height);
     fillPath.close();
 
@@ -382,9 +501,8 @@ class _ChartPainter extends CustomPainter {
     for (final point in data) {
       if (data.indexOf(point) % 5 == 0) {
         // Show every 5th point to avoid clutter
-        final x = (point.x / maxX) * size.width;
-        final y =
-            size.height - ((point.y - minY) / (maxY - minY)) * size.height;
+        final x = ((point.x - minX) / xRange) * size.width;
+        final y = size.height - ((point.y - minY) / yRange) * size.height;
         canvas.drawCircle(Offset(x, y), 2.5, pointPaint);
       }
     }

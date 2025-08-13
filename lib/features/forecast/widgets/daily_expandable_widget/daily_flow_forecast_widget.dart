@@ -299,22 +299,6 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
                 ),
               ),
             ),
-
-          // Refresh button
-          if (widget.onRefresh != null) ...[
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: widget.onRefresh,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  CupertinoIcons.refresh,
-                  size: 18,
-                  color: CupertinoColors.systemBlue.resolveFrom(context),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -405,7 +389,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
             ),
             const SizedBox(height: 8),
             Text(
-              'No daily forecast data is available for this location.',
+              'No daily forecast data is available for this location\nat the moment.',
               style: TextStyle(
                 color: CupertinoColors.secondaryLabel.resolveFrom(context),
                 fontSize: 14,

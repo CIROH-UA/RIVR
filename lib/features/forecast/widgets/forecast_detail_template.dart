@@ -112,7 +112,71 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
         context,
         listen: false,
       );
-      await reachProvider.refreshCurrentReach();
+
+      // Get current reach ID
+      final currentReach = reachProvider.currentReach;
+      if (currentReach == null) {
+        print('FORECAST_TEMPLATE: No current reach for refresh');
+        return;
+      }
+
+      final reachId = currentReach.reachId;
+      print(
+        'FORECAST_TEMPLATE: Refreshing ${widget.forecastType} for $reachId',
+      );
+
+      // Clear unit-dependent computed caches (flow values, categories)
+      // but keep reach metadata cached
+      reachProvider.clearUnitDependentCaches();
+
+      // Call the appropriate forecast-specific refresh method
+      // These methods will fetch fresh forecast data and merge with existing reach data
+      bool success = false;
+      switch (widget.forecastType.toLowerCase()) {
+        case 'short_range':
+          print('FORECAST_TEMPLATE: Refreshing hourly forecast data...');
+          success = await reachProvider.loadHourlyForecast(reachId);
+          break;
+
+        case 'medium_range':
+          print('FORECAST_TEMPLATE: Refreshing daily forecast data...');
+          success = await reachProvider.loadDailyForecast(reachId);
+          break;
+
+        case 'long_range':
+          print('FORECAST_TEMPLATE: Refreshing extended forecast data...');
+          success = await reachProvider.loadExtendedForecast(reachId);
+          break;
+
+        case 'analysis_assimilation':
+        case 'medium_range_blend':
+          print(
+            'FORECAST_TEMPLATE: Refreshing ${widget.forecastType} forecast data...',
+          );
+          success = await reachProvider.loadSpecificForecast(
+            reachId,
+            widget.forecastType,
+          );
+          break;
+
+        default:
+          print(
+            'FORECAST_TEMPLATE: Unknown forecast type: ${widget.forecastType}, falling back to comprehensive refresh',
+          );
+          success = await reachProvider.refreshCurrentReach();
+      }
+
+      if (success) {
+        print(
+          'FORECAST_TEMPLATE: ✅ Successfully refreshed ${widget.forecastType} data',
+        );
+      } else {
+        print(
+          'FORECAST_TEMPLATE: ⚠️ Failed to refresh ${widget.forecastType} data',
+        );
+      }
+    } catch (e) {
+      print('FORECAST_TEMPLATE: ❌ Error refreshing ${widget.forecastType}: $e');
     } finally {
       if (mounted) {
         setState(() {
