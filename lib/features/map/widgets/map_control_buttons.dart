@@ -107,7 +107,7 @@ class MapControlButtons extends StatelessWidget {
         padding: EdgeInsets.zero,
         onPressed: onPressed,
         child: Icon(
-          CupertinoIcons.arrowtriangle_up_fill,
+          CupertinoIcons.view_3d,
           color: isEnabled ? CupertinoColors.white : CupertinoColors.systemBlue,
           size: 20,
         ),
