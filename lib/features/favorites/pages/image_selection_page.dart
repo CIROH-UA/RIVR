@@ -106,10 +106,13 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
   Widget _buildCategorySelector() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: CupertinoColors.systemBackground,
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemBackground.resolveFrom(context),
         border: Border(
-          bottom: BorderSide(color: CupertinoColors.separator, width: 0.5),
+          bottom: BorderSide(
+            color: CupertinoColors.separator.resolveFrom(context),
+            width: 0.5,
+          ),
         ),
       ),
       child: SizedBox(
@@ -125,29 +128,39 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
               });
             }
           },
+          // ✅ THEME-AWARE STYLING - Let Cupertino handle theme adaptation automatically
+          backgroundColor: CupertinoColors.systemGrey6.resolveFrom(context),
+          thumbColor: CupertinoColors.systemBackground.resolveFrom(context),
           children: {
             for (int i = 0; i < _categories.length; i++)
               i: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       _categories[i].icon,
                       size: 16,
+                      // ✅ FIXED: Now properly shows selected vs unselected states with theme awareness
                       color: _selectedCategoryIndex == i
-                          ? CupertinoColors.activeBlue
-                          : CupertinoColors.activeBlue,
+                          ? CupertinoColors.activeBlue.resolveFrom(context)
+                          : CupertinoColors.secondaryLabel.resolveFrom(context),
                     ),
                     const SizedBox(width: 4),
                     Text(
                       _categories[i].shortName,
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                        fontWeight: _selectedCategoryIndex == i
+                            ? FontWeight
+                                  .w600 // Bold for selected
+                            : FontWeight.w500, // Medium for unselected
+                        // ✅ FIXED: Now properly shows selected vs unselected states with theme awareness
                         color: _selectedCategoryIndex == i
-                            ? CupertinoColors.activeBlue
-                            : CupertinoColors.activeBlue,
+                            ? CupertinoColors.activeBlue.resolveFrom(context)
+                            : CupertinoColors.secondaryLabel.resolveFrom(
+                                context,
+                              ),
                       ),
                     ),
                   ],

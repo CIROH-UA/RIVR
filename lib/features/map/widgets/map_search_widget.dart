@@ -322,6 +322,7 @@ class _MapSearchModalState extends State<MapSearchModal> {
       final cachedSearches = await CacheService().getRecentSearches();
       final recentPlaces = cachedSearches
           .map((data) => SearchedPlace.fromCacheData(data))
+          .take(4) // Limit to 4 items
           .toList();
 
       if (mounted) {
@@ -393,16 +394,16 @@ class _MapSearchModalState extends State<MapSearchModal> {
       // Update UI list
       _recentSearches.removeWhere((p) => p.placeName == place.placeName);
       _recentSearches.insert(0, place);
-      if (_recentSearches.length > 5) {
-        _recentSearches = _recentSearches.take(5).toList();
+      if (_recentSearches.length > 4) {
+        _recentSearches = _recentSearches.take(4).toList();
       }
     } catch (e) {
       print('❌ Error saving recent search: $e');
       // Still update UI even if cache fails
       _recentSearches.removeWhere((p) => p.placeName == place.placeName);
       _recentSearches.insert(0, place);
-      if (_recentSearches.length > 5) {
-        _recentSearches = _recentSearches.take(5).toList();
+      if (_recentSearches.length > 4) {
+        _recentSearches = _recentSearches.take(4).toList();
       }
     }
 
@@ -449,7 +450,7 @@ class _MapSearchModalState extends State<MapSearchModal> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.7,
+      height: MediaQuery.of(context).size.height * 0.9,
       decoration: BoxDecoration(
         color: CupertinoColors.systemBackground.resolveFrom(context),
         borderRadius: BorderRadius.only(
