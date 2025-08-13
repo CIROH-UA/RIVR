@@ -274,8 +274,8 @@ lib/
 
 RivrFlow integrates with reliable, authoritative data sources:
 - **NOAA National Water Model**: Official river flow forecasts developed by the National Weather Service
-- **USGS Stream Gauges**: Real-time measurement data from the U.S. Geological Survey
 - **Return Period Statistics**: Historical flood frequency analysis based on government datasets
+- **Mapbox**: High-quality mapping and geocoding services
 
 The National Water Model represents a significant advancement in hydrologic prediction, providing high-resolution forecasts across all river reaches in the continental United States. RivrFlow makes this sophisticated forecasting technology accessible to everyday users in an intuitive mobile interface.
 
@@ -310,7 +310,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - **NOAA**: For developing and maintaining the National Water Model and providing comprehensive river flow forecast data
-- **USGS**: For real-time stream gauge measurements and hydrologic data
 - **Mapbox**: For exceptional mapping services
 - **Flutter Community**: For outstanding open-source packages
 - **BYU Hydroinformatics Lab**: For project support and expertise
