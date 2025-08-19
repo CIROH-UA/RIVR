@@ -13,7 +13,7 @@ import 'components/slide_action_buttons.dart';
 import 'components/slide_action_constants.dart';
 
 /// Individual favorite river card with Cupertino design
-/// Supports slide actions, loading states, video backgrounds, and tap navigation
+/// Supports slide actions, loading states, video backgrounds, custom image overlays, and tap navigation
 class FavoriteRiverCard extends StatefulWidget {
   final FavoriteRiver favorite;
   final VoidCallback? onTap;
@@ -64,14 +64,6 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   Future<void> _initializeVideoBackground() async {
-    // For now, skip video initialization and use gradients
-    // This prevents the PlatformException while video assets are being set up
-    if (mounted) {
-      setState(() {
-        _isVideoInitialized = false;
-      });
-    }
-
     final category = _getFloodRiskCategory();
     final videoPath = FloodRiskVideoService.getVideoForCategory(category);
 
@@ -112,7 +104,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     if (reachData == null ||
         currentFlow == null ||
         !reachData.hasReturnPeriods) {
-      return 'Normal'; // Default when no classification data available
+      return 'NoData'; // Use NoData when no classification data available
     }
 
     // Get user's preferred flow unit
@@ -190,8 +182,11 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            // Video background (or fallback)
-            _buildVideoBackground(),
+            // Background: either custom image OR video (not both)
+            if (widget.favorite.customImageAsset != null)
+              _buildCustomImageBackground()
+            else
+              _buildVideoBackground(),
 
             // Content overlay
             _buildContentOverlay(isRefreshing),
@@ -217,6 +212,22 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
       // Fallback to gradient while video loads or if video fails
       return _buildDefaultGradient();
     }
+  }
+
+  Widget _buildCustomImageBackground() {
+    return Positioned.fill(
+      child: Image.asset(
+        widget.favorite.customImageAsset!,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          // If custom image fails, fall back to video
+          print(
+            'Failed to load custom image: ${widget.favorite.customImageAsset}',
+          );
+          return _buildVideoBackground();
+        },
+      ),
+    );
   }
 
   Widget _buildDefaultGradient() {
@@ -263,6 +274,12 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         return [
           CupertinoColors.systemPurple.withOpacity(0.8),
           CupertinoColors.systemIndigo.withOpacity(0.8),
+        ];
+      case 'nodata':
+      case 'unknown':
+        return [
+          CupertinoColors.systemGrey.withOpacity(0.8),
+          CupertinoColors.systemGrey2.withOpacity(0.8),
         ];
       default:
         return [

@@ -11,10 +11,12 @@ class FloodRiskVideoService {
     'Moderate': '$_baseVideoPath/Moderate-Risk.mp4',
     'Major': '$_baseVideoPath/Major-Risk.mp4',
     'Extreme': '$_baseVideoPath/Extreme-Risk.mp4',
+    'NoData': '$_baseVideoPath/NoData-Risk.mp4',
+    'Unknown': '$_baseVideoPath/NoData-Risk.mp4',
   };
 
   /// Default fallback video for unknown categories
-  static const String _defaultVideo = '$_baseVideoPath/Normal-Risk.mp4';
+  static const String _defaultVideo = '$_baseVideoPath/NoData-Risk.mp4';
 
   /// Get video asset path for a flood risk category
   static String getVideoForCategory(String category) {
