@@ -273,7 +273,7 @@ class ReachData {
     );
   }
 
-  /// UPDATED: Get flow category based on return periods (unit-agnostic)
+  /// UPDATED: Get flood risk category based on NOAA return periods (unit-agnostic)
   String getFlowCategory(double flowValue, String flowUnit) {
     if (!hasReturnPeriods) return 'Unknown';
 
@@ -281,39 +281,30 @@ class ReachData {
     final periods = getReturnPeriodsInUnit(flowUnit);
     if (periods == null) return 'Unknown';
 
-    final sortedPeriods = periods.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
+    // Get threshold values for each return period
+    final threshold2yr = periods[2];
+    final threshold5yr = periods[5];
+    final threshold10yr = periods[10];
+    final threshold25yr = periods[25];
 
-    for (final period in sortedPeriods) {
-      if (flowValue < period.value) {
-        if (period.key == 2) return 'Normal';
-        if (period.key <= 5) return 'Elevated';
-        return 'High';
-      }
+    // Classify flow based on NOAA flood risk categories
+    if (threshold2yr != null && flowValue < threshold2yr) {
+      return 'Normal'; // Below 2-year return period
     }
 
-    return 'Flood Risk';
-  }
-
-  /// ORIGINAL METHOD PRESERVED: Get flow category based on return periods (flow in CFS, return periods in CMS)
-  String getFlowCategoryOriginal(double flowCfs) {
-    if (!hasReturnPeriods) return 'Unknown';
-
-    // Convert CFS to CMS for comparison (1 CFS = 0.0283168 CMS)
-    final flowCms = flowCfs * 0.0283168;
-
-    final periods = returnPeriods!.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-
-    for (final period in periods) {
-      if (flowCms < period.value) {
-        if (period.key == 2) return 'Normal';
-        if (period.key <= 5) return 'Elevated';
-        return 'High';
-      }
+    if (threshold5yr != null && flowValue < threshold5yr) {
+      return 'Action'; // Above 2-year, below 5-year return period
     }
 
-    return 'Flood Risk';
+    if (threshold10yr != null && flowValue < threshold10yr) {
+      return 'Moderate'; // Above 5-year, below 10-year return period
+    }
+
+    if (threshold25yr != null && flowValue < threshold25yr) {
+      return 'Major'; // Above 10-year, below 25-year return period
+    }
+
+    return 'Extreme'; // Above 25-year return period
   }
 
   // Get next return period threshold

@@ -3,14 +3,17 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:rivrflow/core/utils/river_image_utility.dart';
+import 'package:video_player/video_player.dart';
+import 'package:rivrflow/core/providers/reach_data_provider.dart';
+import 'package:rivrflow/core/services/flow_unit_preference_service.dart';
 import '../../../core/models/favorite_river.dart';
 import '../../../core/providers/favorites_provider.dart';
+import '../services/flood_risk_video_service.dart';
 import 'components/slide_action_buttons.dart';
 import 'components/slide_action_constants.dart';
 
 /// Individual favorite river card with Cupertino design
-/// Supports slide actions, loading states, and tap navigation
+/// Supports slide actions, loading states, video backgrounds, and tap navigation
 class FavoriteRiverCard extends StatefulWidget {
   final FavoriteRiver favorite;
   final VoidCallback? onTap;
@@ -38,6 +41,11 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   late AnimationController _slideController;
   late Animation<Offset> _slideAnimation;
 
+  // Video background state
+  VideoPlayerController? _videoController;
+  bool _isVideoInitialized = false;
+  String? _currentVideoPath;
+
   @override
   void initState() {
     super.initState();
@@ -45,13 +53,74 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
       duration: const Duration(milliseconds: 500),
       vsync: this,
     );
-    // Animation will be set up in build method when we have screen width
+    _initializeVideoBackground();
   }
 
   @override
   void dispose() {
     _slideController.dispose();
+    _videoController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _initializeVideoBackground() async {
+    // For now, skip video initialization and use gradients
+    // This prevents the PlatformException while video assets are being set up
+    if (mounted) {
+      setState(() {
+        _isVideoInitialized = false;
+      });
+    }
+
+    final category = _getFloodRiskCategory();
+    final videoPath = FloodRiskVideoService.getVideoForCategory(category);
+
+    if (_currentVideoPath != videoPath) {
+      await _videoController?.dispose();
+
+      _currentVideoPath = videoPath;
+      _videoController = VideoPlayerController.asset(videoPath);
+
+      try {
+        await _videoController!.initialize();
+        await _videoController!.setLooping(true);
+        await _videoController!.setVolume(0.0); // Mute the video
+        await _videoController!.play();
+
+        if (mounted) {
+          setState(() {
+            _isVideoInitialized = true;
+          });
+        }
+      } catch (e) {
+        print('Failed to initialize video: $e');
+        if (mounted) {
+          setState(() {
+            _isVideoInitialized = false;
+          });
+        }
+      }
+    }
+  }
+
+  String _getFloodRiskCategory() {
+    // Get current flow and reach data from provider
+    final reachDataProvider = context.read<ReachDataProvider>();
+    final reachData = reachDataProvider.currentReach;
+    final currentFlow = reachDataProvider.getCurrentFlow();
+
+    if (reachData == null ||
+        currentFlow == null ||
+        !reachData.hasReturnPeriods) {
+      return 'Normal'; // Default when no classification data available
+    }
+
+    // Get user's preferred flow unit
+    final flowUnitService = FlowUnitPreferenceService();
+    final currentUnit = flowUnitService.currentFlowUnit;
+
+    // Get flood category using ReachData classification
+    return reachData.getFlowCategory(currentFlow, currentUnit);
   }
 
   @override
@@ -76,9 +145,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
           margin: const EdgeInsets.symmetric(horizontal: 19, vertical: 6),
           child: GestureDetector(
             onTap: _isSliding ? null : widget.onTap,
-            // Remove onLongPress when reorderable - let ReorderableListView handle it
             onLongPress: widget.isReorderable ? null : _handleLongPress,
-            // RE-ENABLE pan gestures - they can coexist with reordering
             onPanStart: _handlePanStart,
             onPanUpdate: _handlePanUpdate,
             onPanEnd: _handlePanEnd,
@@ -123,8 +190,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         borderRadius: BorderRadius.circular(12),
         child: Stack(
           children: [
-            // Background image or gradient
-            _buildBackground(),
+            // Video background (or fallback)
+            _buildVideoBackground(),
 
             // Content overlay
             _buildContentOverlay(isRefreshing),
@@ -134,51 +201,28 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
   }
 
-  Widget _buildBackground() {
-    // Priority: Custom image -> Random default image -> Gradient fallback
-
-    if (widget.favorite.customImageAsset != null) {
-      // User has selected a custom image
+  Widget _buildVideoBackground() {
+    if (_isVideoInitialized && _videoController != null) {
       return Positioned.fill(
-        child: Image.asset(
-          widget.favorite.customImageAsset!,
+        child: FittedBox(
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            // If custom image fails, fall back to random default
-            return _buildDefaultImage();
-          },
+          child: SizedBox(
+            width: _videoController!.value.size.width,
+            height: _videoController!.value.size.height,
+            child: VideoPlayer(_videoController!),
+          ),
         ),
       );
     } else {
-      // No custom image, use random default
-      return _buildDefaultImage();
+      // Fallback to gradient while video loads or if video fails
+      return _buildDefaultGradient();
     }
   }
 
-  Widget _buildDefaultImage() {
-    // Get consistent random image for this river
-    final defaultImage = RiverImageUtility.getDefaultImageForRiver(
-      widget.favorite.reachId,
-    );
-
-    return Positioned.fill(
-      child: Image.asset(
-        defaultImage,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          // If default image fails, fall back to gradient
-          print(
-            'Failed to load default image: $defaultImage, using gradient fallback',
-          );
-          return _buildDefaultGradient();
-        },
-      ),
-    );
-  }
-
   Widget _buildDefaultGradient() {
-    // Generate gradient based on reach ID for consistency
-    final colors = _getGradientColors(widget.favorite.reachId);
+    // Generate gradient based on flood risk category
+    final category = _getFloodRiskCategory();
+    final colors = _getGradientColorsForCategory(category);
 
     return Positioned.fill(
       child: Container(
@@ -193,20 +237,39 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
   }
 
-  List<Color> _getGradientColors(String reachId) {
-    // Simple hash-based color selection for consistent gradients
-    final hash = reachId.hashCode.abs();
-    final gradients = [
-      [CupertinoColors.systemBlue, CupertinoColors.systemTeal],
-      [CupertinoColors.systemPurple, CupertinoColors.systemBlue],
-      [CupertinoColors.systemTeal, CupertinoColors.systemGreen],
-      [CupertinoColors.systemOrange, CupertinoColors.systemRed],
-      [CupertinoColors.systemIndigo, CupertinoColors.systemPurple],
-    ];
-
-    return gradients[hash % gradients.length]
-        .map((color) => color.withOpacity(0.8))
-        .toList();
+  List<Color> _getGradientColorsForCategory(String category) {
+    switch (category.toLowerCase()) {
+      case 'normal':
+        return [
+          CupertinoColors.systemBlue.withOpacity(0.8),
+          CupertinoColors.systemTeal.withOpacity(0.8),
+        ];
+      case 'action':
+        return [
+          CupertinoColors.systemYellow.withOpacity(0.8),
+          CupertinoColors.systemOrange.withOpacity(0.8),
+        ];
+      case 'moderate':
+        return [
+          CupertinoColors.systemOrange.withOpacity(0.8),
+          CupertinoColors.systemRed.withOpacity(0.8),
+        ];
+      case 'major':
+        return [
+          CupertinoColors.systemRed.withOpacity(0.8),
+          CupertinoColors.systemPink.withOpacity(0.8),
+        ];
+      case 'extreme':
+        return [
+          CupertinoColors.systemPurple.withOpacity(0.8),
+          CupertinoColors.systemIndigo.withOpacity(0.8),
+        ];
+      default:
+        return [
+          CupertinoColors.systemGrey.withOpacity(0.8),
+          CupertinoColors.systemGrey2.withOpacity(0.8),
+        ];
+    }
   }
 
   Widget _buildContentOverlay(bool isRefreshing) {
@@ -218,7 +281,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
             end: Alignment.bottomCenter,
             colors: [
               CupertinoColors.black.withOpacity(0.0),
-              CupertinoColors.black.withOpacity(0.6),
+              CupertinoColors.black.withOpacity(0.7),
             ],
             stops: const [0.0, 1.0],
           ),
@@ -227,10 +290,12 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Top row with loading indicator
+            // Top row with flood risk badge and loading indicator
             Row(
               children: [
-                Expanded(child: Container()), // Spacer
+                // Flood risk badge
+                _buildFloodRiskBadge(),
+                const Spacer(),
                 if (isRefreshing)
                   const CupertinoActivityIndicator(
                     color: CupertinoColors.white,
@@ -247,6 +312,46 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         ),
       ),
     );
+  }
+
+  Widget _buildFloodRiskBadge() {
+    final category = _getFloodRiskCategory();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getBadgeColor(category),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        category.toUpperCase(),
+        style: const TextStyle(
+          color: CupertinoColors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Color _getBadgeColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'normal':
+        return CupertinoColors.systemBlue;
+      case 'action':
+        return CupertinoColors.systemYellow;
+      case 'moderate':
+        return CupertinoColors.systemOrange;
+      case 'major':
+        return CupertinoColors.systemRed;
+      case 'extreme':
+        return CupertinoColors.systemPurple;
+      case 'nodata':
+      case 'unknown':
+        return CupertinoColors.systemGrey;
+      default:
+        return CupertinoColors.systemGrey;
+    }
   }
 
   Widget _buildBottomContent() {
