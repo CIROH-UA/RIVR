@@ -56,9 +56,8 @@ class FavoritesProvider with ChangeNotifier {
       final reachId = favorite.reachId;
       return favorite.copyWith(
         riverName: _sessionRiverNames[reachId],
-        customName: _sessionCustomNames[reachId], // ✅ Include custom name
-        customImageAsset:
-            _sessionCustomImages[reachId], // ✅ Include custom image
+        customName: _sessionCustomNames[reachId],
+        customImageAsset: _sessionCustomImages[reachId],
         lastKnownFlow: _sessionFlowData[reachId],
         lastUpdated: _sessionFlowUpdates[reachId],
         latitude: _sessionCoordinates[reachId]?.lat,
@@ -93,8 +92,6 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Initialize favorites and start background refresh
   Future<void> initializeAndRefresh() async {
-    print('FAVORITES_PROVIDER: Initializing favorites with cloud storage');
-
     _setLoading(true);
     _clearError();
 
@@ -102,7 +99,7 @@ class FavoritesProvider with ChangeNotifier {
       // Load favorites from cloud storage first
       await _loadFavoritesFromStorage();
 
-      // ✅ LOAD CUSTOM PROPERTIES FROM LOCAL STORAGE
+      // LOAD CUSTOM PROPERTIES FROM LOCAL STORAGE
       await _loadCustomPropertiesFromLocal();
 
       // Start background refresh after short delay (let UI show cached data)
@@ -110,7 +107,6 @@ class FavoritesProvider with ChangeNotifier {
         _refreshAllFavoritesInBackground();
       });
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error during initialization: $e');
       _setError(e.toString());
     } finally {
       _setLoading(false);
@@ -122,12 +118,8 @@ class FavoritesProvider with ChangeNotifier {
     try {
       _favorites = await _favoritesService.loadFavorites();
       _updateFavoriteReachIds(); // Update lookup set
-      print(
-        'FAVORITES_PROVIDER: ✅ Loaded ${_favorites.length} favorites from cloud',
-      );
       notifyListeners();
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error loading favorites: $e');
       rethrow;
     }
   }
@@ -139,12 +131,9 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Add a new favorite river (coordinates loaded in background)
   Future<bool> addFavorite(String reachId, {String? customName}) async {
-    print('FAVORITES_PROVIDER: Adding favorite: $reachId');
-
     try {
       // Check if already exists using O(1) lookup
       if (isFavorite(reachId)) {
-        print('FAVORITES_PROVIDER: ⚠️ Reach $reachId already favorited');
         return false;
       }
 
@@ -158,10 +147,8 @@ class FavoritesProvider with ChangeNotifier {
       // Load rich data in background
       _loadFavoriteDataInBackground(reachId);
 
-      print('FAVORITES_PROVIDER: ✅ Added favorite: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error adding favorite: $e');
       _setError(e.toString());
       return false;
     }
@@ -175,14 +162,9 @@ class FavoritesProvider with ChangeNotifier {
     required double longitude,
     String? riverName,
   }) async {
-    print(
-      'FAVORITES_PROVIDER: Adding favorite with known coordinates: $reachId',
-    );
-
     try {
       // Check if already exists using O(1) lookup
       if (isFavorite(reachId)) {
-        print('FAVORITES_PROVIDER: ⚠️ Reach $reachId already favorited');
         return false;
       }
 
@@ -204,12 +186,8 @@ class FavoritesProvider with ChangeNotifier {
         _loadFavoriteRiverNameInBackground(reachId);
       }
 
-      print(
-        'FAVORITES_PROVIDER: ✅ Added favorite with known coordinates: $reachId',
-      );
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error adding favorite with coordinates: $e');
       _setError(e.toString());
       return false;
     }
@@ -224,9 +202,6 @@ class FavoritesProvider with ChangeNotifier {
       // Store in session data
       _sessionRiverNames[reachId] = forecast.reach.riverName;
 
-      print(
-        'FAVORITES_PROVIDER: ✅ Updated river name for $reachId: ${forecast.reach.riverName}',
-      );
       notifyListeners();
     } catch (e) {
       print(
@@ -238,8 +213,6 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Remove a favorite river and clean up custom properties when favorite is removed
   Future<bool> removeFavorite(String reachId) async {
-    print('FAVORITES_PROVIDER: Removing favorite: $reachId');
-
     try {
       final success = await _favoritesService.removeFavorite(reachId);
       if (!success) return false;
@@ -249,20 +222,18 @@ class FavoritesProvider with ChangeNotifier {
       _sessionFlowData.remove(reachId);
       _sessionFlowUpdates.remove(reachId);
       _sessionCoordinates.remove(reachId);
-      _sessionCustomNames.remove(reachId); // ✅ Clean up custom name
-      _sessionCustomImages.remove(reachId); // ✅ Clean up custom image
+      _sessionCustomNames.remove(reachId);
+      _sessionCustomImages.remove(reachId);
       _refreshingReachIds.remove(reachId);
 
-      // ✅ PERSIST CHANGES TO LOCAL STORAGE
+      // PERSIST CHANGES TO LOCAL STORAGE
       await _persistCustomPropertiesToLocal();
 
       // Reload from storage
       await _loadFavoritesFromStorage();
 
-      print('FAVORITES_PROVIDER: ✅ Removed favorite: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error removing favorite: $e');
       _setError(e.toString());
       return false;
     }
@@ -270,10 +241,6 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Reorder favorites (for drag-and-drop)
   Future<bool> reorderFavorites(int oldIndex, int newIndex) async {
-    print(
-      'FAVORITES_PROVIDER: Reordering favorite from $oldIndex to $newIndex',
-    );
-
     try {
       // Update local list immediately for UI responsiveness
       final reorderedFavorites = List<FavoriteRiver>.from(_favorites);
@@ -292,10 +259,8 @@ class FavoritesProvider with ChangeNotifier {
         return false;
       }
 
-      print('FAVORITES_PROVIDER: ✅ Reordered favorites successfully');
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error reordering favorites: $e');
       _setError(e.toString());
       await _loadFavoritesFromStorage(); // Revert
       return false;
@@ -309,20 +274,15 @@ class FavoritesProvider with ChangeNotifier {
     String? riverName,
     String? customImageAsset,
   }) async {
-    print('FAVORITES_PROVIDER: Updating favorite: $reachId');
-
     try {
       // Update session data (stored locally)
       if (riverName != null) {
         _sessionRiverNames[reachId] = riverName;
       }
 
-      // ✅ NOW HANDLE CUSTOM NAME
+      // HANDLES CUSTOM NAME
       if (customName != null) {
         _sessionCustomNames[reachId] = customName;
-        print(
-          'FAVORITES_PROVIDER: Updated custom name for $reachId: $customName',
-        );
       }
 
       if (customImageAsset != null) {
@@ -330,19 +290,14 @@ class FavoritesProvider with ChangeNotifier {
       } else {
         // Explicitly handle null to remove custom image
         _sessionCustomImages.remove(reachId);
-        print(
-          'FAVORITES_PROVIDER: Updated custom image for $reachId: $customImageAsset',
-        );
       }
 
-      // ✅ PERSIST TO LOCAL STORAGE
+      // PERSISTS TO LOCAL STORAGE
       await _persistCustomPropertiesToLocal();
 
       notifyListeners();
-      print('FAVORITES_PROVIDER: ✅ Updated favorite session data: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error updating favorite: $e');
       _setError(e.toString());
       return false;
     }
@@ -362,8 +317,6 @@ class FavoritesProvider with ChangeNotifier {
         'favorites_custom_images',
         json.encode(_sessionCustomImages),
       );
-
-      print('FAVORITES_PROVIDER: ✅ Custom properties persisted locally');
     } catch (e) {
       print('FAVORITES_PROVIDER: ❌ Error persisting custom properties: $e');
     }
@@ -387,10 +340,6 @@ class FavoritesProvider with ChangeNotifier {
         final imagesMap = json.decode(imagesJson) as Map<String, dynamic>;
         _sessionCustomImages.addAll(imagesMap.cast<String, String>());
       }
-
-      print(
-        'FAVORITES_PROVIDER: ✅ Custom properties loaded from local storage',
-      );
     } catch (e) {
       print('FAVORITES_PROVIDER: ❌ Error loading custom properties: $e');
     }
@@ -398,8 +347,6 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Refresh all favorites flow data (pull-to-refresh)
   Future<void> refreshAllFavorites() async {
-    print('FAVORITES_PROVIDER: Manual refresh of all favorites');
-
     _clearError();
 
     // Clear computed caches to force fresh calculations
@@ -411,7 +358,6 @@ class FavoritesProvider with ChangeNotifier {
         .toList();
 
     await Future.wait(refreshTasks);
-    print('FAVORITES_PROVIDER: ✅ Manual refresh completed');
   }
 
   /// Background refresh of all favorites (app launch)
@@ -427,7 +373,7 @@ class FavoritesProvider with ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 200));
     }
 
-    print('FAVORITES_PROVIDER: ✅ Background refresh completed');
+    print('FAVORITES_PROVIDER: Background refresh completed');
   }
 
   /// Load favorite data in background (when new favorite added)
@@ -437,12 +383,9 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Ultra-fast favorite addition for map integration
   Future<bool> addFavoriteFromMap(String reachId, {String? customName}) async {
-    print('FAVORITES_PROVIDER: Adding favorite from map: $reachId');
-
     try {
       // Check if already exists using O(1) lookup
       if (isFavorite(reachId)) {
-        print('FAVORITES_PROVIDER: ⚠️ Reach $reachId already favorited');
         return false;
       }
 
@@ -450,11 +393,7 @@ class FavoritesProvider with ChangeNotifier {
       ReachData reach;
       try {
         reach = await _forecastService.loadBasicReachInfo(reachId);
-        print('FAVORITES_PROVIDER: ✅ Got basic info for $reachId');
       } catch (e) {
-        print(
-          'FAVORITES_PROVIDER: ❌ Could not get basic info for $reachId: $e',
-        );
         return false;
       }
 
@@ -476,10 +415,8 @@ class FavoritesProvider with ChangeNotifier {
         _loadFavoriteDataInBackground(reachId);
       });
 
-      print('FAVORITES_PROVIDER: ✅ Added favorite from map: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error adding favorite from map: $e');
       _setError(e.toString());
       return false;
     }
@@ -525,8 +462,6 @@ class FavoritesProvider with ChangeNotifier {
           'FAVORITES_PROVIDER: $riverName ($reachId) - No return periods available',
         );
       }
-
-      print('FAVORITES_PROVIDER: ✅ Refreshed session data for $reachId');
     } catch (e) {
       print('FAVORITES_PROVIDER: ❌ Failed to refresh $reachId: $e');
     } finally {
@@ -548,7 +483,7 @@ class FavoritesProvider with ChangeNotifier {
 
       if (cachedReach?.hasReturnPeriods == true) {
         _sessionReturnPeriods[reachId] = cachedReach!.returnPeriods!;
-        print('FAVORITES_PROVIDER: ✅ Using cached return periods for $reachId');
+        print('FAVORITES_PROVIDER: Using cached return periods for $reachId');
         return;
       }
 
@@ -565,8 +500,6 @@ class FavoritesProvider with ChangeNotifier {
           final updatedReach = cachedReach.mergeWith(returnPeriodData);
           await _reachCacheService.store(updatedReach);
         }
-
-        print('FAVORITES_PROVIDER: ✅ Loaded fresh return periods for $reachId');
       }
     } catch (e) {
       print(
@@ -617,7 +550,6 @@ class FavoritesProvider with ChangeNotifier {
 
     _clearError();
     notifyListeners();
-    print('FAVORITES_PROVIDER: ✅ Cleared all favorites and session data');
   }
 
   /// Get just the reach IDs for notification system

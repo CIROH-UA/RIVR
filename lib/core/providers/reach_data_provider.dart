@@ -1,7 +1,6 @@
 // lib/core/providers/reach_data_provider.dart
 
 import 'package:flutter/foundation.dart';
-import 'package:rivrflow/core/services/flow_unit_preference_service.dart';
 import 'package:rivrflow/features/forecast/widgets/horizontal_flow_timeline.dart';
 import '../models/reach_data.dart';
 import '../services/forecast_service.dart';
@@ -22,7 +21,7 @@ class ReachDataProvider with ChangeNotifier {
   String _loadingPhase =
       'none'; // 'none', 'overview', 'supplementary', 'complete'
 
-  // NEW: Progressive forecast category loading states
+  // Progressive forecast category loading states
   bool _isLoadingHourly = false;
   bool _isLoadingDaily = false;
   bool _isLoadingExtended = false;
@@ -45,7 +44,7 @@ class ReachDataProvider with ChangeNotifier {
   ForecastResponse? get currentForecast => _currentForecast;
   bool get hasData => _currentForecast != null;
 
-  // NEW: Forecast category loading state getters
+  // Forecast category loading state getters
   bool get isLoadingHourly => _isLoadingHourly;
   bool get isLoadingDaily => _isLoadingDaily;
   bool get isLoadingExtended => _isLoadingExtended;
@@ -61,7 +60,7 @@ class ReachDataProvider with ChangeNotifier {
   bool get hasSupplementaryData =>
       _currentForecast?.reach.hasReturnPeriods ?? false;
 
-  // NEW: Check if specific forecast categories are available in current data
+  // Check if specific forecast categories are available in current data
   bool get hasHourlyForecast =>
       _currentForecast?.shortRange?.isNotEmpty ?? false;
   bool get hasDailyForecast =>
@@ -69,9 +68,8 @@ class ReachDataProvider with ChangeNotifier {
   bool get hasExtendedForecast =>
       _currentForecast?.longRange.isNotEmpty ?? false;
 
-  // NEW: Immediately clear current reach display (fixes wrong river issue)
+  // Immediately clear current reach display (fixes wrong river issue)
   void clearCurrentReach() {
-    print('REACH_PROVIDER: Immediately clearing current reach display');
     _currentForecast = null;
     _clearAllComputedCaches();
     _clearError();
@@ -80,7 +78,7 @@ class ReachDataProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // NEW: Get loading state summary for forecast categories
+  // Get loading state summary for forecast categories
   Map<String, dynamic> getForecastCategoryLoadingState() {
     return {
       'hourly': {
@@ -105,8 +103,6 @@ class ReachDataProvider with ChangeNotifier {
   /// Load minimal data for overview page display
   /// This is the fastest possible load - shows name, location, current flow immediately
   Future<bool> loadOverviewData(String reachId) async {
-    print('REACH_PROVIDER: Loading overview data for reach: $reachId');
-
     _setLoadingOverview(true);
     _setLoadingPhase('overview');
     _clearError();
@@ -128,9 +124,6 @@ class ReachDataProvider with ChangeNotifier {
       _currentForecast = forecast;
       _updateComputedCaches(reachId);
 
-      print(
-        'REACH_PROVIDER: ✅ Overview data loaded: ${forecast.reach.displayName}',
-      );
       _setLoadingOverview(false);
       _setLoadingPhase('overview');
       return true;
@@ -143,10 +136,8 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Load hourly forecast data specifically (short-range)
+  // Load hourly forecast data specifically (short-range)
   Future<bool> loadHourlyForecast(String reachId) async {
-    print('REACH_PROVIDER: Loading hourly forecast for reach: $reachId');
-
     _setLoadingHourly(true);
 
     try {
@@ -165,12 +156,11 @@ class ReachDataProvider with ChangeNotifier {
         'short_range',
       );
 
-      // FIXED: Merge with existing data instead of overwriting
+      // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, hourlyForecast);
       _sessionCache[reachId] = _currentForecast!;
       _updateComputedCaches(reachId);
 
-      print('REACH_PROVIDER: ✅ Hourly forecast loaded and merged');
       _setLoadingHourly(false);
       return true;
     } catch (e) {
@@ -180,10 +170,8 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Load daily forecast data specifically (medium-range)
+  // Load daily forecast data specifically (medium-range)
   Future<bool> loadDailyForecast(String reachId) async {
-    print('REACH_PROVIDER: Loading daily forecast for reach: $reachId');
-
     _setLoadingDaily(true);
 
     try {
@@ -202,12 +190,11 @@ class ReachDataProvider with ChangeNotifier {
         'medium_range',
       );
 
-      // FIXED: Merge with existing data instead of overwriting
+      // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, dailyForecast);
       _sessionCache[reachId] = _currentForecast!;
       _updateComputedCaches(reachId);
 
-      print('REACH_PROVIDER: ✅ Daily forecast loaded and merged');
       _setLoadingDaily(false);
       return true;
     } catch (e) {
@@ -217,10 +204,8 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Load extended forecast data specifically (long-range)
+  // Load extended forecast data specifically (long-range)
   Future<bool> loadExtendedForecast(String reachId) async {
-    print('REACH_PROVIDER: Loading extended forecast for reach: $reachId');
-
     _setLoadingExtended(true);
 
     try {
@@ -239,7 +224,7 @@ class ReachDataProvider with ChangeNotifier {
         'long_range',
       );
 
-      // FIXED: Merge with existing data instead of overwriting
+      // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(
         _currentForecast!,
         extendedForecast,
@@ -247,7 +232,6 @@ class ReachDataProvider with ChangeNotifier {
       _sessionCache[reachId] = _currentForecast!;
       _updateComputedCaches(reachId);
 
-      print('REACH_PROVIDER: ✅ Extended forecast loaded and merged');
       _setLoadingExtended(false);
       return true;
     } catch (e) {
@@ -257,7 +241,7 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Merge forecast data properly (preserves existing data)
+  // Merge forecast data properly (preserves existing data)
   ForecastResponse _mergeForecastData(
     ForecastResponse existing,
     ForecastResponse newData,
@@ -283,10 +267,8 @@ class ReachDataProvider with ChangeNotifier {
     );
   }
 
-  // NEW: Comprehensive refresh - loads all forecast categories systematically
+  // Comprehensive refresh - loads all forecast categories systematically
   Future<bool> comprehensiveRefresh(String reachId) async {
-    print('REACH_PROVIDER: Starting comprehensive refresh for: $reachId');
-
     // Clear caches first
     _sessionCache.remove(reachId);
     _clearComputedCaches(reachId);
@@ -308,7 +290,6 @@ class ReachDataProvider with ChangeNotifier {
       // Step 3: Load supplementary data
       await loadSupplementaryData(reachId);
 
-      print('REACH_PROVIDER: ✅ Comprehensive refresh completed');
       return true;
     } catch (e) {
       print('REACH_PROVIDER: ❌ Error in comprehensive refresh: $e');
@@ -322,14 +303,9 @@ class ReachDataProvider with ChangeNotifier {
   /// Call this after overview data is displayed to add functionality progressively
   Future<bool> loadSupplementaryData(String reachId) async {
     if (_currentForecast == null) {
-      print(
-        'REACH_PROVIDER: No overview data to enhance, loading overview first',
-      );
       final success = await loadOverviewData(reachId);
       if (!success) return false;
     }
-
-    print('REACH_PROVIDER: Loading supplementary data for reach: $reachId');
 
     _setLoadingSupplementary(true);
     _clearError();
@@ -341,30 +317,16 @@ class ReachDataProvider with ChangeNotifier {
         _currentForecast!,
       );
 
-      // Only update if we actually got enhanced data
-      final hadReturnPeriods = _currentForecast!.reach.hasReturnPeriods;
-      final hasReturnPeriodsNow = enhancedForecast.reach.hasReturnPeriods;
-
       _currentForecast = enhancedForecast;
       _sessionCache[reachId] = enhancedForecast; // Update cache
 
       // Update computed caches
       _updateComputedCaches(reachId);
 
-      // Only notify if we actually got new useful data
-      if (!hadReturnPeriods && hasReturnPeriodsNow) {
-        print('REACH_PROVIDER: ✅ Added return period data for flow categories');
-      } else {
-        print(
-          'REACH_PROVIDER: ✅ Supplementary data loaded (no new return periods)',
-        );
-      }
-
       _setLoadingSupplementary(false);
       _setLoadingPhase('complete');
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ⚠️ Error loading supplementary data: $e');
       // Don't set error - supplementary data is not critical
       // Keep existing overview data
       _setLoadingSupplementary(false);
@@ -376,8 +338,6 @@ class ReachDataProvider with ChangeNotifier {
   // Keep for backwards compatibility and complete loading
   /// Load complete reach and forecast data
   Future<bool> loadReach(String reachId) async {
-    print('REACH_PROVIDER: Loading complete reach data: $reachId');
-
     _setLoading(true);
     _setLoadingPhase('complete');
     _clearError();
@@ -385,7 +345,6 @@ class ReachDataProvider with ChangeNotifier {
     try {
       // Check session cache first
       if (_sessionCache.containsKey(reachId)) {
-        print('REACH_PROVIDER: Using session cache for: $reachId');
         _currentForecast = _sessionCache[reachId];
         _updateComputedCaches(reachId);
         _setLoading(false);
@@ -400,9 +359,6 @@ class ReachDataProvider with ChangeNotifier {
       _sessionCache[reachId] = forecast; // Cache for session
       _updateComputedCaches(reachId);
 
-      print(
-        'REACH_PROVIDER: ✅ Complete data loaded: ${forecast.reach.displayName}',
-      );
       _setLoading(false);
       _setLoadingPhase('complete');
       return true;
@@ -417,8 +373,6 @@ class ReachDataProvider with ChangeNotifier {
 
   /// Load specific forecast type only (faster)
   Future<bool> loadSpecificForecast(String reachId, String forecastType) async {
-    print('REACH_PROVIDER: Loading $forecastType for reach: $reachId');
-
     _setLoading(true);
     _clearError();
 
@@ -432,12 +386,10 @@ class ReachDataProvider with ChangeNotifier {
       _sessionCache[reachId] = forecast;
       _updateComputedCaches(reachId);
 
-      print('REACH_PROVIDER: ✅ Successfully loaded $forecastType');
       _setLoading(false);
       _setLoadingPhase('specific');
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading $forecastType: $e');
       _setError(e.toString());
       _setLoading(false);
       _setLoadingPhase('none');
@@ -450,7 +402,6 @@ class ReachDataProvider with ChangeNotifier {
     if (_currentForecast == null) return false;
 
     final reachId = _currentForecast!.reach.reachId;
-    print('REACH_PROVIDER: Force refreshing: $reachId');
 
     // Use comprehensive refresh instead of basic loadReach
     return await comprehensiveRefresh(reachId);
@@ -467,9 +418,6 @@ class ReachDataProvider with ChangeNotifier {
     // Return cached value if available
     if (_currentFlowCache.containsKey(cacheKey)) {
       final cachedValue = _currentFlowCache[cacheKey];
-      print(
-        'REACH_PROVIDER: Using cached flow value: $cachedValue ${FlowUnitPreferenceService().currentFlowUnit}',
-      );
       return cachedValue;
     }
 
@@ -478,9 +426,7 @@ class ReachDataProvider with ChangeNotifier {
       _currentForecast!,
       preferredType: preferredType,
     );
-    print(
-      'REACH_PROVIDER: Computed new flow value: $flow ${FlowUnitPreferenceService().currentFlowUnit}',
-    );
+
     _currentFlowCache[cacheKey] = flow;
     return flow;
   }
@@ -558,7 +504,6 @@ class ReachDataProvider with ChangeNotifier {
     _setLoadingPhase('none');
     _resetAllLoadingStates();
     notifyListeners();
-    print('REACH_PROVIDER: Cleared all data');
   }
 
   /// Clear error message
@@ -603,8 +548,6 @@ class ReachDataProvider with ChangeNotifier {
     getFlowCategory(); // This will cache the result
     getFormattedLocation(); // This will cache the result
     getAvailableForecastTypes(); // This will cache the result
-
-    print('REACH_PROVIDER: Updated computed caches for: $reachId');
   }
 
   // Clear computed caches for specific reach
@@ -617,8 +560,6 @@ class ReachDataProvider with ChangeNotifier {
 
   /// Clear unit-dependent cached values (call when unit preference changes)
   void clearUnitDependentCaches() {
-    print('REACH_PROVIDER: Clearing unit-dependent caches for unit change');
-
     // Clear flow and category caches (these depend on units)
     _currentFlowCache.clear();
     _flowCategoryCache.clear();
@@ -661,7 +602,7 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Individual forecast category loading state setters
+  // Individual forecast category loading state setters
   void _setLoadingHourly(bool loading) {
     if (_isLoadingHourly != loading) {
       _isLoadingHourly = loading;
@@ -683,7 +624,7 @@ class ReachDataProvider with ChangeNotifier {
     }
   }
 
-  // NEW: Reset all loading states
+  // Reset all loading states
   void _resetAllLoadingStates() {
     _isLoading = false;
     _isLoadingOverview = false;
