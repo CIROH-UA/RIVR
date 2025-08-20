@@ -76,7 +76,7 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        middle: const Text('Choose Image'),
+        middle: const Text('Choose Background'),
         leading: CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: _isUpdating ? null : () => Navigator.pop(context),
@@ -93,13 +93,74 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
             : null,
       ),
       child: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            _buildCategorySelector(),
-            Expanded(child: _buildImageGrid()),
+            Column(
+              children: [
+                _buildCategorySelector(),
+                Expanded(child: _buildImageGrid()),
+              ],
+            ),
+            // Reset to default floating button
+            _buildResetButton(),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildResetButton() {
+    return Consumer<FavoritesProvider>(
+      builder: (context, favoritesProvider, child) {
+        // Get current favorite to check if it has a custom image
+        final currentFavorite = favoritesProvider.favorites
+            .where((f) => f.reachId == widget.reachId)
+            .firstOrNull;
+
+        // Only show button if there's currently a custom image set
+        final hasCustomImage = currentFavorite?.customImageAsset != null;
+
+        if (!hasCustomImage) {
+          return const SizedBox.shrink();
+        }
+
+        return Positioned(
+          bottom: 20,
+          left: 80,
+          right: 80,
+          child: CupertinoButton(
+            onPressed: _isUpdating ? null : _resetToDefault,
+            borderRadius: BorderRadius.circular(25),
+            color: CupertinoColors.systemBlue,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  CupertinoIcons.play_circle,
+                  color: CupertinoColors.white,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Use flow animation',
+                  style: TextStyle(
+                    color: CupertinoColors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_isUpdating) ...[
+                  const SizedBox(width: 12),
+                  const CupertinoActivityIndicator(
+                    radius: 8,
+                    color: CupertinoColors.white,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -346,6 +407,47 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
         Navigator.of(context).pop();
       } else if (mounted) {
         _showErrorMessage('Failed to update image. Please try again.');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showErrorMessage('An error occurred: ${e.toString()}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdating = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _resetToDefault() async {
+    if (_isUpdating) return;
+
+    setState(() {
+      _isUpdating = true;
+    });
+
+    try {
+      final favoritesProvider = context.read<FavoritesProvider>();
+      print(
+        'RESET: Before update - customImageAsset: ${favoritesProvider.favorites.firstWhere((f) => f.reachId == widget.reachId).customImageAsset}',
+      );
+
+      final success = await favoritesProvider.updateFavorite(
+        widget.reachId,
+        customImageAsset: null,
+      );
+
+      print('RESET: After update - success: $success');
+      print(
+        'RESET: After update - customImageAsset: ${favoritesProvider.favorites.firstWhere((f) => f.reachId == widget.reachId).customImageAsset}',
+      );
+
+      if (success && mounted) {
+        Navigator.of(context).pop();
+      } else if (mounted) {
+        _showErrorMessage('Failed to reset background. Please try again.');
       }
     } catch (e) {
       if (mounted) {

@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
-import 'package:rivrflow/core/providers/reach_data_provider.dart';
 import 'package:rivrflow/core/services/flow_unit_preference_service.dart';
 import '../../../core/models/favorite_river.dart';
 import '../../../core/providers/favorites_provider.dart';
@@ -57,6 +56,42 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   @override
+  void didUpdateWidget(FavoriteRiverCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Reinitialize video when switching from custom image to null
+    if (oldWidget.favorite.customImageAsset != null &&
+        widget.favorite.customImageAsset == null) {
+      print(
+        'Switching from custom image to video for ${widget.favorite.reachId}',
+      );
+
+      // Properly dispose existing controller first
+      _videoController?.dispose();
+      _videoController = null;
+      _currentVideoPath = null;
+      setState(() {
+        _isVideoInitialized = false;
+      });
+
+      // Then reinitialize
+      _initializeVideoBackground();
+    }
+    // Dispose video when switching from null to custom image
+    else if (oldWidget.favorite.customImageAsset == null &&
+        widget.favorite.customImageAsset != null) {
+      print(
+        'Switching from video to custom image for ${widget.favorite.reachId}',
+      );
+      _videoController?.dispose();
+      _videoController = null;
+      setState(() {
+        _isVideoInitialized = false;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _slideController.dispose();
     _videoController?.dispose();
@@ -96,23 +131,64 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   String _getFloodRiskCategory() {
-    // Get current flow and reach data from provider
-    final reachDataProvider = context.read<ReachDataProvider>();
-    final reachData = reachDataProvider.currentReach;
-    final currentFlow = reachDataProvider.getCurrentFlow();
+    final currentFlow = widget.favorite.lastKnownFlow;
+    if (currentFlow == null) {
+      print(
+        'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no flow)',
+      );
+      return 'NoData';
+    }
 
-    if (reachData == null ||
-        currentFlow == null ||
-        !reachData.hasReturnPeriods) {
-      return 'NoData'; // Use NoData when no classification data available
+    // Get return periods from FavoritesProvider for this specific favorite
+    final favoritesProvider = context.read<FavoritesProvider>();
+    final returnPeriods = favoritesProvider.getReturnPeriods(
+      widget.favorite.reachId,
+    );
+
+    if (returnPeriods == null || returnPeriods.isEmpty) {
+      print(
+        'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no return periods)',
+      );
+      return 'NoData';
     }
 
     // Get user's preferred flow unit
     final flowUnitService = FlowUnitPreferenceService();
     final currentUnit = flowUnitService.currentFlowUnit;
 
-    // Get flood category using ReachData classification
-    return reachData.getFlowCategory(currentFlow, currentUnit);
+    // Convert return periods to current unit (they're stored in CMS)
+    final convertedReturnPeriods = <int, double>{};
+    for (final entry in returnPeriods.entries) {
+      convertedReturnPeriods[entry.key] = flowUnitService.convertFlow(
+        entry.value,
+        'CMS',
+        currentUnit,
+      );
+    }
+
+    // Use same logic as ReachData.getFlowCategory()
+    final threshold2yr = convertedReturnPeriods[2];
+    final threshold5yr = convertedReturnPeriods[5];
+    final threshold10yr = convertedReturnPeriods[10];
+    final threshold25yr = convertedReturnPeriods[25];
+
+    String category;
+    if (threshold2yr != null && currentFlow < threshold2yr) {
+      category = 'Normal';
+    } else if (threshold5yr != null && currentFlow < threshold5yr) {
+      category = 'Action';
+    } else if (threshold10yr != null && currentFlow < threshold10yr) {
+      category = 'Moderate';
+    } else if (threshold25yr != null && currentFlow < threshold25yr) {
+      category = 'Major';
+    } else {
+      category = 'Extreme';
+    }
+
+    print(
+      'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Current: ${currentFlow.toStringAsFixed(1)} $currentUnit, Flood Risk: $category',
+    );
+    return category;
   }
 
   @override
@@ -132,6 +208,27 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         final isRefreshing = favoritesProvider.isRefreshing(
           widget.favorite.reachId,
         );
+
+        // Check if flood risk category changed and reinitialize video
+        final newCategory = _getFloodRiskCategory();
+        final expectedVideoPath = FloodRiskVideoService.getVideoForCategory(
+          newCategory,
+        );
+
+        if (_currentVideoPath != expectedVideoPath &&
+            widget.favorite.customImageAsset == null) {
+          // Category changed, reinitialize video asynchronously
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _initializeVideoBackground();
+          });
+        }
+
+        // Force video initialization when no custom image is set
+        if (widget.favorite.customImageAsset == null && !_isVideoInitialized) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _initializeVideoBackground();
+          });
+        }
 
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 19, vertical: 6),

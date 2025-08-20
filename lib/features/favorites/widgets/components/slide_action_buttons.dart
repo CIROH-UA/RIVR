@@ -47,7 +47,8 @@ class SlideActionButtons extends StatelessWidget {
               width: SlideActionConstants.buttonWidth,
               color: CupertinoColors.systemRed,
               icon: CupertinoIcons.trash,
-              label: 'Delete',
+              iconPadding: const EdgeInsets.only(left: 20),
+              label: '   Delete',
               borderRadius: const BorderRadius.only(
                 topRight: Radius.circular(12),
                 bottomRight: Radius.circular(12),
@@ -65,10 +66,11 @@ class SlideActionButtons extends StatelessWidget {
                 SlideActionConstants.overlap, // Middle position
             top: 0,
             child: _buildActionButton(
-              width: SlideActionConstants.buttonWidth,
+              width: SlideActionConstants.buttonWidth + 10,
               color: CupertinoColors.systemOrange,
-              icon: CupertinoIcons.pencil,
-              label: 'Rename',
+              icon: CupertinoIcons.pencil_ellipsis_rectangle,
+              iconPadding: const EdgeInsets.only(left: 30),
+              label: '     Rename',
               borderRadius: const BorderRadius.only(
                 topRight: Radius.circular(12),
                 bottomRight: Radius.circular(12),
@@ -85,10 +87,11 @@ class SlideActionButtons extends StatelessWidget {
             left: 0, // Leftmost position
             top: 0,
             child: _buildActionButton(
-              width: SlideActionConstants.buttonWidth + 5,
+              width: SlideActionConstants.buttonWidth + 15,
               color: CupertinoColors.systemBlue,
               icon: CupertinoIcons.photo,
-              label: 'Image',
+              iconPadding: const EdgeInsets.only(left: 15),
+              label: '  Background',
               borderRadius: const BorderRadius.only(
                 topRight: Radius.circular(12),
                 bottomRight: Radius.circular(12),
@@ -111,10 +114,13 @@ class SlideActionButtons extends StatelessWidget {
     required String label,
     required BorderRadius borderRadius,
     required VoidCallback onPressed,
+    EdgeInsets iconPadding = const EdgeInsets.only(
+      left: 15.0,
+    ), // Add this parameter
   }) {
     return SizedBox(
       width: width,
-      height: 210, // Match card height exactly
+      height: 210,
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: onPressed,
@@ -124,7 +130,6 @@ class SlideActionButtons extends StatelessWidget {
           decoration: BoxDecoration(
             color: color,
             borderRadius: borderRadius,
-            // Add a subtle shadow for depth
             boxShadow: [
               BoxShadow(
                 color: CupertinoColors.black.withOpacity(0.1),
@@ -137,7 +142,7 @@ class SlideActionButtons extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Padding(
-                padding: const EdgeInsets.only(left: 12.0),
+                padding: iconPadding, // Use the parameter
                 child: Icon(icon, color: CupertinoColors.white, size: 22),
               ),
               const SizedBox(height: 6),

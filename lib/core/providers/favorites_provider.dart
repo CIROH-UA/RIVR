@@ -4,6 +4,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:rivrflow/core/models/reach_data.dart';
+import 'package:rivrflow/core/services/noaa_api_service.dart';
+import 'package:rivrflow/core/services/reach_cache_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_river.dart';
 import '../services/favorites_service.dart';
@@ -14,6 +16,9 @@ import '../services/forecast_service.dart';
 class FavoritesProvider with ChangeNotifier {
   final FavoritesService _favoritesService = FavoritesService();
   final ForecastService _forecastService = ForecastService();
+  final ReachCacheService _reachCacheService = ReachCacheService();
+  final Map<String, Map<int, double>> _sessionReturnPeriods =
+      {}; // reachId -> return periods
 
   // Current state
   List<FavoriteRiver> _favorites = [];
@@ -320,9 +325,11 @@ class FavoritesProvider with ChangeNotifier {
         );
       }
 
-      // ✅ NOW HANDLE CUSTOM IMAGE
       if (customImageAsset != null) {
         _sessionCustomImages[reachId] = customImageAsset;
+      } else {
+        // Explicitly handle null to remove custom image
+        _sessionCustomImages.remove(reachId);
         print(
           'FAVORITES_PROVIDER: Updated custom image for $reachId: $customImageAsset',
         );
@@ -497,13 +504,75 @@ class FavoritesProvider with ChangeNotifier {
         lon: forecast.reach.longitude,
       );
 
+      // Load return periods for this favorite
+      await _loadReturnPeriods(reachId);
+
+      // Print results for this favorite
+      final flow = _sessionFlowData[reachId];
+      final riverName = _sessionRiverNames[reachId] ?? 'Unknown';
+      final returnPeriods = _sessionReturnPeriods[reachId];
+
+      print(
+        'FAVORITES_PROVIDER: $riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} CFS',
+      );
+
+      if (returnPeriods != null && returnPeriods.isNotEmpty) {
+        print(
+          'FAVORITES_PROVIDER: $riverName ($reachId) - Return Periods: ${returnPeriods.toString()}',
+        );
+      } else {
+        print(
+          'FAVORITES_PROVIDER: $riverName ($reachId) - No return periods available',
+        );
+      }
+
       print('FAVORITES_PROVIDER: ✅ Refreshed session data for $reachId');
     } catch (e) {
       print('FAVORITES_PROVIDER: ❌ Failed to refresh $reachId: $e');
-      // Individual failures don't break the whole list
     } finally {
       _refreshingReachIds.remove(reachId);
       notifyListeners();
+    }
+  }
+
+  /// Get return periods for a specific favorite
+  Map<int, double>? getReturnPeriods(String reachId) {
+    return _sessionReturnPeriods[reachId];
+  }
+
+  /// Load return periods for a favorite (with caching)
+  Future<void> _loadReturnPeriods(String reachId) async {
+    try {
+      // Check cache first
+      final cachedReach = await _reachCacheService.get(reachId);
+
+      if (cachedReach?.hasReturnPeriods == true) {
+        _sessionReturnPeriods[reachId] = cachedReach!.returnPeriods!;
+        print('FAVORITES_PROVIDER: ✅ Using cached return periods for $reachId');
+        return;
+      }
+
+      // Fetch fresh return periods
+      final returnPeriods = await NoaaApiService().fetchReturnPeriods(reachId);
+
+      if (returnPeriods.isNotEmpty) {
+        // Parse return periods
+        final returnPeriodData = ReachData.fromReturnPeriodApi(returnPeriods);
+        _sessionReturnPeriods[reachId] = returnPeriodData.returnPeriods!;
+
+        // Cache for future use
+        if (cachedReach != null) {
+          final updatedReach = cachedReach.mergeWith(returnPeriodData);
+          await _reachCacheService.store(updatedReach);
+        }
+
+        print('FAVORITES_PROVIDER: ✅ Loaded fresh return periods for $reachId');
+      }
+    } catch (e) {
+      print(
+        'FAVORITES_PROVIDER: ⚠️ Failed to load return periods for $reachId: $e',
+      );
+      // Continue without return periods
     }
   }
 
