@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:rivrflow/features/forecast/utils/flow_category_pulse_animator.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
 import '../../../core/constants.dart'; // Import for centralized styling
@@ -20,25 +21,25 @@ class CurrentFlowStatusCard extends StatefulWidget {
 class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     with TickerProviderStateMixin {
   bool _returnPeriodExpanded = false;
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
+  late FlowCategoryPulseAnimator _pulseAnimator;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    );
-    _pulseAnimation = Tween(begin: 0.96, end: 0.98).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-    _pulseController.repeat(reverse: true);
+
+    // Initialize pulse animator utility
+    _pulseAnimator = FlowCategoryPulseAnimator(vsync: this);
+
+    // Start animation only if card is tappable
+    if (widget.onTap != null) {
+      _pulseAnimator.start();
+    }
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    // Clean disposal of pulse animator
+    _pulseAnimator.dispose();
     super.dispose();
   }
 
@@ -96,13 +97,16 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         // Calculate category using converted flow (don't use stale cache)
         final category = _calculateFlowCategory(convertedCurrentFlow, reach);
 
+        // Update pulse animation based on flow category
+        _pulseAnimator.updateCategory(category);
+
         return GestureDetector(
           onTap: widget.onTap,
           child: AnimatedBuilder(
-            animation: _pulseAnimation,
+            animation: _pulseAnimator.animation!,
             builder: (context, child) {
               return Transform.scale(
-                scale: widget.onTap != null ? _pulseAnimation.value : 1.0,
+                scale: widget.onTap != null ? _pulseAnimator.value : 1.0,
                 child: Container(
                   margin: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
