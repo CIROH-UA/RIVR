@@ -38,7 +38,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     }
   }
 
-  // FIXED: Progressive loading with immediate state clearing
+  // Progressive loading with immediate state clearing
   Future<void> _loadReachData() async {
     if (widget.reachId == null) return;
 
@@ -90,7 +90,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     }
   }
 
-  // NEW: Progressive forecast category loading
+  // Progressive forecast category loading
   Future<void> _loadForecastCategoriesProgressively(String reachId) async {
     final reachProvider = Provider.of<ReachDataProvider>(
       context,
@@ -121,7 +121,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     print('OVERVIEW_PAGE: Progressive forecast loading completed');
   }
 
-  // FIXED: Comprehensive refresh for all forecast categories
+  // Comprehensive refresh for all forecast categories
   Future<void> _handleRefresh() async {
     if (widget.reachId == null) return;
 
