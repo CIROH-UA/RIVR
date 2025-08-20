@@ -315,31 +315,11 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
           expanded: true,
           onTap: () => _navigateToHydrograph('short_range'),
         ),
-
-        // Show loading indicator for supplementary data
-        if (reachProvider.isLoadingSupplementary)
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const CupertinoActivityIndicator(radius: 8),
-                const SizedBox(width: 12),
-                Text(
-                  'Loading return period data...',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }
 
-  // RESTORED: Your original forecast categories design with loading improvements
+  // Forecast categories design with loading improvements
   Widget _buildForecastCategoriesSection(ReachDataProvider reachProvider) {
     // Check if we should show the shimmer loading or your actual ForecastCategoryGrid
     if (reachProvider.loadingPhase == 'overview' &&
@@ -352,7 +332,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     return ForecastCategoryGrid(onCategoryTap: _navigateToForecastDetail);
   }
 
-  // Your original loading shimmer for forecast categories (kept exactly as you designed it)
+  // Loading shimmer for forecast categories
   Widget _buildForecastCategoriesShimmer() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -382,7 +362,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     );
   }
 
-  // Your original category shimmer design (kept exactly as you designed it)
+  // Category shimmer design
   Widget _buildCategoryShimmer() {
     return Container(
       decoration: BoxDecoration(

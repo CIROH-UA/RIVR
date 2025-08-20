@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
+import '../../../core/constants.dart'; // Import for centralized styling
 
 class CurrentFlowStatusCard extends StatefulWidget {
   final VoidCallback? onTap;
@@ -41,13 +42,13 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     super.dispose();
   }
 
-  // ✅ FIXED: Get current flow units from preference service
+  // Get current flow units from preference service
   String _getCurrentFlowUnit() {
     final unitService = FlowUnitPreferenceService();
     return unitService.currentFlowUnit; // Returns 'CFS' or 'CMS' directly
   }
 
-  // ✅ NEW: Calculate flow category using converted values (avoid stale cache)
+  // Calculate flow category using converted values (avoid stale cache)
   String _calculateFlowCategory(double? convertedFlow, dynamic reach) {
     if (convertedFlow == null || reach?.returnPeriods == null) {
       return 'Unknown';
@@ -59,7 +60,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     return reach.getFlowCategory(convertedFlow, currentUnit);
   }
 
-  // ✅ NEW: Convert raw flow value to user's preferred unit
+  // Convert raw flow value to user's preferred unit
   double? _convertFlowToCurrentUnit(double? rawFlow) {
     if (rawFlow == null) return null;
 
@@ -89,10 +90,10 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         final rawCurrentFlow = reachProvider.getCurrentFlow(); // Raw API value
         final reach = reachProvider.currentReach;
 
-        // ✅ FIXED: Convert current flow to user's preferred unit
+        // Convert current flow to user's preferred unit
         final convertedCurrentFlow = _convertFlowToCurrentUnit(rawCurrentFlow);
 
-        // ✅ FIXED: Calculate category using converted flow (don't use stale cache)
+        // Calculate category using converted flow (don't use stale cache)
         final category = _calculateFlowCategory(convertedCurrentFlow, reach);
 
         return GestureDetector(
@@ -126,11 +127,11 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                       children: [
                         _buildHeader(category),
                         const SizedBox(height: 16),
-                        // ✅ FIXED: Use converted flow value
+                        // Use converted flow value
                         _buildFlowValue(convertedCurrentFlow),
                         const SizedBox(height: 16),
 
-                        // NEW: Progressive flow indicator based on loading state
+                        // Progressive flow indicator based on loading state
                         _buildProgressiveFlowIndicator(
                           convertedCurrentFlow,
                           reach,
@@ -193,7 +194,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // ✅ UPDATED: Format flow value as integer with comma separators
+  // Format flow value as integer with comma separators
   Widget _buildFlowValue(double? flow) {
     if (flow == null) {
       return const Text(
@@ -209,14 +210,14 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     // Get current flow unit dynamically
     final currentUnit = _getCurrentFlowUnit();
 
-    // ✅ NEW: Format flow as integer with comma separators
+    // Format flow as integer with comma separators
     final formattedFlow = NumberFormat('#,###').format(flow.round());
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(
-          formattedFlow, // ✅ Now shows "43,210" instead of "43210.0078125"
+          formattedFlow, // Shows "43,210" instead of "43210.0078125"
           style: const TextStyle(
             color: CupertinoColors.white,
             fontSize: 32,
@@ -226,7 +227,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         Padding(
           padding: const EdgeInsets.only(bottom: 4, left: 4),
           child: Text(
-            currentUnit, // Dynamic unit
+            currentUnit,
             style: const TextStyle(
               color: CupertinoColors.white,
               fontSize: 16,
@@ -238,7 +239,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // NEW: Progressive flow indicator that handles loading states
+  // Progressive flow indicator that handles loading states
   Widget _buildProgressiveFlowIndicator(
     double? currentFlow,
     dynamic reach,
@@ -248,7 +249,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     if (reach?.returnPeriods != null &&
         reach!.returnPeriods!.isNotEmpty &&
         currentFlow != null) {
-      // ✅ FIXED: Use converted return periods for proper comparison
+      // Use converted return periods for proper comparison
       return _buildFlowIndicator(currentFlow, reach);
     }
 
@@ -257,16 +258,11 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
       return _buildFlowIndicatorLoading();
     }
 
-    // Show basic indicator without return periods if we only have overview data
-    if (currentFlow != null && reachProvider.loadingPhase == 'overview') {
-      return _buildBasicFlowIndicator();
-    }
-
     // No indicator if no flow data
     return const SizedBox.shrink();
   }
 
-  // NEW: Loading state for flow indicator
+  // Loading state for flow indicator
   Widget _buildFlowIndicatorLoading() {
     return Column(
       children: [
@@ -274,7 +270,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           height: 8,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
-            color: CupertinoColors.white.withOpacity(0.3),
+            color: CupertinoColors.white.withValues(alpha: 0.3),
           ),
           child: const Center(
             child: SizedBox(
@@ -291,7 +287,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         Text(
           'Loading flow categories...',
           style: TextStyle(
-            color: CupertinoColors.white.withOpacity(0.7),
+            color: CupertinoColors.white.withValues(alpha: 0.7),
             fontSize: 10,
           ),
         ),
@@ -299,36 +295,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // NEW: Basic flow indicator without return periods
-  Widget _buildBasicFlowIndicator() {
-    return Column(
-      children: [
-        Container(
-          height: 8,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
-            gradient: LinearGradient(
-              colors: [
-                const Color(0xFF4A90E2).withOpacity(0.7), // Enhanced blue
-                const Color(0xFFFFC107).withOpacity(0.7), // Enhanced yellow
-                const Color(0xFFFF9800).withOpacity(0.7), // Enhanced orange
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Flow categories loading...',
-          style: TextStyle(
-            color: CupertinoColors.white.withOpacity(0.7),
-            fontSize: 10,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ✅ UPDATED: Flow indicator with equal-width zones and accurate flow positioning
+  // Flow indicator with equal-width zones and accurate flow positioning
   Widget _buildFlowIndicator(
     double currentFlow, // Already converted to user's preferred unit
     dynamic reach,
@@ -383,8 +350,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
       }
     }
 
-    // ✅ CREATE: Equal-width zones (20% each) with smooth transitions
-
+    // Use centralized colors for flow categories
     List<double> stops = [
       0.0, // Start
       0.17, 0.24, // Normal to Action transition
@@ -417,7 +383,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           ),
           child: Stack(
             children: [
-              // ✅ ACCURATE: Flow marker positioned based on actual return period values
+              // Flow marker positioned based on actual return period values
               Positioned(
                 left: (flowPosition * MediaQuery.of(context).size.width * 0.8)
                     .clamp(0, MediaQuery.of(context).size.width * 0.8 - 4),
@@ -430,7 +396,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                     borderRadius: BorderRadius.circular(2),
                     boxShadow: [
                       BoxShadow(
-                        color: CupertinoColors.black.withOpacity(0.3),
+                        color: CupertinoColors.black.withValues(alpha: 0.3),
                         blurRadius: 2,
                       ),
                     ],
@@ -441,13 +407,12 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           ),
         ),
         const SizedBox(height: 4),
-        // ✅ MAINTAINED: Equal-width zone labels including Extreme
         _buildEqualWidthZoneLabels(),
       ],
     );
   }
 
-  // ✅ NEW: Build equal-width zone labels with Extreme included
+  // Build equal-width zone labels with Extreme included
   Widget _buildEqualWidthZoneLabels() {
     final screenWidth = MediaQuery.of(context).size.width * 0.8;
 
@@ -534,7 +499,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // IMPROVED: Use cached formatted location
+  // Use cached formatted location
   Widget _buildMetadata(dynamic reach, ReachDataProvider reachProvider) {
     if (reach == null) return const SizedBox.shrink();
 
@@ -542,19 +507,19 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
       children: [
         Icon(
           CupertinoIcons.location,
-          color: CupertinoColors.white.withOpacity(0.8),
+          color: CupertinoColors.white.withValues(alpha: 0.8),
           size: 16,
         ),
         const SizedBox(width: 6),
         Text(
           reach.displayName ?? reach.riverName,
           style: TextStyle(
-            color: CupertinoColors.white.withOpacity(0.9),
+            color: CupertinoColors.white.withValues(alpha: 0.9),
             fontSize: 14,
           ),
         ),
 
-        // NEW: Use cached formatted location (fixes subtitle issues)
+        //  Use cached formatted location (fixes subtitle issues)
         Builder(
           builder: (context) {
             final formattedLocation = reachProvider.getFormattedLocation();
@@ -565,7 +530,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                   Text(
                     '• $formattedLocation',
                     style: TextStyle(
-                      color: CupertinoColors.white.withOpacity(0.7),
+                      color: CupertinoColors.white.withValues(alpha: 0.7),
                       fontSize: 14,
                     ),
                   ),
@@ -587,7 +552,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         Container(
           width: double.infinity,
           height: 1,
-          color: CupertinoColors.white.withOpacity(0.3),
+          color: CupertinoColors.white.withValues(alpha: 0.3),
         ),
         const SizedBox(height: 16),
         CupertinoButton(
@@ -600,7 +565,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: CupertinoColors.white.withOpacity(0.15),
+              color: CupertinoColors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -640,7 +605,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // NEW: Progressive return period content
+  // Progressive return period content
   Widget _buildReturnPeriodContent(
     dynamic reach,
     ReachDataProvider reachProvider,
@@ -659,12 +624,12 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     return _buildReturnPeriodNotAvailable();
   }
 
-  // NEW: Loading state for return period table
+  // Loading state for return period table
   Widget _buildReturnPeriodLoading() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: CupertinoColors.white.withOpacity(0.1),
+        color: CupertinoColors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: const Center(
@@ -685,18 +650,18 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // NEW: Not available state for return periods
+  // Not available state for return periods
   Widget _buildReturnPeriodNotAvailable() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CupertinoColors.white.withOpacity(0.1),
+        color: CupertinoColors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         'Return period data is not available for this reach.',
         style: TextStyle(
-          color: CupertinoColors.white.withOpacity(0.8),
+          color: CupertinoColors.white.withValues(alpha: 0.8),
           fontSize: 14,
         ),
         textAlign: TextAlign.center,
@@ -704,7 +669,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // ✅ FIXED: Use converted return periods and dynamic header
+  // Use converted return periods and dynamic header
   Widget _buildReturnPeriodTable(dynamic reach) {
     final periods = [
       2,
@@ -718,7 +683,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     // Get current flow unit for table header
     final currentUnit = _getCurrentFlowUnit();
 
-    // ✅ FIXED: Get return periods converted to current unit
+    // Get return periods converted to current unit
     final convertedReturnPeriods = reach.getReturnPeriodsInUnit(currentUnit);
     if (convertedReturnPeriods == null) {
       return _buildReturnPeriodNotAvailable();
@@ -727,7 +692,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: CupertinoColors.white.withOpacity(0.1),
+        color: CupertinoColors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -746,7 +711,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
               ),
               Expanded(
                 child: Text(
-                  'Flow ($currentUnit)', // ✅ FIXED: Dynamic unit header
+                  'Flow ($currentUnit)',
                   style: const TextStyle(
                     color: CupertinoColors.white,
                     fontWeight: FontWeight.bold,
@@ -758,7 +723,6 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           ),
           const SizedBox(height: 8),
           ...periods.map((year) {
-            // ✅ FIXED: Use converted return periods
             final flow = convertedReturnPeriods[year]!;
 
             return Padding(
@@ -770,7 +734,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                     child: Text(
                       '$year-year',
                       style: TextStyle(
-                        color: CupertinoColors.white.withOpacity(0.9),
+                        color: CupertinoColors.white.withValues(alpha: 0.9),
                       ),
                     ),
                   ),
@@ -778,7 +742,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                     child: Text(
                       _formatFlow(flow),
                       style: TextStyle(
-                        color: CupertinoColors.white.withOpacity(0.9),
+                        color: CupertinoColors.white.withValues(alpha: 0.9),
                       ),
                       textAlign: TextAlign.right,
                     ),
@@ -800,7 +764,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         padding: const EdgeInsets.only(top: 8),
         child: Icon(
           CupertinoIcons.chevron_down,
-          color: CupertinoColors.white.withOpacity(0.6),
+          color: CupertinoColors.white.withValues(alpha: 00.6),
           size: 20,
         ),
       ),
@@ -884,44 +848,42 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // Use NOAA return period colors consistently
+  // Use centralized styling and support new categories
   List<Color> _getGradientColors(String category) {
+    final baseColor = AppConstants.getFlowCategoryColor(category);
+
     switch (category.toLowerCase()) {
       case 'normal':
-        // Cool blue gradient for normal flows
-        return [const Color(0xFF4A90E2), const Color(0x833579BD)];
-
-      case 'elevated':
-        // Enhanced yellow gradient (NOAA Action zone inspired)
-        return [const Color(0xFFFFC107), const Color(0x8AFFB300)];
-
-      case 'high':
-        // Enhanced orange gradient (NOAA Moderate zone inspired)
-        return [const Color(0xFFFF9800), const Color(0x81FF9100)];
-
-      case 'flood risk':
-        // Enhanced red gradient (NOAA Major zone inspired)
-        return [const Color(0xFFF44336), const Color(0x79E53835)];
-
+        return [baseColor, baseColor.withValues(alpha: 0.7)];
+      case 'action':
+        return [baseColor, baseColor.withValues(alpha: 0.8)];
+      case 'moderate':
+        return [baseColor, baseColor.withValues(alpha: 0.8)];
+      case 'major':
+        return [baseColor, baseColor.withValues(alpha: 0.7)];
+      case 'extreme':
+        return [baseColor, baseColor.withValues(alpha: 0.7)];
       default:
         // Use a neutral gray for unknown categories
         return [CupertinoColors.systemGrey, CupertinoColors.systemGrey2];
     }
   }
 
-  // ✅ NEW: Get badge background color with better contrast
+  // Support new categories with better contrast
   Color _getBadgeBackgroundColor(String category) {
     switch (category.toLowerCase()) {
       case 'normal':
-        return CupertinoColors.white.withOpacity(0.25);
-      case 'elevated':
-        return CupertinoColors.black.withOpacity(0.25);
-      case 'high':
-        return CupertinoColors.black.withOpacity(0.25);
-      case 'flood risk':
-        return CupertinoColors.black.withOpacity(0.25);
+        return CupertinoColors.white.withValues(alpha: 0.25);
+      case 'action':
+        return CupertinoColors.black.withValues(alpha: 0.25);
+      case 'moderate':
+        return CupertinoColors.black.withValues(alpha: 0.25);
+      case 'major':
+        return CupertinoColors.white.withValues(alpha: 0.25);
+      case 'extreme':
+        return CupertinoColors.white.withValues(alpha: 0.25);
       default:
-        return CupertinoColors.white.withOpacity(0.25);
+        return CupertinoColors.white.withValues(alpha: 0.25);
     }
   }
 

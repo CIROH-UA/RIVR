@@ -151,14 +151,19 @@ class AppConstants {
   /// Get flow category color for consistent styling
   static Color getFlowCategoryColor(String? flowCategory) {
     switch (flowCategory?.toLowerCase()) {
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'elevated':
-        return CupertinoColors.systemYellow;
+      case 'extreme':
+        return CupertinoColors
+            .systemPurple; // Matches returnPeriodExtremeBg theme
+      case 'major':
+        return CupertinoColors.systemRed; // Matches returnPeriodMajorBg theme
+      case 'moderate':
+        return CupertinoColors
+            .systemOrange; // Matches returnPeriodModerateBg theme
+      case 'action':
+        return CupertinoColors
+            .systemYellow; // Matches returnPeriodActionBg theme
       case 'normal':
-        return CupertinoColors.systemGreen;
+        return CupertinoColors.systemBlue; // Safe/normal condition
       default:
         return CupertinoColors.systemGrey;
     }
@@ -167,14 +172,16 @@ class AppConstants {
   /// Get flow category icon for consistent iconography
   static IconData getFlowCategoryIcon(String? flowCategory) {
     switch (flowCategory?.toLowerCase()) {
-      case 'flood risk':
-        return CupertinoIcons.exclamationmark_triangle_fill;
-      case 'high':
-        return CupertinoIcons.arrow_up_circle_fill;
-      case 'elevated':
-        return CupertinoIcons.arrow_up_circle;
+      case 'extreme':
+        return CupertinoIcons.xmark_octagon_fill; // Highest danger level
+      case 'major':
+        return CupertinoIcons.exclamationmark_triangle_fill; // High danger
+      case 'moderate':
+        return CupertinoIcons.exclamationmark_triangle; // Medium danger
+      case 'action':
+        return CupertinoIcons.info_circle_fill; // Action required
       case 'normal':
-        return CupertinoIcons.checkmark_circle_fill;
+        return CupertinoIcons.checkmark_circle_fill; // Safe condition
       default:
         return CupertinoIcons.question_circle;
     }

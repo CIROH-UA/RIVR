@@ -262,7 +262,7 @@ class ReachData {
     return DateTime.now().difference(cachedAt) > maxAge;
   }
 
-  /// NEW: Get return periods converted to specified unit
+  /// Get return periods converted to specified unit
   Map<int, double>? getReturnPeriodsInUnit(String targetUnit) {
     if (returnPeriods == null) return null;
 
@@ -273,7 +273,7 @@ class ReachData {
     );
   }
 
-  /// UPDATED: Get flood risk category based on NOAA return periods (unit-agnostic)
+  /// Get flood risk category based on NOAA return periods (unit-agnostic)
   String getFlowCategory(double flowValue, String flowUnit) {
     if (!hasReturnPeriods) return 'Unknown';
 
@@ -368,7 +368,7 @@ class ForecastSeries {
 
   ForecastSeries({this.referenceTime, required this.units, required this.data});
 
-  /// NEW: Factory constructor for unit conversion
+  /// Factory constructor for unit conversion
   factory ForecastSeries.withPreferredUnits({
     required String originalUnits,
     required String preferredUnits,
