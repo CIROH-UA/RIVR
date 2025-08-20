@@ -341,9 +341,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
         children: [
           // App title with theme-aware color
           Text(
-            'RivrFlow',
+            ' RIVR',
             style: TextStyle(
-              fontSize: 32,
+              fontSize: 45,
               fontWeight: FontWeight.bold,
               color: CupertinoTheme.of(context).textTheme.textStyle.color,
             ),
