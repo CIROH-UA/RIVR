@@ -193,6 +193,15 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
           onPressed: _handleRefresh,
           child: Consumer<ReachDataProvider>(
             builder: (context, reachProvider, child) {
+              // Extra safety check - don't show data if IDs don't match
+              if (reachProvider.currentReach?.reachId != widget.reachId &&
+                  reachProvider.currentReach != null) {
+                // Force another clear if we somehow have mismatched data
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  reachProvider.clearCurrentReach();
+                });
+                return _buildInitialLoadingState();
+              }
               // Show loading indicator when any loading is happening
               final isAnyLoading =
                   reachProvider.isLoading ||
