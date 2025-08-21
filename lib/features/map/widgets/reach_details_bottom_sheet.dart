@@ -631,7 +631,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     }
   }
 
-  // OPTIMIZED: Load return periods only if needed
+  // Load return periods only if needed
   Future<void> _loadReturnPeriodsIfNeeded(String reachId) async {
     try {
       // Check if we already have cached return periods
@@ -688,7 +688,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     }
   }
 
-  // OPTIMIZED: Fast favorite toggle using cached coordinates
+  // Fast favorite toggle using cached coordinates
   Future<void> _toggleFavoriteOptimized(
     FavoritesProvider favoritesProvider,
   ) async {
@@ -864,8 +864,8 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   String _buildReachInfoText() {
     final buffer = StringBuffer();
 
-    buffer.writeln('🏞️ ${_riverName ?? widget.selectedReach.displayName}');
-    buffer.writeln('📍 Reach ID: ${widget.selectedReach.reachId}');
+    buffer.writeln(_riverName ?? widget.selectedReach.displayName);
+    buffer.writeln('Reach ID: ${widget.selectedReach.reachId}');
     buffer.writeln('🌊 Stream Order: ${widget.selectedReach.streamOrder}');
     buffer.writeln('📍 Coordinates: ${widget.selectedReach.coordinatesString}');
 
@@ -878,7 +878,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     if (_currentFlow != null) {
       buffer.writeln('\n💧 Current Flow: ${_formatFlow(_currentFlow!)}');
       if (_flowCategory != null) {
-        buffer.writeln('⚠️ Risk Level: $_flowCategory');
+        buffer.writeln('Risk Level: $_flowCategory');
       }
     }
 
