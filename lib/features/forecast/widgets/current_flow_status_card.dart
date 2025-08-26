@@ -49,28 +49,20 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     return unitService.currentFlowUnit; // Returns 'CFS' or 'CMS' directly
   }
 
-  // Calculate flow category using converted values (avoid stale cache)
-  String _calculateFlowCategory(double? convertedFlow, dynamic reach) {
-    if (convertedFlow == null || reach?.returnPeriods == null) {
+  // Calculate flow category using already-converted values
+  String _calculateFlowCategory(double? currentFlow, dynamic reach) {
+    if (currentFlow == null || reach?.returnPeriods == null) {
       return 'Unknown';
     }
 
     final currentUnit = _getCurrentFlowUnit();
 
-    // Use the ReachData method with proper unit-aware calculation
-    return reach.getFlowCategory(convertedFlow, currentUnit);
+    // FIXED: No double conversion - flow is already in preferred unit from API service
+    return reach.getFlowCategory(currentFlow, currentUnit);
   }
 
-  // Convert raw flow value to user's preferred unit
-  double? _convertFlowToCurrentUnit(double? rawFlow) {
-    if (rawFlow == null) return null;
-
-    final unitService = FlowUnitPreferenceService();
-    final currentUnit = unitService.currentFlowUnit;
-
-    // Convert from API unit (assume CFS) to user's preferred unit
-    return unitService.convertFlow(rawFlow, 'CFS', currentUnit);
-  }
+  // REMOVED: _convertFlowToCurrentUnit method - no longer needed!
+  // The NoaaApiService already converts all forecast data to preferred units
 
   @override
   Widget build(BuildContext context) {
@@ -87,15 +79,13 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           return _buildEmptyCard();
         }
 
-        // Get raw values from provider
-        final rawCurrentFlow = reachProvider.getCurrentFlow(); // Raw API value
+        // FIXED: Get flow data that's already converted by NoaaApiService
+        final currentFlow = reachProvider
+            .getCurrentFlow(); // Already in preferred unit!
         final reach = reachProvider.currentReach;
 
-        // Convert current flow to user's preferred unit
-        final convertedCurrentFlow = _convertFlowToCurrentUnit(rawCurrentFlow);
-
-        // Calculate category using converted flow (don't use stale cache)
-        final category = _calculateFlowCategory(convertedCurrentFlow, reach);
+        // FIXED: No double conversion - use flow data directly
+        final category = _calculateFlowCategory(currentFlow, reach);
 
         // Update pulse animation based on flow category
         _pulseAnimator.updateCategory(category);
@@ -131,28 +121,22 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                       children: [
                         _buildHeader(category),
                         const SizedBox(height: 16),
-                        // Use converted flow value
-                        _buildFlowValue(convertedCurrentFlow),
+                        // FIXED: Use flow value directly (already converted)
+                        _buildFlowValue(currentFlow),
                         const SizedBox(height: 16),
 
                         // Progressive flow indicator based on loading state
                         _buildProgressiveFlowIndicator(
-                          convertedCurrentFlow,
+                          currentFlow,
                           reach,
                           reachProvider,
                         ),
 
                         const SizedBox(height: 12),
-                        _buildMetadata(
-                          reach,
-                          reachProvider,
-                        ), // Pass provider for cached location
+                        _buildMetadata(reach, reachProvider),
                         if (widget.expanded) ...[
                           const SizedBox(height: 16),
-                          _buildExpandedContent(
-                            reach,
-                            reachProvider,
-                          ), // Pass provider
+                          _buildExpandedContent(reach, reachProvider),
                         ] else
                           _buildExpandHint(),
                       ],
@@ -198,7 +182,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // Format flow value as integer with comma separators
+  // FIXED: Format flow value that's already converted
   Widget _buildFlowValue(double? flow) {
     if (flow == null) {
       return const Text(
@@ -253,7 +237,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     if (reach?.returnPeriods != null &&
         reach!.returnPeriods!.isNotEmpty &&
         currentFlow != null) {
-      // Use converted return periods for proper comparison
+      // FIXED: Use flow data directly (no conversion needed)
       return _buildFlowIndicator(currentFlow, reach);
     }
 
@@ -299,9 +283,9 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     );
   }
 
-  // Flow indicator with equal-width zones and accurate flow positioning
+  // FIXED: Flow indicator with flow data already in correct unit
   Widget _buildFlowIndicator(
-    double currentFlow, // Already converted to user's preferred unit
+    double currentFlow, // Already in user's preferred unit from API service
     dynamic reach,
   ) {
     final currentUnit = _getCurrentFlowUnit();

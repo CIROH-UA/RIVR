@@ -53,14 +53,8 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     return currentUnit == 'CMS' ? 'CMS' : 'CFS';
   }
 
-  // Convert flow value to current unit preference
-  double _convertFlowToCurrentUnit(double flowValue) {
-    final unitService = FlowUnitPreferenceService();
-    final currentUnit = unitService.currentFlowUnit;
-
-    // Assume stored data is in CFS (API default) and convert if needed
-    return unitService.convertFlow(flowValue, 'CFS', currentUnit);
-  }
+  // REMOVED: _convertFlowToCurrentUnit() - no longer needed!
+  // The NoaaApiService already converts all forecast data to preferred units
 
   // Check for unit changes and rebuild if necessary
   @override
@@ -197,15 +191,13 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     );
   }
 
-  // Fix for horizontal_flow_timeline.dart
-  // Replace the _buildHourCard method with this version
-
+  // FIXED: Use flow data directly (already converted by API service)
   Widget _buildHourCard(
     BuildContext context,
     HourlyFlowDataPoint dataPoint,
     ReachDataProvider reachProvider,
   ) {
-    // Flow is already converted in _extractShortRangeData, no need to convert again
+    // Flow is already converted by NoaaApiService, no need to convert again
     final flowCategory = _getFlowCategory(dataPoint.flow, reachProvider);
     final categoryColor = _getCategoryColor(flowCategory);
     final isCurrentHour = _isCurrentOrNearCurrentHour(dataPoint.validTime);
@@ -264,13 +256,13 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
 
             const SizedBox(height: 8),
 
-            // Flow value with proper dark mode support
+            // FIXED: Flow value (already converted)
             Text(
               _formatFlow(dataPoint.flow),
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: CupertinoColors.label.resolveFrom(context), //
+                color: CupertinoColors.label.resolveFrom(context),
               ),
             ),
 
@@ -279,7 +271,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
               currentUnit,
               style: TextStyle(
                 fontSize: 11,
-                color: CupertinoColors.secondaryLabel.resolveFrom(context), //
+                color: CupertinoColors.secondaryLabel.resolveFrom(context),
               ),
             ),
 
@@ -337,13 +329,13 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     List<HourlyFlowDataPoint> data,
     ReachDataProvider reachProvider,
   ) {
-    // Data is already converted in _extractShortRangeData, use as-is
+    // FIXED: Data is already converted by API service, use as-is
     return Container(
       height: widget.height,
       padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 16),
       child: CustomPaint(
         painter: FlowWavePainter(
-          data: data, // ✅ Use data as-is (already converted)
+          data: data, // Use data as-is (already converted by API service)
           reachProvider: reachProvider,
           context: context,
         ),
@@ -352,18 +344,17 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     );
   }
 
-  // Data extraction method with unit conversion (converts once here)
+  // FIXED: Data extraction method without conversion (data already converted by API service)
   List<HourlyFlowDataPoint> _extractShortRangeData(
     ReachDataProvider reachProvider,
   ) {
-    final rawData = reachProvider.getShortRangeHourlyData();
+    final data = reachProvider.getShortRangeHourlyData();
 
-    // Convert all flow values to current unit preference ONCE here
-    return rawData.map((point) {
-      final convertedFlow = _convertFlowToCurrentUnit(point.flow);
+    // FIXED: No conversion needed - data is already in user's preferred unit from API service
+    return data.map((point) {
       return HourlyFlowDataPoint(
         validTime: point.validTime,
-        flow: convertedFlow, // ✅ Converted flow value - used throughout
+        flow: point.flow, // Already in correct unit from NoaaApiService
         trend: point.trend,
         trendPercentage: point.trendPercentage,
         confidence: point.confidence,
@@ -372,9 +363,9 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     }).toList();
   }
 
-  // Flow category calculation (flow is already converted)
+  // FIXED: Flow category calculation (flow is already converted)
   String _getFlowCategory(
-    double convertedFlow,
+    double flow, // Already in user's preferred unit
     ReachDataProvider reachProvider,
   ) {
     if (!reachProvider.hasData) return 'Unknown';
@@ -384,7 +375,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
 
     final currentUnit = _getCurrentFlowUnit();
 
-    // Get return periods in the same unit as the converted flow
+    // Get return periods in the same unit as the flow
     final convertedReturnPeriods = reach.getReturnPeriodsInUnit(currentUnit);
     if (convertedReturnPeriods == null || convertedReturnPeriods.isEmpty) {
       return 'Unknown';
@@ -394,7 +385,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
       ..sort((a, b) => a.key.compareTo(b.key));
 
     for (final period in periods) {
-      if (convertedFlow < period.value) {
+      if (flow < period.value) {
         if (period.key == 2) return 'Normal';
         if (period.key <= 5) return 'Elevated';
         return 'High';
@@ -592,7 +583,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
   }
 }
 
-// Custom painter for flow wave visualization (receives already converted data)
+// FIXED: Custom painter for flow wave visualization (receives already converted data)
 class FlowWavePainter extends CustomPainter {
   final List<HourlyFlowDataPoint> data;
   final ReachDataProvider reachProvider;
@@ -618,7 +609,7 @@ class FlowWavePainter extends CustomPainter {
       ..color = CupertinoColors.systemBlue.resolveFrom(context).withOpacity(0.1)
       ..style = PaintingStyle.fill;
 
-    // Calculate scaling - data is already converted to current units in _extractShortRangeData
+    // FIXED: Calculate scaling - data is already in correct units from API service
     final minFlow = data.map((d) => d.flow).reduce(math.min);
     final maxFlow = data.map((d) => d.flow).reduce(math.max);
     final flowRange = maxFlow - minFlow;
@@ -701,7 +692,7 @@ class FlowWavePainter extends CustomPainter {
 class HourlyFlowDataPoint {
   final DateTime validTime;
   final double
-  flow; // CONVERTED to user's preferred unit (CFS or CMS) in _extractShortRangeData
+  flow; // ALREADY CONVERTED to user's preferred unit by NoaaApiService
   final FlowTrend? trend;
   final double? trendPercentage; // Percentage change from previous hour
   final double? confidence;

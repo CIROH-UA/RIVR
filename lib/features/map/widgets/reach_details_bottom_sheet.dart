@@ -64,47 +64,32 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     return currentUnit; // Returns 'CFS' or 'CMS' directly
   }
 
-  // Convert raw flow value to user's preferred unit (same as current_flow_status_card.dart)
-  double? _convertFlowToCurrentUnit(double? rawFlow) {
-    if (rawFlow == null) return null;
-
-    final unitService = FlowUnitPreferenceService();
-    final currentUnit = unitService.currentFlowUnit;
-
-    // Convert from API unit (CFS) to user's preferred unit
-    return unitService.convertFlow(rawFlow, 'CFS', currentUnit);
-  }
-
-  // Calculate flow category using converted values (same as current_flow_status_card.dart)
-  String _calculateFlowCategory(double? convertedFlow, dynamic reach) {
-    if (convertedFlow == null || reach?.returnPeriods == null) {
+  // Calculate flow category using already-converted values
+  String _calculateFlowCategory(double? currentFlow, dynamic reach) {
+    if (currentFlow == null || reach?.returnPeriods == null) {
       return 'Unknown';
     }
 
     final currentUnit = _getCurrentFlowUnit();
 
-    // Use the ReachData method with proper unit-aware calculation
-    return reach.getFlowCategory(convertedFlow, currentUnit);
+    // No conversion needed - flow is already in user's preferred unit from API service
+    return reach.getFlowCategory(currentFlow, currentUnit);
   }
 
-  // Flow formatting with unit conversion
-  String _formatFlow(double flowCfs) {
-    // Convert to user's preferred unit
-    final convertedFlow = _convertFlowToCurrentUnit(flowCfs);
-    if (convertedFlow == null) return '${flowCfs.toStringAsFixed(0)} CFS';
-
+  String _formatFlow(double flow) {
+    // FIXED: Use flow directly (already in user's preferred unit from API service)
     final currentUnit = _getCurrentFlowUnit();
 
-    // Format the converted value
+    // Format the value (no conversion needed)
     String formattedValue;
-    if (convertedFlow >= 1000000) {
-      formattedValue = '${(convertedFlow / 1000000).toStringAsFixed(1)}M';
-    } else if (convertedFlow >= 1000) {
-      formattedValue = '${(convertedFlow / 1000).toStringAsFixed(1)}K';
-    } else if (convertedFlow >= 100) {
-      formattedValue = convertedFlow.toStringAsFixed(0);
+    if (flow >= 1000000) {
+      formattedValue = '${(flow / 1000000).toStringAsFixed(1)}M';
+    } else if (flow >= 1000) {
+      formattedValue = '${(flow / 1000).toStringAsFixed(1)}K';
+    } else if (flow >= 100) {
+      formattedValue = flow.toStringAsFixed(0);
     } else {
-      formattedValue = convertedFlow.toStringAsFixed(1);
+      formattedValue = flow.toStringAsFixed(1);
     }
 
     return '$formattedValue $currentUnit';
@@ -563,7 +548,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     );
   }
 
-  // OPTIMIZED: Progressive loading strategy
+  // FIXED: Progressive loading with corrected flow classification
   Future<void> _loadDataProgressively() async {
     setState(() {
       _isLoadingFlow = true;
@@ -592,16 +577,17 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       setState(() {
         _riverName = forecast.reach.riverName;
         _formattedLocation = forecast.reach.formattedLocation;
-        _currentFlow = _forecastService.getCurrentFlow(forecast);
+        _currentFlow = _forecastService.getCurrentFlow(
+          forecast,
+        ); // Already converted!
         _latitude = forecast.reach.latitude;
         _longitude = forecast.reach.longitude;
         _isLoadingFlow = false;
 
         // Check if we already have return periods (cached)
         if (forecast.reach.hasReturnPeriods && _currentFlow != null) {
-          // Use same approach as current_flow_status_card.dart
-          final convertedFlow = _convertFlowToCurrentUnit(_currentFlow!);
-          _flowCategory = _calculateFlowCategory(convertedFlow, forecast.reach);
+          // FIXED: Use flow directly (already converted by API service)
+          _flowCategory = _calculateFlowCategory(_currentFlow!, forecast.reach);
         } else if (_currentFlow != null) {
           // We have flow but not return periods yet
           _isLoadingClassification = true;
@@ -631,7 +617,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     }
   }
 
-  // Load return periods only if needed
+  // FIXED: Load return periods with corrected flow classification
   Future<void> _loadReturnPeriodsIfNeeded(String reachId) async {
     try {
       // Check if we already have cached return periods
@@ -655,10 +641,9 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
 
       // Update flow classification if we now have return periods
       if (enhancedForecast.reach.hasReturnPeriods && _currentFlow != null) {
-        // Use same approach as current_flow_status_card.dart
-        final convertedFlow = _convertFlowToCurrentUnit(_currentFlow!);
+        // FIXED: Use flow directly (already converted by API service)
         final flowCategory = _calculateFlowCategory(
-          convertedFlow,
+          _currentFlow!,
           enhancedForecast.reach,
         );
 

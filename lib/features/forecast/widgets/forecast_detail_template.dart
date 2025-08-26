@@ -497,6 +497,7 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
     );
   }
 
+  // Calculate peak flow using already-converted data
   double? _calculatePeakFlow(dynamic forecast) {
     try {
       // Get forecast data based on type
@@ -514,17 +515,15 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
 
       if (maxFlow <= -9000) return null;
 
-      // ✅ FIXED: Convert from API units (CFS) to user preference
-      final unitService = FlowUnitPreferenceService();
-      final currentUnit = unitService.currentFlowUnit;
-
-      return unitService.convertFlow(maxFlow, 'CFS', currentUnit);
+      // FIXED: No conversion needed - data is already in user's preferred unit from API service
+      return maxFlow;
     } catch (e) {
       print('Error calculating peak flow: $e');
       return null;
     }
   }
 
+  // FIXED: Calculate trend using already-converted data
   String _calculateCurrentTrend(dynamic forecast) {
     try {
       final unitService = FlowUnitPreferenceService();
@@ -534,22 +533,10 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       if (widget.forecastType == 'short_range') {
         final hourlyData = _forecastService.getShortRangeHourlyData(forecast);
         if (hourlyData.length >= 3) {
-          // Convert flow values to user preference for comparison
-          final current = unitService.convertFlow(
-            hourlyData[0].flow,
-            'CFS',
-            currentUnit,
-          );
-          final future1 = unitService.convertFlow(
-            hourlyData[1].flow,
-            'CFS',
-            currentUnit,
-          );
-          final future2 = unitService.convertFlow(
-            hourlyData[2].flow,
-            'CFS',
-            currentUnit,
-          );
+          // Use flow values directly (already in user's preferred unit from API service)
+          final current = hourlyData[0].flow;
+          final future1 = hourlyData[1].flow;
+          final future2 = hourlyData[2].flow;
 
           final avgFuture = (future1 + future2) / 2;
           final change = avgFuture - current;
@@ -566,17 +553,9 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       // For other forecast types, use first few data points
       final forecastSeries = forecast.getPrimaryForecast(widget.forecastType);
       if (forecastSeries != null && forecastSeries.data.length >= 3) {
-        // Convert values for comparison
-        final first = unitService.convertFlow(
-          forecastSeries.data[0].flow,
-          'CFS',
-          currentUnit,
-        );
-        final third = unitService.convertFlow(
-          forecastSeries.data[2].flow,
-          'CFS',
-          currentUnit,
-        );
+        // Use values directly (already in user's preferred unit from API service)
+        final first = forecastSeries.data[0].flow;
+        final third = forecastSeries.data[2].flow;
         final change = third - first;
 
         // Use dynamic thresholds based on unit
