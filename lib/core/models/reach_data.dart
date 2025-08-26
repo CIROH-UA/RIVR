@@ -277,9 +277,15 @@ class ReachData {
   String getFlowCategory(double flowValue, String flowUnit) {
     if (!hasReturnPeriods) return 'Unknown';
 
+    // 🐛 DEBUG: Add this logging
+    print('🐛 getFlowCategory: flowValue=$flowValue, flowUnit=$flowUnit');
+
     // Get return periods in the same unit as the flow value
     final periods = getReturnPeriodsInUnit(flowUnit);
     if (periods == null) return 'Unknown';
+
+    // 🐛 DEBUG: Add this logging
+    print('🐛 Return periods in $flowUnit: $periods');
 
     // Get threshold values for each return period
     final threshold2yr = periods[2];
@@ -289,21 +295,26 @@ class ReachData {
 
     // Classify flow based on NOAA flood risk categories
     if (threshold2yr != null && flowValue < threshold2yr) {
+      print('🐛 Classification: Normal (flow < 2yr threshold)');
       return 'Normal'; // Below 2-year return period
     }
 
     if (threshold5yr != null && flowValue < threshold5yr) {
+      print('🐛 Classification: Action (flow < 5yr threshold)');
       return 'Action'; // Above 2-year, below 5-year return period
     }
 
     if (threshold10yr != null && flowValue < threshold10yr) {
+      print('🐛 Classification: Moderate (flow < 10yr threshold)');
       return 'Moderate'; // Above 5-year, below 10-year return period
     }
 
     if (threshold25yr != null && flowValue < threshold25yr) {
+      print('🐛 Classification: Major (flow < 25yr threshold)');
       return 'Major'; // Above 10-year, below 25-year return period
     }
 
+    print('🐛 Classification: Extreme (flow > all thresholds)');
     return 'Extreme'; // Above 25-year return period
   }
 

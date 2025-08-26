@@ -534,15 +534,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
         await UserSettingsService().updateFlowUnit(userId, flowUnit);
         FlowUnitPreferenceService().setFlowUnit(value);
 
-        // Clear unit-dependent caches
-        // This forces the Current Flow Status Card to recalculate with new units
+        // Clear unit-dependent caches to refresh display values
         final reachProvider = context.read<ReachDataProvider>();
         reachProvider.clearUnitDependentCaches();
 
-        // Force UI rebuild
+        // Force UI rebuild to show new units
         if (mounted) {
           setState(() {
-            // This triggers rebuild of favorites page river cards
+            // This triggers rebuild with new unit display values
           });
         }
       } else {

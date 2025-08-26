@@ -12,8 +12,8 @@ class FlowUnitPreferenceService {
   String _currentFlowUnit = 'CFS'; // Default to CFS
 
   // Conversion constants
-  static const double _cmsToCs = 35.3147; // 1 CMS = 35.3147 CFS
-  static const double _cfsToCs = 1.0 / _cmsToCs; // 1 CFS = 0.0283168 CMS
+  static const double _cmsToFs = 35.3147; // 1 CMS = 35.3147 CFS
+  static const double _cfsToCms = 1.0 / _cmsToFs; // 1 CFS = 0.0283168 CMS
 
   /// Get the current flow unit preference
   String get currentFlowUnit => _currentFlowUnit;
@@ -29,19 +29,37 @@ class FlowUnitPreferenceService {
     }
   }
 
+  /// Normalize unit names to handle different representations
+  String _normalizeUnit(String unit) {
+    switch (unit.toLowerCase()) {
+      case 'ft³/s':
+      case 'cfs':
+        return 'CFS';
+      case 'm³/s':
+      case 'cms':
+        return 'CMS';
+      default:
+        return unit.toUpperCase();
+    }
+  }
+
   /// Convert flow value between units
   double convertFlow(double value, String fromUnit, String toUnit) {
+    // Normalize unit names first
+    final normalizedFromUnit = _normalizeUnit(fromUnit);
+    final normalizedToUnit = _normalizeUnit(toUnit);
+
     // No conversion needed if units are the same
-    if (fromUnit == toUnit) return value;
+    if (normalizedFromUnit == normalizedToUnit) return value;
 
     // Convert CMS to CFS
-    if (fromUnit == 'CMS' && toUnit == 'CFS') {
-      return value * _cmsToCs;
+    if (normalizedFromUnit == 'CMS' && normalizedToUnit == 'CFS') {
+      return value * _cmsToFs;
     }
 
     // Convert CFS to CMS
-    if (fromUnit == 'CFS' && toUnit == 'CMS') {
-      return value * _cfsToCs;
+    if (normalizedFromUnit == 'CFS' && normalizedToUnit == 'CMS') {
+      return value * _cfsToCms;
     }
 
     // Fallback - return original value if unknown units

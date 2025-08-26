@@ -131,8 +131,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   String _getFloodRiskCategory() {
-    final currentFlow = widget.favorite.lastKnownFlow;
-    if (currentFlow == null) {
+    final rawFlow = widget.favorite.lastKnownFlow;
+    if (rawFlow == null) {
       print(
         'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no flow)',
       );
@@ -155,6 +155,13 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     // Get user's preferred flow unit
     final flowUnitService = FlowUnitPreferenceService();
     final currentUnit = flowUnitService.currentFlowUnit;
+
+    // Convert the flow value to current unit before comparison
+    final currentFlow = flowUnitService.convertFlow(
+      rawFlow,
+      'CFS', // lastKnownFlow is stored in CFS
+      currentUnit, // Convert to current unit
+    );
 
     // Convert return periods to current unit (they're stored in CMS)
     final convertedReturnPeriods = <int, double>{};
