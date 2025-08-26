@@ -519,21 +519,33 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
                   ),
                 ),
 
-              // Custom image indicator
+              // Delete button for custom images (top-right)
               if (isCustomImage && !isSelected)
                 Positioned(
                   top: 8,
                   right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: CupertinoColors.systemBackground.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.camera_fill,
-                      size: 14,
-                      color: CupertinoColors.activeBlue,
+                  child: GestureDetector(
+                    onTap: () => _showDeleteConfirmation(imagePath),
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemBackground.withOpacity(
+                          0.9,
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: CupertinoColors.black.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        CupertinoIcons.trash_fill,
+                        size: 16,
+                        color: CupertinoColors.systemRed,
+                      ),
                     ),
                   ),
                 ),
@@ -551,8 +563,8 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          CupertinoColors.black.withOpacity(0.0),
-                          CupertinoColors.black.withOpacity(0.3),
+                          CupertinoColors.black.withValues(alpha: 0.0),
+                          CupertinoColors.black.withValues(alpha: 0.3),
                         ],
                       ),
                       borderRadius: const BorderRadius.only(
@@ -567,6 +579,68 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
         ),
       ),
     );
+  }
+
+  void _showDeleteConfirmation(String imagePath) {
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('Delete Image'),
+        content: const Text(
+          'Are you sure you want to delete your image? This action cannot be undone.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteCustomImage(imagePath);
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteCustomImage(String imagePath) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.currentUser == null) return;
+
+    try {
+      // Delete from file system
+      final success = await _backgroundService.deleteCustomBackground(
+        imagePath,
+      );
+
+      if (success) {
+        // Remove from user settings
+        await _settingsService.removeCustomBackgroundImage(
+          authProvider.currentUser!.uid,
+          imagePath,
+        );
+
+        // Refresh the custom images list
+        await _loadCustomImages();
+
+        // If the deleted image was selected, clear selection
+        if (_selectedImagePath == imagePath) {
+          setState(() {
+            _selectedImagePath = null;
+          });
+        }
+
+        HapticFeedback.lightImpact();
+      } else {
+        _showErrorMessage('Failed to delete image. Please try again.');
+      }
+    } catch (e) {
+      _showErrorMessage('Error deleting image: ${e.toString()}');
+    }
   }
 
   Widget _buildImageError() {
@@ -745,7 +819,7 @@ class ImageCategory {
       case 'Desert Rivers':
         return 'Desert';
       case 'Big Water':
-        return 'Water';
+        return 'Large';
       default:
         return name;
     }

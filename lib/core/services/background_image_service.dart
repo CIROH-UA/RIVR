@@ -392,7 +392,8 @@ class BackgroundImageService {
       final status = await Permission.photos.status;
       print('PHOTO PERMISSION STATUS: $status');
 
-      if (status.isGranted) {
+      // Both granted and limited are valid for photo selection
+      if (status.isGranted || status.isLimited) {
         return PermissionResult.success();
       }
 
@@ -401,7 +402,8 @@ class BackgroundImageService {
         final result = await Permission.photos.request();
         print('PHOTO PERMISSION RESULT: $result');
 
-        if (result.isGranted) {
+        // Accept both granted and limited permission results
+        if (result.isGranted || result.isLimited) {
           return PermissionResult.success();
         } else if (result.isPermanentlyDenied) {
           return PermissionResult.needsSettings(
