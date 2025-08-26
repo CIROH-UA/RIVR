@@ -43,6 +43,8 @@
 	<string>This app saves exported forecast charts to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs access to photo library to save exported charts.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to take photos for custom backgrounds.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

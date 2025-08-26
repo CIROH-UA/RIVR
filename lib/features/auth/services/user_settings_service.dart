@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/models/user_settings.dart';
 import '../../../core/services/error_service.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
+import '../../../core/services/background_image_service.dart'; // NEW: For file management
 
 /// Simple service for managing UserSettings with Firestore
 class UserSettingsService {
@@ -14,6 +15,8 @@ class UserSettingsService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FlowUnitPreferenceService _flowUnitService =
       FlowUnitPreferenceService();
+  final BackgroundImageService _backgroundImageService =
+      BackgroundImageService(); // NEW: Background service instance
 
   // Simple in-memory cache
   UserSettings? _cachedSettings;
@@ -135,6 +138,148 @@ class UserSettingsService {
     }
   }
 
+  // NEW: Custom Background Management Methods
+
+  /// Add custom background image to user's collection
+  Future<UserSettings?> addCustomBackgroundImage(
+    String userId,
+    String imagePath,
+  ) async {
+    try {
+      print(
+        'USER_SETTINGS_SERVICE: Adding custom background for user: $userId',
+      );
+
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+
+      // Add to user's collection
+      final updatedSettings = settings.addCustomBackground(imagePath);
+      await saveUserSettings(updatedSettings);
+
+      print('USER_SETTINGS_SERVICE: Custom background added successfully');
+      return updatedSettings;
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error adding custom background: $e');
+      throw Exception('Failed to add custom background: ${e.toString()}');
+    }
+  }
+
+  /// Remove custom background image from user's collection
+  Future<UserSettings?> removeCustomBackgroundImage(
+    String userId,
+    String imagePath,
+  ) async {
+    try {
+      print(
+        'USER_SETTINGS_SERVICE: Removing custom background for user: $userId',
+      );
+
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+
+      // Remove from user's collection
+      final updatedSettings = settings.removeCustomBackground(imagePath);
+      await saveUserSettings(updatedSettings);
+
+      // Delete the actual image file
+      await _backgroundImageService.deleteCustomBackground(imagePath);
+
+      print('USER_SETTINGS_SERVICE: Custom background removed successfully');
+      return updatedSettings;
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error removing custom background: $e');
+      throw Exception('Failed to remove custom background: ${e.toString()}');
+    }
+  }
+
+  /// Get user's custom background images
+  Future<List<String>> getUserCustomBackgrounds(String userId) async {
+    try {
+      final settings = await getUserSettings(userId);
+      return settings?.customBackgroundImagePaths ?? [];
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error getting custom backgrounds: $e');
+      return [];
+    }
+  }
+
+  /// Validate custom background images and remove broken references
+  Future<UserSettings?> validateCustomBackgrounds(String userId) async {
+    try {
+      print(
+        'USER_SETTINGS_SERVICE: Validating custom backgrounds for user: $userId',
+      );
+
+      final settings = await getUserSettings(userId);
+      if (settings == null || !settings.hasCustomBackgrounds) {
+        return settings;
+      }
+
+      final validPaths = <String>[];
+
+      // Check each custom background image
+      for (final imagePath in settings.customBackgroundImagePaths) {
+        final exists = await _backgroundImageService.imageExists(imagePath);
+        if (exists) {
+          validPaths.add(imagePath);
+        } else {
+          print(
+            'USER_SETTINGS_SERVICE: Removing invalid background: $imagePath',
+          );
+        }
+      }
+
+      // Update settings if any paths were removed
+      if (validPaths.length != settings.customBackgroundImagePaths.length) {
+        final updatedSettings = settings.copyWith(
+          customBackgroundImagePaths: validPaths,
+        );
+        await saveUserSettings(updatedSettings);
+
+        print(
+          'USER_SETTINGS_SERVICE: Cleaned up ${settings.customBackgroundImagePaths.length - validPaths.length} invalid backgrounds',
+        );
+        return updatedSettings;
+      }
+
+      print('USER_SETTINGS_SERVICE: All custom backgrounds are valid');
+      return settings;
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error validating custom backgrounds: $e');
+      return null;
+    }
+  }
+
+  /// Clear all custom background images for user
+  Future<UserSettings?> clearAllCustomBackgrounds(String userId) async {
+    try {
+      print(
+        'USER_SETTINGS_SERVICE: Clearing all custom backgrounds for user: $userId',
+      );
+
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+
+      // Delete all image files
+      for (final imagePath in settings.customBackgroundImagePaths) {
+        await _backgroundImageService.deleteCustomBackground(imagePath);
+      }
+
+      // Update settings
+      final updatedSettings = settings.clearAllCustomBackgrounds();
+      await saveUserSettings(updatedSettings);
+
+      print('USER_SETTINGS_SERVICE: All custom backgrounds cleared');
+      return updatedSettings;
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error clearing custom backgrounds: $e');
+      throw Exception('Failed to clear custom backgrounds: ${e.toString()}');
+    }
+  }
+
+  // END: Custom Background Management Methods
+
   /// Create default settings for a new user
   Future<UserSettings> createDefaultSettings({
     required String userId,
@@ -158,6 +303,7 @@ class UserSettingsService {
         enableNotifications: true,
         enableDarkMode: false,
         favoriteReachIds: [],
+        customBackgroundImagePaths: [], // NEW: Initialize empty list
         lastLoginDate: now,
         createdAt: now,
         updatedAt: now,
@@ -187,11 +333,18 @@ class UserSettingsService {
         return null;
       }
 
+      // Validate custom backgrounds (remove if files missing)
+      final validatedSettings = await validateCustomBackgrounds(userId);
+
       // Sync flow unit preference to FlowUnitPreferenceService
-      _syncFlowUnitToService(settings.preferredFlowUnit);
+      _syncFlowUnitToService(
+        validatedSettings?.preferredFlowUnit ?? settings.preferredFlowUnit,
+      );
 
       // Update last login date
-      final updatedSettings = settings.copyWith(lastLoginDate: DateTime.now());
+      final updatedSettings = (validatedSettings ?? settings).copyWith(
+        lastLoginDate: DateTime.now(),
+      );
       await saveUserSettings(updatedSettings);
 
       print('USER_SETTINGS_SERVICE: Settings synced successfully');

@@ -24,7 +24,9 @@ class UserSettings {
   final bool enableNotifications;
   final bool enableDarkMode;
   final List<String> favoriteReachIds;
-  final String? fcmToken; // ADD: FCM token for push notifications
+  final String? fcmToken;
+  final List<String>
+  customBackgroundImagePaths; // List of custom uploaded image paths
   final DateTime lastLoginDate;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -39,7 +41,8 @@ class UserSettings {
     required this.enableNotifications,
     required this.enableDarkMode,
     required this.favoriteReachIds,
-    this.fcmToken, // ADD: Optional FCM token
+    this.fcmToken,
+    this.customBackgroundImagePaths = const [], // Default to empty list
     required this.lastLoginDate,
     required this.createdAt,
     required this.updatedAt,
@@ -62,7 +65,10 @@ class UserSettings {
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
       ),
-      fcmToken: json['fcmToken'] as String?, // ADD: Parse FCM token
+      fcmToken: json['fcmToken'] as String?,
+      customBackgroundImagePaths: List<String>.from(
+        json['customBackgroundImagePaths'] as List? ?? [],
+      ),
       lastLoginDate: DateTime.parse(json['lastLoginDate'] as String),
       createdAt: DateTime.parse(json['createdAt'] as String),
       updatedAt: DateTime.parse(json['updatedAt'] as String),
@@ -80,7 +86,8 @@ class UserSettings {
       'enableNotifications': enableNotifications,
       'enableDarkMode': enableDarkMode,
       'favoriteReachIds': favoriteReachIds,
-      'fcmToken': fcmToken, // ADD: Include FCM token in JSON
+      'fcmToken': fcmToken,
+      'customBackgroundImagePaths': customBackgroundImagePaths,
       'lastLoginDate': lastLoginDate.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -96,7 +103,8 @@ class UserSettings {
     bool? enableNotifications,
     bool? enableDarkMode,
     List<String>? favoriteReachIds,
-    String? fcmToken, // ADD: FCM token parameter
+    String? fcmToken,
+    List<String>? customBackgroundImagePaths,
     DateTime? lastLoginDate,
   }) {
     return UserSettings(
@@ -109,7 +117,9 @@ class UserSettings {
       enableNotifications: enableNotifications ?? this.enableNotifications,
       enableDarkMode: enableDarkMode ?? this.enableDarkMode,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
-      fcmToken: fcmToken ?? this.fcmToken, // ADD: Handle FCM token in copy
+      fcmToken: fcmToken ?? this.fcmToken,
+      customBackgroundImagePaths:
+          customBackgroundImagePaths ?? this.customBackgroundImagePaths,
       lastLoginDate: lastLoginDate ?? this.lastLoginDate,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
@@ -132,6 +142,31 @@ class UserSettings {
 
   String get fullName => '$firstName $lastName'.trim();
 
-  // ADD: Helper method to check if user has valid FCM token
+  // Helper method to check if user has valid FCM token
   bool get hasValidFCMToken => fcmToken != null && fcmToken!.isNotEmpty;
+
+  // Custom background management
+  bool get hasCustomBackgrounds => customBackgroundImagePaths.isNotEmpty;
+
+  UserSettings addCustomBackground(String imagePath) {
+    if (customBackgroundImagePaths.contains(imagePath)) return this;
+    return copyWith(
+      customBackgroundImagePaths: [...customBackgroundImagePaths, imagePath],
+    );
+  }
+
+  UserSettings removeCustomBackground(String imagePath) {
+    return copyWith(
+      customBackgroundImagePaths: customBackgroundImagePaths
+          .where((path) => path != imagePath)
+          .toList(),
+    );
+  }
+
+  UserSettings clearAllCustomBackgrounds() {
+    return copyWith(customBackgroundImagePaths: []);
+  }
+
+  bool hasCustomBackground(String imagePath) =>
+      customBackgroundImagePaths.contains(imagePath);
 }
