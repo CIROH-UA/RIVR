@@ -8,7 +8,6 @@ import '../../../core/providers/reach_data_provider.dart';
 import '../../../core/services/forecast_service.dart';
 import 'current_flow_status_card.dart';
 import 'flow_values_usage_guide.dart';
-import 'chart_preview_widget.dart';
 
 /// Enhanced forecast detail template that provides a consistent structure
 /// while allowing each forecast type to use specialized widgets for optimal data display.
@@ -303,18 +302,8 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 24),
-                  _buildSectionHeader(
-                    widget.chartSectionTitle ?? 'Flow Chart Preview',
-                  ),
-                  const SizedBox(height: 12),
-                  // Use custom chart preview if provided, otherwise default
-                  widget.customChartPreview ??
-                      ChartPreviewWidget(
-                        forecastType: widget.forecastType,
-                        onTap: widget.onChartTap ?? _navigateToHydrograph,
-                        height: 200,
-                        showTitle: false,
-                      ),
+                  // Use custom chart preview if provided, otherwise simple button
+                  widget.customChartPreview ?? _buildChartButton(),
                 ],
               ),
             ),
@@ -369,6 +358,63 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       default:
         return 'Flow Timeline';
     }
+  }
+
+  String _getChartButtonText() {
+    switch (widget.forecastType) {
+      case 'short_range':
+        return 'Hourly Flow Chart';
+      case 'medium_range':
+        return 'Daily Flow Chart';
+      case 'long_range':
+        return 'Extended Flow Chart';
+      case 'analysis_assimilation':
+        return 'Analysis Flow Chart';
+      case 'medium_range_blend':
+        return 'Blended Flow Chart';
+      default:
+        return 'Flow Chart';
+    }
+  }
+
+  Widget _buildChartButton() {
+    return CupertinoButton(
+      onPressed: widget.onChartTap ?? _navigateToHydrograph,
+      padding: EdgeInsets.zero,
+      child: Container(
+        width: double.infinity,
+        height: 50,
+        decoration: BoxDecoration(
+          color: CupertinoColors.systemBlue.resolveFrom(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: CupertinoColors.systemGrey4.resolveFrom(context),
+            width: 1,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _getChartButtonText(),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: CupertinoColors.systemBackground.resolveFrom(context),
+                ),
+              ),
+              Icon(
+                CupertinoIcons.chevron_right,
+                color: CupertinoColors.systemBackground.resolveFrom(context),
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildForecastSummary(ReachDataProvider reachProvider) {
