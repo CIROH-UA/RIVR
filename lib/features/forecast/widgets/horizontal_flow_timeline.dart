@@ -31,14 +31,14 @@ class HorizontalFlowTimeline extends StatefulWidget {
 class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
   late FlowTimelineViewMode _viewMode;
   ScrollController? _scrollController;
-  String _lastKnownUnit = 'CFS'; // ✅ NEW: Track unit changes
+  String _lastKnownUnit = 'CFS';
 
   @override
   void initState() {
     super.initState();
     _viewMode = widget.initialViewMode;
     _scrollController = ScrollController();
-    _lastKnownUnit = _getCurrentFlowUnit(); // ✅ NEW: Initialize unit tracking
+    _lastKnownUnit = _getCurrentFlowUnit();
   }
 
   @override
@@ -47,15 +47,13 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     super.dispose();
   }
 
-  // ✅ FIXED: Get current flow units from preference service (string-based)
+  // Get current flow units from preference service (string-based)
   String _getCurrentFlowUnit() {
     final currentUnit = FlowUnitPreferenceService().currentFlowUnit;
-    return currentUnit == 'CMS'
-        ? 'CMS'
-        : 'CFS'; // ✅ Fixed: Use strings consistently
+    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
   }
 
-  // ✅ NEW: Convert flow value to current unit preference
+  // Convert flow value to current unit preference
   double _convertFlowToCurrentUnit(double flowValue) {
     final unitService = FlowUnitPreferenceService();
     final currentUnit = unitService.currentFlowUnit;
@@ -64,7 +62,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     return unitService.convertFlow(flowValue, 'CFS', currentUnit);
   }
 
-  // ✅ NEW: Check for unit changes and rebuild if necessary
+  // Check for unit changes and rebuild if necessary
   @override
   void didUpdateWidget(HorizontalFlowTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -207,7 +205,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     HourlyFlowDataPoint dataPoint,
     ReachDataProvider reachProvider,
   ) {
-    // ✅ FIXED: Flow is already converted in _extractShortRangeData, no need to convert again
+    // Flow is already converted in _extractShortRangeData, no need to convert again
     final flowCategory = _getFlowCategory(dataPoint.flow, reachProvider);
     final categoryColor = _getCategoryColor(flowCategory);
     final isCurrentHour = _isCurrentOrNearCurrentHour(dataPoint.validTime);
@@ -339,7 +337,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     List<HourlyFlowDataPoint> data,
     ReachDataProvider reachProvider,
   ) {
-    // ✅ FIXED: Data is already converted in _extractShortRangeData, use as-is
+    // Data is already converted in _extractShortRangeData, use as-is
     return Container(
       height: widget.height,
       padding: widget.padding ?? const EdgeInsets.symmetric(horizontal: 16),
@@ -354,7 +352,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     );
   }
 
-  // ✅ UPDATED: Data extraction method with unit conversion (converts once here)
+  // Data extraction method with unit conversion (converts once here)
   List<HourlyFlowDataPoint> _extractShortRangeData(
     ReachDataProvider reachProvider,
   ) {
@@ -374,7 +372,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     }).toList();
   }
 
-  // ✅ FIXED: Flow category calculation (flow is already converted)
+  // Flow category calculation (flow is already converted)
   String _getFlowCategory(
     double convertedFlow,
     ReachDataProvider reachProvider,
@@ -594,7 +592,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
   }
 }
 
-// ✅ FIXED: Custom painter for flow wave visualization (receives already converted data)
+// Custom painter for flow wave visualization (receives already converted data)
 class FlowWavePainter extends CustomPainter {
   final List<HourlyFlowDataPoint> data;
   final ReachDataProvider reachProvider;
