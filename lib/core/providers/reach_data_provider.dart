@@ -564,6 +564,9 @@ class ReachDataProvider with ChangeNotifier {
     _currentFlowCache.clear();
     _flowCategoryCache.clear();
 
+    // FIXED: Also clear session cache since it may contain unconverted data
+    _sessionCache.clear();
+
     // Also clear ForecastService unit-dependent caches
     _forecastService.clearUnitDependentCaches();
 
