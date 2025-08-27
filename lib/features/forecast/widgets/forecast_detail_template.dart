@@ -363,17 +363,17 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
   String _getChartButtonText() {
     switch (widget.forecastType) {
       case 'short_range':
-        return 'Hourly Flow Chart';
+        return 'View Hourly Hydrograph';
       case 'medium_range':
-        return 'Daily Flow Chart';
+        return 'View Daily Hydrograph';
       case 'long_range':
-        return 'Extended Flow Chart';
+        return 'View Extended Hydrograph';
       case 'analysis_assimilation':
-        return 'Analysis Flow Chart';
+        return 'View Analysis Hydrograph';
       case 'medium_range_blend':
-        return 'Blended Flow Chart';
+        return 'View Blended Hydrograph';
       default:
-        return 'Flow Chart';
+        return 'View Hydrograph';
     }
   }
 
