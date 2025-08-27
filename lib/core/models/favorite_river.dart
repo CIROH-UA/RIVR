@@ -4,6 +4,7 @@ import 'package:rivrflow/core/services/flow_unit_preference_service.dart';
 
 /// Simple model for storing user's favorite rivers
 /// Designed for JSON serialization with SharedPreferences
+/// FIXED: Added unit tracking to prevent double conversion
 class FavoriteRiver {
   final String reachId; // Links to existing ReachData
   final String? customName; // User override for display name
@@ -12,6 +13,8 @@ class FavoriteRiver {
   customImageAsset; // Asset path like 'assets/images/rivers/mountain/river1.webp'
   final int displayOrder; // For user reordering (0 = first)
   final double? lastKnownFlow; // Cached flow value for offline display
+  final String?
+  storedFlowUnit; // CRITICAL FIX: Track what unit the stored flow is in
   final DateTime? lastUpdated; // When flow was last refreshed
 
   // Cached coordinates for efficient map marker positioning
@@ -25,6 +28,7 @@ class FavoriteRiver {
     this.customImageAsset,
     required this.displayOrder,
     this.lastKnownFlow,
+    this.storedFlowUnit, // FIXED: Add unit tracking parameter
     this.lastUpdated,
     this.latitude,
     this.longitude,
@@ -39,6 +43,8 @@ class FavoriteRiver {
       customImageAsset: json['customImageAsset'] as String?,
       displayOrder: json['displayOrder'] as int,
       lastKnownFlow: json['lastKnownFlow'] as double?,
+      storedFlowUnit:
+          json['storedFlowUnit'] as String?, // FIXED: Load stored unit
       lastUpdated: json['lastUpdated'] != null
           ? DateTime.parse(json['lastUpdated'] as String)
           : null,
@@ -56,6 +62,7 @@ class FavoriteRiver {
       'customImageAsset': customImageAsset,
       'displayOrder': displayOrder,
       'lastKnownFlow': lastKnownFlow,
+      'storedFlowUnit': storedFlowUnit, // FIXED: Save stored unit
       'lastUpdated': lastUpdated?.toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
@@ -70,6 +77,7 @@ class FavoriteRiver {
     String? customImageAsset,
     int? displayOrder,
     double? lastKnownFlow,
+    String? storedFlowUnit, // FIXED: Add to copyWith method
     DateTime? lastUpdated,
     double? latitude,
     double? longitude,
@@ -81,6 +89,8 @@ class FavoriteRiver {
       customImageAsset: customImageAsset ?? this.customImageAsset,
       displayOrder: displayOrder ?? this.displayOrder,
       lastKnownFlow: lastKnownFlow ?? this.lastKnownFlow,
+      storedFlowUnit:
+          storedFlowUnit ?? this.storedFlowUnit, // FIXED: Include in copy
       lastUpdated: lastUpdated ?? this.lastUpdated,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
@@ -116,16 +126,24 @@ class FavoriteRiver {
   }
 
   /// Get formatted flow display with proper unit conversion
+  /// CRITICAL FIX: Now uses stored unit information to prevent double conversion
   String get formattedFlow {
     if (lastKnownFlow == null) return 'No data';
 
     final unitService = FlowUnitPreferenceService();
     final currentUnit = unitService.currentFlowUnit;
 
-    // Convert from stored unit (assume CFS) to user's preferred unit
+    // CRITICAL FIX: Use stored unit if available, otherwise assume CFS for backward compatibility
+    final actualStoredUnit = storedFlowUnit ?? 'CFS';
+
+    print(
+      'FAVORITE_RIVER: Converting flow for $reachId: $lastKnownFlow $actualStoredUnit → $currentUnit',
+    );
+
+    // Convert from actual stored unit to user's preferred unit
     final convertedFlow = unitService.convertFlow(
       lastKnownFlow!,
-      'CFS',
+      actualStoredUnit, // FIXED: Use actual stored unit instead of assuming CFS
       currentUnit,
     );
 
@@ -143,6 +161,6 @@ class FavoriteRiver {
 
   @override
   String toString() {
-    return 'FavoriteRiver{reachId: $reachId, customName: $customName, riverName: $riverName, displayOrder: $displayOrder, hasCoords: $hasCoordinates}';
+    return 'FavoriteRiver{reachId: $reachId, customName: $customName, riverName: $riverName, displayOrder: $displayOrder, hasCoords: $hasCoordinates, storedUnit: $storedFlowUnit}';
   }
 }

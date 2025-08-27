@@ -10,9 +10,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_river.dart';
 import '../services/favorites_service.dart';
 import '../services/forecast_service.dart';
+import '../services/flow_unit_preference_service.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
+/// FIXED: Added unit tracking to prevent double conversion
 class FavoritesProvider with ChangeNotifier {
   final FavoritesService _favoritesService = FavoritesService();
   final ForecastService _forecastService = ForecastService();
@@ -29,6 +31,8 @@ class FavoritesProvider with ChangeNotifier {
   // Session data (not persisted, loaded fresh each session)
   final Map<String, String> _sessionRiverNames = {}; // reachId -> riverName
   final Map<String, double?> _sessionFlowData = {}; // reachId -> lastKnownFlow
+  final Map<String, String> _sessionFlowUnits =
+      {}; // reachId -> unit of stored flow
   final Map<String, DateTime> _sessionFlowUpdates =
       {}; // reachId -> lastUpdated
   final Map<String, ({double lat, double lon})> _sessionCoordinates =
@@ -51,6 +55,7 @@ class FavoritesProvider with ChangeNotifier {
   bool get shouldShowSearch => _favoriteReachIds.length >= 4;
 
   /// Build enriched favorites list combining cloud data + session data
+  /// FIXED: Now passes stored unit information
   List<FavoriteRiver> _buildEnrichedFavorites() {
     return _favorites.map((favorite) {
       final reachId = favorite.reachId;
@@ -59,6 +64,8 @@ class FavoritesProvider with ChangeNotifier {
         customName: _sessionCustomNames[reachId],
         customImageAsset: _sessionCustomImages[reachId],
         lastKnownFlow: _sessionFlowData[reachId],
+        storedFlowUnit:
+            _sessionFlowUnits[reachId], // CRITICAL FIX: Pass stored unit
         lastUpdated: _sessionFlowUpdates[reachId],
         latitude: _sessionCoordinates[reachId]?.lat,
         longitude: _sessionCoordinates[reachId]?.lon,
@@ -212,6 +219,7 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Remove a favorite river and clean up custom properties when favorite is removed
+  /// FIXED: Also clean up stored flow units
   Future<bool> removeFavorite(String reachId) async {
     try {
       final success = await _favoritesService.removeFavorite(reachId);
@@ -220,6 +228,9 @@ class FavoritesProvider with ChangeNotifier {
       // Clean up ALL session data including custom properties
       _sessionRiverNames.remove(reachId);
       _sessionFlowData.remove(reachId);
+      _sessionFlowUnits.remove(
+        reachId,
+      ); // FIXED: Clean up stored flow units too
       _sessionFlowUpdates.remove(reachId);
       _sessionCoordinates.remove(reachId);
       _sessionCustomNames.remove(reachId);
@@ -423,6 +434,7 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Refresh a single favorite's flow data and store in session
+  /// FIXED: Now tracks units of stored flow values
   Future<void> _refreshSingleFavorite(String reachId) async {
     try {
       _refreshingReachIds.add(reachId);
@@ -432,9 +444,14 @@ class FavoritesProvider with ChangeNotifier {
       final forecast = await _forecastService.loadCurrentFlowOnly(reachId);
       final currentFlow = _forecastService.getCurrentFlow(forecast);
 
+      // CRITICAL FIX: Store the current flow unit along with the value
+      final currentUnit = FlowUnitPreferenceService().currentFlowUnit;
+
       // Store all data in session storage (not persisted to cloud)
       _sessionRiverNames[reachId] = forecast.reach.riverName;
       _sessionFlowData[reachId] = currentFlow;
+      _sessionFlowUnits[reachId] =
+          currentUnit; // FIXED: Track what unit the stored flow is in
       _sessionFlowUpdates[reachId] = DateTime.now();
       _sessionCoordinates[reachId] = (
         lat: forecast.reach.latitude,
@@ -444,14 +461,14 @@ class FavoritesProvider with ChangeNotifier {
       // Load return periods for this favorite
       await _loadReturnPeriods(reachId);
 
-      // Print results for this favorite
+      // Print results for this favorite - FIXED: Use correct unit in display
       final flow = _sessionFlowData[reachId];
       final riverName = _sessionRiverNames[reachId] ?? 'Unknown';
       final returnPeriods = _sessionReturnPeriods[reachId];
 
       print(
-        'FAVORITES_PROVIDER: $riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} CFS',
-      );
+        'FAVORITES_PROVIDER: $riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
+      ); // FIXED: Use actual current unit, not hardcoded "CFS"
 
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         print(
@@ -535,6 +552,26 @@ class FavoritesProvider with ChangeNotifier {
     _errorMessage = null;
   }
 
+  /// Clear unit-dependent cached values (call when unit preference changes)
+  /// FIXED: Also clear stored flow units when units change
+  void clearUnitDependentCaches() {
+    print('FAVORITES_PROVIDER: Clearing unit-dependent caches for unit change');
+
+    // Clear flow data and their associated units since they need to be re-fetched
+    _sessionFlowData.clear();
+    _sessionFlowUnits.clear(); // FIXED: Clear unit tracking too
+    _sessionFlowUpdates
+        .clear(); // Also clear update timestamps to force refresh
+
+    // Notify UI immediately of the change
+    notifyListeners();
+
+    // Refresh all favorites to get data in new units
+    Future.delayed(const Duration(milliseconds: 100), () {
+      refreshAllFavorites(); // Use public method for proper error handling
+    });
+  }
+
   /// Clear all favorites (for testing)
   Future<void> clearAllFavorites() async {
     await _favoritesService.clearAllFavorites();
@@ -545,6 +582,7 @@ class FavoritesProvider with ChangeNotifier {
     _refreshingReachIds.clear();
     _sessionRiverNames.clear();
     _sessionFlowData.clear();
+    _sessionFlowUnits.clear(); // FIXED: Clear flow units too
     _sessionFlowUpdates.clear();
     _sessionCoordinates.clear();
 

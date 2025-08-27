@@ -534,9 +534,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
         await UserSettingsService().updateFlowUnit(userId, flowUnit);
         FlowUnitPreferenceService().setFlowUnit(value);
 
-        // Clear unit-dependent caches to refresh display values
+        // Clear unit-dependent caches for BOTH providers
         final reachProvider = context.read<ReachDataProvider>();
+        final favoritesProvider = context
+            .read<FavoritesProvider>(); // ADD: Get favorites provider
+
         reachProvider.clearUnitDependentCaches();
+        favoritesProvider
+            .clearUnitDependentCaches(); // Clear favorites caches too!
 
         // Force UI rebuild to show new units
         if (mounted) {
