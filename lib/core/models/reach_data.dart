@@ -372,6 +372,8 @@ class ForecastPoint {
   String toString() => 'ForecastPoint{validTime: $validTime, flow: $flow}';
 }
 
+// lib/core/models/reach_data.dart - ForecastSeries class with fix
+
 class ForecastSeries {
   final DateTime? referenceTime;
   final String units;
@@ -379,7 +381,8 @@ class ForecastSeries {
 
   ForecastSeries({this.referenceTime, required this.units, required this.data});
 
-  /// Factory constructor for unit conversion
+  /// Factory constructor for unit conversion with double conversion prevention
+  /// FIXED: Added check to prevent double conversion
   factory ForecastSeries.withPreferredUnits({
     required String originalUnits,
     required String preferredUnits,
@@ -387,6 +390,28 @@ class ForecastSeries {
     DateTime? referenceTime,
   }) {
     final converter = FlowUnitPreferenceService();
+
+    // CRITICAL FIX: Normalize units for comparison to prevent double conversion
+    final normalizedOriginalUnits = converter.normalizeUnit(originalUnits);
+    final normalizedPreferredUnits = converter.normalizeUnit(preferredUnits);
+
+    // MISSING LOGIC: If units are already the same, don't convert!
+    if (normalizedOriginalUnits == normalizedPreferredUnits) {
+      print(
+        'FORECAST_SERIES: Units already match ($normalizedOriginalUnits), skipping conversion',
+      );
+      return ForecastSeries(
+        referenceTime: referenceTime,
+        units: preferredUnits, // Use preferred format for consistency
+        data: originalData, // Use data as-is, no conversion needed
+      );
+    }
+
+    print(
+      'FORECAST_SERIES: Converting from $normalizedOriginalUnits to $normalizedPreferredUnits',
+    );
+
+    // Only convert if units are actually different
     final convertedData = originalData
         .map(
           (point) => ForecastPoint(

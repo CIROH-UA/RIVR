@@ -2,6 +2,7 @@
 
 /// Simple service for managing flow unit preferences and conversions
 /// Handles the global flow unit setting and provides conversion utilities
+/// FIXED: Made normalizeUnit public to prevent double conversion
 class FlowUnitPreferenceService {
   static final FlowUnitPreferenceService _instance =
       FlowUnitPreferenceService._internal();
@@ -29,8 +30,9 @@ class FlowUnitPreferenceService {
     }
   }
 
+  /// FIXED: Made public to enable double conversion prevention
   /// Normalize unit names to handle different representations
-  String _normalizeUnit(String unit) {
+  String normalizeUnit(String unit) {
     switch (unit.toLowerCase()) {
       case 'ft³/s':
       case 'cfs':
@@ -44,13 +46,23 @@ class FlowUnitPreferenceService {
   }
 
   /// Convert flow value between units
+  /// FIXED: Uses public normalizeUnit method
   double convertFlow(double value, String fromUnit, String toUnit) {
     // Normalize unit names first
-    final normalizedFromUnit = _normalizeUnit(fromUnit);
-    final normalizedToUnit = _normalizeUnit(toUnit);
+    final normalizedFromUnit = normalizeUnit(fromUnit);
+    final normalizedToUnit = normalizeUnit(toUnit);
 
-    // No conversion needed if units are the same
-    if (normalizedFromUnit == normalizedToUnit) return value;
+    // CRITICAL: No conversion needed if units are the same
+    if (normalizedFromUnit == normalizedToUnit) {
+      print(
+        'FLOW_UNIT_SERVICE: Units match ($normalizedFromUnit), no conversion needed',
+      );
+      return value;
+    }
+
+    print(
+      'FLOW_UNIT_SERVICE: Converting $value from $normalizedFromUnit to $normalizedToUnit',
+    );
 
     // Convert CMS to CFS
     if (normalizedFromUnit == 'CMS' && normalizedToUnit == 'CFS') {

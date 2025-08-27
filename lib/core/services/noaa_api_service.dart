@@ -379,12 +379,15 @@ class NoaaApiService {
     }
   }
 
-  /// NEW: Convert forecast response to user's preferred units
+  /// FIXED: Added better logging to track conversions and prevent double conversion
   Map<String, dynamic> _convertForecastResponse(
     Map<String, dynamic> rawResponse,
   ) {
     try {
       final convertedResponse = Map<String, dynamic>.from(rawResponse);
+      final targetUnit = _unitService.currentFlowUnit;
+
+      print('NOAA_API: Starting forecast conversion to $targetUnit');
 
       // Convert all forecast sections that contain series data
       final sectionsToConvert = [
@@ -397,21 +400,24 @@ class NoaaApiService {
 
       for (final section in sectionsToConvert) {
         if (convertedResponse[section] != null) {
+          print('NOAA_API: Converting section: $section');
           convertedResponse[section] = _convertForecastSection(
             convertedResponse[section],
           );
         }
       }
 
+      print('NOAA_API: ✅ Forecast conversion completed');
       return convertedResponse;
     } catch (e) {
-      print('NOAA_API: Warning - Failed to convert units: $e');
+      print('NOAA_API: ❌ Failed to convert units: $e');
       // Return original data if conversion fails
       return rawResponse;
     }
   }
 
-  /// NEW: Convert a forecast section (handles both single series and ensemble data)
+  /// Convert a forecast section (handles both single series and ensemble data)
+  /// FIXED: Added logging to track what gets converted
   dynamic _convertForecastSection(dynamic section) {
     if (section == null || section is! Map<String, dynamic>) {
       return section;
@@ -421,6 +427,7 @@ class NoaaApiService {
 
     // Handle 'series' data (single forecast series)
     if (convertedSection['series'] != null) {
+      print('NOAA_API: Converting single series data');
       convertedSection['series'] = _convertSingleSeries(
         convertedSection['series'],
       );
@@ -428,6 +435,7 @@ class NoaaApiService {
 
     // Handle 'mean' data (ensemble mean)
     if (convertedSection['mean'] != null) {
+      print('NOAA_API: Converting ensemble mean data');
       convertedSection['mean'] = _convertSingleSeries(convertedSection['mean']);
     }
 
@@ -435,6 +443,11 @@ class NoaaApiService {
     final memberKeys = convertedSection.keys
         .where((key) => key.startsWith('member'))
         .toList();
+
+    if (memberKeys.isNotEmpty) {
+      print('NOAA_API: Converting ${memberKeys.length} ensemble members');
+    }
+
     for (final memberKey in memberKeys) {
       if (convertedSection[memberKey] != null) {
         convertedSection[memberKey] = _convertSingleSeries(
@@ -446,7 +459,8 @@ class NoaaApiService {
     return convertedSection;
   }
 
-  /// NEW: Convert a single forecast series
+  /// Convert a single forecast series
+  /// FIXED: Added detailed logging to track double conversion prevention
   Map<String, dynamic> _convertSingleSeries(dynamic seriesData) {
     if (seriesData == null || seriesData is! Map<String, dynamic>) {
       return seriesData ?? {};
@@ -455,11 +469,16 @@ class NoaaApiService {
     try {
       // Parse the series to get the data structure
       final originalSeries = ForecastSeries.fromJson(seriesData);
+      final targetUnit = _unitService.currentFlowUnit;
 
-      // Convert to preferred units
+      print(
+        'NOAA_API: Series conversion - ${originalSeries.units} → $targetUnit (${originalSeries.data.length} points)',
+      );
+
+      // FIXED: The ForecastSeries.withPreferredUnits now prevents double conversion
       final convertedSeries = ForecastSeries.withPreferredUnits(
         originalUnits: originalSeries.units,
-        preferredUnits: _unitService.currentFlowUnit,
+        preferredUnits: targetUnit,
         originalData: originalSeries.data,
         referenceTime: originalSeries.referenceTime,
       );
@@ -467,7 +486,7 @@ class NoaaApiService {
       // Convert back to JSON format
       return convertedSeries.toJson();
     } catch (e) {
-      print('NOAA_API: Warning - Failed to convert series: $e');
+      print('NOAA_API: ⚠️ Failed to convert series: $e');
       return Map<String, dynamic>.from(seriesData);
     }
   }

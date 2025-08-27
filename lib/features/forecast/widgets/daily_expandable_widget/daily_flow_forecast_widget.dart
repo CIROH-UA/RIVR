@@ -52,7 +52,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
   int? _expandedIndex;
   bool _isProcessing = false;
   String? _errorMessage;
-  String _lastKnownUnit = 'CFS'; // Track unit changes
+  String _lastKnownUnit = 'CFS'; // Track unit changes for UI rebuild only
 
   // Get current flow units from preference service
   String _getCurrentFlowUnit() {
@@ -71,27 +71,26 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
   void didUpdateWidget(DailyFlowForecastWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Check for unit changes
+    // Check for unit changes for UI rebuild only
     final currentUnit = _getCurrentFlowUnit();
     final unitChanged = currentUnit != _lastKnownUnit;
 
     if (oldWidget.forecastResponse != widget.forecastResponse ||
-        oldWidget.forecastType != widget.forecastType ||
-        unitChanged) {
-      // React to unit changes
-
-      if (unitChanged) {
-        print(
-          'DAILY_WIDGET: Unit changed from $_lastKnownUnit to $currentUnit - reprocessing data',
-        );
-        _lastKnownUnit = currentUnit; // Update tracked unit
-      }
-
+        oldWidget.forecastType != widget.forecastType) {
+      // Only reprocess data if the actual data changed
       _processData();
+    } else if (unitChanged) {
+      // For unit changes, just rebuild UI since data is already converted by API service
+      print(
+        'DAILY_WIDGET: Unit changed from $_lastKnownUnit to $currentUnit - rebuilding UI only',
+      );
+      _lastKnownUnit = currentUnit; // Update tracked unit
+      setState(() {}); // Trigger rebuild without reprocessing data
     }
   }
 
   /// Process forecast data into daily summaries
+  /// Data is already converted by API service, no manual conversion needed
   void _processData() {
     if (widget.forecastResponse == null) {
       setState(() {
@@ -108,10 +107,11 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
     });
 
     try {
-      // Get current unit for display purposes
+      // Get current unit for display purposes only (data already converted)
       final currentUnit = _getCurrentFlowUnit();
 
       // Process the forecast data based on type
+      // Data is already in correct units from NoaaApiService
       List<DailyFlowForecast> dailyForecasts;
 
       if (widget.forecastType.toLowerCase() == 'medium_range') {
@@ -440,6 +440,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
 }
 
 /// Simplified version for quick display without expansion
+/// Data is already converted by API service, no manual conversion needed
 class SimpleDailyFlowForecastWidget extends StatelessWidget {
   final ForecastResponse? forecastResponse;
   final String forecastType;
@@ -463,7 +464,7 @@ class SimpleDailyFlowForecastWidget extends StatelessWidget {
       );
     }
 
-    // Process data with manual unit conversion in DailyForecastProcessor
+    // Data is already converted by API service, use as-is
     List<DailyFlowForecast> dailyForecasts;
     if (forecastType.toLowerCase() == 'medium_range') {
       dailyForecasts = DailyForecastProcessor.processMediumRange(

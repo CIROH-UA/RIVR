@@ -9,6 +9,7 @@ import '../domain/entities/daily_flow_forecast.dart';
 /// Converts raw hourly ensemble data (from medium/long range forecasts) into
 /// structured daily forecasts suitable for display in expandable widgets.
 /// Prioritizes 'mean' data with fallback to first available ensemble member.
+/// FIXED: Data is already converted by API service, no manual conversion needed
 class DailyForecastProcessor {
   /// Process medium or long range forecast data into daily summaries
   ///
@@ -17,6 +18,7 @@ class DailyForecastProcessor {
   /// [forecastType] - Type identifier ('medium_range' or 'long_range') for tracking
   ///
   /// Returns a list of DailyFlowForecast objects, one per day covered by the forecast
+  /// FIXED: Data is already in correct units from NoaaApiService
   static List<DailyFlowForecast> processForecastData({
     required Map<String, ForecastSeries> forecastData,
     required ReachData reach,
@@ -37,15 +39,15 @@ class DailyForecastProcessor {
     final dataSource = selectedData['source'] as String;
     final forecastSeries = selectedData['series'] as ForecastSeries;
 
-    // Get current unit for manual conversion
+    // FIXED: Get current unit for display purposes only (data already converted)
     final unitService = FlowUnitPreferenceService();
     final currentUnit = unitService.currentFlowUnit;
 
     print(
-      'DAILY_PROCESSOR: Using $dataSource for $forecastType (${forecastSeries.data.length} points, ${forecastSeries.units} → $currentUnit)',
+      'DAILY_PROCESSOR: Using $dataSource for $forecastType (${forecastSeries.data.length} points, already in $currentUnit)',
     );
 
-    // Step 2: Group hourly data by calendar date with manual conversion
+    // Step 2: Group hourly data by calendar date (no conversion needed)
     final dailyGroups = _groupHourlyDataByDate(forecastSeries);
 
     // Step 3: Process each day's data into DailyFlowForecast objects
@@ -79,7 +81,7 @@ class DailyForecastProcessor {
     dailyForecasts.sort((a, b) => a.date.compareTo(b.date));
 
     print(
-      'DAILY_PROCESSOR: Generated ${dailyForecasts.length} daily forecasts from $dataSource ($currentUnit)',
+      'DAILY_PROCESSOR: Generated ${dailyForecasts.length} daily forecasts from $dataSource (already in $currentUnit)',
     );
     return dailyForecasts;
   }
@@ -184,13 +186,12 @@ class DailyForecastProcessor {
     return null; // No valid data found
   }
 
-  /// Group hourly forecast points by calendar date with manual conversion
+  /// Group hourly forecast points by calendar date
+  /// FIXED: Data is already converted by API service, use as-is
   static Map<DateTime, Map<DateTime, double>> _groupHourlyDataByDate(
     ForecastSeries forecastSeries,
   ) {
     final dailyGroups = <DateTime, Map<DateTime, double>>{};
-    final unitService = FlowUnitPreferenceService();
-    final currentUnit = unitService.currentFlowUnit;
 
     for (final point in forecastSeries.data) {
       // Convert to local time and get the calendar date
@@ -200,20 +201,15 @@ class DailyForecastProcessor {
       // Initialize day group if needed
       dailyGroups[dateKey] ??= <DateTime, double>{};
 
-      // Manual conversion from CFS (API default) to user preference
-      final convertedFlow = unitService.convertFlow(
-        point.flow,
-        'CFS', // API always returns CFS
-        currentUnit, // Target unit
-      );
-      dailyGroups[dateKey]![localTime] = convertedFlow;
+      // FIXED: Data is already in correct unit from NoaaApiService
+      dailyGroups[dateKey]![localTime] = point.flow;
     }
 
     return dailyGroups;
   }
 
   /// Process a single day's hourly data into a DailyFlowForecast
-  /// Flow values are already converted to target unit in grouping step
+  /// FIXED: Flow values are already in correct unit from API service
   static DailyFlowForecast? _processDailyData({
     required DateTime date,
     required Map<DateTime, double> hourlyData,
@@ -223,7 +219,7 @@ class DailyForecastProcessor {
   }) {
     if (hourlyData.isEmpty) return null;
 
-    // Calculate daily statistics (flow values already converted)
+    // Calculate daily statistics (flow values already in correct unit)
     final flows = hourlyData.values.toList();
     final minFlow = flows.reduce((a, b) => a < b ? a : b);
     final maxFlow = flows.reduce((a, b) => a > b ? a : b);
@@ -285,28 +281,35 @@ class DailyForecastProcessor {
     // Use provided unit or get current unit for display
     final displayUnit = unit ?? FlowUnitPreferenceService().currentFlowUnit;
 
-    print('DAILY_PROCESSOR: Processing Summary:');
+    final first = forecasts.first;
+    final last = forecasts.last;
+
+    // Calculate overall statistics
+    final allFlows = forecasts
+        .expand((f) => [f.minFlow, f.maxFlow, f.avgFlow])
+        .toList();
+
+    final overallMin = allFlows.reduce((a, b) => a < b ? a : b);
+    final overallMax = allFlows.reduce((a, b) => a > b ? a : b);
+
+    print('DAILY_PROCESSOR: ========== Processing Summary ==========');
     print(
-      '  📅 Date range: ${forecasts.first.date.toIso8601String().split('T')[0]} to ${forecasts.last.date.toIso8601String().split('T')[0]}',
+      'DAILY_PROCESSOR: Period: ${first.date.toLocal().toString().split(' ')[0]} to ${last.date.toLocal().toString().split(' ')[0]}',
     );
-    print('  📊 Total days: ${forecasts.length}');
+    print('DAILY_PROCESSOR: Total days: ${forecasts.length}');
+    print(
+      'DAILY_PROCESSOR: Flow range: ${overallMin.toStringAsFixed(1)} - ${overallMax.toStringAsFixed(1)} $displayUnit',
+    );
+    print('DAILY_PROCESSOR: Data source: ${first.dataSource}');
 
-    final dataSourceCounts = <String, int>{};
-    final categoryCounts = <String, int>{};
-
+    // Count by flow category
+    final categoryCount = <String, int>{};
     for (final forecast in forecasts) {
-      dataSourceCounts[forecast.dataSource] =
-          (dataSourceCounts[forecast.dataSource] ?? 0) + 1;
-      categoryCounts[forecast.flowCategory] =
-          (categoryCounts[forecast.flowCategory] ?? 0) + 1;
+      categoryCount[forecast.flowCategory] =
+          (categoryCount[forecast.flowCategory] ?? 0) + 1;
     }
 
-    print('  📈 Data sources: $dataSourceCounts');
-    print('  🎯 Flow categories: $categoryCounts');
-
-    final bounds = getFlowBounds(forecasts);
-    print(
-      '  🌊 Flow range: ${bounds['min']?.toStringAsFixed(1)} - ${bounds['max']?.toStringAsFixed(1)} $displayUnit',
-    );
+    print('DAILY_PROCESSOR: Flow categories: $categoryCount');
+    print('DAILY_PROCESSOR: ==========================================');
   }
 }
