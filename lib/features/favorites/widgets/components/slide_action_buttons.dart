@@ -24,7 +24,7 @@ class SlideActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 140, // Match the card height
+      height: 120, // Match the card height
       child: _buildOverlappingButtons(context),
     );
   }
@@ -120,7 +120,7 @@ class SlideActionButtons extends StatelessWidget {
   }) {
     return SizedBox(
       width: width,
-      height: 210,
+      height: 120,
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: onPressed,

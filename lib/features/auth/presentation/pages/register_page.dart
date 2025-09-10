@@ -157,7 +157,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   const SizedBox(height: 8),
 
                   Text(
-                    'Join RivrFlow today',
+                    'Join RIVR today',
                     style: TextStyle(
                       fontSize: 16,
                       color: brightness == Brightness.dark

@@ -95,14 +95,17 @@ class _LoginPageState extends State<LoginPage> {
                     height: 100,
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [primaryColor, primaryColor.withOpacity(0.7)],
+                        colors: [
+                          primaryColor,
+                          primaryColor.withValues(alpha: 0.7),
+                        ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: primaryColor.withOpacity(0.3),
+                          color: primaryColor.withValues(alpha: 0.3),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -118,7 +121,7 @@ class _LoginPageState extends State<LoginPage> {
 
                   // Title
                   Text(
-                    'RivrFlow',
+                    'RIVR',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
