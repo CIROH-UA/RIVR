@@ -21,7 +21,6 @@ import 'package:rivrflow/features/settings/pages/notifications_settings_page.dar
 import 'package:rivrflow/features/settings/pages/app_theme_settings_page.dart';
 import 'package:rivrflow/features/settings/pages/sponsors_page.dart';
 import 'package:rivrflow/features/map/widgets/map_with_favorites.dart';
-import 'package:rivrflow/test/home_page.dart';
 import 'firebase_options.dart';
 import 'features/auth/presentation/pages/auth_coordinator.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -138,9 +137,8 @@ class _RivrFlowAppState extends State<RivrFlowApp> with WidgetsBindingObserver {
               '/notifications-settings': (context) =>
                   const NotificationsSettingsPage(),
               '/app-theme-settings': (context) => const AppThemeSettingsPage(),
-              '/sponsors': (context) => const SponsorsPage(),
-              '/test-home': (context) =>
-                  const HomePage(), // Keep test home for development
+              '/sponsors': (context) =>
+                  const SponsorsPage(), // Keep test home for development
             },
             onGenerateRoute: (settings) {
               // Handle routes with arguments
