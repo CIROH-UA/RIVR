@@ -1,10 +1,10 @@
-# RivrFlow
+# Rivr
 
-A comprehensive river flow monitoring and flood risk assessment mobile application built with Flutter. RivrFlow democratizes access to the National Water Model developed by NOAA, providing real-time river flow data, flood risk analysis, and interactive forecasting to help all civilians make informed decisions about water safety and recreational activities.
+A comprehensive river flow monitoring and flood risk assessment mobile application built with Flutter. Rivr democratizes access to the National Water Model developed by NOAA, providing real-time river flow data, flood risk analysis, and interactive forecasting to help all civilians make informed decisions about water safety and recreational activities.
 
 ## About the National Water Model
 
-RivrFlow is powered by the **National Water Model (NWM)**, developed by the National Oceanic and Atmospheric Administration (NOAA). The NWM is a cutting-edge hydrologic modeling framework that simulates water flow across the entire continental United States. By leveraging this authoritative government data source, RivrFlow provides civilian users with the same high-quality forecasting information used by emergency managers and water resource professionals.
+Rivr is powered by the **National Water Model (NWM)**, developed by the National Oceanic and Atmospheric Administration (NOAA). The NWM is a cutting-edge hydrologic modeling framework that simulates water flow across the entire continental United States. By leveraging this authoritative government data source, Rivr provides civilian users with the same high-quality forecasting information used by emergency managers and water resource professionals.
 
 ## Core Features
 
@@ -44,10 +44,10 @@ RivrFlow is powered by the **National Water Model (NWM)**, developed by the Nati
 - **Theme Options**: Light, dark, or automatic theme switching
 - **Map Preferences**: Auto or manual map style selection
 
-## Who Benefits from RivrFlow?
+## Who Benefits from Rivr?
 
 ### Civilian Users
-RivrFlow is specifically designed to make professional-grade water forecasting accessible to all civilians, regardless of technical background:
+Rivr is specifically designed to make professional-grade water forecasting accessible to all civilians, regardless of technical background:
 
 - **Outdoor Enthusiasts**: Rafters, kayakers, anglers, hikers, and campers can assess flow conditions for optimal and safe recreation
 - **Families**: Parents can check flood risks before camping or picnicking near waterways
@@ -57,7 +57,7 @@ RivrFlow is specifically designed to make professional-grade water forecasting a
 - **Business Owners**: Tourism operators and outdoor businesses can make informed operational decisions
 
 ### Professional Applications
-While designed for civilian use, RivrFlow also serves professional needs:
+While designed for civilian use, Rivr also serves professional needs:
 - **Emergency Managers**: Monitor flood risks across multiple watersheds
 - **Water Resource Managers**: Track flow conditions for operational decisions
 - **Researchers**: Access comprehensive flow data and forecasts
@@ -76,8 +76,8 @@ While designed for civilian use, RivrFlow also serves professional needs:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/rivrflow.git
-   cd rivrflow
+   git clone https://github.com/your-username/rivr.git
+   cd rivr
    ```
 
 2. **Install dependencies**
@@ -125,8 +125,8 @@ While designed for civilian use, RivrFlow also serves professional needs:
      static const String androidPackageName = 'YOUR_ANDROID_PACKAGE_NAME';
 
      // App Constants
-     static const String appName = 'RivrFlow';
-     static const String supportEmail = 'support@rivrflow.app';
+     static const String appName = 'Rivr';
+     static const String supportEmail = 'support@rivr.app';
 
      // Default Settings
      static const String defaultDisplayUnit = 'cfs';
@@ -272,16 +272,16 @@ lib/
 
 ## Data Sources
 
-RivrFlow integrates with reliable, authoritative data sources:
+RIVR integrates with reliable, authoritative data sources:
 - **NOAA National Water Model**: Official river flow forecasts developed by the National Weather Service
 - **Return Period Statistics**: Historical flood frequency analysis based on government datasets
 - **Mapbox**: High-quality mapping and geocoding services
 
-The National Water Model represents a significant advancement in hydrologic prediction, providing high-resolution forecasts across all river reaches in the continental United States. RivrFlow makes this sophisticated forecasting technology accessible to everyday users in an intuitive mobile interface.
+The National Water Model represents a significant advancement in hydrologic prediction, providing high-resolution forecasts across all river reaches in the continental United State makes this sophisticated forecasting technology accessible to everyday users in an intuitive mobile interface.
 
 ## Contributing
 
-We welcome contributions to RivrFlow! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
+We welcome contributions to Rivr! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
 
 ### Development Guidelines
 - Follow Flutter best practices and conventions
@@ -303,9 +303,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- **Documentation**: [Wiki](https://github.com/your-username/rivrflow/wiki)
-- **Issues**: [GitHub Issues](https://github.com/your-username/rivrflow/issues)
-- **Email**: support@rivrflow.app
+- **Documentation**: [Wiki](https://github.com/your-username/rivr/wiki)
+- **Issues**: [GitHub Issues](https://github.com/your-username/rivr/issues)
+- **Email**: support@rivr.app
 
 ## Acknowledgments
 
@@ -316,6 +316,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Safety Disclaimer**: RivrFlow is designed to provide informational data to support decision-making. Always exercise caution around water bodies and consult local authorities for official flood warnings and emergency information. Never enter flood waters or ignore evacuation orders.
+**Safety Disclaimer**: Rivr is designed to provide informational data to support decision-making. Always exercise caution around water bodies and consult local authorities for official flood warnings and emergency information. Never enter flood waters or ignore evacuation orders.
 
-**Stay Safe, Stay Informed with RivrFlow**
+**Stay Safe, Stay Informed with Rivr**
