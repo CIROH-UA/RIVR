@@ -46,3 +46,12 @@ app.*.map.json
 
 # Configuration files with sensitive API keys
 lib/core/config.dart
+# Firebase configuration files with API keys
+android/app/google-services.json
+lib/firebase_options.dart
+functions/.env
+functions/.runtimeconfig.json
+ios/build/android/app/google-services.json
+lib/firebase_options.dart
+functions/.env
+functions/.runtimeconfig.json
