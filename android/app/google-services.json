@@ -7,15 +7,15 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:158435993111:android:7b26fd7c38d1fe45121e52",
+        "mobilesdk_app_id": "1:158435993111:android:08ec08bb3ece410d121e52",
         "android_client_info": {
-          "package_name": "com.byuhydroinformaticslab.rivrflow"
+          "package_name": "com.byuhydroinformatics.rivr"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "***REMOVED***"
+          "current_key": "AIzaSyABSp5c6oEVbTM1W_JIjds3u6dmaO1ejuw"
         }
       ],
       "services": {

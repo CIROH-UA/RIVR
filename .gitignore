@@ -55,3 +55,6 @@ ios/build/android/app/google-services.json
 lib/firebase_options.dart
 functions/.env
 functions/.runtimeconfig.json
+ios/build/
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
