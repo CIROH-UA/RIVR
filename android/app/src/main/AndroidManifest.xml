@@ -52,12 +52,12 @@
         <!-- For RivrFlow deep linking -->
         <intent>
             <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="rivrflow" />
+            <data android:scheme="rivr" />
         </intent>
     </queries>
 
     <application
-        android:label="RivrFlow"
+        android:label="RIVR"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">
@@ -82,7 +82,7 @@
             <!-- Get your token from lib/core/config.dart (mapboxPublicToken) -->
             <meta-data
                 android:name="com.mapbox.token"
-                android:value="pk.eyJ1IjoiamVyc29uZGV2cyIsImEiOiJjbTkxcGQ1emYwM2d1MnFwcWJ2dmgwYmpuIn0.ca52KhzP9gaK5nYDMv0ZxA" />
+                android:value="pk.eyJ1IjoiYnl1LWh5ZHJvaW5mb3JtYXRpY3MiLCJhIjoiY21obWtmdzZ5MmF6ODJycHExanptY3IzYyJ9.jMJ7WI9SzJuUDuR1CFLvfw" />
 
             <!-- App launcher entry point -->
             <intent-filter>
@@ -95,7 +95,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="rivrflow" />
+                <data android:scheme="rivr" />
             </intent-filter>
         </activity>
 

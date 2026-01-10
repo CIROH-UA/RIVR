@@ -50,19 +50,20 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: '***REMOVED***',
-    appId: '1:158435993111:android:7b26fd7c38d1fe45121e52',
-    messagingSenderId: '158435993111',
-    projectId: 'rivrflow-app',
-    storageBucket: 'rivrflow-app.firebasestorage.app',
+    apiKey: 'AIzaSyDmxLSNpZNeKl4jawWdfIiYsn_HiajW8A8',
+    appId: '1:359266072243:android:f6fce7b488390e032ae2c6',
+    messagingSenderId: '359266072243',
+    projectId: 'ciroh-rivr-app',
+    storageBucket: 'ciroh-rivr-app.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: '***REMOVED***',
-    appId: '1:158435993111:ios:911892f1e3be456f121e52',
-    messagingSenderId: '158435993111',
-    projectId: 'rivrflow-app',
-    storageBucket: 'rivrflow-app.firebasestorage.app',
-    iosBundleId: 'com.byuhydroinformaticslab.rivrflow',
+    apiKey: 'AIzaSyBbUH_HIVycuNtXKl3KL5HhzNzPGjkP7pI',
+    appId: '1:359266072243:ios:580364ea6268ade02ae2c6',
+    messagingSenderId: '359266072243',
+    projectId: 'ciroh-rivr-app',
+    storageBucket: 'ciroh-rivr-app.firebasestorage.app',
+    iosBundleId: 'com.byuhydroinformatics.rivr',
   );
+
 }

@@ -6,7 +6,7 @@ import * as logger from "firebase-functions/logger";
 const NOAA_CONFIG = {
   // Base URLs matching your AppConfig exactly
   noaaReachesBaseUrl: "https://api.water.noaa.gov/nwps/v1",
-  nwmReturnPeriodUrl: "https://nwm-api-updt-9f6idmxh.uc.gateway.dev/return-period",
+  nwmReturnPeriodUrl: "https://nwm-api.ciroh.org//return-period",
   nwmApiKey: "***REMOVED***",
 
   // Request configuration

@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "158435993111",
-    "project_id": "rivrflow-app",
-    "storage_bucket": "rivrflow-app.firebasestorage.app"
+    "project_number": "359266072243",
+    "project_id": "ciroh-rivr-app",
+    "storage_bucket": "ciroh-rivr-app.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:158435993111:android:08ec08bb3ece410d121e52",
+        "mobilesdk_app_id": "1:359266072243:android:f6fce7b488390e032ae2c6",
         "android_client_info": {
           "package_name": "com.byuhydroinformatics.rivr"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyABSp5c6oEVbTM1W_JIjds3u6dmaO1ejuw"
+          "current_key": "AIzaSyDmxLSNpZNeKl4jawWdfIiYsn_HiajW8A8"
         }
       ],
       "services": {

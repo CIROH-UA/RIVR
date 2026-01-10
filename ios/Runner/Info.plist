@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Rivrflow</string>
+	<string>RIVR</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>rivrflow</string>
+	<string>RIVR</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -34,7 +34,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MBXAccessToken</key>
-	<string>pk.eyJ1IjoiamVyc29uZGV2cyIsImEiOiJjbWR2MXRieDAwY2VlMm9xNWNrbHpveWw2In0.SAJosCa9hGvtp7ffeK25Pw</string>
+	<string>pk.eyJ1IjoiYnl1LWh5ZHJvaW5mb3JtYXRpY3MiLCJhIjoiY21obWtmdzZ5MmF6ODJycHExanptY3IzYyJ9.jMJ7WI9SzJuUDuR1CFLvfw</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>This app needs access to your location to show your position on the map.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
