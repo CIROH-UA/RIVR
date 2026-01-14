@@ -22,6 +22,7 @@ class UserSettings {
   final FlowUnit preferredFlowUnit;
   final TimeFormat preferredTimeFormat;
   final bool enableNotifications;
+  final int notificationFrequency; // 1, 2, 3, or 4 times per day
   final bool enableDarkMode;
   final List<String> favoriteReachIds;
   final String? fcmToken;
@@ -39,6 +40,7 @@ class UserSettings {
     required this.preferredFlowUnit,
     required this.preferredTimeFormat,
     required this.enableNotifications,
+    this.notificationFrequency = 1, // Default to once daily
     required this.enableDarkMode,
     required this.favoriteReachIds,
     this.fcmToken,
@@ -61,6 +63,7 @@ class UserSettings {
           ? TimeFormat.twentyFourHour
           : TimeFormat.twelveHour,
       enableNotifications: json['enableNotifications'] as bool? ?? true,
+      notificationFrequency: json['notificationFrequency'] as int? ?? 1,
       enableDarkMode: json['enableDarkMode'] as bool? ?? false,
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
@@ -84,6 +87,7 @@ class UserSettings {
       'preferredFlowUnit': preferredFlowUnit.value,
       'preferredTimeFormat': preferredTimeFormat.value,
       'enableNotifications': enableNotifications,
+      'notificationFrequency': notificationFrequency,
       'enableDarkMode': enableDarkMode,
       'favoriteReachIds': favoriteReachIds,
       'fcmToken': fcmToken,
@@ -101,6 +105,7 @@ class UserSettings {
     FlowUnit? preferredFlowUnit,
     TimeFormat? preferredTimeFormat,
     bool? enableNotifications,
+    int? notificationFrequency,
     bool? enableDarkMode,
     List<String>? favoriteReachIds,
     String? fcmToken,
@@ -115,6 +120,8 @@ class UserSettings {
       preferredFlowUnit: preferredFlowUnit ?? this.preferredFlowUnit,
       preferredTimeFormat: preferredTimeFormat ?? this.preferredTimeFormat,
       enableNotifications: enableNotifications ?? this.enableNotifications,
+      notificationFrequency:
+          notificationFrequency ?? this.notificationFrequency,
       enableDarkMode: enableDarkMode ?? this.enableDarkMode,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       fcmToken: fcmToken ?? this.fcmToken,

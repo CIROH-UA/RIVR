@@ -15,6 +15,7 @@ const messaging = admin.messaging();
 interface UserSettings {
   userId: string;
   enableNotifications: boolean;
+  notificationFrequency: number; // 1, 2, 3, or 4 times per day
   preferredFlowUnit: "cfs" | "cms";
   favoriteReachIds: string[];
   fcmToken?: string;
@@ -42,17 +43,20 @@ interface AlertData {
   riverName: string;
 }
 
-// Scale factor for development testing
-const SCALE_FACTOR = 25;
+// Scale factor for testing (set to 1 for production, increase for demos)
+const SCALE_FACTOR = 1;
 
 /**
- * Main function: Check all users for river alerts
+ * Check alerts for a specific time slot
+ * @param {number} timeSlot - Time slot number (1-4)
  * @return {Promise<AlertCheckResult>} Summary of alert check results
  */
-export async function checkAllUserAlerts(): Promise<AlertCheckResult> {
-  logger.info("🔍 Starting alert check for all users", {
+export async function checkAlertsForTimeSlot(
+  timeSlot: number
+): Promise<AlertCheckResult> {
+  logger.info(`🔍 Starting alert check for time slot ${timeSlot}`, {
+    timeSlot,
     scaleFactor: SCALE_FACTOR,
-    environment: process.env.NODE_ENV || "development",
   });
 
   const result: AlertCheckResult = {
@@ -62,9 +66,11 @@ export async function checkAllUserAlerts(): Promise<AlertCheckResult> {
   };
 
   try {
-    // Get all users with notifications enabled
-    const users = await getNotificationUsers();
-    logger.info(`📱 Found ${users.length} users with notifications enabled`);
+    // Get users for this time slot
+    const users = await getNotificationUsers(timeSlot);
+    logger.info(
+      `📱 Found ${users.length} users for slot ${timeSlot}`
+    );
 
     // Check each user's favorite rivers
     for (const user of users) {
@@ -80,10 +86,10 @@ export async function checkAllUserAlerts(): Promise<AlertCheckResult> {
       }
     }
 
-    logger.info("🎯 Alert check summary", result);
+    logger.info(`🎯 Slot ${timeSlot} check summary`, result);
     return result;
   } catch (error) {
-    logger.error("💥 Fatal error in checkAllUserAlerts", {
+    logger.error(`💥 Fatal error in slot ${timeSlot} check`, {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -91,13 +97,25 @@ export async function checkAllUserAlerts(): Promise<AlertCheckResult> {
 }
 
 /**
- * Get users who have notifications enabled and valid FCM tokens
- * @return {Promise<UserSettings[]>} Array of users with notifications enabled
+ * Get users who should be checked for this time slot
+ * Time slot mapping:
+ * - Slot 1 (6am): All users (1x, 2x, 3x, 4x daily)
+ * - Slot 2 (12pm): 3x and 4x daily users
+ * - Slot 3 (6pm): 2x, 3x, and 4x daily users
+ * - Slot 4 (12am): 4x daily users only
+ * @param {number} timeSlot - Time slot number (1-4)
+ * @return {Promise<UserSettings[]>} Array of users for this slot
  */
-async function getNotificationUsers(): Promise<UserSettings[]> {
+async function getNotificationUsers(
+  timeSlot: number
+): Promise<UserSettings[]> {
   try {
+    // Determine minimum frequency for this slot
+    const minFrequency = getMinFrequencyForSlot(timeSlot);
+
     const usersSnapshot = await db.collection("users")
       .where("enableNotifications", "==", true)
+      .where("notificationFrequency", ">=", minFrequency)
       .get();
 
     const users: UserSettings[] = [];
@@ -113,6 +131,7 @@ async function getNotificationUsers(): Promise<UserSettings[]> {
         users.push({
           userId: doc.id,
           enableNotifications: data.enableNotifications,
+          notificationFrequency: data.notificationFrequency || 1,
           preferredFlowUnit: data.preferredFlowUnit || "cfs",
           favoriteReachIds: data.favoriteReachIds,
           fcmToken: data.fcmToken,
@@ -130,6 +149,26 @@ async function getNotificationUsers(): Promise<UserSettings[]> {
 }
 
 /**
+ * Get minimum frequency required for a time slot
+ * @param {number} timeSlot - Time slot number (1-4)
+ * @return {number} Minimum notification frequency
+ */
+function getMinFrequencyForSlot(timeSlot: number): number {
+  switch (timeSlot) {
+  case 1: // 6am - all users
+    return 1;
+  case 2: // 12pm - 3x and 4x
+    return 3;
+  case 3: // 6pm - 2x, 3x, 4x
+    return 2;
+  case 4: // 12am - 4x only
+    return 4;
+  default:
+    return 1;
+  }
+}
+
+/**
  * Check all favorite rivers for a specific user
  * @param {UserSettings} user - User settings and preferences
  * @return {Promise<number>} Number of alerts sent for this user
@@ -139,6 +178,7 @@ async function checkUserRivers(user: UserSettings): Promise<number> {
     userId: user.userId,
     favoriteCount: user.favoriteReachIds.length,
     flowUnit: user.preferredFlowUnit,
+    frequency: user.notificationFrequency,
   });
 
   let alertsSent = 0;
@@ -187,7 +227,7 @@ async function shouldSendAlert(
 
     // Get forecast and return period data in parallel
     const [forecastData, returnPeriodData, riverName] = await Promise.all([
-      getForecast(reachId), // Returns only {shortRange, mediumRange}
+      getForecast(reachId),
       getReturnPeriods(reachId),
       getRiverName(reachId),
     ]);
@@ -220,41 +260,45 @@ async function shouldSendAlert(
       scaleFactor: SCALE_FACTOR,
     });
 
-    // Check against each return period threshold
+    // Check against each return period threshold - find HIGHEST exceeded
+    let highestExceededAlert: AlertData | null = null;
+
     for (const [returnPeriod, thresholdCms] of Object.entries(thresholds)) {
-      // Apply scale factor for development testing
+      // Apply scale factor for testing
       const scaledThreshold = thresholdCms / SCALE_FACTOR;
 
       if (forecastCms > scaledThreshold) {
         // Convert values to user's preferred unit for notification display
         const displayForecast = userFlowUnit === "cfs" ?
-          maxForecastFlow : // Show original CFS forecast
-          forecastCms; // Show converted CMS forecast
+          maxForecastFlow :
+          forecastCms;
 
         const displayThreshold = userFlowUnit === "cfs" ?
-        // Convert CMS threshold → CFS for display
           scaledThreshold / 0.0283168 :
-          scaledThreshold; // Show original CMS threshold
+          scaledThreshold;
 
-        logger.info(`🚨 Alert condition met for reach ${reachId}`, {
-          riverName,
-          forecastFlow: displayForecast,
-          threshold: displayThreshold,
-          returnPeriod,
-          unit: userFlowUnit.toUpperCase(),
-          scaleFactor: SCALE_FACTOR,
-        });
-
-        return {
+        highestExceededAlert = {
           forecastFlow: Math.round(displayForecast),
           threshold: Math.round(displayThreshold),
           returnPeriod,
           riverName,
         };
+        // Continue checking to find highest threshold
       }
     }
 
-    return null; // No thresholds exceeded
+    if (highestExceededAlert) {
+      logger.info(`🚨 Alert condition met for reach ${reachId}`, {
+        riverName: highestExceededAlert.riverName,
+        forecastFlow: highestExceededAlert.forecastFlow,
+        threshold: highestExceededAlert.threshold,
+        returnPeriod: highestExceededAlert.returnPeriod,
+        unit: userFlowUnit.toUpperCase(),
+        scaleFactor: SCALE_FACTOR,
+      });
+    }
+
+    return highestExceededAlert;
   } catch (error) {
     logger.error(
       `❌ Error checking alert condition for reach ${reachId}`,
@@ -277,13 +321,10 @@ async function sendAlert(
   alertData: AlertData
 ): Promise<boolean> {
   try {
-    // Check if we already sent this alert recently (prevent duplicates)
-    // const recentAlert = await checkRecentAlert(user.userId, reachId);
-    // if (recentAlert) {
-    //   logger.info(`🔇 Skippin duplicate alert ${user.userId}:${reachId}`);
-    //   return false;
-    // }
-
+    // Check if this is a repeat alert (sent within last 6 hours)
+    const isRepeat = await checkRecentAlert(user.userId, reachId);
+    const stillPrefix = isRepeat ? "Still exceeds" : "Exceeds";
+    
     const unitLabel = user.preferredFlowUnit.toUpperCase();
 
     const message = {
@@ -291,7 +332,7 @@ async function sendAlert(
       notification: {
         title: `🌊 ${alertData.riverName} Flood Alert`,
         body: `Forecast: ${alertData.forecastFlow} ${unitLabel} ` +
-          `(exceeds ${alertData.returnPeriod} flood threshold)`,
+          `(${stillPrefix} ${alertData.returnPeriod} flood threshold)`,
       },
       data: {
         type: "flood_alert",
@@ -305,7 +346,7 @@ async function sendAlert(
       android: {
         notification: {
           icon: "ic_notification",
-          color: "#FF6B35", // Orange for flood alerts
+          color: "#FF6B35",
         },
       },
       apns: {
@@ -330,6 +371,7 @@ async function sendAlert(
         reachId,
         forecastFlow: alertData.forecastFlow,
         unit: unitLabel,
+        isRepeat,
       }
     );
 
@@ -339,6 +381,34 @@ async function sendAlert(
       error: error instanceof Error ? error.message : String(error),
       reachId,
     });
+    return false;
+  }
+}
+
+/**
+ * Check if we sent an alert for this user/river in the last 6 hours
+ * @param {string} userId - User identifier
+ * @param {string} reachId - River reach identifier
+ * @return {Promise<boolean>} True if recent alert exists
+ */
+async function checkRecentAlert(
+  userId: string,
+  reachId: string
+): Promise<boolean> {
+  try {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
+    const recentAlerts = await db.collection("notification_logs")
+      .where("userId", "==", userId)
+      .where("reachId", "==", reachId)
+      .where("sentAt", ">", sixHoursAgo)
+      .limit(1)
+      .get();
+
+    return !recentAlerts.empty;
+  } catch (error) {
+    logger.error("❌ Error checking recent alerts", {error});
+    // Assume not repeat on error (better to send than miss)
     return false;
   }
 }
@@ -400,34 +470,6 @@ function extractReturnPeriodThresholds(
   return thresholds;
 }
 
-// /**
-//  * Check if we sent an alert for this user/river in the last 6 hours
-//  * @param {string} userId - User identifier
-//  * @param {string} reachId - River reach identifier
-//  * @return {Promise<boolean>} True if recent alert exists
-//  */
-// async function checkRecentAlert(
-//   userId: string,
-//   reachId: string
-// ): Promise<boolean> {
-//   try {
-//     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-
-//     const recentAlerts = await db.collection("notification_logs")
-//       .where("userId", "==", userId)
-//       .where("reachId", "==", reachId)
-//       .where("sentAt", ">", sixHoursAgo)
-//       .limit(1)
-//       .get();
-
-//     return !recentAlerts.empty;
-//   } catch (error) {
-//     logger.error("❌ Error checking recent alerts", {error});
-//     // If error, allow sending (better to send duplicate than miss alert)
-//     return false;
-//   }
-// }
-
 /**
  * Log notification to prevent duplicates
  * @param {string} userId - User identifier
@@ -452,6 +494,5 @@ async function logNotification(
     });
   } catch (error) {
     logger.error("❌ Error logging notification", {error});
-    // Don't throw - notification was sent successfully
   }
 }

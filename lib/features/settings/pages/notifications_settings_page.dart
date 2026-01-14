@@ -6,6 +6,7 @@ import '../../../features/auth/providers/auth_provider.dart';
 import '../../../features/auth/services/user_settings_service.dart';
 import '../../../core/services/fcm_service.dart';
 import '../../../core/models/user_settings.dart';
+import '../widgets/notification_frequency_picker.dart';
 
 class NotificationsSettingsPage extends StatefulWidget {
   const NotificationsSettingsPage({super.key});
@@ -20,6 +21,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   final FCMService _fcmService = FCMService();
 
   bool _notificationsEnabled = false;
+  int _notificationFrequency = 1;
   bool _isLoading = true;
   bool _isUpdating = false;
   UserSettings? _userSettings;
@@ -45,6 +47,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         setState(() {
           _userSettings = settings;
           _notificationsEnabled = settings.enableNotifications;
+          _notificationFrequency = settings.notificationFrequency;
           _isLoading = false;
         });
       }
@@ -121,6 +124,47 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     }
   }
 
+  Future<void> _updateFrequency(int frequency) async {
+    if (_isUpdating) return;
+
+    setState(() {
+      _isUpdating = true;
+    });
+
+    try {
+      final authProvider = context.read<AuthProvider>();
+      final userId = authProvider.currentUser?.uid;
+
+      if (userId == null) {
+        _showError('Please log in to change settings');
+        return;
+      }
+
+      final updatedSettings = await _userSettingsService
+          .updateNotificationFrequency(userId, frequency);
+
+      if (updatedSettings != null && mounted) {
+        setState(() {
+          _userSettings = updatedSettings;
+          _notificationFrequency = frequency;
+        });
+
+        _showSuccess('Check frequency updated');
+      } else {
+        _showError('Failed to update frequency');
+      }
+    } catch (e) {
+      print('NOTIFICATIONS_SETTINGS: Error updating frequency: $e');
+      _showError('Error updating frequency: ${e.toString()}');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdating = false;
+        });
+      }
+    }
+  }
+
   void _showError(String message) {
     if (!mounted) return;
 
@@ -142,7 +186,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   void _showSuccess(String message) {
     if (!mounted) return;
 
-    // Simple success feedback - you could replace with a more subtle indicator
     showCupertinoDialog(
       context: context,
       builder: (context) => CupertinoAlertDialog(
@@ -175,8 +218,15 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
 
                   const SizedBox(height: 16),
 
-                  // Explanation text
-                  _buildExplanationSection(),
+                  // Frequency picker (only show when notifications enabled)
+                  if (_notificationsEnabled) ...[
+                    NotificationFrequencyPicker(
+                      selectedFrequency: _notificationFrequency,
+                      onChanged: _updateFrequency,
+                      isEnabled: !_isUpdating,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
 
                   const SizedBox(height: 24),
 
@@ -243,51 +293,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
               value: _notificationsEnabled,
               onChanged: _toggleNotifications,
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExplanationSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: CupertinoColors.secondarySystemBackground.resolveFrom(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                CupertinoIcons.info_circle,
-                color: CupertinoColors.systemBlue.resolveFrom(context),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'How it works',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: CupertinoColors.label.resolveFrom(context),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '• Notifications are sent only for rivers in your favorites list\n'
-            '• Alerts trigger when forecasts exceed flood return periods (2-year, 5-year, etc.)\n'
-            '• You\'ll receive notifications in your preferred flow units (CFS or CMS)\n'
-            '• Alerts are checked every 6 hours to avoid spam',
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.4,
-              color: CupertinoColors.secondaryLabel.resolveFrom(context),
-            ),
-          ),
         ],
       ),
     );

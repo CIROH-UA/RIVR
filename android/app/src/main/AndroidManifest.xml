@@ -80,9 +80,11 @@
 
             <!-- Mapbox access token - YOU NEED TO ADD YOUR TOKEN HERE -->
             <!-- Get your token from lib/core/config.dart (mapboxPublicToken) -->
+            <!-- IMPORTANT: Replace YOUR_MAPBOX_TOKEN_HERE with your actual token locally -->
+            <!-- DO NOT commit your real token to git! -->
             <meta-data
                 android:name="com.mapbox.token"
-                android:value="pk.eyJ1IjoiYnl1LWh5ZHJvaW5mb3JtYXRpY3MiLCJhIjoiY21obWtmdzZ5MmF6ODJycHExanptY3IzYyJ9.jMJ7WI9SzJuUDuR1CFLvfw" />
+                android:value="YOUR_MAPBOX_TOKEN_HERE" />
 
             <!-- App launcher entry point -->
             <intent-filter>

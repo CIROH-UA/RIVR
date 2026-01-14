@@ -447,6 +447,29 @@ class UserSettingsService {
     }
   }
 
+  /// Update notification frequency preference
+  Future<UserSettings?> updateNotificationFrequency(
+    String userId,
+    int frequency,
+  ) async {
+    try {
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+
+      final updatedSettings = settings.copyWith(
+        notificationFrequency: frequency,
+      );
+      await saveUserSettings(updatedSettings);
+
+      return updatedSettings;
+    } catch (e) {
+      print('USER_SETTINGS_SERVICE: Error updating notification frequency: $e');
+      throw Exception(
+        'Failed to update notification frequency: ${e.toString()}',
+      );
+    }
+  }
+
   /// Clear cached settings (call on sign out)
   void clearCache() {
     print('USER_SETTINGS_SERVICE: Clearing cache');

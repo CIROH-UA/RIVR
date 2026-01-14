@@ -5,83 +5,117 @@ import {onRequest} from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 
 /**
- * Main scheduled function for checking river flood alerts
- *
- * Frequency:
- * - Development: Every 1 minutes (for easy testing)
- * - Production: Every 6 hours (to avoid spam)
- *
- * What it does:
- * 1. Get all users with notifications enabled
- * 2. For each user, check their favorite rivers
- * 3. Compare forecasts vs return period thresholds (scaled for dev)
- * 4. Send FCM notifications when thresholds exceeded
+ * Scheduled functions for checking river flood alerts at specific times
+ * 
+ * Time slots based on user notification frequency preferences:
+ * - Slot 1 (6am MT): All users (1x, 2x, 3x, 4x daily)
+ * - Slot 2 (12pm MT): 3x and 4x daily users
+ * - Slot 3 (6pm MT): 2x, 3x, and 4x daily users
+ * - Slot 4 (12am MT): 4x daily users only
  */
-export const checkRiverAlerts = onSchedule({
-  // Schedule based on environment
-  schedule: "*/1 * * * *", // Every 1 minutes in development
-  // "0 */6 * * *"  // Every 6 hours in production
 
-  // Set timezone to handle forecasts consistently
-  timeZone: "America/Denver", // Mountain Time (matches NOAA data)
-
-  // Memory and timeout settings
+// Slot 1: 6:00 AM Mountain Time
+export const checkRiverAlerts6am = onSchedule({
+  schedule: "0 6 * * *",
+  timeZone: "America/Denver",
   memory: "1GiB",
-  timeoutSeconds: 540, // 9 minutes max (plenty of time for API calls)
-
+  timeoutSeconds: 540,
 }, async (event) => {
+  await runAlertCheckForSlot(1, event.scheduleTime);
+});
+
+// Slot 2: 12:00 PM Mountain Time
+export const checkRiverAlerts12pm = onSchedule({
+  schedule: "0 12 * * *",
+  timeZone: "America/Denver",
+  memory: "1GiB",
+  timeoutSeconds: 540,
+}, async (event) => {
+  await runAlertCheckForSlot(2, event.scheduleTime);
+});
+
+// Slot 3: 6:00 PM Mountain Time
+export const checkRiverAlerts6pm = onSchedule({
+  schedule: "0 18 * * *",
+  timeZone: "America/Denver",
+  memory: "1GiB",
+  timeoutSeconds: 540,
+}, async (event) => {
+  await runAlertCheckForSlot(3, event.scheduleTime);
+});
+
+// Slot 4: 12:00 AM Mountain Time
+export const checkRiverAlerts12am = onSchedule({
+  schedule: "0 0 * * *",
+  timeZone: "America/Denver",
+  memory: "1GiB",
+  timeoutSeconds: 540,
+}, async (event) => {
+  await runAlertCheckForSlot(4, event.scheduleTime);
+});
+
+/**
+ * Shared logic for running alert checks
+ */
+async function runAlertCheckForSlot(
+  slot: number,
+  scheduleTime: string
+): Promise<void> {
   const startTime = Date.now();
-  logger.info("🔔 Starting river alert check", {
-    scheduledTime: event.scheduleTime,
-    environment: process.env.NODE_ENV || "development",
+  logger.info(`🔔 Starting river alert check for slot ${slot}`, {
+    slot,
+    scheduleTime,
   });
 
   try {
-    // Import notification service (dynamic import to avoid cold start issues)
-    const {checkAllUserAlerts} = await import("./notification-service.js");
-
-    // Run the main notification logic
-    const result = await checkAllUserAlerts();
+    const {checkAlertsForTimeSlot} = await import("./notification-service.js");
+    const result = await checkAlertsForTimeSlot(slot);
 
     const duration = Date.now() - startTime;
-    logger.info("✅ River alert check completed", {
+    logger.info(`✅ Slot ${slot} alert check completed`, {
+      slot,
       duration: `${duration}ms`,
       usersChecked: result.usersChecked,
       alertsSent: result.alertsSent,
       errors: result.errors,
     });
-
-    // onSchedule handlers must return void
-    return;
   } catch (error) {
     const duration = Date.now() - startTime;
-    logger.error("❌ River alert check failed", {
+    logger.error(`❌ Slot ${slot} alert check failed`, {
+      slot,
       error: error instanceof Error ? error.message : String(error),
       duration: `${duration}ms`,
     });
-
-    // Don't throw - let the function complete so it doesn't retry immediately
-    return;
   }
-});
+}
 
 /**
- * Optional: Manual trigger for testing
- * Call this HTTP endpoint to manually trigger a notification check
- * Remove this in production or add authentication
+ * Manual trigger for testing specific time slots
+ * Usage: POST with body {"slot": 1} to test slot 1
  */
 export const triggerAlertCheck = onRequest(async (request, response) => {
   logger.info("🧪 Manual alert check triggered");
 
   try {
-    const {checkAllUserAlerts} = await import("./notification-service.js");
-    const result = await checkAllUserAlerts();
+    const slot = request.body?.slot || 1;
+    
+    if (slot < 1 || slot > 4) {
+      response.status(400).json({
+        success: false,
+        error: "Slot must be between 1 and 4",
+      });
+      return;
+    }
 
-    logger.info("✅ Manual alert check completed", result);
+    const {checkAlertsForTimeSlot} = await import("./notification-service.js");
+    const result = await checkAlertsForTimeSlot(slot);
+
+    logger.info(`✅ Manual check for slot ${slot} completed`, result);
 
     response.json({
       success: true,
-      message: "Alert check completed successfully",
+      slot,
+      message: `Alert check for slot ${slot} completed successfully`,
       ...result,
     });
   } catch (error) {
@@ -95,32 +129,18 @@ export const triggerAlertCheck = onRequest(async (request, response) => {
 });
 
 /**
- * Health check endpoint - useful for monitoring
+ * Health check endpoint
  */
 export const healthCheck = onRequest(async (request, response) => {
-  const timestamp = new Date().toISOString();
-
-  logger.info("🏥 Health check requested");
-
   response.json({
     status: "healthy",
-    timestamp,
-    environment: process.env.NODE_ENV || "development",
-    message: "RivrFlow notification system is running",
-  });
-});
-
-// Simple development info endpoint
-export const devInfo = onRequest(async (request, response) => {
-  if (process.env.NODE_ENV === "production") {
-    response.status(404).send("Not found");
-    return;
-  }
-
-  response.json({
-    environment: "development",
-    scheduleFrequency: "Every 5 minutes",
-    scaleFactor: "Return periods divided by 25 for easy testing",
-    message: "In development mode - notifications trigger more frequently",
+    timestamp: new Date().toISOString(),
+    message: "RIVR notification system is running",
+    schedule: {
+      slot1: "6:00 AM MT (all users)",
+      slot2: "12:00 PM MT (3x, 4x users)",
+      slot3: "6:00 PM MT (2x, 3x, 4x users)",
+      slot4: "12:00 AM MT (4x users)",
+    },
   });
 });
