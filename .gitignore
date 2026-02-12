@@ -58,3 +58,5 @@ functions/.runtimeconfig.json
 ios/build/
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
+# iOS Secrets configuration
+ios/Flutter/Secrets.xcconfig

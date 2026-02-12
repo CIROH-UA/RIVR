@@ -27,7 +27,7 @@ plugins {
 }
 
 android {
-    namespace = "com.byuhydroinformatics.rivr"
+    namespace = "com.hydromap.rivr"
     compileSdk = 36 // Updated for latest Firebase and notification support
     ndkVersion = "27.0.12077973"
 
@@ -44,7 +44,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.byuhydroinformatics.rivr"
+        applicationId = "com.hydromap.rivr"
         minSdk = 30 // Raised for better performance and modern features
         targetSdk = 35 // Updated for latest Android features and Firebase compatibility
         versionCode = flutter.versionCode

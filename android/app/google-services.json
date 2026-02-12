@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:359266072243:android:f6fce7b488390e032ae2c6",
+        "mobilesdk_app_id": "1:359266072243:android:e3f5c9d480c0b38c2ae2c6",
         "android_client_info": {
-          "package_name": "com.byuhydroinformatics.rivr"
+          "package_name": "com.hydromap.rivr"
         }
       },
       "oauth_client": [],

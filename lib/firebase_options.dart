@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDmxLSNpZNeKl4jawWdfIiYsn_HiajW8A8',
-    appId: '1:359266072243:android:f6fce7b488390e032ae2c6',
+    appId: '1:359266072243:android:e3f5c9d480c0b38c2ae2c6',
     messagingSenderId: '359266072243',
     projectId: 'ciroh-rivr-app',
     storageBucket: 'ciroh-rivr-app.firebasestorage.app',
@@ -59,11 +59,11 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyBbUH_HIVycuNtXKl3KL5HhzNzPGjkP7pI',
-    appId: '1:359266072243:ios:580364ea6268ade02ae2c6',
+    appId: '1:359266072243:ios:a3b5fd45e342c5a12ae2c6',
     messagingSenderId: '359266072243',
     projectId: 'ciroh-rivr-app',
     storageBucket: 'ciroh-rivr-app.firebasestorage.app',
-    iosBundleId: 'com.byuhydroinformatics.rivr',
+    iosBundleId: 'com.hydromap.rivr',
   );
 
 }

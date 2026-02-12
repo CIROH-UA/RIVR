@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.byuhydroinformatics.rivr</string>
+	<string>com.hydromap.rivr</string>
 	<key>PROJECT_ID</key>
 	<string>ciroh-rivr-app</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:359266072243:ios:580364ea6268ade02ae2c6</string>
+	<string>1:359266072243:ios:a3b5fd45e342c5a12ae2c6</string>
 </dict>
 </plist>

@@ -1,4 +1,4 @@
-package com.byuhydroinformatics.rivr
+package com.hydromap.rivr
 
 import io.flutter.embedding.android.FlutterActivity
 

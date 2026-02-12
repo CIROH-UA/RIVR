@@ -34,7 +34,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MBXAccessToken</key>
-	<string>pk.eyJ1IjoiYnl1LWh5ZHJvaW5mb3JtYXRpY3MiLCJhIjoiY21obWtmdzZ5MmF6ODJycHExanptY3IzYyJ9.jMJ7WI9SzJuUDuR1CFLvfw</string>
+	<string>$(MAPBOX_ACCESS_TOKEN)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to take photos for custom backgrounds.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>This app needs access to your location to show your position on the map.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -43,8 +45,6 @@
 	<string>This app saves exported forecast charts to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs access to photo library to save exported charts.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>This app needs camera access to take photos for custom backgrounds.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
