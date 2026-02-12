@@ -78,13 +78,11 @@
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
-            <!-- Mapbox access token - YOU NEED TO ADD YOUR TOKEN HERE -->
-            <!-- Get your token from lib/core/config.dart (mapboxPublicToken) -->
-            <!-- IMPORTANT: Replace YOUR_MAPBOX_TOKEN_HERE with your actual token locally -->
-            <!-- DO NOT commit your real token to git! -->
+            <!-- Mapbox access token - Injected from android/local.properties -->
+            <!-- Add your token to android/local.properties: mapbox.token=pk.xxx... -->
             <meta-data
                 android:name="com.mapbox.token"
-                android:value="YOUR_MAPBOX_TOKEN_HERE" />
+                android:value="${MAPBOX_TOKEN}" />
 
             <!-- App launcher entry point -->
             <intent-filter>

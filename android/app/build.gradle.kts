@@ -10,6 +10,13 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// Load local.properties for environment-specific values like Mapbox token
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     // Firebase Configuration
@@ -42,9 +49,12 @@ android {
         targetSdk = 35 // Updated for latest Android features and Firebase compatibility
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        
+
         // Enable multidex support for Firebase and other large dependencies
         multiDexEnabled = true
+
+        // Inject Mapbox token from local.properties into AndroidManifest.xml
+        manifestPlaceholders["MAPBOX_TOKEN"] = localProperties.getProperty("mapbox.token", "YOUR_MAPBOX_TOKEN_HERE")
     }
 
     // Signing configuration for release builds (only if key.properties exists)
