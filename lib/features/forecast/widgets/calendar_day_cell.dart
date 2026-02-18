@@ -65,7 +65,7 @@ class _CalendarDayCellState extends State<CalendarDayCell> {
               ? []
               : [
                   BoxShadow(
-                    color: CupertinoColors.systemGrey.withOpacity(0.1),
+                    color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
                     blurRadius: 2,
                     offset: const Offset(0, 1),
                   ),
@@ -107,7 +107,7 @@ class _CalendarDayCellState extends State<CalendarDayCell> {
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w500,
-              color: _getTextColor(categoryColor).withOpacity(0.9),
+              color: _getTextColor(categoryColor).withValues(alpha: 0.9),
             ),
             textAlign: TextAlign.center,
             maxLines: 1,
@@ -162,27 +162,27 @@ class _CalendarDayCellState extends State<CalendarDayCell> {
   Color _getCellBackgroundColor(Color categoryColor) {
     if (!widget.isCurrentMonth) {
       // Muted color for days outside current month
-      return categoryColor.withOpacity(0.5);
+      return categoryColor.withValues(alpha: 0.5);
     }
 
     if (_isPressed) {
       // Slightly darker when pressed
-      return categoryColor.withOpacity(0.4);
+      return categoryColor.withValues(alpha: 0.4);
     }
 
     if (widget.isToday) {
       // More vibrant for today
-      return categoryColor.withOpacity(1.0);
+      return categoryColor.withValues(alpha: 1.0);
     }
 
     // Normal state
-    return categoryColor.withOpacity(0.9);
+    return categoryColor.withValues(alpha: 0.9);
   }
 
   /// Get the border for the cell
   Border? _getCellBorder() {
     if (widget.isToday) {
-      return Border.all(color: CupertinoColors.black.withOpacity(.4), width: 2);
+      return Border.all(color: CupertinoColors.black.withValues(alpha: .4), width: 2);
     }
 
     if (!widget.isCurrentMonth) {

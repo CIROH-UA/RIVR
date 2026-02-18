@@ -27,6 +27,7 @@ class UserSettingsService implements IUserSettingsService {
   String? _cachedUserId;
 
   /// Get UserSettings for a user
+  @override
   Future<UserSettings?> getUserSettings(String userId) async {
     try {
       AppLogger.debug('UserSettingsService', 'Getting settings for user: $userId');
@@ -70,6 +71,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Save UserSettings to Firestore
+  @override
   Future<void> saveUserSettings(UserSettings settings) async {
     try {
       AppLogger.debug(
@@ -105,6 +107,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Update specific settings fields
+  @override
   Future<void> updateUserSettings(
     String userId,
     Map<String, dynamic> updates,
@@ -150,6 +153,7 @@ class UserSettingsService implements IUserSettingsService {
   // NEW: Custom Background Management Methods
 
   /// Add custom background image to user's collection
+  @override
   Future<UserSettings?> addCustomBackgroundImage(
     String userId,
     String imagePath,
@@ -176,6 +180,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Remove custom background image from user's collection
+  @override
   Future<UserSettings?> removeCustomBackgroundImage(
     String userId,
     String imagePath,
@@ -205,6 +210,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Get user's custom background images
+  @override
   Future<List<String>> getUserCustomBackgrounds(String userId) async {
     try {
       final settings = await getUserSettings(userId);
@@ -216,6 +222,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Validate custom background images and remove broken references
+  @override
   Future<UserSettings?> validateCustomBackgrounds(String userId) async {
     try {
       AppLogger.debug(
@@ -266,6 +273,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Clear all custom background images for user
+  @override
   Future<UserSettings?> clearAllCustomBackgrounds(String userId) async {
     try {
       AppLogger.debug(
@@ -296,6 +304,7 @@ class UserSettingsService implements IUserSettingsService {
   // END: Custom Background Management Methods
 
   /// Create default settings for a new user
+  @override
   Future<UserSettings> createDefaultSettings({
     required String userId,
     required String email,
@@ -336,6 +345,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Sync settings after login (updates lastLoginDate)
+  @override
   Future<UserSettings?> syncAfterLogin(String userId) async {
     try {
       AppLogger.debug(
@@ -374,6 +384,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Add favorite reach
+  @override
   Future<UserSettings?> addFavoriteReach(String userId, String reachId) async {
     try {
       final settings = await getUserSettings(userId);
@@ -390,6 +401,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Remove favorite reach
+  @override
   Future<UserSettings?> removeFavoriteReach(
     String userId,
     String reachId,
@@ -409,6 +421,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Update theme preference
+  @override
   Future<UserSettings?> updateTheme(String userId, bool enableDarkMode) async {
     try {
       final settings = await getUserSettings(userId);
@@ -425,6 +438,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Update flow unit preference
+  @override
   Future<UserSettings?> updateFlowUnit(String userId, FlowUnit flowUnit) async {
     try {
       final settings = await getUserSettings(userId);
@@ -444,6 +458,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Update notification preference
+  @override
   Future<UserSettings?> updateNotifications(
     String userId,
     bool enableNotifications,
@@ -465,6 +480,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Update notification frequency preference
+  @override
   Future<UserSettings?> updateNotificationFrequency(
     String userId,
     int frequency,
@@ -488,6 +504,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Clear cached settings (call on sign out)
+  @override
   void clearCache() {
     AppLogger.debug('UserSettingsService', 'Clearing cache');
     _cachedSettings = null;
@@ -501,6 +518,7 @@ class UserSettingsService implements IUserSettingsService {
   UserSettings? get cachedSettings => _cachedSettings;
 
   /// Check if user has settings
+  @override
   Future<bool> userHasSettings(String userId) async {
     try {
       final doc = await _firestore
@@ -528,6 +546,7 @@ class UserSettingsService implements IUserSettingsService {
   }
 
   /// Public method to manually sync flow unit preference
+  @override
   Future<void> syncFlowUnitPreference(String userId) async {
     try {
       final settings = await getUserSettings(userId);

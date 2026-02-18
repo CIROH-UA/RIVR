@@ -132,7 +132,7 @@ class SlideActionButtons extends StatelessWidget {
             borderRadius: borderRadius,
             boxShadow: [
               BoxShadow(
-                color: CupertinoColors.black.withOpacity(0.1),
+                color: CupertinoColors.black.withValues(alpha: 0.1),
                 blurRadius: 2,
                 offset: const Offset(0, 1),
               ),

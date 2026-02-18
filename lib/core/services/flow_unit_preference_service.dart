@@ -17,9 +17,11 @@ class FlowUnitPreferenceService implements IFlowUnitPreferenceService {
   static const double _cfsToCms = 1.0 / _cmsToFs; // 1 CFS = 0.0283168 CMS
 
   /// Get the current flow unit preference
+  @override
   String get currentFlowUnit => _currentFlowUnit;
 
   /// Set the current flow unit preference
+  @override
   void setFlowUnit(String unit) {
     if (unit == 'CFS' || unit == 'CMS') {
       _currentFlowUnit = unit;
@@ -32,6 +34,7 @@ class FlowUnitPreferenceService implements IFlowUnitPreferenceService {
 
   /// FIXED: Made public to enable double conversion prevention
   /// Normalize unit names to handle different representations
+  @override
   String normalizeUnit(String unit) {
     switch (unit.toLowerCase()) {
       case 'ft³/s':
@@ -47,6 +50,7 @@ class FlowUnitPreferenceService implements IFlowUnitPreferenceService {
 
   /// Convert flow value between units
   /// FIXED: Uses public normalizeUnit method
+  @override
   double convertFlow(double value, String fromUnit, String toUnit) {
     // Normalize unit names first
     final normalizedFromUnit = normalizeUnit(fromUnit);
@@ -81,25 +85,31 @@ class FlowUnitPreferenceService implements IFlowUnitPreferenceService {
   }
 
   /// Convert flow value to the current preferred unit
+  @override
   double convertToPreferredUnit(double value, String fromUnit) {
     return convertFlow(value, fromUnit, _currentFlowUnit);
   }
 
   /// Convert flow value from the current preferred unit to target unit
+  @override
   double convertFromPreferredUnit(double value, String toUnit) {
     return convertFlow(value, _currentFlowUnit, toUnit);
   }
 
   /// Get display unit for UI elements
+  @override
   String getDisplayUnit() => _currentFlowUnit;
 
   /// Check if current unit is CFS
+  @override
   bool get isCFS => _currentFlowUnit == 'CFS';
 
   /// Check if current unit is CMS
+  @override
   bool get isCMS => _currentFlowUnit == 'CMS';
 
   /// Reset to default (CFS)
+  @override
   void resetToDefault() {
     setFlowUnit('CFS');
   }

@@ -260,7 +260,7 @@ class _LongRangeCalendarState extends State<LongRangeCalendar> {
       decoration: BoxDecoration(
         color: calendarDay.isCurrentMonth
             ? CupertinoColors.systemGrey6.resolveFrom(context)
-            : CupertinoColors.systemGrey6.resolveFrom(context).withOpacity(0.5),
+            : CupertinoColors.systemGrey6.resolveFrom(context).withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Center(
@@ -273,7 +273,7 @@ class _LongRangeCalendarState extends State<LongRangeCalendar> {
                 ? CupertinoColors.tertiaryLabel.resolveFrom(context)
                 : CupertinoColors.tertiaryLabel
                       .resolveFrom(context)
-                      .withOpacity(0.5),
+                      .withValues(alpha: 0.5),
           ),
         ),
       ),

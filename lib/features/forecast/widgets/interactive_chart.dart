@@ -195,7 +195,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
       maximumZoomLevel: 0.01,
       selectionRectBorderWidth: 2,
       selectionRectBorderColor: CupertinoColors.systemBlue,
-      selectionRectColor: CupertinoColors.systemBlue.withOpacity(0.2),
+      selectionRectColor: CupertinoColors.systemBlue.withValues(alpha: 0.2),
     );
 
     // Enhanced tooltip behavior
@@ -513,7 +513,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
           selectionBehavior: SelectionBehavior(
             enable: true,
             selectedColor: CupertinoColors.systemOrange,
-            unselectedColor: CupertinoColors.systemBlue.withOpacity(0.5),
+            unselectedColor: CupertinoColors.systemBlue.withValues(alpha: 0.5),
             selectedBorderColor: CupertinoColors.systemRed,
             selectedBorderWidth: 2,
             toggleSelection: true,
@@ -530,9 +530,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
     // Extract member number from memberName (e.g., "member_01" -> 1)
     final memberNumber =
         int.tryParse(memberName.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-    return _ensembleColors[memberNumber % _ensembleColors.length].withOpacity(
-      0.7,
-    );
+    return _ensembleColors[memberNumber % _ensembleColors.length].withValues(alpha: 0.7);
   }
 
   Widget _buildEnsembleLegend() {
@@ -560,7 +558,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
           ),
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.systemGrey.withOpacity(0.2),
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.2),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),

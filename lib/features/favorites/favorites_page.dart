@@ -127,7 +127,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
             borderRadius: BorderRadius.circular(28),
             boxShadow: [
               BoxShadow(
-                color: CupertinoColors.black.withOpacity(0.2),
+                color: CupertinoColors.black.withValues(alpha: 0.2),
                 blurRadius: 8,
                 offset: const Offset(0, 4),
               ),
@@ -182,7 +182,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
-                        color: CupertinoColors.systemBlue.withOpacity(0.1),
+                        color: CupertinoColors.systemBlue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(60),
                       ),
                       child: const Icon(
@@ -381,10 +381,10 @@ class _FavoritesPageState extends State<FavoritesPage> {
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemRed.withOpacity(0.1),
+        color: CupertinoColors.systemRed.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: CupertinoColors.systemRed.withOpacity(0.3),
+          color: CupertinoColors.systemRed.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -469,7 +469,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
           Icon(
             CupertinoIcons.search,
             size: 48,
-            color: CupertinoColors.systemGrey.withOpacity(0.5),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
@@ -508,7 +508,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               boxShadow: [
                 // More pronounced shadow during drag
                 BoxShadow(
-                  color: CupertinoColors.black.withOpacity(0.3),
+                  color: CupertinoColors.black.withValues(alpha: 0.3),
                   blurRadius: 12,
                   offset: const Offset(0, 6),
                 ),
@@ -533,6 +533,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         final flowUnit = value == 'CMS' ? FlowUnit.cms : FlowUnit.cfs;
 
         await GetIt.I<IUserSettingsService>().updateFlowUnit(userId, flowUnit);
+        if (!mounted) return;
         GetIt.I<IFlowUnitPreferenceService>().setFlowUnit(value);
 
         // Clear unit-dependent caches for BOTH providers
@@ -629,7 +630,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Settings Menu',
-      barrierColor: CupertinoColors.black.withOpacity(0.3),
+      barrierColor: CupertinoColors.black.withValues(alpha: 0.3),
       transitionDuration: const Duration(milliseconds: 150),
       pageBuilder: (context, animation, secondaryAnimation) {
         return FadeTransition(opacity: animation, child: _buildDropdownMenu());
@@ -651,7 +652,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
-                    color: CupertinoColors.black.withOpacity(0.3),
+                    color: CupertinoColors.black.withValues(alpha: 0.3),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -844,8 +845,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
       height: 1,
       color:
           color ??
-          CupertinoColors.separator.withOpacity(
-            0.3,
+          CupertinoColors.separator.withValues(
+            alpha: 0.3,
           ), // Use provided color or default
       margin: EdgeInsets.symmetric(horizontal: 16),
     );

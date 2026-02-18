@@ -90,10 +90,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         width: 80,
                         height: 80,
                         decoration: BoxDecoration(
-                          color: CupertinoColors.systemGreen.withOpacity(0.1),
+                          color: CupertinoColors.systemGreen.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(40),
                           border: Border.all(
-                            color: CupertinoColors.systemGreen.withOpacity(0.3),
+                            color: CupertinoColors.systemGreen.withValues(alpha: 0.3),
                             width: 2,
                           ),
                         ),
@@ -168,10 +168,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: primaryColor.withOpacity(0.1),
+                        color: primaryColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(40),
                         border: Border.all(
-                          color: primaryColor.withOpacity(0.3),
+                          color: primaryColor.withValues(alpha: 0.3),
                           width: 2,
                         ),
                       ),

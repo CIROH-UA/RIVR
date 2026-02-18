@@ -1,7 +1,6 @@
 // lib/features/forecast/pages/short_range_detail_page.dart
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/forecast_detail_template.dart';
@@ -128,10 +127,10 @@ class _ShortRangeDetailPageState extends State<ShortRangeDetailPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemBlue.withOpacity(0.1),
+        color: CupertinoColors.systemBlue.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: CupertinoColors.systemBlue.withOpacity(0.2),
+          color: CupertinoColors.systemBlue.withValues(alpha: 0.2),
           width: 1,
         ),
       ),

@@ -216,6 +216,7 @@ class _HydrographPageState extends State<HydrographPage> {
         context: context,
       );
     } catch (e) {
+      if (!mounted) return;
       ExportFunctionality.showErrorMessage(context, e.toString());
     }
   }
@@ -244,6 +245,7 @@ class _HydrographPageState extends State<HydrographPage> {
         context: context,
       );
     } catch (e) {
+      if (!mounted) return;
       ExportFunctionality.showErrorMessage(context, e.toString());
     }
   }
@@ -276,6 +278,7 @@ class _HydrographPageState extends State<HydrographPage> {
         await _exportSingleSeriesAsCSV(reach, forecast);
       }
     } catch (e) {
+      if (!mounted) return;
       ExportFunctionality.showErrorMessage(context, e.toString());
     }
   }
@@ -363,6 +366,7 @@ class _HydrographPageState extends State<HydrographPage> {
       );
     } catch (e) {
       AppLogger.error('HydrographPage', 'Error in _exportSingleSeriesAsCSV', e);
+      if (!mounted) return;
       ExportFunctionality.showErrorMessage(
         context,
         'Failed to export data: ${e.toString()}',
@@ -425,6 +429,7 @@ class _HydrographPageState extends State<HydrographPage> {
       );
     } catch (e) {
       AppLogger.error('HydrographPage', 'Error in _exportEnsembleDataAsCSV', e);
+      if (!mounted) return;
       ExportFunctionality.showErrorMessage(
         context,
         'Failed to export ensemble data: ${e.toString()}',

@@ -86,7 +86,7 @@ class _ImageCategoryGridState extends State<ImageCategoryGrid> {
           Icon(
             CupertinoIcons.photo_on_rectangle,
             size: 48,
-            color: CupertinoColors.systemGrey.withOpacity(0.5),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
@@ -187,14 +187,14 @@ class _ImageTileState extends State<ImageTile>
         border: widget.isSelected
             ? Border.all(color: CupertinoColors.activeBlue, width: 3)
             : Border.all(
-                color: CupertinoColors.separator.withOpacity(0.3),
+                color: CupertinoColors.separator.withValues(alpha: 0.3),
                 width: 1,
               ),
         boxShadow: [
           BoxShadow(
             color: widget.isSelected
-                ? CupertinoColors.activeBlue.withOpacity(0.2)
-                : CupertinoColors.systemGrey.withOpacity(0.15),
+                ? CupertinoColors.activeBlue.withValues(alpha: 0.2)
+                : CupertinoColors.systemGrey.withValues(alpha: 0.15),
             blurRadius: widget.isSelected ? 12 : 6,
             offset: const Offset(0, 2),
           ),
@@ -271,7 +271,7 @@ class _ImageTileState extends State<ImageTile>
   Widget _buildSelectionOverlay() {
     return Container(
       decoration: BoxDecoration(
-        color: CupertinoColors.activeBlue.withOpacity(0.25),
+        color: CupertinoColors.activeBlue.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Center(
@@ -296,8 +296,8 @@ class _ImageTileState extends State<ImageTile>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              CupertinoColors.black.withOpacity(0.0),
-              CupertinoColors.black.withOpacity(0.2),
+              CupertinoColors.black.withValues(alpha: 0.0),
+              CupertinoColors.black.withValues(alpha: 0.2),
             ],
           ),
           borderRadius: const BorderRadius.only(
@@ -312,7 +312,7 @@ class _ImageTileState extends State<ImageTile>
   Widget _buildDisabledOverlay() {
     return Container(
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey.withOpacity(0.6),
+        color: CupertinoColors.systemGrey.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(12),
       ),
     );

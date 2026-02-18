@@ -119,7 +119,7 @@ class ForecastCategoryGrid extends StatelessWidget {
 
     final gradientColors = isAvailable
         ? baseGradientColors
-              .map((color) => color.withOpacity(gradientOpacity))
+              .map((color) => color.withValues(alpha: gradientOpacity))
               .toList()
         : _getDisabledColors();
 
@@ -141,7 +141,7 @@ class ForecastCategoryGrid extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: CupertinoColors.systemGrey.withOpacity(0.4),
+                color: CupertinoColors.systemGrey.withValues(alpha: 0.4),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -157,7 +157,7 @@ class ForecastCategoryGrid extends StatelessWidget {
                   ),
                   child: CustomPaint(
                     painter: _PatternPainter(
-                      color: CupertinoColors.white.withOpacity(0.1),
+                      color: CupertinoColors.white.withValues(alpha: 0.1),
                     ),
                   ),
                 ),
@@ -172,7 +172,7 @@ class ForecastCategoryGrid extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: CupertinoColors.white.withOpacity(0.2),
+                        color: CupertinoColors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
@@ -206,7 +206,7 @@ class ForecastCategoryGrid extends StatelessWidget {
                           Text(
                             category.timeRange,
                             style: TextStyle(
-                              color: CupertinoColors.white.withOpacity(0.8),
+                              color: CupertinoColors.white.withValues(alpha: 0.8),
                               fontSize: 14,
                               fontWeight: FontWeight.w400,
                             ),
@@ -222,7 +222,7 @@ class ForecastCategoryGrid extends StatelessWidget {
                               category.description,
                             ),
                             style: TextStyle(
-                              color: CupertinoColors.white.withOpacity(0.7),
+                              color: CupertinoColors.white.withValues(alpha: 0.7),
                               fontSize: 12,
                               height: 1.2,
                             ),
@@ -256,8 +256,8 @@ class ForecastCategoryGrid extends StatelessWidget {
                             width: 12,
                             height: 12,
                             decoration: BoxDecoration(
-                              color: CupertinoColors.systemGrey6.withOpacity(
-                                0.9,
+                              color: CupertinoColors.systemGrey6.withValues(
+                                alpha: 0.9,
                               ),
                               shape: BoxShape.circle,
                             ),
@@ -269,7 +269,7 @@ class ForecastCategoryGrid extends StatelessWidget {
                         if (isAvailable && !isLoading)
                           Icon(
                             CupertinoIcons.chevron_right,
-                            color: CupertinoColors.white.withOpacity(0.6),
+                            color: CupertinoColors.white.withValues(alpha: 0.6),
                             size: 18,
                           ),
                       ],

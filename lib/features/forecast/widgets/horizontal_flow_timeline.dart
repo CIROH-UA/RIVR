@@ -218,7 +218,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
         ),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.1),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -282,7 +282,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: categoryColor.withOpacity(0.15),
+                color: categoryColor.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -607,7 +607,7 @@ class FlowWavePainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final fillPaint = Paint()
-      ..color = CupertinoColors.systemBlue.resolveFrom(context).withOpacity(0.1)
+      ..color = CupertinoColors.systemBlue.resolveFrom(context).withValues(alpha: 0.1)
       ..style = PaintingStyle.fill;
 
     // FIXED: Calculate scaling - data is already in correct units from API service

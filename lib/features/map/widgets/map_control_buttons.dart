@@ -63,11 +63,11 @@ class MapControlButtons extends StatelessWidget {
       width: 44,
       height: 44,
       decoration: BoxDecoration(
-        color: CupertinoColors.white.withOpacity(0.95),
+        color: CupertinoColors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.3),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -93,11 +93,11 @@ class MapControlButtons extends StatelessWidget {
       decoration: BoxDecoration(
         color: isEnabled
             ? CupertinoColors.systemBlue
-            : CupertinoColors.white.withOpacity(0.95),
+            : CupertinoColors.white.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.3),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),

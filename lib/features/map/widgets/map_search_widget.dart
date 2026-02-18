@@ -22,11 +22,11 @@ class CompactMapSearchBar extends StatelessWidget {
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: CupertinoColors.systemBackground.withOpacity(0.95),
+          color: CupertinoColors.systemBackground.withValues(alpha: 0.95),
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.systemGrey.withOpacity(0.2),
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.2),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -197,6 +197,7 @@ class _MapSearchModalState extends State<MapSearchModal> {
 
     // Notify parent and close
     widget.onPlaceSelected?.call(place);
+    if (!mounted) return;
     Navigator.of(context).pop();
   }
 
@@ -409,7 +410,7 @@ class _MapSearchModalState extends State<MapSearchModal> {
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: CupertinoColors.separator.withOpacity(0.5),
+            color: CupertinoColors.separator.withValues(alpha: 0.5),
             width: 0.5,
           ),
         ),
@@ -421,7 +422,7 @@ class _MapSearchModalState extends State<MapSearchModal> {
           decoration: BoxDecoration(
             color: isRecent
                 ? CupertinoColors.systemGrey5
-                : CupertinoColors.systemBlue.withOpacity(0.1),
+                : CupertinoColors.systemBlue.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(

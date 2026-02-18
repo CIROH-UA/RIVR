@@ -21,6 +21,7 @@ class ReachCacheService implements IReachCacheService {
   static const String _keyPrefix = 'reach_cache_';
 
   /// Initialize the cache service
+  @override
   Future<void> initialize() async {
     try {
       _prefs ??= await SharedPreferences.getInstance();
@@ -32,6 +33,7 @@ class ReachCacheService implements IReachCacheService {
 
   /// Get cached ReachData by reach ID
   /// Returns null if not cached or cache is stale
+  @override
   Future<ReachData?> get(String reachId) async {
     try {
       await _ensureInitialized();
@@ -73,6 +75,7 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Store ReachData in cache
+  @override
   Future<void> store(ReachData reachData) async {
     try {
       await _ensureInitialized();
@@ -92,6 +95,7 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Clear specific reach from cache
+  @override
   Future<void> clearReach(String reachId) async {
     try {
       await _ensureInitialized();
@@ -105,6 +109,7 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Clear all cached reaches
+  @override
   Future<void> clear() async {
     try {
       await _ensureInitialized();
@@ -123,12 +128,14 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Check if reach is cached and valid
+  @override
   Future<bool> isCached(String reachId) async {
     final cached = await get(reachId);
     return cached != null;
   }
 
   /// Get cache statistics for debugging
+  @override
   Future<Map<String, dynamic>> getCacheStats() async {
     try {
       await _ensureInitialized();
@@ -185,6 +192,7 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Get cache effectiveness stats
+  @override
   Map<String, dynamic> getCacheEffectiveness() {
     final total = _cacheHits + _cacheMisses;
     final hitRate = total > 0 ? (_cacheHits / total) * 100 : 0.0;
@@ -203,12 +211,14 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Force refresh a reach (clear cache and require fresh API call)
+  @override
   Future<void> forceRefresh(String reachId) async {
     AppLogger.debug('ReachCacheService', 'Force refresh requested for reach: $reachId');
     await clearReach(reachId);
   }
 
   /// Clean up stale cache entries
+  @override
   Future<int> cleanupStaleEntries() async {
     try {
       await _ensureInitialized();
@@ -255,5 +265,6 @@ class ReachCacheService implements IReachCacheService {
   }
 
   /// Check if cache service is ready
+  @override
   bool get isReady => _prefs != null;
 }

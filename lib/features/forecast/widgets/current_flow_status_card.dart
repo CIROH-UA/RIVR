@@ -109,7 +109,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: CupertinoColors.systemGrey.withOpacity(0.3),
+                        color: CupertinoColors.systemGrey.withValues(alpha: 0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 4),
                       ),
@@ -773,7 +773,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         ),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.3),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -811,7 +811,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
         ),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.3),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),

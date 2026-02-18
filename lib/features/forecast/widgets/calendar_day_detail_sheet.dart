@@ -141,9 +141,9 @@ class _CalendarDayDetailSheetState extends State<CalendarDayDetailSheet> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: categoryColor.withOpacity(0.15),
+        color: categoryColor.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: categoryColor.withOpacity(0.4), width: 1),
+        border: Border.all(color: categoryColor.withValues(alpha: 0.4), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,11 +268,11 @@ class _CalendarDayDetailSheetState extends State<CalendarDayDetailSheet> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isCurrentHour
-            ? categoryColor.withOpacity(0.2)
+            ? categoryColor.withValues(alpha: 0.2)
             : CupertinoColors.tertiarySystemBackground.resolveFrom(context),
         borderRadius: BorderRadius.circular(8),
         border: isCurrentHour
-            ? Border.all(color: categoryColor.withOpacity(0.8), width: 1.5)
+            ? Border.all(color: categoryColor.withValues(alpha: 0.8), width: 1.5)
             : Border.all(
                 color: CupertinoColors.separator.resolveFrom(context),
                 width: 0.5,

@@ -91,11 +91,11 @@ class FloatingBackButton extends StatelessWidget {
                 ? BoxDecoration(
                     color:
                         backgroundColor ??
-                        CupertinoColors.white.withOpacity(0.9),
+                        CupertinoColors.white.withValues(alpha: 0.9),
                     borderRadius: BorderRadius.circular((size ?? 40) / 2),
                     boxShadow: [
                       BoxShadow(
-                        color: CupertinoColors.black.withOpacity(0.1),
+                        color: CupertinoColors.black.withValues(alpha: 0.1),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),

@@ -45,7 +45,7 @@ class ExportFunctionality {
         imageBytes,
         reachName,
         forecastType,
-        context,
+        context, // ignore: use_build_context_synchronously
       );
 
       // Save to temporary file
@@ -60,10 +60,12 @@ class ExportFunctionality {
       await file.writeAsBytes(enhancedImageBytes);
 
       // Share the file
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: '$reachName Flow Forecast - ${_formatForecastType(forecastType)}',
-        subject: 'Flow Forecast Chart',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: '$reachName Flow Forecast - ${_formatForecastType(forecastType)}',
+          subject: 'Flow Forecast Chart',
+        ),
       );
 
       HapticFeedback.lightImpact();
@@ -92,7 +94,7 @@ class ExportFunctionality {
         imageBytes,
         reachName,
         forecastType,
-        context,
+        context, // ignore: use_build_context_synchronously
       );
 
       // Save to temporary file first
@@ -244,11 +246,13 @@ class ExportFunctionality {
       await file.writeAsString(csvString);
 
       // Share the CSV file
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text:
-            '$reachName Flow Forecast Data - ${_formatForecastType(forecastType)}',
-        subject: 'Flow Forecast Data (CSV)',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text:
+              '$reachName Flow Forecast Data - ${_formatForecastType(forecastType)}',
+          subject: 'Flow Forecast Data (CSV)',
+        ),
       );
 
       HapticFeedback.lightImpact();

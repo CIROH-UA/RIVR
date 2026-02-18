@@ -35,17 +35,21 @@ class AuthService implements IAuthService {
   static const String _biometricEmailKey = 'biometric_email';
 
   /// Get current Firebase user
+  @override
   User? get currentUser => _firebaseAuth.currentUser;
 
   /// Stream of authentication state changes
+  @override
   Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
 
   /// Check if user is currently signed in
+  @override
   bool get isSignedIn => currentUser != null;
 
   // MARK: - Email/Password Authentication
 
   /// Sign in with email and password
+  @override
   Future<AuthResult> signInWithEmailAndPassword({
     required String email,
     required String password,
@@ -79,6 +83,7 @@ class AuthService implements IAuthService {
   }
 
   /// Register with email and password
+  @override
   Future<AuthResult> registerWithEmailAndPassword({
     required String email,
     required String password,
@@ -171,6 +176,7 @@ class AuthService implements IAuthService {
   }
 
   /// Send password reset email
+  @override
   Future<AuthResult> sendPasswordResetEmail({required String email}) async {
     try {
       AppLogger.debug('AuthService', 'Sending password reset email to: $email');
@@ -199,6 +205,7 @@ class AuthService implements IAuthService {
   }
 
   /// Sign out current user
+  @override
   Future<AuthResult> signOut() async {
     try {
       AppLogger.debug('AuthService', 'Signing out current user');
@@ -225,6 +232,7 @@ class AuthService implements IAuthService {
   // MARK: - Biometric Authentication
 
   /// Check if device supports biometric authentication
+  @override
   Future<bool> isBiometricAvailable() async {
     try {
       final canCheckBiometrics = await _localAuth.canCheckBiometrics;
@@ -237,6 +245,7 @@ class AuthService implements IAuthService {
   }
 
   /// Check if user has enabled biometric login
+  @override
   Future<bool> isBiometricEnabled() async {
     try {
       final value = await _secureStorage.read(key: _biometricEnabledKey);
@@ -248,6 +257,7 @@ class AuthService implements IAuthService {
   }
 
   /// Enable biometric login for current user
+  @override
   Future<AuthResult> enableBiometricLogin() async {
     try {
       if (currentUser == null) {
@@ -289,6 +299,7 @@ class AuthService implements IAuthService {
   }
 
   /// Disable biometric login
+  @override
   Future<AuthResult> disableBiometricLogin() async {
     try {
       await _clearBiometricCredentials();
@@ -303,6 +314,7 @@ class AuthService implements IAuthService {
   }
 
   /// Sign in using biometric authentication
+  @override
   Future<AuthResult> signInWithBiometrics() async {
     try {
       if (!await isBiometricAvailable()) {
@@ -380,6 +392,7 @@ class AuthService implements IAuthService {
   // MARK: - User Profile Management
 
   /// Update user display name
+  @override
   Future<AuthResult> updateDisplayName(String displayName) async {
     try {
       if (currentUser == null) {
@@ -398,6 +411,7 @@ class AuthService implements IAuthService {
   }
 
   /// Reload current user data
+  @override
   Future<void> reloadUser() async {
     try {
       await currentUser?.reload();

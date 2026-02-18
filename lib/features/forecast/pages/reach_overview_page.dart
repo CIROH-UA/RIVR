@@ -284,7 +284,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            CupertinoColors.systemBlue.resolveFrom(context).withOpacity(0.1),
+            CupertinoColors.systemBlue.resolveFrom(context).withValues(alpha: 0.1),
             CupertinoColors.systemBackground.resolveFrom(context),
           ],
         ),

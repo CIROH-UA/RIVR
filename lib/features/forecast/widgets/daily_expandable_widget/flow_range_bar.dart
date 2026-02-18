@@ -110,7 +110,7 @@ class FlowRangeBar extends StatelessWidget {
         // Add subtle shadow for depth
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.black.withOpacity(0.1),
+            color: CupertinoColors.black.withValues(alpha: 0.1),
             blurRadius: 2,
             offset: const Offset(0, 1),
           ),
@@ -260,7 +260,7 @@ class DetailedFlowRangeBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(size / 2),
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.black.withOpacity(0.3),
+              color: CupertinoColors.black.withValues(alpha: 0.3),
               blurRadius: 1,
             ),
           ],

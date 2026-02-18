@@ -197,7 +197,7 @@ class FloodCategoriesInfoSheet extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: iconColor.withOpacity(0.3), width: 1),
+        border: Border.all(color: iconColor.withValues(alpha: 0.3), width: 1),
       ),
       child: Row(
         children: [

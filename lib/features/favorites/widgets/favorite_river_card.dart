@@ -258,7 +258,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
             onPanEnd: _handlePanEnd,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              transform: Matrix4.identity()..scale(_isPressed ? 0.98 : 1.0),
+              transform: Matrix4.identity()..scaleByDouble(_isPressed ? 0.98 : 1.0, _isPressed ? 0.98 : 1.0, 1.0, 1.0),
               child: Stack(
                 children: [
                   // Action buttons (show when sliding)
@@ -287,7 +287,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.systemGrey.withOpacity(0.1),
+            color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -377,39 +377,39 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     switch (category.toLowerCase()) {
       case 'normal':
         return [
-          CupertinoColors.systemBlue.withOpacity(0.8),
-          CupertinoColors.systemTeal.withOpacity(0.8),
+          CupertinoColors.systemBlue.withValues(alpha: 0.8),
+          CupertinoColors.systemTeal.withValues(alpha: 0.8),
         ];
       case 'action':
         return [
-          CupertinoColors.systemYellow.withOpacity(0.8),
-          CupertinoColors.systemOrange.withOpacity(0.8),
+          CupertinoColors.systemYellow.withValues(alpha: 0.8),
+          CupertinoColors.systemOrange.withValues(alpha: 0.8),
         ];
       case 'moderate':
         return [
-          CupertinoColors.systemOrange.withOpacity(0.8),
-          CupertinoColors.systemRed.withOpacity(0.8),
+          CupertinoColors.systemOrange.withValues(alpha: 0.8),
+          CupertinoColors.systemRed.withValues(alpha: 0.8),
         ];
       case 'major':
         return [
-          CupertinoColors.systemRed.withOpacity(0.8),
-          CupertinoColors.systemPink.withOpacity(0.8),
+          CupertinoColors.systemRed.withValues(alpha: 0.8),
+          CupertinoColors.systemPink.withValues(alpha: 0.8),
         ];
       case 'extreme':
         return [
-          CupertinoColors.systemPurple.withOpacity(0.8),
-          CupertinoColors.systemIndigo.withOpacity(0.8),
+          CupertinoColors.systemPurple.withValues(alpha: 0.8),
+          CupertinoColors.systemIndigo.withValues(alpha: 0.8),
         ];
       case 'nodata':
       case 'unknown':
         return [
-          CupertinoColors.systemGrey.withOpacity(0.8),
-          CupertinoColors.systemGrey2.withOpacity(0.8),
+          CupertinoColors.systemGrey.withValues(alpha: 0.8),
+          CupertinoColors.systemGrey2.withValues(alpha: 0.8),
         ];
       default:
         return [
-          CupertinoColors.systemGrey.withOpacity(0.8),
-          CupertinoColors.systemGrey2.withOpacity(0.8),
+          CupertinoColors.systemGrey.withValues(alpha: 0.8),
+          CupertinoColors.systemGrey2.withValues(alpha: 0.8),
         ];
     }
   }
@@ -422,8 +422,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              CupertinoColors.black.withOpacity(0.0),
-              CupertinoColors.black.withOpacity(0.7),
+              CupertinoColors.black.withValues(alpha: 0.0),
+              CupertinoColors.black.withValues(alpha: 0.7),
             ],
             stops: const [0.0, 1.0],
           ),
@@ -519,14 +519,14 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
           children: [
             Icon(
               CupertinoIcons.drop,
-              color: CupertinoColors.white.withOpacity(0.8),
+              color: CupertinoColors.white.withValues(alpha: 0.8),
               size: 14,
             ),
             const SizedBox(width: 4),
             Text(
               widget.favorite.formattedFlow,
               style: TextStyle(
-                color: CupertinoColors.white.withOpacity(0.9),
+                color: CupertinoColors.white.withValues(alpha: 0.9),
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -541,7 +541,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
                     : CupertinoIcons.checkmark_circle,
                 color: widget.favorite.isFlowDataStale
                     ? CupertinoColors.systemYellow
-                    : CupertinoColors.systemGreen.withOpacity(0.8),
+                    : CupertinoColors.systemGreen.withValues(alpha: 0.8),
                 size: 12,
               ),
             ],
@@ -555,7 +555,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
           Text(
             _getLastUpdatedText(),
             style: TextStyle(
-              color: CupertinoColors.white.withOpacity(0.7),
+              color: CupertinoColors.white.withValues(alpha: 0.7),
               fontSize: 12,
             ),
           ),

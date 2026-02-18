@@ -76,7 +76,7 @@ class _ManagedAsyncButtonState extends State<ManagedAsyncButton> {
             width: double.infinity,
             height: double.infinity,
             decoration: BoxDecoration(
-              color: _isLoading ? buttonColor.withOpacity(0.7) : displayColor,
+              color: _isLoading ? buttonColor.withValues(alpha: 0.7) : displayColor,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Center(

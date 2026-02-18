@@ -22,6 +22,7 @@ class FavoritesService implements IFavoritesService {
   String? get _currentUserIdOrNull => _authService.currentUser?.uid;
 
   /// Load all favorites from Firestore
+  @override
   Future<List<FavoriteRiver>> loadFavorites() async {
     try {
       AppLogger.debug('FavoritesService', 'Loading favorites from Firestore');
@@ -59,6 +60,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Save all favorites to Firestore
+  @override
   Future<bool> saveFavorites(List<FavoriteRiver> favorites) async {
     try {
       final userId = _currentUserIdOrNull;
@@ -90,6 +92,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Add a new favorite river
+  @override
   Future<bool> addFavorite(
     String reachId, {
     String? customName,
@@ -134,6 +137,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Remove a favorite river
+  @override
   Future<bool> removeFavorite(String reachId) async {
     try {
       final userId = _currentUserIdOrNull;
@@ -175,6 +179,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Check if a reach is favorited
+  @override
   Future<bool> isFavorite(String reachId) async {
     try {
       final userId = _currentUserIdOrNull;
@@ -191,6 +196,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Reorder favorites (for drag-and-drop)
+  @override
   Future<bool> reorderFavorites(List<FavoriteRiver> reorderedFavorites) async {
     try {
       final userId = _currentUserIdOrNull;
@@ -220,6 +226,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Update a favorite's properties
+  @override
   Future<bool> updateFavorite(
     String reachId, {
     String? customName,
@@ -252,6 +259,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Get count of favorites
+  @override
   Future<int> getFavoritesCount() async {
     try {
       final userId = _currentUserIdOrNull;
@@ -268,6 +276,7 @@ class FavoritesService implements IFavoritesService {
   }
 
   /// Clear all favorites
+  @override
   Future<bool> clearAllFavorites() async {
     try {
       final userId = _currentUserIdOrNull;

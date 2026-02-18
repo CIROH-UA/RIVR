@@ -134,10 +134,10 @@ class _LongRangeDetailPageState extends State<LongRangeDetailPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemBlue.withOpacity(0.1),
+        color: CupertinoColors.systemBlue.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: CupertinoColors.systemBlue.withOpacity(0.2),
+          color: CupertinoColors.systemBlue.withValues(alpha: 0.2),
           width: 1,
         ),
       ),

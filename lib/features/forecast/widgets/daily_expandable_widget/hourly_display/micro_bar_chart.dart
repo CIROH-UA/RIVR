@@ -124,7 +124,7 @@ class MicroBarChart extends StatelessWidget {
           width: 20,
           height: height * 0.8,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.8),
+            color: color.withValues(alpha: 0.8),
             borderRadius: BorderRadius.circular(4),
             border: Border.all(color: color, width: 1),
           ),
@@ -241,8 +241,8 @@ class _MicroBarChartPainter extends CustomPainter {
       // Create paint
       final paint = Paint()
         ..color = isSelected
-            ? barColor.withOpacity(1.0)
-            : barColor.withOpacity(0.7)
+            ? barColor.withValues(alpha: 1.0)
+            : barColor.withValues(alpha: 0.7)
         ..style = PaintingStyle.fill;
 
       // Draw bar with rounded corners
@@ -254,8 +254,8 @@ class _MicroBarChartPainter extends CustomPainter {
       if (isSelected) {
         final highlightPaint = Paint()
           ..color = theme.brightness == Brightness.dark
-              ? CupertinoColors.white.withOpacity(0.3)
-              : CupertinoColors.black.withOpacity(0.2)
+              ? CupertinoColors.white.withValues(alpha: 0.3)
+              : CupertinoColors.black.withValues(alpha: 0.2)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5;
 
@@ -281,7 +281,7 @@ class _MicroBarChartPainter extends CustomPainter {
           (theme.brightness == Brightness.dark
                   ? CupertinoColors.systemGrey4
                   : CupertinoColors.systemGrey5)
-              .withOpacity(0.5)
+              .withValues(alpha: 0.5)
       ..strokeWidth = 0.5;
 
     // Draw horizontal lines at 25%, 50%, 75% heights

@@ -477,7 +477,7 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
               : null,
           boxShadow: [
             BoxShadow(
-              color: CupertinoColors.systemGrey.withOpacity(0.2),
+              color: CupertinoColors.systemGrey.withValues(alpha: 0.2),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -509,7 +509,7 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
               if (isSelected)
                 Container(
                   decoration: BoxDecoration(
-                    color: CupertinoColors.activeBlue.withOpacity(0.3),
+                    color: CupertinoColors.activeBlue.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Center(
@@ -531,8 +531,8 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
                     child: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: CupertinoColors.systemBackground.withOpacity(
-                          0.9,
+                        color: CupertinoColors.systemBackground.withValues(
+                          alpha: 0.9,
                         ),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [

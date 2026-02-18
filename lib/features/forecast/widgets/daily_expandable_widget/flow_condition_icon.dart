@@ -40,7 +40,7 @@ class FlowConditionIcon extends StatelessWidget {
         width: size * 1.5,
         height: size * 1.5,
         decoration: BoxDecoration(
-          color: iconColor.withOpacity(0.15),
+          color: iconColor.withValues(alpha: 0.15),
           shape: BoxShape.circle,
         ),
         child: Center(child: icon),

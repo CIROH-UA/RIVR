@@ -44,6 +44,8 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
       // Initialize cache service
       await GetIt.I<ICacheService>().initialize();
 
+      if (!mounted) return;
+
       // Initialize auth provider
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       await authProvider.initialize();
@@ -269,7 +271,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
                   gradient: LinearGradient(
                     colors: [
                       CupertinoTheme.of(context).primaryColor,
-                      CupertinoTheme.of(context).primaryColor.withOpacity(0.7),
+                      CupertinoTheme.of(context).primaryColor.withValues(alpha: 0.7),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -279,7 +281,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
                     BoxShadow(
                       color: CupertinoTheme.of(
                         context,
-                      ).primaryColor.withOpacity(0.3),
+                      ).primaryColor.withValues(alpha: 0.3),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),

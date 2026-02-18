@@ -23,6 +23,7 @@ class FCMService implements IFCMService {
   String? _cachedToken;
 
   /// Initialize FCM - call this when user enables notifications
+  @override
   Future<bool> initialize() async {
     try {
       AppLogger.debug('FcmService', 'Initializing Firebase Messaging');
@@ -57,6 +58,7 @@ class FCMService implements IFCMService {
   }
 
   /// Request notification permissions
+  @override
   Future<bool> requestPermission() async {
     try {
       AppLogger.debug('FcmService', 'Requesting notification permission');
@@ -85,6 +87,7 @@ class FCMService implements IFCMService {
   }
 
   /// Get FCM token and save to user settings
+  @override
   Future<String?> getAndSaveToken(String userId) async {
     try {
       AppLogger.debug('FcmService', 'Getting FCM token for user: $userId');
@@ -184,6 +187,7 @@ class FCMService implements IFCMService {
   }
 
   /// Enable notifications for a user (gets token and saves it)
+  @override
   Future<bool> enableNotifications(String userId) async {
     try {
       AppLogger.debug('FcmService', 'Enabling notifications for user: $userId');
@@ -205,6 +209,7 @@ class FCMService implements IFCMService {
   }
 
   /// Disable notifications for a user (clears token)
+  @override
   Future<void> disableNotifications(String userId) async {
     try {
       AppLogger.debug('FcmService', 'Disabling notifications for user: $userId');
@@ -232,6 +237,7 @@ class FCMService implements IFCMService {
   }
 
   /// Check if notifications are properly set up for user
+  @override
   Future<bool> isEnabledForUser(String userId) async {
     try {
       final settings = await _userSettingsService.getUserSettings(userId);
@@ -243,6 +249,7 @@ class FCMService implements IFCMService {
   }
 
   /// Refresh token if needed (call on app startup)
+  @override
   Future<void> refreshTokenIfNeeded(String userId) async {
     try {
       // Listen for token refresh (happens when app is restored from backup, etc.)
@@ -258,6 +265,7 @@ class FCMService implements IFCMService {
   }
 
   /// Clear cache (call on user logout)
+  @override
   void clearCache() {
     AppLogger.debug('FcmService', 'Clearing cache');
     _cachedToken = null;

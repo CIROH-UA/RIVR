@@ -178,7 +178,7 @@ class _DailyForecastRowState extends State<DailyForecastRow>
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
         color: _isExpanded
-            ? CupertinoColors.systemGrey6.resolveFrom(context).withOpacity(0.3)
+            ? CupertinoColors.systemGrey6.resolveFrom(context).withValues(alpha: 0.3)
             : null,
       ),
       child: Row(
@@ -291,7 +291,7 @@ class _DailyForecastRowState extends State<DailyForecastRow>
               color: isToday
                   ? CupertinoColors.systemBlue
                         .resolveFrom(context)
-                        .withOpacity(0.7)
+                        .withValues(alpha: 0.7)
                   : CupertinoColors.secondaryLabel.resolveFrom(context),
             ),
           ),
@@ -306,7 +306,7 @@ class _DailyForecastRowState extends State<DailyForecastRow>
 
     return Container(
       width: double.infinity,
-      color: CupertinoColors.systemGrey6.resolveFrom(context).withOpacity(0.2),
+      color: CupertinoColors.systemGrey6.resolveFrom(context).withValues(alpha: 0.2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

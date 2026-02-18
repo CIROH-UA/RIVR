@@ -210,7 +210,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: CupertinoColors.black.withOpacity(0.1),
+            color: CupertinoColors.black.withValues(alpha: 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -258,7 +258,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
       decoration: BoxDecoration(
         color: CupertinoColors.systemGrey6
             .resolveFrom(context)
-            .withOpacity(0.3),
+            .withValues(alpha: 0.3),
         border: Border(
           bottom: BorderSide(
             color: CupertinoColors.separator.resolveFrom(context),
@@ -284,8 +284,8 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: _dailyForecasts.first.isUsingMeanData
-                    ? CupertinoColors.systemBlue.withOpacity(0.15)
-                    : CupertinoColors.systemOrange.withOpacity(0.15),
+                    ? CupertinoColors.systemBlue.withValues(alpha: 0.15)
+                    : CupertinoColors.systemOrange.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(

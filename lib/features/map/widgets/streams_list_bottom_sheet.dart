@@ -95,7 +95,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
             decoration: BoxDecoration(
               color: CupertinoColors.systemBlue
                   .resolveFrom(context)
-                  .withOpacity(isDark ? 0.15 : 0.1),
+                  .withValues(alpha: isDark ? 0.15 : 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
@@ -267,7 +267,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
             decoration: BoxDecoration(
               color: AppConstants.getStreamOrderColor(
                 stream.streamOrder,
-              ).withOpacity(isDark ? 0.15 : 0.1),
+              ).withValues(alpha: isDark ? 0.15 : 0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(

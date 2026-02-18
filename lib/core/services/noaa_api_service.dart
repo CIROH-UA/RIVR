@@ -37,6 +37,7 @@ class NoaaApiService implements INoaaApiService {
   /// Fetch reach information from NOAA Reaches API
   /// Returns data in format expected by ReachData.fromNoaaApi()
   /// Now optimized with shorter timeout for overview loading
+  @override
   Future<Map<String, dynamic>> fetchReachInfo(
     String reachId, {
     bool isOverview = false,
@@ -90,6 +91,7 @@ class NoaaApiService implements INoaaApiService {
   // Fast current flow fetching for overview
   /// Fetch only current flow data for overview display
   /// Uses short-range forecast but with optimized timeout
+  @override
   Future<Map<String, dynamic>> fetchCurrentFlowOnly(String reachId) async {
     AppLogger.debug('NoaaApi', 'Fetching current flow only for: $reachId');
 
@@ -100,6 +102,7 @@ class NoaaApiService implements INoaaApiService {
   // Return Period Fetching (handles failures gracefully)
   /// Fetch return period data from NWM API
   /// Returns array data in format expected by ReachData.fromReturnPeriodApi()
+  @override
   Future<List<dynamic>> fetchReturnPeriods(String reachId) async {
     final start = DateTime.now();
     try {
@@ -186,6 +189,7 @@ class NoaaApiService implements INoaaApiService {
   /// Returns data in format expected by ForecastResponse.fromJson()
   /// Now with priority handling for overview vs detailed loading
   /// UPDATED: Now includes unit conversion for all forecast data
+  @override
   Future<Map<String, dynamic>> fetchForecast(
     String reachId,
     String series, {
@@ -250,6 +254,7 @@ class NoaaApiService implements INoaaApiService {
   /// Fetch minimal data needed for overview page: reach info + current flow
   /// Optimized for speed with shorter timeouts and priority headers
   /// UPDATED: Now includes unit conversion
+  @override
   Future<Map<String, dynamic>> fetchOverviewData(String reachId) async {
     AppLogger.debug('NoaaApi', 'Fetching overview data for reach: $reachId');
 
@@ -285,6 +290,7 @@ class NoaaApiService implements INoaaApiService {
   /// Orchestrates multiple API calls to get complete forecast data
   /// Returns combined data with all available forecasts
   /// UPDATED: Now includes unit conversion for all forecast types
+  @override
   Future<Map<String, dynamic>> fetchAllForecasts(String reachId) async {
     AppLogger.debug('NoaaApi', 'Fetching all forecasts for reach: $reachId');
 

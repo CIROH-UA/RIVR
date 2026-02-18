@@ -77,11 +77,11 @@
 //                                     padding: const EdgeInsets.all(4),
 //                                     decoration: BoxDecoration(
 //                                       color: CupertinoColors.systemBackground
-//                                           .withOpacity(0.8),
+//                                           .withValues(alpha: 0.8),
 //                                       borderRadius: BorderRadius.circular(12),
 //                                       border: Border.all(
 //                                         color: CupertinoColors.separator
-//                                             .withOpacity(0.5),
+//                                             .withValues(alpha: 0.5),
 //                                         width: 0.5,
 //                                       ),
 //                                     ),
@@ -132,7 +132,7 @@
 //             Icon(
 //               CupertinoIcons.arrow_up_right_square,
 //               size: 16,
-//               color: CupertinoColors.systemBlue.withOpacity(0.8),
+//               color: CupertinoColors.systemBlue.withValues(alpha: 0.8),
 //             ),
 //         ],
 //       ),
@@ -442,7 +442,7 @@
 //       ..strokeCap = StrokeCap.round;
 
 //     final fillPaint = Paint()
-//       ..color = _getLineColor(forecastType).withOpacity(0.1)
+//       ..color = _getLineColor(forecastType).withValues(alpha: 0.1)
 //       ..style = PaintingStyle.fill;
 
 //     // Find min and max values for scaling

@@ -32,6 +32,7 @@ class ForecastService implements IForecastService {
   // PHASE 1 - Load minimal data for overview page
   /// Load only essential data for overview page: reach info + current flow
   /// This is the fastest possible load - only what's needed immediately
+  @override
   Future<ForecastResponse> loadOverviewData(String reachId) async {
     try {
       AppLogger.debug('ForecastService', 'Loading overview data for reach: $reachId');
@@ -142,6 +143,7 @@ class ForecastService implements IForecastService {
   // PHASE 2 - Add return periods and forecast summaries
   /// Load supplementary data: return periods + other forecast summaries
   /// Call this after overview data is displayed to enhance functionality
+  @override
   Future<ForecastResponse> loadSupplementaryData(
     String reachId,
     ForecastResponse existingData,
@@ -228,6 +230,7 @@ class ForecastService implements IForecastService {
   /// Load complete reach and forecast data
   /// Returns ForecastResponse with all available forecast types
   /// Uses cache for static reach data, always fetches fresh forecast data
+  @override
   Future<ForecastResponse> loadCompleteReachData(String reachId) async {
     try {
       AppLogger.debug('ForecastService', 'Loading complete data for reach: $reachId');
@@ -318,6 +321,7 @@ class ForecastService implements IForecastService {
 
   /// Load only specific forecast type (faster for simple displays)
   /// Also uses cache for reach data
+  @override
   Future<ForecastResponse> loadSpecificForecast(
     String reachId,
     String forecastType,
@@ -386,6 +390,7 @@ class ForecastService implements IForecastService {
   }
 
   /// Force refresh reach data (clear cache and fetch fresh)
+  @override
   Future<ForecastResponse> refreshReachData(String reachId) async {
     AppLogger.debug('ForecastService', 'Force refreshing reach data for: $reachId');
     await _cacheService.forceRefresh(reachId);
@@ -398,11 +403,13 @@ class ForecastService implements IForecastService {
   }
 
   /// Check if reach data is cached
+  @override
   Future<bool> isReachCached(String reachId) async {
     return await _cacheService.isCached(reachId);
   }
 
   /// Get cache statistics for debugging
+  @override
   Future<Map<String, dynamic>> getCacheStats() async {
     return await _cacheService.getCacheStats();
   }
@@ -412,6 +419,7 @@ class ForecastService implements IForecastService {
   /// Load only current flow data for favorites display (optimized)
   /// Gets: reach info + current flow + return periods only
   /// Skips: hourly/daily/extended forecast arrays (90% data reduction)
+  @override
   Future<ForecastResponse> loadCurrentFlowOnly(String reachId) async {
     try {
       AppLogger.debug('ForecastService', 'Loading current flow only for: $reachId');
@@ -481,6 +489,7 @@ class ForecastService implements IForecastService {
 
   /// Load basic reach info only (coordinates + name) for map integration
   /// Ultra-lightweight for map heart button functionality
+  @override
   Future<ReachData> loadBasicReachInfo(String reachId) async {
     try {
       AppLogger.debug('ForecastService', 'Loading basic reach info for: $reachId');
@@ -509,6 +518,7 @@ class ForecastService implements IForecastService {
 
   /// Merge current flow data with existing favorite data efficiently
   /// Helper method for updating favorites without losing existing info
+  @override
   ForecastResponse mergeCurrentFlowData(
     ForecastResponse existing,
     ForecastResponse newFlowData,
@@ -532,6 +542,7 @@ class ForecastService implements IForecastService {
   // Use cache first, then compute if needed
   /// Get current flow value for display - now with caching
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) {
     final reachId = forecast.reach.reachId;
 
@@ -565,6 +576,7 @@ class ForecastService implements IForecastService {
 
   // Use cache first, then compute if needed
   /// UPDATED: Get flow category with return period context - now unit-aware
+  @override
   String getFlowCategory(ForecastResponse forecast, {String? preferredType}) {
     final reachId = forecast.reach.reachId;
 
@@ -587,6 +599,7 @@ class ForecastService implements IForecastService {
   }
 
   /// Get available forecast types
+  @override
   List<String> getAvailableForecastTypes(ForecastResponse forecast) {
     final available = <String>[];
 
@@ -610,11 +623,13 @@ class ForecastService implements IForecastService {
   }
 
   /// Check if reach has ensemble data for hydrographs
+  @override
   bool hasEnsembleData(ForecastResponse forecast) {
     return forecast.mediumRange.length > 1 || forecast.longRange.length > 1;
   }
 
   /// Get ensemble summary for a forecast type
+  @override
   Map<String, dynamic> getEnsembleSummary(
     ForecastResponse forecast,
     String forecastType,
@@ -641,6 +656,7 @@ class ForecastService implements IForecastService {
   /// Extract hourly data points for short-range forecast with trends
   /// Filters out past hours - only shows current hour and future
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   List<HourlyFlowDataPoint> getShortRangeHourlyData(ForecastResponse forecast) {
     if (forecast.shortRange == null || forecast.shortRange!.isEmpty) {
       return [];
@@ -703,6 +719,7 @@ class ForecastService implements IForecastService {
   /// Get ALL short-range hourly data (including past hours) for charts
   /// This is the unfiltered version needed for complete visualization
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   List<HourlyFlowDataPoint> getAllShortRangeHourlyData(
     ForecastResponse forecast,
   ) {
@@ -752,6 +769,7 @@ class ForecastService implements IForecastService {
   /// Get ensemble statistics for uncertainty visualization
   /// Returns min, max, and mean values at each time point
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   List<EnsembleStatPoint> getEnsembleStatistics(
     ForecastResponse forecast,
     String forecastType,
@@ -802,6 +820,7 @@ class ForecastService implements IForecastService {
   }
 
   /// Check if forecast has multiple ensemble members (for UI decisions)
+  @override
   bool hasMultipleEnsembleMembers(
     ForecastResponse forecast,
     String forecastType,
@@ -819,6 +838,7 @@ class ForecastService implements IForecastService {
   /// Returns Map<String, List<ChartData where ChartData has x,y coordinates
   /// This replaces the conflicting getAllEnsembleChartData method
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   Map<String, List<ChartData>> getEnsembleSeriesForChart(
     ForecastResponse forecast,
     String forecastType,
@@ -866,6 +886,7 @@ class ForecastService implements IForecastService {
   /// Get ensemble data as time-based points (for bounds calculation in charts)
   /// Returns the first available series as ChartDataPoint (DateTime, flow) for interactive_chart.dart
   /// NOTE: Flow values are already converted by NoaaApiService
+  @override
   List<ChartDataPoint> getEnsembleReferenceData(
     ForecastResponse forecast,
     String forecastType,
@@ -890,6 +911,7 @@ class ForecastService implements IForecastService {
     return [];
   }
 
+  @override
   void clearUnitDependentCaches() {
     AppLogger.debug('ForecastService', 'Clearing unit-dependent caches for unit change');
 
@@ -899,6 +921,7 @@ class ForecastService implements IForecastService {
   }
 
   // Clear all caches (useful for testing)
+  @override
   void clearComputedCaches() {
     _currentFlowCache.clear();
     _flowCategoryCache.clear();

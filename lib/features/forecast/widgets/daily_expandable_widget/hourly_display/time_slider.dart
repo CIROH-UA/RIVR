@@ -255,8 +255,9 @@ class EnhancedHourlyTimeSlider extends StatelessWidget {
 
   /// Build current time indicator
   Widget _buildCurrentTimeIndicator(BuildContext context) {
-    if (currentTime == null || hourLabels.isEmpty)
+    if (currentTime == null || hourLabels.isEmpty) {
       return const SizedBox.shrink();
+    }
 
     // Find the closest hour index to current time
     int closestIndex = 0;

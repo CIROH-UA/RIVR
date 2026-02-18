@@ -1,7 +1,6 @@
 // lib/features/map/map_page.dart
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/widgets/navigation_button.dart';
@@ -132,7 +131,7 @@ class MapPageState extends State<MapPage> {
           top: 30,
           left: 0,
           child: FloatingBackButton(
-            backgroundColor: CupertinoColors.white.withOpacity(0.95),
+            backgroundColor: CupertinoColors.white.withValues(alpha: 0.95),
             iconColor: CupertinoColors.systemBlue,
             margin: const EdgeInsets.only(top: 8, left: 16),
           ),
@@ -190,7 +189,7 @@ class MapPageState extends State<MapPage> {
 
   Widget _buildLoadingOverlay() {
     return Container(
-      color: CupertinoColors.systemBackground.withOpacity(0.8),
+      color: CupertinoColors.systemBackground.withValues(alpha: 0.8),
       child: const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -375,6 +374,8 @@ class MapPageState extends State<MapPage> {
     try {
       // Get visible streams from the reach selection service
       final visibleStreams = await _reachSelectionService.getVisibleStreams();
+
+      if (!mounted) return;
 
       if (visibleStreams.isEmpty) {
         // Show feedback if no streams are visible

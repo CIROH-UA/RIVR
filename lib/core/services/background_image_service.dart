@@ -22,6 +22,7 @@ class BackgroundImageService implements IBackgroundImageService {
   static const int _maxHeight = 1080;
 
   /// Pick image from gallery
+  @override
   Future<BackgroundImageResult> pickFromGallery(String userId) async {
     try {
       AppLogger.debug('BackgroundImageService', 'Picking image from gallery for user: $userId');
@@ -57,6 +58,7 @@ class BackgroundImageService implements IBackgroundImageService {
   }
 
   /// Pick image from camera
+  @override
   Future<BackgroundImageResult> pickFromCamera(String userId) async {
     try {
       AppLogger.debug('BackgroundImageService', 'Taking photo with camera for user: $userId');
@@ -92,6 +94,7 @@ class BackgroundImageService implements IBackgroundImageService {
   }
 
   /// Show image source selection modal
+  @override
   Future<BackgroundImageResult> showImageSourceSelector({
     required BuildContext context,
     required String userId,
@@ -261,6 +264,7 @@ class BackgroundImageService implements IBackgroundImageService {
   }
 
   /// Delete custom background image
+  @override
   Future<bool> deleteCustomBackground(String imagePath) async {
     try {
       AppLogger.debug('BackgroundImageService', 'Deleting custom background: $imagePath');
@@ -281,6 +285,7 @@ class BackgroundImageService implements IBackgroundImageService {
   }
 
   /// Clean up old custom backgrounds for user (keep only the latest)
+  @override
   Future<void> cleanupOldBackgrounds(String userId) async {
     try {
       AppLogger.debug(
@@ -332,6 +337,7 @@ class BackgroundImageService implements IBackgroundImageService {
   }
 
   /// Check if image file exists
+  @override
   Future<bool> imageExists(String imagePath) async {
     try {
       final file = File(imagePath);

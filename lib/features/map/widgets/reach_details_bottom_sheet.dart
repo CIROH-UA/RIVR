@@ -136,7 +136,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
             decoration: BoxDecoration(
               color: AppConstants.getStreamOrderColor(
                 widget.selectedReach.streamOrder,
-              ).withOpacity(0.15),
+              ).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
@@ -281,10 +281,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       margin: const EdgeInsets.only(top: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _getFlowCategoryColor().withOpacity(0.1),
+        color: _getFlowCategoryColor().withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _getFlowCategoryColor().withOpacity(0.3),
+          color: _getFlowCategoryColor().withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -393,10 +393,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       margin: const EdgeInsets.only(top: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemRed.withOpacity(0.1),
+        color: CupertinoColors.systemRed.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: CupertinoColors.systemRed.withOpacity(0.3),
+          color: CupertinoColors.systemRed.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -439,10 +439,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       margin: const EdgeInsets.only(top: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemOrange.withOpacity(0.1),
+        color: CupertinoColors.systemOrange.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: CupertinoColors.systemOrange.withOpacity(0.3),
+          color: CupertinoColors.systemOrange.withValues(alpha: 0.3),
           width: 1,
         ),
       ),
@@ -511,7 +511,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
 
                 return CupertinoButton(
                   color: isFavorited
-                      ? CupertinoColors.systemRed.withOpacity(0.1)
+                      ? CupertinoColors.systemRed.withValues(alpha: 0.1)
                       : CupertinoColors.tertiarySystemGroupedBackground
                             .resolveFrom(context),
                   onPressed: _isTogglingFavorite
@@ -829,7 +829,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   Future<void> _shareLocation() async {
     try {
       final text = _buildLocationShareText();
-      await Share.share(text, subject: widget.selectedReach.displayName);
+      await SharePlus.instance.share(ShareParams(text: text, subject: widget.selectedReach.displayName));
     } catch (e) {
       AppLogger.error('ReachDetailsSheet', 'Error sharing location', e);
     }

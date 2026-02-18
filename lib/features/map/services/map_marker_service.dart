@@ -183,8 +183,8 @@ class MapMarkerService {
         ),
         textField: '❤️',
         textSize: 20.0,
-        textColor: Colors.red.value,
-        textHaloColor: Colors.white.value,
+        textColor: Colors.red.toARGB32(),
+        textHaloColor: Colors.white.toARGB32(),
         textHaloWidth: 2.0,
         textOffset: [0.0, -0.5], // Slight offset to center better
       );

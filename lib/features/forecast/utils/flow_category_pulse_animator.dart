@@ -201,20 +201,20 @@ class FlowCategoryPulseAnimatorEnhanced extends FlowCategoryPulseAnimator {
 
     switch (category) {
       case 'moderate':
-        pulseColor = CupertinoColors.systemOrange.withOpacity(0.1);
+        pulseColor = CupertinoColors.systemOrange.withValues(alpha: 0.1);
         break;
       case 'major':
-        pulseColor = CupertinoColors.systemRed.withOpacity(0.15);
+        pulseColor = CupertinoColors.systemRed.withValues(alpha: 0.15);
         break;
       case 'extreme':
-        pulseColor = CupertinoColors.systemPurple.withOpacity(0.2);
+        pulseColor = CupertinoColors.systemPurple.withValues(alpha: 0.2);
         break;
       default:
-        pulseColor = CupertinoColors.systemGrey.withOpacity(0.05);
+        pulseColor = CupertinoColors.systemGrey.withValues(alpha: 0.05);
     }
 
     return ColorTween(
-      begin: CupertinoColors.systemBackground.withOpacity(0),
+      begin: CupertinoColors.systemBackground.withValues(alpha: 0),
       end: pulseColor,
     ).animate(_controller!);
   }
