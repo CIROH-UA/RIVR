@@ -7,6 +7,7 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/core/models/reach_data.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_river.dart';
+import '../models/favorite_session_data.dart';
 import '../services/app_logger.dart';
 import '../services/i_favorites_service.dart';
 import '../services/i_forecast_service.dart';
@@ -16,7 +17,6 @@ import '../services/i_noaa_api_service.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
-/// FIXED: Added unit tracking to prevent double conversion
 class FavoritesProvider with ChangeNotifier {
   final IFavoritesService _favoritesService;
   final IForecastService _forecastService;
@@ -46,20 +46,8 @@ class FavoritesProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
 
-  // Session data (not persisted, loaded fresh each session)
-  final Map<String, String> _sessionRiverNames = {}; // reachId -> riverName
-  final Map<String, double?> _sessionFlowData = {}; // reachId -> lastKnownFlow
-  final Map<String, String> _sessionFlowUnits =
-      {}; // reachId -> unit of stored flow
-  final Map<String, DateTime> _sessionFlowUpdates =
-      {}; // reachId -> lastUpdated
-  final Map<String, ({double lat, double lon})> _sessionCoordinates =
-      {}; // reachId -> coordinates
-
-  // Session data maps to store custom properties
-  final Map<String, String> _sessionCustomNames = {}; // reachId -> customName
-  final Map<String, String> _sessionCustomImages =
-      {}; // reachId -> customImageAsset
+  // Consolidated session data per favorite (replaces 7 parallel maps)
+  final Map<String, FavoriteSessionData> _sessionData = {};
 
   // Track loading state per favorite for individual refresh indicators
   final Set<String> _refreshingReachIds = {};
@@ -73,20 +61,20 @@ class FavoritesProvider with ChangeNotifier {
   bool get shouldShowSearch => _favoriteReachIds.length >= 4;
 
   /// Build enriched favorites list combining cloud data + session data
-  /// FIXED: Now passes stored unit information
   List<FavoriteRiver> _buildEnrichedFavorites() {
     return _favorites.map((favorite) {
       final reachId = favorite.reachId;
+      final session = _sessionData[reachId];
+      if (session == null) return favorite;
       return favorite.copyWith(
-        riverName: _sessionRiverNames[reachId],
-        customName: _sessionCustomNames[reachId],
-        customImageAsset: _sessionCustomImages[reachId],
-        lastKnownFlow: _sessionFlowData[reachId],
-        storedFlowUnit:
-            _sessionFlowUnits[reachId], // CRITICAL FIX: Pass stored unit
-        lastUpdated: _sessionFlowUpdates[reachId],
-        latitude: _sessionCoordinates[reachId]?.lat,
-        longitude: _sessionCoordinates[reachId]?.lon,
+        riverName: session.riverName,
+        customName: session.customName,
+        customImageAsset: session.customImageAsset,
+        lastKnownFlow: session.lastKnownFlow,
+        storedFlowUnit: session.flowUnit,
+        lastUpdated: session.lastUpdated,
+        latitude: session.coordinates?.lat,
+        longitude: session.coordinates?.lon,
       );
     }).toList();
   }
@@ -198,10 +186,10 @@ class FavoritesProvider with ChangeNotifier {
       if (!success) return false;
 
       // Store rich data in session storage
-      _sessionCoordinates[reachId] = (lat: latitude, lon: longitude);
-      if (riverName != null) {
-        _sessionRiverNames[reachId] = riverName;
-      }
+      _sessionData[reachId] = (_sessionData[reachId] ?? FavoriteSessionData.empty).copyWith(
+        coordinates: (lat: latitude, lon: longitude),
+        riverName: riverName,
+      );
 
       // Reload from storage to get updated list
       await _loadFavoritesFromStorage();
@@ -225,7 +213,9 @@ class FavoritesProvider with ChangeNotifier {
       final forecast = await _forecastService.loadOverviewData(reachId);
 
       // Store in session data
-      _sessionRiverNames[reachId] = forecast.reach.riverName;
+      _sessionData[reachId] = (_sessionData[reachId] ?? FavoriteSessionData.empty).copyWith(
+        riverName: forecast.reach.riverName,
+      );
 
       notifyListeners();
     } catch (e) {
@@ -237,23 +227,15 @@ class FavoritesProvider with ChangeNotifier {
     }
   }
 
-  /// Remove a favorite river and clean up custom properties when favorite is removed
-  /// FIXED: Also clean up stored flow units
+  /// Remove a favorite river and clean up all session data
   Future<bool> removeFavorite(String reachId) async {
     try {
       final success = await _favoritesService.removeFavorite(reachId);
       if (!success) return false;
 
-      // Clean up ALL session data including custom properties
-      _sessionRiverNames.remove(reachId);
-      _sessionFlowData.remove(reachId);
-      _sessionFlowUnits.remove(
-        reachId,
-      ); // FIXED: Clean up stored flow units too
-      _sessionFlowUpdates.remove(reachId);
-      _sessionCoordinates.remove(reachId);
-      _sessionCustomNames.remove(reachId);
-      _sessionCustomImages.remove(reachId);
+      // Clean up ALL session data in one call
+      _sessionData.remove(reachId);
+      _sessionReturnPeriods.remove(reachId);
       _refreshingReachIds.remove(reachId);
 
       // PERSIST CHANGES TO LOCAL STORAGE
@@ -297,7 +279,7 @@ class FavoritesProvider with ChangeNotifier {
     }
   }
 
-  /// Update favorite properties (session data only - not persisted)
+  /// Update favorite properties (custom name, image, river name)
   Future<bool> updateFavorite(
     String reachId, {
     String? customName,
@@ -305,22 +287,13 @@ class FavoritesProvider with ChangeNotifier {
     String? customImageAsset,
   }) async {
     try {
-      // Update session data (stored locally)
-      if (riverName != null) {
-        _sessionRiverNames[reachId] = riverName;
-      }
-
-      // HANDLES CUSTOM NAME
-      if (customName != null) {
-        _sessionCustomNames[reachId] = customName;
-      }
-
-      if (customImageAsset != null) {
-        _sessionCustomImages[reachId] = customImageAsset;
-      } else {
+      final existing = _sessionData[reachId] ?? FavoriteSessionData.empty;
+      _sessionData[reachId] = existing.copyWith(
+        riverName: riverName,
+        customName: customName,
         // Explicitly handle null to remove custom image
-        _sessionCustomImages.remove(reachId);
-      }
+        customImageAsset: customImageAsset,
+      );
 
       // PERSISTS TO LOCAL STORAGE
       await _persistCustomPropertiesToLocal();
@@ -338,14 +311,25 @@ class FavoritesProvider with ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Convert maps to JSON and save
+      // Extract custom names and images from session data
+      final customNames = <String, String>{};
+      final customImages = <String, String>{};
+      for (final entry in _sessionData.entries) {
+        if (entry.value.customName != null) {
+          customNames[entry.key] = entry.value.customName!;
+        }
+        if (entry.value.customImageAsset != null) {
+          customImages[entry.key] = entry.value.customImageAsset!;
+        }
+      }
+
       await prefs.setString(
         'favorites_custom_names',
-        json.encode(_sessionCustomNames),
+        json.encode(customNames),
       );
       await prefs.setString(
         'favorites_custom_images',
-        json.encode(_sessionCustomImages),
+        json.encode(customImages),
       );
     } catch (e) {
       AppLogger.error('FavoritesProvider', 'Error persisting custom properties: $e', e);
@@ -361,14 +345,22 @@ class FavoritesProvider with ChangeNotifier {
       final namesJson = prefs.getString('favorites_custom_names');
       if (namesJson != null) {
         final namesMap = json.decode(namesJson) as Map<String, dynamic>;
-        _sessionCustomNames.addAll(namesMap.cast<String, String>());
+        for (final entry in namesMap.entries) {
+          _sessionData[entry.key] = (_sessionData[entry.key] ?? FavoriteSessionData.empty).copyWith(
+            customName: entry.value as String,
+          );
+        }
       }
 
       // Load custom images
       final imagesJson = prefs.getString('favorites_custom_images');
       if (imagesJson != null) {
         final imagesMap = json.decode(imagesJson) as Map<String, dynamic>;
-        _sessionCustomImages.addAll(imagesMap.cast<String, String>());
+        for (final entry in imagesMap.entries) {
+          _sessionData[entry.key] = (_sessionData[entry.key] ?? FavoriteSessionData.empty).copyWith(
+            customImageAsset: entry.value as String,
+          );
+        }
       }
     } catch (e) {
       AppLogger.error('FavoritesProvider', 'Error loading custom properties: $e', e);
@@ -433,9 +425,8 @@ class FavoritesProvider with ChangeNotifier {
       if (!success) return false;
 
       // Store session data
-      _sessionCoordinates[reachId] = (
-        lat: reach.latitude,
-        lon: reach.longitude,
+      _sessionData[reachId] = (_sessionData[reachId] ?? FavoriteSessionData.empty).copyWith(
+        coordinates: (lat: reach.latitude, lon: reach.longitude),
       );
 
       // Reload from storage to get updated list
@@ -454,7 +445,6 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Refresh a single favorite's flow data and store in session
-  /// FIXED: Now tracks units of stored flow values
   Future<void> _refreshSingleFavorite(String reachId) async {
     try {
       _refreshingReachIds.add(reachId);
@@ -463,33 +453,29 @@ class FavoritesProvider with ChangeNotifier {
       // Load efficient data for favorites refresh
       final forecast = await _forecastService.loadCurrentFlowOnly(reachId);
       final currentFlow = _forecastService.getCurrentFlow(forecast);
-
-      // CRITICAL FIX: Store the current flow unit along with the value
       final currentUnit = _unitService.currentFlowUnit;
 
-      // Store all data in session storage (not persisted to cloud)
-      _sessionRiverNames[reachId] = forecast.reach.riverName;
-      _sessionFlowData[reachId] = currentFlow;
-      _sessionFlowUnits[reachId] =
-          currentUnit; // FIXED: Track what unit the stored flow is in
-      _sessionFlowUpdates[reachId] = DateTime.now();
-      _sessionCoordinates[reachId] = (
-        lat: forecast.reach.latitude,
-        lon: forecast.reach.longitude,
+      // Store all data in session storage (preserves custom name/image)
+      final existing = _sessionData[reachId] ?? FavoriteSessionData.empty;
+      _sessionData[reachId] = existing.copyWith(
+        riverName: forecast.reach.riverName,
+        lastKnownFlow: currentFlow,
+        flowUnit: currentUnit,
+        lastUpdated: DateTime.now(),
+        coordinates: (lat: forecast.reach.latitude, lon: forecast.reach.longitude),
       );
 
       // Load return periods for this favorite
       await _loadReturnPeriods(reachId);
 
-      // Print results for this favorite - FIXED: Use correct unit in display
-      final flow = _sessionFlowData[reachId];
-      final riverName = _sessionRiverNames[reachId] ?? 'Unknown';
+      final session = _sessionData[reachId]!;
+      final riverName = session.riverName ?? 'Unknown';
       final returnPeriods = _sessionReturnPeriods[reachId];
 
       AppLogger.debug(
         'FavoritesProvider',
-        '$riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
-      ); // FIXED: Use actual current unit, not hardcoded "CFS"
+        '$riverName ($reachId) - Current Flow: ${session.lastKnownFlow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
+      );
 
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         AppLogger.debug(
@@ -581,15 +567,11 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Clear unit-dependent cached values (call when unit preference changes)
-  /// FIXED: Also clear stored flow units when units change
   void clearUnitDependentCaches() {
     AppLogger.debug('FavoritesProvider', 'Clearing unit-dependent caches for unit change');
 
-    // Clear flow data and their associated units since they need to be re-fetched
-    _sessionFlowData.clear();
-    _sessionFlowUnits.clear(); // FIXED: Clear unit tracking too
-    _sessionFlowUpdates
-        .clear(); // Also clear update timestamps to force refresh
+    // Clear flow data while preserving non-flow fields (name, coordinates, custom properties)
+    _sessionData.updateAll((key, session) => session.clearFlowData());
 
     // Notify UI immediately of the change
     notifyListeners();
@@ -608,11 +590,8 @@ class FavoritesProvider with ChangeNotifier {
     _favorites.clear();
     _favoriteReachIds.clear();
     _refreshingReachIds.clear();
-    _sessionRiverNames.clear();
-    _sessionFlowData.clear();
-    _sessionFlowUnits.clear(); // FIXED: Clear flow units too
-    _sessionFlowUpdates.clear();
-    _sessionCoordinates.clear();
+    _sessionData.clear();
+    _sessionReturnPeriods.clear();
 
     _clearError();
     notifyListeners();
