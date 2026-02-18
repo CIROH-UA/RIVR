@@ -8,11 +8,22 @@ import 'app_logger.dart';
 /// Core geocoding service for reverse geocoding coordinates to city/state.
 /// Extracted from MapSearchService to break core -> features dependency.
 class GeocodingService {
+  /// In-memory cache for reverse geocoding results (session lifetime).
+  /// Key: "$lat,$lng" coordinate string. Coordinates never change for a given reach.
+  static final Map<String, Map<String, String?>> _cache = {};
+
   /// Convert coordinates to city, state using Mapbox Geocoding API
   static Future<Map<String, String?>> reverseGeocode(
     double latitude,
     double longitude,
   ) async {
+    final cacheKey = '$latitude,$longitude';
+
+    if (_cache.containsKey(cacheKey)) {
+      AppLogger.debug('GeocodingService', 'Cache hit for $cacheKey');
+      return _cache[cacheKey]!;
+    }
+
     try {
       AppLogger.debug('GeocodingService', 'Reverse geocoding $latitude, $longitude');
 
@@ -54,7 +65,9 @@ class GeocodingService {
           }
 
           AppLogger.debug('GeocodingService', 'Reverse geocoded to: $city, $state');
-          return {'city': city, 'state': state};
+          final result = {'city': city, 'state': state};
+          _cache[cacheKey] = result;
+          return result;
         }
       } else {
         AppLogger.error('GeocodingService', 'API error ${response.statusCode}: ${response.body}');
@@ -63,6 +76,8 @@ class GeocodingService {
       AppLogger.error('GeocodingService', 'Reverse geocoding failed', e);
     }
 
-    return {'city': null, 'state': null};
+    final fallback = {'city': null, 'state': null};
+    _cache[cacheKey] = fallback;
+    return fallback;
   }
 }

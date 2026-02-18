@@ -18,6 +18,7 @@ class ReachCacheService implements IReachCacheService {
 
   // Cache configuration
   static const Duration _cacheMaxAge = Duration(days: 180); // 6 months
+  static const Duration _cacheFreshness = Duration(hours: 6); // NWM update cycle
   static const String _keyPrefix = 'reach_cache_';
 
   /// Initialize the cache service
@@ -70,6 +71,48 @@ class ReachCacheService implements IReachCacheService {
       return reachData;
     } catch (e) {
       AppLogger.error('ReachCacheService', 'Error getting cached reach $reachId', e);
+      return null;
+    }
+  }
+
+  /// Get cached ReachData with freshness information for stale-while-revalidate.
+  /// Returns null if not cached or expired (> 180 days).
+  /// Returns CacheResult with fresh (< 6 hours) or stale (6h - 180d) status.
+  @override
+  Future<CacheResult<ReachData>?> getWithFreshness(String reachId) async {
+    try {
+      await _ensureInitialized();
+
+      final key = _keyPrefix + reachId;
+      final cachedJson = _prefs!.getString(key);
+
+      if (cachedJson == null) {
+        _cacheMisses++;
+        return null;
+      }
+
+      final data = jsonDecode(cachedJson) as Map<String, dynamic>;
+      final reachData = ReachData.fromJson(data);
+      final age = DateTime.now().difference(reachData.cachedAt);
+
+      // Expired (> 180 days): treat as miss
+      if (age > _cacheMaxAge) {
+        _cacheMisses++;
+        await _prefs!.remove(key);
+        return null;
+      }
+
+      _cacheHits++;
+
+      // Fresh (< 6 hours): no refresh needed
+      if (age <= _cacheFreshness) {
+        return CacheResult(data: reachData, freshness: CacheFreshness.fresh);
+      }
+
+      // Stale (6h - 180d): return data, caller should refresh in background
+      return CacheResult(data: reachData, freshness: CacheFreshness.stale);
+    } catch (e) {
+      AppLogger.error('ReachCacheService', 'Error in getWithFreshness for $reachId', e);
       return null;
     }
   }

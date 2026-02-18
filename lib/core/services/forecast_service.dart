@@ -30,6 +30,9 @@ class ForecastService implements IForecastService {
   final Map<String, double?> _currentFlowCache = {};
   final Map<String, String> _flowCategoryCache = {};
 
+  /// Tracks which reaches are being background-refreshed to avoid duplicates.
+  final Set<String> _backgroundRefreshingReaches = {};
+
   // PHASE 1 - Load minimal data for overview page
   /// Load only essential data for overview page: reach info + current flow
   /// This is the fastest possible load - only what's needed immediately
@@ -38,13 +41,18 @@ class ForecastService implements IForecastService {
     try {
       AppLogger.debug('ForecastService', 'Loading overview data for reach: $reachId');
 
-      // Step 1: Check cache for reach data first
-      final cachedReach = await _cacheService.get(reachId);
+      // Step 1: Check cache with freshness info (stale-while-revalidate)
+      final cacheResult = await _cacheService.getWithFreshness(reachId);
 
       ReachData reach;
-      if (cachedReach != null) {
-        AppLogger.info('ForecastService', 'Using cached reach data');
-        reach = cachedReach;
+      if (cacheResult != null) {
+        AppLogger.info('ForecastService', 'Using cached reach data (${cacheResult.freshness})');
+        reach = cacheResult.data;
+
+        // Trigger background refresh for stale data
+        if (cacheResult.isStale) {
+          _backgroundRefreshReach(reachId);
+        }
 
         // KEY: Check if cached reach needs geocoding
         if (reach.city == null || reach.state == null) {
@@ -56,22 +64,16 @@ class ForecastService implements IForecastService {
               reach.longitude,
             );
 
-            // Update cached reach with city/state
             reach = reach.copyWith(
               city: locationData['city'],
               state: locationData['state'],
             );
 
             AppLogger.info('ForecastService', 'Enhanced cached reach with location: ${reach.city}, ${reach.state}');
-
-            // Re-cache the updated reach data
             await _cacheService.store(reach);
-            AppLogger.info('ForecastService', 'Re-cached reach data with location info');
           } catch (e) {
             AppLogger.warning('ForecastService', 'Reverse geocoding failed for cached reach: $e');
           }
-        } else {
-          AppLogger.debug('ForecastService', 'Cached reach already has location: city=${reach.city}, state=${reach.state}');
         }
       } else {
         AppLogger.debug('ForecastService', 'Cache miss - fetching reach info only');
@@ -236,13 +238,17 @@ class ForecastService implements IForecastService {
     try {
       AppLogger.debug('ForecastService', 'Loading complete data for reach: $reachId');
 
-      // Step 1: Check cache for reach data first
-      final cachedReach = await _cacheService.get(reachId);
+      // Step 1: Check cache with freshness info (stale-while-revalidate)
+      final cacheResult = await _cacheService.getWithFreshness(reachId);
 
       ReachData reach;
-      if (cachedReach != null) {
-        AppLogger.info('ForecastService', 'Using cached reach data');
-        reach = cachedReach;
+      if (cacheResult != null) {
+        AppLogger.info('ForecastService', 'Using cached reach data (${cacheResult.freshness})');
+        reach = cacheResult.data;
+
+        if (cacheResult.isStale) {
+          _backgroundRefreshReach(reachId);
+        }
       } else {
         AppLogger.debug('ForecastService', 'Cache miss - fetching fresh reach data');
 
@@ -330,13 +336,17 @@ class ForecastService implements IForecastService {
     try {
       AppLogger.debug('ForecastService', 'Loading $forecastType forecast for reach: $reachId');
 
-      // Check cache for reach data first
-      final cachedReach = await _cacheService.get(reachId);
+      // Check cache with freshness info (stale-while-revalidate)
+      final cacheResult = await _cacheService.getWithFreshness(reachId);
 
       ReachData reach;
-      if (cachedReach != null) {
-        AppLogger.info('ForecastService', 'Using cached reach data for specific forecast');
-        reach = cachedReach;
+      if (cacheResult != null) {
+        AppLogger.info('ForecastService', 'Using cached reach data for specific forecast (${cacheResult.freshness})');
+        reach = cacheResult.data;
+
+        if (cacheResult.isStale) {
+          _backgroundRefreshReach(reachId);
+        }
 
         // Only fetch the specific forecast (already converted by NoaaApiService)
         final forecastData = await _apiService.fetchForecast(
@@ -425,13 +435,17 @@ class ForecastService implements IForecastService {
     try {
       AppLogger.debug('ForecastService', 'Loading current flow only for: $reachId');
 
-      // Step 1: Check cache for reach data first
-      final cachedReach = await _cacheService.get(reachId);
+      // Step 1: Check cache with freshness info (stale-while-revalidate)
+      final cacheResult = await _cacheService.getWithFreshness(reachId);
 
       ReachData reach;
-      if (cachedReach != null) {
-        AppLogger.info('ForecastService', 'Using cached reach data for current flow');
-        reach = cachedReach;
+      if (cacheResult != null) {
+        AppLogger.info('ForecastService', 'Using cached reach data for current flow (${cacheResult.freshness})');
+        reach = cacheResult.data;
+
+        if (cacheResult.isStale) {
+          _backgroundRefreshReach(reachId);
+        }
       } else {
         // Load fresh reach data with return periods
         final futures = await Future.wait([
@@ -495,11 +509,14 @@ class ForecastService implements IForecastService {
     try {
       AppLogger.debug('ForecastService', 'Loading basic reach info for: $reachId');
 
-      // Check cache first for super-fast response
-      final cachedReach = await _cacheService.get(reachId);
-      if (cachedReach != null) {
-        AppLogger.info('ForecastService', 'Using cached basic reach info');
-        return cachedReach;
+      // Check cache with freshness info (stale-while-revalidate)
+      final cacheResult = await _cacheService.getWithFreshness(reachId);
+      if (cacheResult != null) {
+        AppLogger.info('ForecastService', 'Using cached basic reach info (${cacheResult.freshness})');
+        if (cacheResult.isStale) {
+          _backgroundRefreshReach(reachId);
+        }
+        return cacheResult.data;
       }
 
       // Load minimal reach info only
@@ -910,6 +927,36 @@ class ForecastService implements IForecastService {
     }
 
     return [];
+  }
+
+  /// Non-blocking background refresh of stale reach data.
+  /// Fetches fresh reach info and updates the cache without blocking the UI.
+  void _backgroundRefreshReach(String reachId) {
+    if (_backgroundRefreshingReaches.contains(reachId)) {
+      AppLogger.debug('ForecastService', 'Background refresh already in progress for $reachId');
+      return;
+    }
+
+    _backgroundRefreshingReaches.add(reachId);
+    AppLogger.debug('ForecastService', 'Starting background refresh for stale reach $reachId');
+
+    _apiService.fetchReachInfo(reachId).then((reachInfo) async {
+      final freshReach = ReachData.fromNoaaApi(reachInfo);
+
+      // Preserve existing return periods if the fresh fetch doesn't have them
+      final existingCached = await _cacheService.get(reachId);
+      ReachData toStore = freshReach;
+      if (existingCached != null && existingCached.hasReturnPeriods && !freshReach.hasReturnPeriods) {
+        toStore = freshReach.mergeWith(existingCached);
+      }
+
+      await _cacheService.store(toStore);
+      AppLogger.info('ForecastService', 'Background refresh completed for $reachId');
+    }).catchError((e) {
+      AppLogger.warning('ForecastService', 'Background refresh failed for $reachId: $e');
+    }).whenComplete(() {
+      _backgroundRefreshingReaches.remove(reachId);
+    });
   }
 
   @override

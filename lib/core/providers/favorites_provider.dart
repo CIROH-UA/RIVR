@@ -383,17 +383,19 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Background refresh of all favorites (app launch)
+  /// Uses batched parallel requests (groups of 3) for faster loading
   Future<void> _refreshAllFavoritesInBackground() async {
     AppLogger.debug(
       'FavoritesProvider',
       'Starting background refresh of ${_favorites.length} favorites',
     );
 
-    // Refresh favorites one by one to show progressive updates
-    for (final favorite in _favorites) {
-      await _refreshSingleFavorite(favorite.reachId);
-      // Small delay between requests to be API-friendly
-      await Future.delayed(const Duration(milliseconds: 200));
+    final reachIds = _favorites.map((f) => f.reachId).toList();
+    const batchSize = 3;
+
+    for (var i = 0; i < reachIds.length; i += batchSize) {
+      final batch = reachIds.skip(i).take(batchSize);
+      await Future.wait(batch.map((id) => _refreshSingleFavorite(id)));
     }
 
     AppLogger.debug('FavoritesProvider', 'Background refresh completed');
@@ -465,8 +467,14 @@ class FavoritesProvider with ChangeNotifier {
         coordinates: (lat: forecast.reach.latitude, lon: forecast.reach.longitude),
       );
 
-      // Load return periods for this favorite
-      await _loadReturnPeriods(reachId);
+      // Use return periods from the forecast response if already loaded
+      // (loadCurrentFlowOnly fetches and caches them on cache miss)
+      if (forecast.reach.hasReturnPeriods) {
+        _sessionReturnPeriods[reachId] = forecast.reach.returnPeriods!;
+      } else {
+        // Only fetch separately if not already present
+        await _loadReturnPeriods(reachId);
+      }
 
       final session = _sessionData[reachId]!;
       final riverName = session.riverName ?? 'Unknown';
