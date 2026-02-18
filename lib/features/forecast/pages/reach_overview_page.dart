@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/models/reach_data.dart';
 import 'package:rivr/core/services/app_logger.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/current_flow_status_card.dart';
 import '../widgets/forecast_category_grid.dart';
@@ -140,38 +141,20 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
   void _navigateToForecastDetail(String forecastType) {
     if (widget.reachId == null) return;
 
-    // Route to the correct detail page based on forecast type
-    String routeName;
-    switch (forecastType) {
-      case 'short_range':
-        routeName = '/short-range-detail';
-        break;
-      case 'medium_range':
-        routeName = '/medium-range-detail';
-        break;
-      case 'long_range':
-        routeName = '/long-range-detail';
-        break;
-      default:
-        // Fallback to short range if unknown type
-        routeName = '/short-range-detail';
-        break;
-    }
-
-    Navigator.pushNamed(
+    AppRouter.pushForecastDetail(
       context,
-      routeName,
-      arguments: {'reachId': widget.reachId, 'forecastType': forecastType},
+      reachId: widget.reachId!,
+      forecastType: forecastType,
     );
   }
 
   void _navigateToHydrograph(String forecastType) {
     if (widget.reachId == null) return;
 
-    Navigator.pushNamed(
+    AppRouter.pushHydrograph(
       context,
-      '/hydrograph',
-      arguments: {'reachId': widget.reachId, 'forecastType': forecastType},
+      reachId: widget.reachId!,
+      forecastType: forecastType,
     );
   }
 

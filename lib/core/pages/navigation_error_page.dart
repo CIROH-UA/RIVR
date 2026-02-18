@@ -1,6 +1,7 @@
 // lib/core/pages/navigation_error_page.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/core/routing/app_router.dart';
 
 /// Reusable error page for navigation and route errors
 /// Provides user-friendly error messages and navigation recovery
@@ -170,8 +171,6 @@ class NavigationErrorPage extends StatelessWidget {
 
   void _navigateHome(BuildContext context) {
     // Navigate to favorites page (home) and clear the stack
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil('/favorites', (route) => false);
+    AppRouter.pushFavoritesAndClear(context);
   }
 }

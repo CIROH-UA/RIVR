@@ -5,24 +5,14 @@ import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/di/service_locator.dart';
 import 'package:provider/provider.dart';
-import 'package:rivr/core/pages/navigation_error_page.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
 import 'package:rivr/core/providers/favorites_provider.dart';
 import 'package:rivr/core/providers/theme_provider.dart';
 import 'package:rivr/core/services/theme_service.dart';
 import 'package:rivr/core/services/map_preference_service.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/features/favorites/favorites_page.dart';
-import 'package:rivr/features/forecast/pages/reach_overview_page.dart';
-import 'package:rivr/features/forecast/pages/short_range_detail_page.dart';
-import 'package:rivr/features/forecast/pages/medium_range_detail_page.dart';
-import 'package:rivr/features/forecast/pages/long_range_detail_page.dart';
-import 'package:rivr/features/forecast/pages/hydrograph_page.dart';
-import 'package:rivr/features/favorites/pages/image_selection_page.dart';
-import 'package:rivr/features/settings/pages/notifications_settings_page.dart';
-import 'package:rivr/features/settings/pages/app_theme_settings_page.dart';
-import 'package:rivr/features/settings/pages/sponsors_page.dart';
-import 'package:rivr/features/map/widgets/map_with_favorites.dart';
 import 'firebase_options.dart';
 import 'features/auth/presentation/pages/auth_coordinator.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -125,160 +115,9 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
             home: AuthCoordinator(
               onAuthSuccess: (context) => const FavoritesPage(),
             ),
-            routes: {
-              '/favorites': (context) => const FavoritesPage(),
-              '/map': (context) => const MapWithFavorites(),
-              '/forecast': (context) {
-                final reachId =
-                    ModalRoute.of(context)?.settings.arguments as String?;
-                if (reachId == null) {
-                  return const NavigationErrorPage.missingArguments(
-                    routeName: 'forecast',
-                  );
-                }
-                return ReachOverviewPage(reachId: reachId);
-              },
-              // Settings pages
-              '/notifications-settings': (context) =>
-                  const NotificationsSettingsPage(),
-              '/app-theme-settings': (context) => const AppThemeSettingsPage(),
-              '/sponsors': (context) =>
-                  const SponsorsPage(), // Keep test home for development
-            },
-            onGenerateRoute: (settings) {
-              // Handle routes with arguments
-              switch (settings.name) {
-                case '/reach-overview':
-                  final args = settings.arguments as Map<String, dynamic>?;
-                  final reachId = args?['reachId'] as String?;
-                  if (reachId == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) =>
-                          const NavigationErrorPage.missingArguments(
-                            routeName: 'reach overview',
-                          ),
-                      settings: settings,
-                    );
-                  }
-                  return CupertinoPageRoute(
-                    builder: (context) => ReachOverviewPage(reachId: reachId),
-                    settings: settings,
-                  );
-
-                case '/short-range-detail':
-                  final args = settings.arguments as Map<String, dynamic>?;
-                  final reachId = args?['reachId'] as String?;
-                  if (reachId == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) =>
-                          const NavigationErrorPage.missingArguments(
-                            routeName: 'short range detail',
-                          ),
-                      settings: settings,
-                    );
-                  }
-                  return CupertinoPageRoute(
-                    builder: (context) =>
-                        ShortRangeDetailPage(reachId: reachId),
-                    settings: settings,
-                  );
-
-                case '/medium-range-detail':
-                  final args = settings.arguments as Map<String, dynamic>?;
-                  final reachId = args?['reachId'] as String?;
-                  if (reachId == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) =>
-                          const NavigationErrorPage.missingArguments(
-                            routeName: 'medium range detail',
-                          ),
-                      settings: settings,
-                    );
-                  }
-                  return CupertinoPageRoute(
-                    builder: (context) =>
-                        MediumRangeDetailPage(reachId: reachId),
-                    settings: settings,
-                  );
-
-                case '/long-range-detail':
-                  final args = settings.arguments as Map<String, dynamic>?;
-                  final reachId = args?['reachId'] as String?;
-                  if (reachId == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) =>
-                          const NavigationErrorPage.missingArguments(
-                            routeName: 'long range detail',
-                          ),
-                      settings: settings,
-                    );
-                  }
-                  return CupertinoPageRoute(
-                    builder: (context) => LongRangeDetailPage(reachId: reachId),
-                    settings: settings,
-                  );
-
-                case '/hydrograph':
-                  final args = settings.arguments as Map<String, dynamic>?;
-                  final reachId = args?['reachId'] as String?;
-                  final forecastType = args?['forecastType'] as String?;
-
-                  if (reachId == null || forecastType == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) =>
-                          const NavigationErrorPage.invalidArguments(
-                            expected:
-                                'reachId (String) and forecastType (String)',
-                            routeName: 'hydrograph',
-                          ),
-                      settings: settings,
-                    );
-                  }
-
-                  return CupertinoPageRoute(
-                    builder: (context) => HydrographPage(
-                      reachId: reachId,
-                      forecastType: forecastType,
-                      title: args?['title'] as String?,
-                    ),
-                    settings: settings,
-                  );
-
-                case '/image-selection':
-                  final reachId = settings.arguments as String?;
-                  if (reachId == null) {
-                    return CupertinoPageRoute(
-                      builder: (context) => const NavigationErrorPage(
-                        message: 'No river selected for image customization.',
-                        title: 'Selection Required',
-                        icon: CupertinoIcons.photo,
-                      ),
-                      settings: settings,
-                    );
-                  }
-                  return CupertinoPageRoute(
-                    builder: (context) => ImageSelectionPage(reachId: reachId),
-                    settings: settings,
-                  );
-
-                default:
-                  return CupertinoPageRoute(
-                    builder: (context) => NavigationErrorPage.pageNotFound(
-                      routeName: settings.name ?? 'unknown',
-                    ),
-                    settings: settings,
-                  );
-              }
-            },
-            // Handle completely unknown routes
-            onUnknownRoute: (settings) {
-              return CupertinoPageRoute(
-                builder: (context) => NavigationErrorPage.pageNotFound(
-                  routeName: settings.name ?? 'unknown',
-                ),
-                settings: settings,
-              );
-            },
+            routes: AppRouter.namedRoutes,
+            onGenerateRoute: AppRouter.onGenerateRoute,
+            onUnknownRoute: AppRouter.onUnknownRoute,
             debugShowCheckedModeBanner: false,
           );
         },

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import '../../../../core/services/app_logger.dart';
 import '../../../../core/providers/favorites_provider.dart';
 import '../../models/selected_reach.dart';
@@ -49,10 +50,9 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
             flex: 2,
             child: CupertinoButton.filled(
               onPressed: () {
-                Navigator.pushNamed(
+                AppRouter.pushForecast(
                   context,
-                  '/forecast',
-                  arguments: widget.selectedReach.reachId,
+                  reachId: widget.selectedReach.reachId,
                 );
               },
               child: const Text('View Forecast'),

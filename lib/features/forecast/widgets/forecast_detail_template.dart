@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/core/services/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/core/services/i_flow_unit_preference_service.dart';
@@ -178,13 +179,10 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
   }
 
   void _navigateToHydrograph() {
-    Navigator.pushNamed(
+    AppRouter.pushHydrograph(
       context,
-      '/hydrograph',
-      arguments: {
-        'reachId': widget.reachId,
-        'forecastType': widget.forecastType,
-      },
+      reachId: widget.reachId,
+      forecastType: widget.forecastType,
     );
   }
 

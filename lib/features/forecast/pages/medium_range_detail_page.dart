@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/forecast_detail_template.dart';
@@ -76,14 +77,11 @@ class _MediumRangeDetailPageState extends State<MediumRangeDetailPage> {
   void _navigateToHydrograph() {
     if (_reachId == null) return;
 
-    Navigator.pushNamed(
+    AppRouter.pushHydrograph(
       context,
-      '/hydrograph',
-      arguments: {
-        'reachId': _reachId,
-        'forecastType': 'medium_range',
-        'title': 'Daily Hydrograph',
-      },
+      reachId: _reachId!,
+      forecastType: 'medium_range',
+      title: 'Daily Hydrograph',
     );
   }
 

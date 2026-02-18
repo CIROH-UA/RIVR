@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
 import 'package:rivr/core/services/i_flow_unit_preference_service.dart';
 import 'package:rivr/core/services/app_logger.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import 'package:rivr/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/features/favorites/widgets/favorites_search_bar.dart';
@@ -663,19 +664,19 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 children: [
                   _buildMenuOption('Notifications', CupertinoIcons.bell, () {
                     Navigator.pop(context);
-                    Navigator.of(context).pushNamed('/notifications-settings');
+                    AppRouter.pushNotificationsSettings(context);
                   }),
                   _buildMenuDivider(),
                   _buildFlowUnitsToggleWithModalState(setModalState),
                   _buildMenuDivider(),
                   _buildMenuOption('App Theme', CupertinoIcons.moon, () {
                     Navigator.pop(context);
-                    Navigator.of(context).pushNamed('/app-theme-settings');
+                    AppRouter.pushAppThemeSettings(context);
                   }),
                   _buildMenuDivider(),
                   _buildMenuOption('Sponsors', CupertinoIcons.creditcard, () {
                     Navigator.pop(context);
-                    Navigator.of(context).pushNamed('/sponsors');
+                    AppRouter.pushSponsors(context);
                   }),
                   _buildMenuDivider(color: CupertinoColors.systemGrey),
                   _buildSignOutOption(),
@@ -853,17 +854,15 @@ class _FavoritesPageState extends State<FavoritesPage> {
   }
 
   void _navigateToMap() {
-    Navigator.of(context).pushNamed('/map');
+    AppRouter.pushMap(context);
   }
 
   void _navigateToForecast(String reachId) {
-    Navigator.of(context).pushNamed('/forecast', arguments: reachId);
+    AppRouter.pushForecast(context, reachId: reachId);
   }
 
   void _navigateToImageSelection(FavoriteRiver favorite) {
-    Navigator.of(
-      context,
-    ).pushNamed('/image-selection', arguments: favorite.reachId);
+    AppRouter.pushImageSelection(context, reachId: favorite.reachId);
   }
 
   void _showRenameDialog(FavoriteRiver favorite) {

@@ -5,6 +5,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/widgets/navigation_button.dart';
 import 'package:rivr/core/services/app_logger.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/features/map/widgets/map_search_widget.dart';
 // NEW IMPORTS
 import 'package:rivr/features/map/widgets/map_control_buttons.dart';
@@ -447,9 +448,7 @@ class MapPageState extends State<MapPage> {
     Navigator.of(context).pop(); // Close bottom sheet
 
     // Navigate to forecast page with reachId
-    Navigator.of(
-      context,
-    ).pushNamed('/forecast', arguments: selectedReach.reachId);
+    AppRouter.pushForecast(context, reachId: selectedReach.reachId);
   }
 
   void _retryMapLoad() {

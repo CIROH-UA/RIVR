@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/routing/app_router.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/forecast_detail_template.dart';
 import '../widgets/flow_values_usage_guide.dart';
@@ -75,14 +76,11 @@ class _LongRangeDetailPageState extends State<LongRangeDetailPage> {
   void _navigateToHydrograph() {
     if (_reachId == null) return;
 
-    Navigator.pushNamed(
+    AppRouter.pushHydrograph(
       context,
-      '/hydrograph',
-      arguments: {
-        'reachId': _reachId,
-        'forecastType': 'long_range',
-        'title': 'Extended Forecast',
-      },
+      reachId: _reachId!,
+      forecastType: 'long_range',
+      title: 'Extended Forecast',
     );
   }
 
