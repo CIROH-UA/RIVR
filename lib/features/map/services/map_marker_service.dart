@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import '../../../core/models/favorite_river.dart';
+import '../../../core/services/app_logger.dart';
 
 /// Dedicated service for managing map markers efficiently
 /// Uses single annotation manager pattern with diff-based updates
@@ -26,7 +27,7 @@ class MapMarkerService {
   /// Initialize the marker service with the map
   Future<void> initializeMarkers(MapboxMap mapboxMap) async {
     try {
-      print('MAP_MARKER_SERVICE: Initializing marker service');
+      AppLogger.debug('MapMarkerService', 'Initializing marker service');
 
       _mapboxMap = mapboxMap;
 
@@ -38,15 +39,16 @@ class MapMarkerService {
 
       // NEW: Re-add any existing favorites if this is a re-initialization
       if (_currentFavorites.isNotEmpty) {
-        print(
-          'MAP_MARKER_SERVICE: Re-adding ${_currentFavorites.length} favorites after style change',
+        AppLogger.debug(
+          'MapMarkerService',
+          'Re-adding ${_currentFavorites.length} favorites after style change',
         );
         await _reAddAllMarkers();
       }
 
-      print('MAP_MARKER_SERVICE: ✅ Marker service initialized');
+      AppLogger.info('MapMarkerService', 'Marker service initialized');
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error initializing markers: $e');
+      AppLogger.error('MapMarkerService', 'Error initializing markers', e);
       _isInitialized = false;
     }
   }
@@ -54,15 +56,17 @@ class MapMarkerService {
   /// Update heart markers based on favorites list with diff-based approach
   Future<void> updateHeartMarkers(List<FavoriteRiver> favorites) async {
     if (!_isInitialized || _annotationManager == null) {
-      print(
-        'MAP_MARKER_SERVICE: ⚠️ Service not initialized, skipping marker update',
+      AppLogger.warning(
+        'MapMarkerService',
+        'Service not initialized, skipping marker update',
       );
       return;
     }
 
     try {
-      print(
-        'MAP_MARKER_SERVICE: Updating heart markers for ${favorites.length} favorites',
+      AppLogger.debug(
+        'MapMarkerService',
+        'Updating heart markers for ${favorites.length} favorites',
       );
 
       // NEW: Store current favorites for style change recovery
@@ -78,8 +82,9 @@ class MapMarkerService {
       final toRemove = _currentMarkerReachIds.difference(newReachIds);
       final toAdd = newReachIds.difference(_currentMarkerReachIds);
 
-      print(
-        'MAP_MARKER_SERVICE: Markers to add: ${toAdd.length}, to remove: ${toRemove.length}',
+      AppLogger.debug(
+        'MapMarkerService',
+        'Markers to add: ${toAdd.length}, to remove: ${toRemove.length}',
       );
 
       // Remove markers that are no longer favorites
@@ -95,11 +100,12 @@ class MapMarkerService {
         await _addMarker(favorite);
       }
 
-      print(
-        'MAP_MARKER_SERVICE: ✅ Heart markers updated: ${_heartMarkers.length} total',
+      AppLogger.info(
+        'MapMarkerService',
+        'Heart markers updated: ${_heartMarkers.length} total',
       );
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error updating heart markers: $e');
+      AppLogger.error('MapMarkerService', 'Error updating heart markers', e);
     }
   }
 
@@ -119,26 +125,29 @@ class MapMarkerService {
         await _addMarker(favorite);
       }
 
-      print(
-        'MAP_MARKER_SERVICE: ✅ Re-added ${favoritesWithCoords.length} markers after style change',
+      AppLogger.info(
+        'MapMarkerService',
+        'Re-added ${favoritesWithCoords.length} markers after style change',
       );
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error re-adding markers: $e');
+      AppLogger.error('MapMarkerService', 'Error re-adding markers', e);
     }
   }
 
   /// Add a single heart marker for a favorite
   Future<void> addMarker(FavoriteRiver favorite) async {
     if (!_isInitialized || _annotationManager == null) {
-      print(
-        'MAP_MARKER_SERVICE: ⚠️ Service not initialized, cannot add marker',
+      AppLogger.warning(
+        'MapMarkerService',
+        'Service not initialized, cannot add marker',
       );
       return;
     }
 
     if (!favorite.hasCoordinates) {
-      print(
-        'MAP_MARKER_SERVICE: ⚠️ Cannot add marker for ${favorite.reachId} - no coordinates',
+      AppLogger.warning(
+        'MapMarkerService',
+        'Cannot add marker for ${favorite.reachId} - no coordinates',
       );
       return;
     }
@@ -149,8 +158,9 @@ class MapMarkerService {
   /// Remove a single heart marker
   Future<void> removeMarker(String reachId) async {
     if (!_isInitialized || _annotationManager == null) {
-      print(
-        'MAP_MARKER_SERVICE: ⚠️ Service not initialized, cannot remove marker',
+      AppLogger.warning(
+        'MapMarkerService',
+        'Service not initialized, cannot remove marker',
       );
       return;
     }
@@ -188,10 +198,12 @@ class MapMarkerService {
       _heartMarkers[favorite.reachId] = annotation;
       _currentMarkerReachIds.add(favorite.reachId);
 
-      print('MAP_MARKER_SERVICE: ✅ Added heart marker for ${favorite.reachId}');
+      AppLogger.info('MapMarkerService', 'Added heart marker for ${favorite.reachId}');
     } catch (e) {
-      print(
-        'MAP_MARKER_SERVICE: ❌ Error adding marker for ${favorite.reachId}: $e',
+      AppLogger.error(
+        'MapMarkerService',
+        'Error adding marker for ${favorite.reachId}',
+        e,
       );
     }
   }
@@ -211,9 +223,9 @@ class MapMarkerService {
       _heartMarkers.remove(reachId);
       _currentMarkerReachIds.remove(reachId);
 
-      print('MAP_MARKER_SERVICE: ✅ Removed heart marker for $reachId');
+      AppLogger.info('MapMarkerService', 'Removed heart marker for $reachId');
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error removing marker for $reachId: $e');
+      AppLogger.error('MapMarkerService', 'Error removing marker for $reachId', e);
     }
   }
 
@@ -237,7 +249,7 @@ class MapMarkerService {
 
       return markersInView;
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error getting viewport markers: $e');
+      AppLogger.error('MapMarkerService', 'Error getting viewport markers', e);
       return [];
     }
   }
@@ -275,11 +287,12 @@ class MapMarkerService {
       // Update markers to only show visible ones
       await updateHeartMarkers(visibleFavorites);
 
-      print(
-        'MAP_MARKER_SERVICE: Updated markers for viewport: ${visibleFavorites.length} visible',
+      AppLogger.debug(
+        'MapMarkerService',
+        'Updated markers for viewport: ${visibleFavorites.length} visible',
       );
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error updating viewport markers: $e');
+      AppLogger.error('MapMarkerService', 'Error updating viewport markers', e);
     }
   }
 
@@ -293,9 +306,9 @@ class MapMarkerService {
         await _removeMarker(reachId);
       }
 
-      print('MAP_MARKER_SERVICE: ✅ Cleared all markers');
+      AppLogger.info('MapMarkerService', 'Cleared all markers');
     } catch (e) {
-      print('MAP_MARKER_SERVICE: ❌ Error clearing markers: $e');
+      AppLogger.error('MapMarkerService', 'Error clearing markers', e);
     }
   }
 
@@ -307,7 +320,7 @@ class MapMarkerService {
 
   /// Dispose of the service and clean up resources
   void dispose() {
-    print('MAP_MARKER_SERVICE: Disposing marker service');
+    AppLogger.debug('MapMarkerService', 'Disposing marker service');
 
     _heartMarkers.clear();
     _currentMarkerReachIds.clear();
@@ -316,6 +329,6 @@ class MapMarkerService {
     _mapboxMap = null;
     _isInitialized = false;
 
-    print('MAP_MARKER_SERVICE: ✅ Marker service disposed');
+    AppLogger.info('MapMarkerService', 'Marker service disposed');
   }
 }

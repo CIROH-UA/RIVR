@@ -1,8 +1,9 @@
 // lib/core/providers/reach_data_provider.dart
 
 import 'package:flutter/foundation.dart';
-import 'package:rivr/features/forecast/widgets/horizontal_flow_timeline.dart';
+import 'package:rivr/core/models/hourly_flow_data.dart';
 import '../models/reach_data.dart';
+import '../services/app_logger.dart';
 import '../services/forecast_service.dart';
 
 /// State management for reach and forecast data
@@ -72,8 +73,8 @@ class ReachDataProvider with ChangeNotifier {
   void clearCurrentReach() {
     _currentForecast = null;
     _clearAllComputedCaches();
-    _clearError();
-    _setLoadingPhase('none');
+    _errorMessage = null;
+    _loadingPhase = 'none';
     _resetAllLoadingStates();
     notifyListeners();
   }
@@ -110,7 +111,7 @@ class ReachDataProvider with ChangeNotifier {
     try {
       // Check session cache first
       if (_sessionCache.containsKey(reachId)) {
-        print('REACH_PROVIDER: Using cached data for overview: $reachId');
+        AppLogger.debug('ReachProvider', 'Using cached data for overview: $reachId');
         _currentForecast = _sessionCache[reachId];
         _updateComputedCaches(reachId);
         _setLoadingOverview(false);
@@ -128,7 +129,7 @@ class ReachDataProvider with ChangeNotifier {
       _setLoadingPhase('overview');
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading overview data: $e');
+      AppLogger.error('ReachProvider', 'Error loading overview data', e);
       _setError(e.toString());
       _setLoadingOverview(false);
       _setLoadingPhase('none');
@@ -164,7 +165,7 @@ class ReachDataProvider with ChangeNotifier {
       _setLoadingHourly(false);
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading hourly forecast: $e');
+      AppLogger.error('ReachProvider', 'Error loading hourly forecast', e);
       _setLoadingHourly(false);
       return false;
     }
@@ -198,7 +199,7 @@ class ReachDataProvider with ChangeNotifier {
       _setLoadingDaily(false);
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading daily forecast: $e');
+      AppLogger.error('ReachProvider', 'Error loading daily forecast', e);
       _setLoadingDaily(false);
       return false;
     }
@@ -235,7 +236,7 @@ class ReachDataProvider with ChangeNotifier {
       _setLoadingExtended(false);
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading extended forecast: $e');
+      AppLogger.error('ReachProvider', 'Error loading extended forecast', e);
       _setLoadingExtended(false);
       return false;
     }
@@ -292,7 +293,7 @@ class ReachDataProvider with ChangeNotifier {
 
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error in comprehensive refresh: $e');
+      AppLogger.error('ReachProvider', 'Error in comprehensive refresh', e);
       _setError(e.toString());
       return false;
     }
@@ -363,7 +364,7 @@ class ReachDataProvider with ChangeNotifier {
       _setLoadingPhase('complete');
       return true;
     } catch (e) {
-      print('REACH_PROVIDER: ❌ Error loading complete data: $e');
+      AppLogger.error('ReachProvider', 'Error loading complete data', e);
       _setError(e.toString());
       _setLoading(false);
       _setLoadingPhase('none');
@@ -500,8 +501,8 @@ class ReachDataProvider with ChangeNotifier {
     _currentForecast = null;
     _sessionCache.clear();
     _clearAllComputedCaches();
-    _clearError();
-    _setLoadingPhase('none');
+    _errorMessage = null;
+    _loadingPhase = 'none';
     _resetAllLoadingStates();
     notifyListeners();
   }
@@ -645,8 +646,10 @@ class ReachDataProvider with ChangeNotifier {
   }
 
   void _setError(String error) {
-    _errorMessage = error;
-    notifyListeners();
+    if (_errorMessage != error) {
+      _errorMessage = error;
+      notifyListeners();
+    }
   }
 
   void _clearError() {

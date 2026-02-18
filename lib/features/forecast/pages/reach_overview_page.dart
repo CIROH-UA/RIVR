@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/models/reach_data.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/current_flow_status_card.dart';
 import '../widgets/forecast_category_grid.dart';
@@ -49,7 +50,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
 
     // CRITICAL FIX: Immediately clear wrong river data when switching
     if (reachProvider.currentReach?.reachId != widget.reachId) {
-      print('OVERVIEW_PAGE: Switching rivers, clearing current display');
+      AppLogger.debug('ReachOverviewPage', 'Switching rivers, clearing current display');
       reachProvider.clearCurrentReach();
       setState(() {
         _isInitialized = false;
@@ -59,13 +60,13 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
 
     try {
       // PHASE 1: Load overview data first (fast - shows name, location, current flow)
-      print('OVERVIEW_PAGE: Starting Phase 1 - Overview data');
+      AppLogger.debug('ReachOverviewPage', 'Starting Phase 1 - Overview data');
       final overviewSuccess = await reachProvider.loadOverviewData(
         widget.reachId!,
       );
 
       if (!overviewSuccess) {
-        print('OVERVIEW_PAGE: Failed to load overview data');
+        AppLogger.warning('ReachOverviewPage', 'Failed to load overview data');
         return;
       }
 
@@ -77,16 +78,16 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
       }
 
       // PHASE 2: Progressive forecast category loading
-      print('OVERVIEW_PAGE: Starting Phase 2 - Progressive forecast loading');
+      AppLogger.debug('ReachOverviewPage', 'Starting Phase 2 - Progressive forecast loading');
       await _loadForecastCategoriesProgressively(widget.reachId!);
 
       // PHASE 3: Load supplementary data (return periods, enhanced categorization)
-      print('OVERVIEW_PAGE: Starting Phase 3 - Supplementary data');
+      AppLogger.debug('ReachOverviewPage', 'Starting Phase 3 - Supplementary data');
       await reachProvider.loadSupplementaryData(widget.reachId!);
 
-      print('OVERVIEW_PAGE: All loading phases completed');
+      AppLogger.info('ReachOverviewPage', 'All loading phases completed');
     } catch (e) {
-      print('OVERVIEW_PAGE: Error in loading sequence: $e');
+      AppLogger.error('ReachOverviewPage', 'Error in loading sequence', e);
     }
   }
 
@@ -101,31 +102,31 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     // This provides better user experience - they see data as it becomes available
 
     // Load Hourly forecast (short-range) first - usually fastest
-    print('OVERVIEW_PAGE: Loading hourly forecast...');
+    AppLogger.debug('ReachOverviewPage', 'Loading hourly forecast...');
     await reachProvider.loadHourlyForecast(reachId);
 
     // Small delay to allow UI to update and show the hourly category
     await Future.delayed(const Duration(milliseconds: 100));
 
     // Load Daily forecast (medium-range) second
-    print('OVERVIEW_PAGE: Loading daily forecast...');
+    AppLogger.debug('ReachOverviewPage', 'Loading daily forecast...');
     await reachProvider.loadDailyForecast(reachId);
 
     // Small delay to allow UI to update and show the daily category
     await Future.delayed(const Duration(milliseconds: 100));
 
     // Load Extended forecast (long-range) third
-    print('OVERVIEW_PAGE: Loading extended forecast...');
+    AppLogger.debug('ReachOverviewPage', 'Loading extended forecast...');
     await reachProvider.loadExtendedForecast(reachId);
 
-    print('OVERVIEW_PAGE: Progressive forecast loading completed');
+    AppLogger.info('ReachOverviewPage', 'Progressive forecast loading completed');
   }
 
   // Comprehensive refresh for all forecast categories
   Future<void> _handleRefresh() async {
     if (widget.reachId == null) return;
 
-    print('OVERVIEW_PAGE: Starting comprehensive refresh');
+    AppLogger.debug('ReachOverviewPage', 'Starting comprehensive refresh');
     final reachProvider = Provider.of<ReachDataProvider>(
       context,
       listen: false,
@@ -133,7 +134,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
 
     // Use comprehensive refresh instead of basic refresh
     await reachProvider.comprehensiveRefresh(widget.reachId!);
-    print('OVERVIEW_PAGE: Comprehensive refresh completed');
+    AppLogger.info('ReachOverviewPage', 'Comprehensive refresh completed');
   }
 
   void _navigateToForecastDetail(String forecastType) {

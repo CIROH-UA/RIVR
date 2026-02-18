@@ -1,42 +1,6 @@
 // lib/features/map/widgets/base_layer_modal.dart
 import 'package:flutter/cupertino.dart';
-
-enum MapBaseLayer {
-  standard('Standard', 'mapbox://styles/mapbox/standard'),
-  streets('Streets', 'mapbox://styles/mapbox/streets-v12'),
-  satellite('Satellite', 'mapbox://styles/mapbox/satellite-v9'),
-  satelliteStreets(
-    'Satellite Streets',
-    'mapbox://styles/mapbox/satellite-streets-v12',
-  ),
-  outdoors('Outdoors', 'mapbox://styles/mapbox/outdoors-v12'),
-  light('Light', 'mapbox://styles/mapbox/light-v11'),
-  dark('Dark', 'mapbox://styles/mapbox/dark-v11');
-
-  const MapBaseLayer(this.displayName, this.styleUrl);
-
-  final String displayName;
-  final String styleUrl;
-
-  IconData get icon {
-    switch (this) {
-      case MapBaseLayer.standard:
-        return CupertinoIcons.map_fill; // Filled map icon for Standard
-      case MapBaseLayer.streets:
-        return CupertinoIcons.map;
-      case MapBaseLayer.satellite:
-        return CupertinoIcons.globe;
-      case MapBaseLayer.satelliteStreets:
-        return CupertinoIcons.location;
-      case MapBaseLayer.outdoors:
-        return CupertinoIcons.tree;
-      case MapBaseLayer.light:
-        return CupertinoIcons.sun_max;
-      case MapBaseLayer.dark:
-        return CupertinoIcons.moon;
-    }
-  }
-}
+import '../models/map_base_layer.dart';
 
 class BaseLayerModal extends StatelessWidget {
   final MapBaseLayer currentLayer;

@@ -5,6 +5,7 @@ import 'package:rivr/features/auth/models/auth_user.dart';
 import '../../../core/services/auth_service.dart';
 import '../../../core/models/user_settings.dart';
 import '../../auth/services/user_settings_service.dart';
+import '../../../core/services/app_logger.dart';
 
 /// Simple authentication state management for RIVR
 class AuthProvider with ChangeNotifier {
@@ -34,20 +35,20 @@ class AuthProvider with ChangeNotifier {
 
   /// Initialize the provider
   Future<void> initialize() async {
-    print('AUTH_PROVIDER: Initializing...');
+    AppLogger.info('AuthProvider', 'Initializing...');
 
     // Listen to auth state changes
     _authService.authStateChanges.listen((firebaseUser) async {
       if (firebaseUser != null) {
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
-        print('AUTH_PROVIDER: User signed in: ${_currentUser!.uid}');
+        AppLogger.info('AuthProvider', 'User signed in: ${_currentUser!.uid}');
 
         // Fetch user settings
         await _loadUserSettings();
       } else {
         _currentUser = null;
         _currentUserSettings = null;
-        print('AUTH_PROVIDER: User signed out');
+        AppLogger.info('AuthProvider', 'User signed out');
       }
       notifyListeners();
     });
@@ -61,7 +62,7 @@ class AuthProvider with ChangeNotifier {
 
     _isInitialized = true;
     notifyListeners();
-    print('AUTH_PROVIDER: Initialization complete');
+    AppLogger.info('AuthProvider', 'Initialization complete');
   }
 
   /// Load user settings from Firestore
@@ -69,13 +70,13 @@ class AuthProvider with ChangeNotifier {
     if (_currentUser == null) return;
 
     try {
-      print('AUTH_PROVIDER: Loading user settings for: ${_currentUser!.uid}');
+      AppLogger.debug('AuthProvider', 'Loading user settings for: ${_currentUser!.uid}');
       _currentUserSettings = await _userSettingsService.getUserSettings(
         _currentUser!.uid,
       );
-      print('AUTH_PROVIDER: User settings loaded successfully');
+      AppLogger.info('AuthProvider', 'User settings loaded successfully');
     } catch (e) {
-      print('AUTH_PROVIDER: Error loading user settings: $e');
+      AppLogger.error('AuthProvider', 'Error loading user settings: $e', e);
       // Don't throw - user can still use the app without settings
       _currentUserSettings = null;
     }
@@ -319,28 +320,36 @@ class AuthProvider with ChangeNotifier {
   // MARK: - Helper Methods
 
   void _setLoading(bool loading) {
-    _isLoading = loading;
-    notifyListeners();
+    if (_isLoading != loading) {
+      _isLoading = loading;
+      notifyListeners();
+    }
   }
 
   void _setError(String error) {
-    _errorMessage = error;
-    _successMessage = '';
-    notifyListeners();
-    print('AUTH_PROVIDER: Error - $error');
+    if (_errorMessage != error || _successMessage != '') {
+      _errorMessage = error;
+      _successMessage = '';
+      notifyListeners();
+    }
+    AppLogger.error('AuthProvider', 'Error - $error');
   }
 
   void _setSuccess(String message) {
-    _successMessage = message;
-    _errorMessage = '';
-    notifyListeners();
-    print('AUTH_PROVIDER: Success - $message');
+    if (_successMessage != message || _errorMessage != '') {
+      _successMessage = message;
+      _errorMessage = '';
+      notifyListeners();
+    }
+    AppLogger.info('AuthProvider', 'Success - $message');
   }
 
   void _clearMessages() {
-    _errorMessage = '';
-    _successMessage = '';
-    notifyListeners();
+    if (_errorMessage != '' || _successMessage != '') {
+      _errorMessage = '';
+      _successMessage = '';
+      notifyListeners();
+    }
   }
 
   /// Clear all messages (called from UI)

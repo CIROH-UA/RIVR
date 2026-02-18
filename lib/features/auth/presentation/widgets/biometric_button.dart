@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
+import '../../../../core/services/app_logger.dart';
 
 class BiometricButton extends StatefulWidget {
   final String text;
@@ -50,7 +51,7 @@ class _BiometricButtonState extends State<BiometricButton> {
         });
       }
     } catch (e) {
-      print('Error checking biometric capabilities: $e');
+      AppLogger.error('BiometricButton', 'Error checking biometric capabilities: $e', e);
       if (mounted) {
         setState(() {
           _isAvailable = false;

@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/core/models/reach_data.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
 import '../../domain/entities/daily_flow_forecast.dart';
 import '../../services/daily_forecast_processor.dart';
@@ -81,9 +82,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
       _processData();
     } else if (unitChanged) {
       // For unit changes, just rebuild UI since data is already converted by API service
-      print(
-        'DAILY_WIDGET: Unit changed from $_lastKnownUnit to $currentUnit - rebuilding UI only',
-      );
+      AppLogger.debug('DailyFlowForecastWidget', 'Unit changed from $_lastKnownUnit to $currentUnit - rebuilding UI only');
       _lastKnownUnit = currentUnit; // Update tracked unit
       setState(() {}); // Trigger rebuild without reprocessing data
     }
@@ -150,7 +149,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
         _isProcessing = false;
       });
     } catch (e) {
-      print('DAILY_WIDGET: Error processing forecast data: $e');
+      AppLogger.error('DailyFlowForecastWidget', 'Error processing forecast data', e);
       setState(() {
         _errorMessage = 'Error processing forecast data: $e';
         _isProcessing = false;

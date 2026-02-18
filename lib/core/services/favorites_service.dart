@@ -3,6 +3,7 @@
 import '../models/favorite_river.dart';
 import '../services/auth_service.dart';
 import '../../features/auth/services/user_settings_service.dart';
+import 'app_logger.dart';
 
 /// Simple service for managing user's favorite rivers
 /// Uses Firestore via UserSettings.favoriteReachIds - no local storage
@@ -16,19 +17,17 @@ class FavoritesService {
   /// Load all favorites from Firestore
   Future<List<FavoriteRiver>> loadFavorites() async {
     try {
-      print('FAVORITES_SERVICE: Loading favorites from Firestore');
+      AppLogger.debug('FavoritesService', 'Loading favorites from Firestore');
 
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - returning empty list');
+        AppLogger.debug('FavoritesService', 'No user signed in - returning empty list');
         return [];
       }
 
       final userSettings = await _userSettingsService.getUserSettings(userId);
       if (userSettings == null) {
-        print(
-          'FAVORITES_SERVICE: No user settings found - returning empty list',
-        );
+        AppLogger.debug('FavoritesService', 'No user settings found - returning empty list');
         return [];
       }
 
@@ -44,12 +43,10 @@ class FavoritesService {
         );
       }
 
-      print(
-        'FAVORITES_SERVICE: ✅ Loaded ${favorites.length} favorites from cloud',
-      );
+      AppLogger.info('FavoritesService', 'Loaded ${favorites.length} favorites from cloud');
       return favorites;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error loading favorites: $e');
+      AppLogger.error('FavoritesService', 'Error loading favorites: $e', e);
       return [];
     }
   }
@@ -59,11 +56,11 @@ class FavoritesService {
     try {
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - cannot save');
+        AppLogger.debug('FavoritesService', 'No user signed in - cannot save');
         return false;
       }
 
-      print('FAVORITES_SERVICE: Saving ${favorites.length} favorites to cloud');
+      AppLogger.debug('FavoritesService', 'Saving ${favorites.length} favorites to cloud');
 
       // Sort by display order first
       final sortedFavorites = List<FavoriteRiver>.from(favorites);
@@ -77,10 +74,10 @@ class FavoritesService {
         'favoriteReachIds': reachIds,
       });
 
-      print('FAVORITES_SERVICE: ✅ Favorites saved to cloud successfully');
+      AppLogger.info('FavoritesService', 'Favorites saved to cloud successfully');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error saving favorites: $e');
+      AppLogger.error('FavoritesService', 'Error saving favorites: $e', e);
       return false;
     }
   }
@@ -95,21 +92,21 @@ class FavoritesService {
     try {
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - cannot add favorite');
+        AppLogger.debug('FavoritesService', 'No user signed in - cannot add favorite');
         return false;
       }
 
-      print('FAVORITES_SERVICE: Adding favorite: $reachId');
+      AppLogger.debug('FavoritesService', 'Adding favorite: $reachId');
 
       final userSettings = await _userSettingsService.getUserSettings(userId);
       if (userSettings == null) {
-        print('FAVORITES_SERVICE: ❌ No user settings found');
+        AppLogger.error('FavoritesService', 'No user settings found');
         return false;
       }
 
       // Check if already exists
       if (userSettings.favoriteReachIds.contains(reachId)) {
-        print('FAVORITES_SERVICE: ⚠️ Reach $reachId already in favorites');
+        AppLogger.warning('FavoritesService', 'Reach $reachId already in favorites');
         return false;
       }
 
@@ -121,10 +118,10 @@ class FavoritesService {
         'favoriteReachIds': updatedReachIds,
       });
 
-      print('FAVORITES_SERVICE: ✅ Added favorite: $reachId');
+      AppLogger.info('FavoritesService', 'Added favorite: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error adding favorite: $e');
+      AppLogger.error('FavoritesService', 'Error adding favorite: $e', e);
       return false;
     }
   }
@@ -134,21 +131,21 @@ class FavoritesService {
     try {
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - cannot remove favorite');
+        AppLogger.debug('FavoritesService', 'No user signed in - cannot remove favorite');
         return false;
       }
 
-      print('FAVORITES_SERVICE: Removing favorite: $reachId');
+      AppLogger.debug('FavoritesService', 'Removing favorite: $reachId');
 
       final userSettings = await _userSettingsService.getUserSettings(userId);
       if (userSettings == null) {
-        print('FAVORITES_SERVICE: ❌ No user settings found');
+        AppLogger.error('FavoritesService', 'No user settings found');
         return false;
       }
 
       // Check if exists
       if (!userSettings.favoriteReachIds.contains(reachId)) {
-        print('FAVORITES_SERVICE: ⚠️ Reach $reachId not found in favorites');
+        AppLogger.warning('FavoritesService', 'Reach $reachId not found in favorites');
         return false;
       }
 
@@ -162,10 +159,10 @@ class FavoritesService {
         'favoriteReachIds': updatedReachIds,
       });
 
-      print('FAVORITES_SERVICE: ✅ Removed favorite: $reachId');
+      AppLogger.info('FavoritesService', 'Removed favorite: $reachId');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error removing favorite: $e');
+      AppLogger.error('FavoritesService', 'Error removing favorite: $e', e);
       return false;
     }
   }
@@ -181,7 +178,7 @@ class FavoritesService {
 
       return userSettings.favoriteReachIds.contains(reachId);
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error checking favorite status: $e');
+      AppLogger.error('FavoritesService', 'Error checking favorite status: $e', e);
       return false;
     }
   }
@@ -191,13 +188,11 @@ class FavoritesService {
     try {
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - cannot reorder');
+        AppLogger.debug('FavoritesService', 'No user signed in - cannot reorder');
         return false;
       }
 
-      print(
-        'FAVORITES_SERVICE: Reordering ${reorderedFavorites.length} favorites',
-      );
+      AppLogger.debug('FavoritesService', 'Reordering ${reorderedFavorites.length} favorites');
 
       // Extract reach IDs in the new order
       final reorderedReachIds = reorderedFavorites
@@ -209,10 +204,10 @@ class FavoritesService {
         'favoriteReachIds': reorderedReachIds,
       });
 
-      print('FAVORITES_SERVICE: ✅ Favorites reordered successfully');
+      AppLogger.info('FavoritesService', 'Favorites reordered successfully');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error reordering favorites: $e');
+      AppLogger.error('FavoritesService', 'Error reordering favorites: $e', e);
       return false;
     }
   }
@@ -232,21 +227,19 @@ class FavoritesService {
       final userId = _currentUserIdOrNull;
       if (userId == null) return false;
 
-      print('FAVORITES_SERVICE: Update favorite called for: $reachId');
+      AppLogger.debug('FavoritesService', 'Update favorite called for: $reachId');
 
       // Check if favorite exists
       final isFav = await isFavorite(reachId);
       if (!isFav) {
-        print('FAVORITES_SERVICE: ⚠️ Reach $reachId not found for update');
+        AppLogger.warning('FavoritesService', 'Reach $reachId not found for update');
         return false;
       }
 
-      print(
-        'FAVORITES_SERVICE: ⚠️ Note: Extra properties not persisted in simplified cloud storage',
-      );
+      AppLogger.warning('FavoritesService', 'Note: Extra properties not persisted in simplified cloud storage');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error updating favorite: $e');
+      AppLogger.error('FavoritesService', 'Error updating favorite: $e', e);
       return false;
     }
   }
@@ -262,7 +255,7 @@ class FavoritesService {
 
       return userSettings.favoriteReachIds.length;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error getting favorites count: $e');
+      AppLogger.error('FavoritesService', 'Error getting favorites count: $e', e);
       return 0;
     }
   }
@@ -272,21 +265,21 @@ class FavoritesService {
     try {
       final userId = _currentUserIdOrNull;
       if (userId == null) {
-        print('FAVORITES_SERVICE: No user signed in - cannot clear');
+        AppLogger.debug('FavoritesService', 'No user signed in - cannot clear');
         return false;
       }
 
-      print('FAVORITES_SERVICE: Clearing all favorites');
+      AppLogger.debug('FavoritesService', 'Clearing all favorites');
 
       // Update user settings with empty list
       await _userSettingsService.updateUserSettings(userId, {
         'favoriteReachIds': <String>[],
       });
 
-      print('FAVORITES_SERVICE: ✅ All favorites cleared');
+      AppLogger.info('FavoritesService', 'All favorites cleared');
       return true;
     } catch (e) {
-      print('FAVORITES_SERVICE: ❌ Error clearing favorites: $e');
+      AppLogger.error('FavoritesService', 'Error clearing favorites: $e', e);
       return false;
     }
   }

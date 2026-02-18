@@ -3,6 +3,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'app_logger.dart';
 
 /// Simple cache service for secure storage and preferences
 class CacheService {
@@ -40,9 +41,9 @@ class CacheService {
   Future<void> initialize() async {
     try {
       _prefs ??= await SharedPreferences.getInstance();
-      print('CACHE_SERVICE: Initialized successfully');
+      AppLogger.info('CacheService', 'Initialized successfully');
     } catch (e) {
-      print('CACHE_SERVICE: Error initializing: $e');
+      AppLogger.error('CacheService', 'Error initializing: $e', e);
     }
   }
 
@@ -52,9 +53,9 @@ class CacheService {
   Future<void> storeAuthToken(String token) async {
     try {
       await _secureStorage.write(key: _authTokenKey, value: token);
-      print('CACHE_SERVICE: Auth token stored securely');
+      AppLogger.info('CacheService', 'Auth token stored securely');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing auth token: $e');
+      AppLogger.error('CacheService', 'Error storing auth token: $e', e);
       throw Exception('Failed to store authentication token');
     }
   }
@@ -63,12 +64,13 @@ class CacheService {
   Future<String?> getAuthToken() async {
     try {
       final token = await _secureStorage.read(key: _authTokenKey);
-      print(
-        'CACHE_SERVICE: Auth token retrieved: ${token != null ? "exists" : "null"}',
+      AppLogger.debug(
+        'CacheService',
+        'Auth token retrieved: ${token != null ? "exists" : "null"}',
       );
       return token;
     } catch (e) {
-      print('CACHE_SERVICE: Error getting auth token: $e');
+      AppLogger.error('CacheService', 'Error getting auth token: $e', e);
       return null;
     }
   }
@@ -90,9 +92,9 @@ class CacheService {
         if (authToken != null)
           _secureStorage.write(key: _authTokenKey, value: authToken),
       ]);
-      print('CACHE_SERVICE: Auth data stored securely');
+      AppLogger.info('CacheService', 'Auth data stored securely');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing auth data: $e');
+      AppLogger.error('CacheService', 'Error storing auth data: $e', e);
       throw Exception('Failed to store authentication data');
     }
   }
@@ -102,7 +104,7 @@ class CacheService {
     try {
       return await _secureStorage.read(key: _userIdKey);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting user ID: $e');
+      AppLogger.error('CacheService', 'Error getting user ID: $e', e);
       return null;
     }
   }
@@ -112,7 +114,7 @@ class CacheService {
     try {
       return await _secureStorage.read(key: _userEmailKey);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting user email: $e');
+      AppLogger.error('CacheService', 'Error getting user email: $e', e);
       return null;
     }
   }
@@ -126,7 +128,7 @@ class CacheService {
       }
       return null;
     } catch (e) {
-      print('CACHE_SERVICE: Error getting last login: $e');
+      AppLogger.error('CacheService', 'Error getting last login: $e', e);
       return null;
     }
   }
@@ -137,7 +139,7 @@ class CacheService {
       final userId = await getUserId();
       return userId != null && userId.isNotEmpty;
     } catch (e) {
-      print('CACHE_SERVICE: Error checking auth data: $e');
+      AppLogger.error('CacheService', 'Error checking auth data: $e', e);
       return false;
     }
   }
@@ -151,9 +153,9 @@ class CacheService {
         _secureStorage.delete(key: _userEmailKey),
         _secureStorage.delete(key: _lastLoginKey),
       ]);
-      print('CACHE_SERVICE: Auth data cleared');
+      AppLogger.info('CacheService', 'Auth data cleared');
     } catch (e) {
-      print('CACHE_SERVICE: Error clearing auth data: $e');
+      AppLogger.error('CacheService', 'Error clearing auth data: $e', e);
     }
   }
 
@@ -164,9 +166,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setBool(_biometricAvailableKey, available);
-      print('CACHE_SERVICE: Biometric availability cached: $available');
+      AppLogger.debug('CacheService', 'Biometric availability cached: $available');
     } catch (e) {
-      print('CACHE_SERVICE: Error caching biometric availability: $e');
+      AppLogger.error('CacheService', 'Error caching biometric availability: $e', e);
     }
   }
 
@@ -175,7 +177,7 @@ class CacheService {
     try {
       return _prefs?.getBool(_biometricAvailableKey);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting cached biometric availability: $e');
+      AppLogger.error('CacheService', 'Error getting cached biometric availability: $e', e);
       return null;
     }
   }
@@ -185,9 +187,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setBool(_biometricEnabledKey, enabled);
-      print('CACHE_SERVICE: Biometric enabled status cached: $enabled');
+      AppLogger.debug('CacheService', 'Biometric enabled status cached: $enabled');
     } catch (e) {
-      print('CACHE_SERVICE: Error caching biometric enabled status: $e');
+      AppLogger.error('CacheService', 'Error caching biometric enabled status: $e', e);
     }
   }
 
@@ -196,7 +198,7 @@ class CacheService {
     try {
       return _prefs?.getBool(_biometricEnabledKey);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting cached biometric enabled status: $e');
+      AppLogger.error('CacheService', 'Error getting cached biometric enabled status: $e', e);
       return null;
     }
   }
@@ -206,9 +208,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setString(_biometricTypeKey, type);
-      print('CACHE_SERVICE: Biometric type cached: $type');
+      AppLogger.debug('CacheService', 'Biometric type cached: $type');
     } catch (e) {
-      print('CACHE_SERVICE: Error caching biometric type: $e');
+      AppLogger.error('CacheService', 'Error caching biometric type: $e', e);
     }
   }
 
@@ -217,7 +219,7 @@ class CacheService {
     try {
       return _prefs?.getString(_biometricTypeKey);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting cached biometric type: $e');
+      AppLogger.error('CacheService', 'Error getting cached biometric type: $e', e);
       return null;
     }
   }
@@ -231,9 +233,9 @@ class CacheService {
         _prefs!.remove(_biometricEnabledKey),
         _prefs!.remove(_biometricTypeKey),
       ]);
-      print('CACHE_SERVICE: Biometric preferences cleared');
+      AppLogger.info('CacheService', 'Biometric preferences cleared');
     } catch (e) {
-      print('CACHE_SERVICE: Error clearing biometric preferences: $e');
+      AppLogger.error('CacheService', 'Error clearing biometric preferences: $e', e);
     }
   }
 
@@ -245,16 +247,16 @@ class CacheService {
       await _ensurePrefsInitialized();
       final jsonString = _prefs!.getString(_recentSearchesKey);
       if (jsonString == null) {
-        print('CACHE_SERVICE: No recent searches found');
+        AppLogger.debug('CacheService', 'No recent searches found');
         return [];
       }
 
       final List<dynamic> jsonList = jsonDecode(jsonString);
       final searches = jsonList.cast<Map<String, dynamic>>();
-      print('CACHE_SERVICE: Loaded ${searches.length} recent searches');
+      AppLogger.debug('CacheService', 'Loaded ${searches.length} recent searches');
       return searches;
     } catch (e) {
-      print('CACHE_SERVICE: Error loading recent searches: $e');
+      AppLogger.error('CacheService', 'Error loading recent searches: $e', e);
       return [];
     }
   }
@@ -265,9 +267,9 @@ class CacheService {
       await _ensurePrefsInitialized();
       final jsonString = jsonEncode(searches);
       await _prefs!.setString(_recentSearchesKey, jsonString);
-      print('CACHE_SERVICE: Stored ${searches.length} recent searches');
+      AppLogger.debug('CacheService', 'Stored ${searches.length} recent searches');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing recent searches: $e');
+      AppLogger.error('CacheService', 'Error storing recent searches: $e', e);
     }
   }
 
@@ -294,10 +296,10 @@ class CacheService {
       // Save to cache
       await storeRecentSearches(trimmed);
 
-      print('CACHE_SERVICE: Added recent search: $placeName');
+      AppLogger.debug('CacheService', 'Added recent search: $placeName');
       return trimmed;
     } catch (e) {
-      print('CACHE_SERVICE: Error adding recent search: $e');
+      AppLogger.error('CacheService', 'Error adding recent search: $e', e);
       return [];
     }
   }
@@ -307,9 +309,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.remove(_recentSearchesKey);
-      print('CACHE_SERVICE: Recent searches cleared');
+      AppLogger.info('CacheService', 'Recent searches cleared');
     } catch (e) {
-      print('CACHE_SERVICE: Error clearing recent searches: $e');
+      AppLogger.error('CacheService', 'Error clearing recent searches: $e', e);
     }
   }
 
@@ -326,9 +328,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setString(key, value);
-      print('CACHE_SERVICE: String stored for key: $key');
+      AppLogger.debug('CacheService', 'String stored for key: $key');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing string for key $key: $e');
+      AppLogger.error('CacheService', 'Error storing string for key $key: $e', e);
     }
   }
 
@@ -337,7 +339,7 @@ class CacheService {
     try {
       return _prefs?.getString(key);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting string for key $key: $e');
+      AppLogger.error('CacheService', 'Error getting string for key $key: $e', e);
       return null;
     }
   }
@@ -347,9 +349,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setBool(key, value);
-      print('CACHE_SERVICE: Bool stored for key: $key');
+      AppLogger.debug('CacheService', 'Bool stored for key: $key');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing bool for key $key: $e');
+      AppLogger.error('CacheService', 'Error storing bool for key $key: $e', e);
     }
   }
 
@@ -358,7 +360,7 @@ class CacheService {
     try {
       return _prefs?.getBool(key);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting bool for key $key: $e');
+      AppLogger.error('CacheService', 'Error getting bool for key $key: $e', e);
       return null;
     }
   }
@@ -368,9 +370,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.setInt(key, value);
-      print('CACHE_SERVICE: Int stored for key: $key');
+      AppLogger.debug('CacheService', 'Int stored for key: $key');
     } catch (e) {
-      print('CACHE_SERVICE: Error storing int for key $key: $e');
+      AppLogger.error('CacheService', 'Error storing int for key $key: $e', e);
     }
   }
 
@@ -379,7 +381,7 @@ class CacheService {
     try {
       return _prefs?.getInt(key);
     } catch (e) {
-      print('CACHE_SERVICE: Error getting int for key $key: $e');
+      AppLogger.error('CacheService', 'Error getting int for key $key: $e', e);
       return null;
     }
   }
@@ -389,9 +391,9 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.remove(key);
-      print('CACHE_SERVICE: Value removed for key: $key');
+      AppLogger.debug('CacheService', 'Value removed for key: $key');
     } catch (e) {
-      print('CACHE_SERVICE: Error removing value for key $key: $e');
+      AppLogger.error('CacheService', 'Error removing value for key $key: $e', e);
     }
   }
 
@@ -400,16 +402,16 @@ class CacheService {
     try {
       await _ensurePrefsInitialized();
       await _prefs!.clear();
-      print('CACHE_SERVICE: All preferences cleared');
+      AppLogger.info('CacheService', 'All preferences cleared');
     } catch (e) {
-      print('CACHE_SERVICE: Error clearing all preferences: $e');
+      AppLogger.error('CacheService', 'Error clearing all preferences: $e', e);
     }
   }
 
   /// Clear everything (secure and non-secure)
   Future<void> clearEverything() async {
     await Future.wait([clearAuthData(), clearAll()]);
-    print('CACHE_SERVICE: Everything cleared');
+    AppLogger.info('CacheService', 'Everything cleared');
   }
 
   // MARK: - Helper Methods
@@ -430,7 +432,7 @@ class CacheService {
       await _ensurePrefsInitialized();
       return _prefs!.getKeys().length;
     } catch (e) {
-      print('CACHE_SERVICE: Error getting cache size: $e');
+      AppLogger.error('CacheService', 'Error getting cache size: $e', e);
       return 0;
     }
   }
@@ -441,7 +443,7 @@ class CacheService {
       await _ensurePrefsInitialized();
       return _prefs!.getKeys();
     } catch (e) {
-      print('CACHE_SERVICE: Error getting all keys: $e');
+      AppLogger.error('CacheService', 'Error getting all keys: $e', e);
       return <String>{};
     }
   }

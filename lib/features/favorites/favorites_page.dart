@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import 'package:rivr/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/features/favorites/widgets/favorites_search_bar.dart';
@@ -67,7 +68,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         }
       }
     } catch (e) {
-      print('FAVORITES_PAGE: Error loading flow unit preference: $e');
+      AppLogger.error('FavoritesPage', 'Error loading flow unit preference', e);
       // Keep default CFS if loading fails
     }
   }
@@ -966,7 +967,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         await authProvider.signOut();
         // AuthCoordinator will automatically handle navigation back to auth
       } catch (e) {
-        print('FAVORITES_PAGE: Error signing out: $e');
+        AppLogger.error('FavoritesPage', 'Error signing out', e);
 
         // Show error dialog
         if (mounted) {

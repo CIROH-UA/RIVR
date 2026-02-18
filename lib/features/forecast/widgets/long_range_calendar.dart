@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../domain/entities/daily_flow_forecast.dart';
 import '../services/daily_forecast_processor.dart';
@@ -112,7 +113,7 @@ class _LongRangeCalendarState extends State<LongRangeCalendar> {
         );
       }
     } catch (e) {
-      print('LONG_RANGE_CALENDAR: Error processing forecast data: $e');
+      AppLogger.error('LongRangeCalendar', 'Error processing forecast data', e);
       _forecastMap = {};
     }
   }

@@ -1,5 +1,6 @@
 // lib/core/models/reach_data.dart
 
+import '../services/app_logger.dart';
 import '../services/flow_unit_preference_service.dart';
 
 class ReachData {
@@ -277,15 +278,13 @@ class ReachData {
   String getFlowCategory(double flowValue, String flowUnit) {
     if (!hasReturnPeriods) return 'Unknown';
 
-    // 🐛 DEBUG: Add this logging
-    print('🐛 getFlowCategory: flowValue=$flowValue, flowUnit=$flowUnit');
+    AppLogger.debug('ReachData', 'getFlowCategory: flowValue=$flowValue, flowUnit=$flowUnit');
 
     // Get return periods in the same unit as the flow value
     final periods = getReturnPeriodsInUnit(flowUnit);
     if (periods == null) return 'Unknown';
 
-    // 🐛 DEBUG: Add this logging
-    print('🐛 Return periods in $flowUnit: $periods');
+    AppLogger.debug('ReachData', 'Return periods in $flowUnit: $periods');
 
     // Get threshold values for each return period
     final threshold2yr = periods[2];
@@ -295,26 +294,26 @@ class ReachData {
 
     // Classify flow based on NOAA flood risk categories
     if (threshold2yr != null && flowValue < threshold2yr) {
-      print('🐛 Classification: Normal (flow < 2yr threshold)');
+      AppLogger.debug('ReachData', 'Classification: Normal (flow < 2yr threshold)');
       return 'Normal'; // Below 2-year return period
     }
 
     if (threshold5yr != null && flowValue < threshold5yr) {
-      print('🐛 Classification: Action (flow < 5yr threshold)');
+      AppLogger.debug('ReachData', 'Classification: Action (flow < 5yr threshold)');
       return 'Action'; // Above 2-year, below 5-year return period
     }
 
     if (threshold10yr != null && flowValue < threshold10yr) {
-      print('🐛 Classification: Moderate (flow < 10yr threshold)');
+      AppLogger.debug('ReachData', 'Classification: Moderate (flow < 10yr threshold)');
       return 'Moderate'; // Above 5-year, below 10-year return period
     }
 
     if (threshold25yr != null && flowValue < threshold25yr) {
-      print('🐛 Classification: Major (flow < 25yr threshold)');
+      AppLogger.debug('ReachData', 'Classification: Major (flow < 25yr threshold)');
       return 'Major'; // Above 10-year, below 25-year return period
     }
 
-    print('🐛 Classification: Extreme (flow > all thresholds)');
+    AppLogger.debug('ReachData', 'Classification: Extreme (flow > all thresholds)');
     return 'Extreme'; // Above 25-year return period
   }
 
@@ -397,8 +396,9 @@ class ForecastSeries {
 
     // MISSING LOGIC: If units are already the same, don't convert!
     if (normalizedOriginalUnits == normalizedPreferredUnits) {
-      print(
-        'FORECAST_SERIES: Units already match ($normalizedOriginalUnits), skipping conversion',
+      AppLogger.debug(
+        'ReachData',
+        'ForecastSeries: Units already match ($normalizedOriginalUnits), skipping conversion',
       );
       return ForecastSeries(
         referenceTime: referenceTime,
@@ -407,8 +407,9 @@ class ForecastSeries {
       );
     }
 
-    print(
-      'FORECAST_SERIES: Converting from $normalizedOriginalUnits to $normalizedPreferredUnits',
+    AppLogger.debug(
+      'ReachData',
+      'ForecastSeries: Converting from $normalizedOriginalUnits to $normalizedPreferredUnits',
     );
 
     // Only convert if units are actually different
@@ -559,7 +560,7 @@ class ForecastResponse {
     String forecastType,
   ) {
     if (section == null || section is! Map<String, dynamic>) {
-      print('FORECAST_PARSER: No data for $forecastType');
+      AppLogger.debug('ReachData', 'ForecastParser: No data for $forecastType');
       return null;
     }
 
@@ -569,13 +570,14 @@ class ForecastResponse {
       try {
         final forecastSeries = ForecastSeries.fromJson(series);
         if (forecastSeries.isNotEmpty) {
-          print(
-            'FORECAST_PARSER: Using series data for $forecastType (${forecastSeries.data.length} points)',
+          AppLogger.debug(
+            'ReachData',
+            'ForecastParser: Using series data for $forecastType (${forecastSeries.data.length} points)',
           );
           return forecastSeries;
         }
       } catch (e) {
-        print('FORECAST_PARSER: Series data invalid for $forecastType: $e');
+        AppLogger.error('ReachData', 'ForecastParser: Series data invalid for $forecastType', e);
       }
     }
 
@@ -585,13 +587,14 @@ class ForecastResponse {
       try {
         final forecastSeries = ForecastSeries.fromJson(mean);
         if (forecastSeries.isNotEmpty) {
-          print(
-            'FORECAST_PARSER: Using mean data for $forecastType (${forecastSeries.data.length} points)',
+          AppLogger.debug(
+            'ReachData',
+            'ForecastParser: Using mean data for $forecastType (${forecastSeries.data.length} points)',
           );
           return forecastSeries;
         }
       } catch (e) {
-        print('FORECAST_PARSER: Mean data invalid for $forecastType: $e');
+        AppLogger.error('ReachData', 'ForecastParser: Mean data invalid for $forecastType', e);
       }
     }
 
@@ -607,22 +610,26 @@ class ForecastResponse {
         try {
           final memberSeries = ForecastSeries.fromJson(memberData);
           if (memberSeries.isNotEmpty) {
-            print(
-              'FORECAST_PARSER: Using $memberKey data for $forecastType (${memberSeries.data.length} points)',
+            AppLogger.debug(
+              'ReachData',
+              'ForecastParser: Using $memberKey data for $forecastType (${memberSeries.data.length} points)',
             );
             return memberSeries;
           }
         } catch (e) {
-          print(
-            'FORECAST_PARSER: $memberKey data invalid for $forecastType: $e',
+          AppLogger.error(
+            'ReachData',
+            'ForecastParser: $memberKey data invalid for $forecastType',
+            e,
           );
           continue; // Try next member
         }
       }
     }
 
-    print(
-      'FORECAST_PARSER: No valid data found for $forecastType (tried series, mean, and ${memberKeys.length} members)',
+    AppLogger.debug(
+      'ReachData',
+      'ForecastParser: No valid data found for $forecastType (tried series, mean, and ${memberKeys.length} members)',
     );
     return null;
   }
@@ -633,7 +640,7 @@ class ForecastResponse {
     String forecastType,
   ) {
     if (section == null || section is! Map<String, dynamic>) {
-      print('FORECAST_PARSER: No ensemble data for $forecastType');
+      AppLogger.debug('ReachData', 'ForecastParser: No ensemble data for $forecastType');
       return {};
     }
 
@@ -646,12 +653,13 @@ class ForecastResponse {
         final series = ForecastSeries.fromJson(seriesData);
         if (series.isNotEmpty) {
           result['mean'] = series;
-          print(
-            'FORECAST_PARSER: Found series data for $forecastType as mean (${series.data.length} points)',
+          AppLogger.debug(
+            'ReachData',
+            'ForecastParser: Found series data for $forecastType as mean (${series.data.length} points)',
           );
         }
       } catch (e) {
-        print('FORECAST_PARSER: Series data invalid for $forecastType: $e');
+        AppLogger.error('ReachData', 'ForecastParser: Series data invalid for $forecastType', e);
       }
     }
 
@@ -662,12 +670,13 @@ class ForecastResponse {
         final mean = ForecastSeries.fromJson(meanData);
         if (mean.isNotEmpty) {
           result['mean'] = mean;
-          print(
-            'FORECAST_PARSER: Found explicit mean data for $forecastType (${mean.data.length} points)',
+          AppLogger.debug(
+            'ReachData',
+            'ForecastParser: Found explicit mean data for $forecastType (${mean.data.length} points)',
           );
         }
       } catch (e) {
-        print('FORECAST_PARSER: Mean data invalid for $forecastType: $e');
+        AppLogger.error('ReachData', 'ForecastParser: Mean data invalid for $forecastType', e);
       }
     }
 
@@ -697,8 +706,9 @@ class ForecastResponse {
         .where((k) => k.startsWith('member'))
         .length;
 
-    print(
-      'FORECAST_PARSER: Found ${result.length} valid series for $forecastType: ${result.keys.join(", ")} ($validMemberCount/$memberCount members valid)',
+    AppLogger.debug(
+      'ReachData',
+      'ForecastParser: Found ${result.length} valid series for $forecastType: ${result.keys.join(", ")} ($validMemberCount/$memberCount members valid)',
     );
 
     return result;

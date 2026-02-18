@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../models/reach_data.dart';
 
 /// Simple cache service for ReachData objects
@@ -24,9 +25,9 @@ class ReachCacheService {
   Future<void> initialize() async {
     try {
       _prefs ??= await SharedPreferences.getInstance();
-      print('REACH_CACHE: Initialized successfully');
+      AppLogger.info('ReachCacheService', 'Initialized successfully');
     } catch (e) {
-      print('REACH_CACHE: Error initializing: $e');
+      AppLogger.error('ReachCacheService', 'Error initializing', e);
     }
   }
 
@@ -41,8 +42,9 @@ class ReachCacheService {
 
       if (cachedJson == null) {
         _cacheMisses++;
-        print(
-          'REACH_CACHE: No cache found for reach: $reachId (Miss: $_cacheMisses)',
+        AppLogger.debug(
+          'ReachCacheService',
+          'No cache found for reach: $reachId (Miss: $_cacheMisses)',
         );
         return null;
       }
@@ -53,8 +55,9 @@ class ReachCacheService {
       // Check if cache is stale (6 months)
       if (reachData.isCacheStale(maxAge: _cacheMaxAge)) {
         _cacheMisses++;
-        print(
-          'REACH_CACHE: Cache stale for reach: $reachId (${reachData.cachedAt}) (Miss: $_cacheMisses)',
+        AppLogger.debug(
+          'ReachCacheService',
+          'Cache stale for reach: $reachId (${reachData.cachedAt}) (Miss: $_cacheMisses)',
         );
         // Remove stale cache
         await _prefs!.remove(key);
@@ -62,10 +65,10 @@ class ReachCacheService {
       }
 
       _cacheHits++;
-      print('REACH_CACHE: Cache hit for reach: $reachId (Hits: $_cacheHits)');
+      AppLogger.debug('ReachCacheService', 'Cache hit for reach: $reachId (Hits: $_cacheHits)');
       return reachData;
     } catch (e) {
-      print('REACH_CACHE: Error getting cached reach $reachId: $e');
+      AppLogger.error('ReachCacheService', 'Error getting cached reach $reachId', e);
       return null;
     }
   }
@@ -79,11 +82,12 @@ class ReachCacheService {
       final jsonString = jsonEncode(reachData.toJson());
 
       await _prefs!.setString(key, jsonString);
-      print(
-        'REACH_CACHE: Stored reach: ${reachData.reachId} (${reachData.displayName})',
+      AppLogger.debug(
+        'ReachCacheService',
+        'Stored reach: ${reachData.reachId} (${reachData.displayName})',
       );
     } catch (e) {
-      print('REACH_CACHE: Error storing reach ${reachData.reachId}: $e');
+      AppLogger.error('ReachCacheService', 'Error storing reach ${reachData.reachId}', e);
       // Don't throw - caching should not break the app
     }
   }
@@ -95,9 +99,9 @@ class ReachCacheService {
 
       final key = _keyPrefix + reachId;
       await _prefs!.remove(key);
-      print('REACH_CACHE: Cleared cache for reach: $reachId');
+      AppLogger.debug('ReachCacheService', 'Cleared cache for reach: $reachId');
     } catch (e) {
-      print('REACH_CACHE: Error clearing reach $reachId: $e');
+      AppLogger.error('ReachCacheService', 'Error clearing reach $reachId', e);
     }
   }
 
@@ -113,9 +117,9 @@ class ReachCacheService {
         await _prefs!.remove(key);
       }
 
-      print('REACH_CACHE: Cleared ${reachKeys.length} cached reaches');
+      AppLogger.info('ReachCacheService', 'Cleared ${reachKeys.length} cached reaches');
     } catch (e) {
-      print('REACH_CACHE: Error clearing all cache: $e');
+      AppLogger.error('ReachCacheService', 'Error clearing all cache', e);
     }
   }
 
@@ -176,7 +180,7 @@ class ReachCacheService {
         'newestCache': newestCache?.toIso8601String(),
       };
     } catch (e) {
-      print('REACH_CACHE: Error getting cache stats: $e');
+      AppLogger.error('ReachCacheService', 'Error getting cache stats', e);
       return {'error': e.toString()};
     }
   }
@@ -186,8 +190,9 @@ class ReachCacheService {
     final total = _cacheHits + _cacheMisses;
     final hitRate = total > 0 ? (_cacheHits / total) * 100 : 0.0;
 
-    print(
-      'CACHE_STATS: Hits=$_cacheHits, Misses=$_cacheMisses, Rate=${hitRate.toStringAsFixed(1)}%',
+    AppLogger.debug(
+      'ReachCacheService',
+      'Cache stats: Hits=$_cacheHits, Misses=$_cacheMisses, Rate=${hitRate.toStringAsFixed(1)}%',
     );
 
     return {
@@ -200,7 +205,7 @@ class ReachCacheService {
 
   /// Force refresh a reach (clear cache and require fresh API call)
   Future<void> forceRefresh(String reachId) async {
-    print('REACH_CACHE: Force refresh requested for reach: $reachId');
+    AppLogger.debug('ReachCacheService', 'Force refresh requested for reach: $reachId');
     await clearReach(reachId);
   }
 
@@ -233,12 +238,12 @@ class ReachCacheService {
       }
 
       if (cleanedCount > 0) {
-        print('REACH_CACHE: Cleaned up $cleanedCount stale cache entries');
+        AppLogger.info('ReachCacheService', 'Cleaned up $cleanedCount stale cache entries');
       }
 
       return cleanedCount;
     } catch (e) {
-      print('REACH_CACHE: Error during cleanup: $e');
+      AppLogger.error('ReachCacheService', 'Error during cleanup', e);
       return 0;
     }
   }

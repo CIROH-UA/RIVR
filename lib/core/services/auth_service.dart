@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_settings.dart';
+import 'app_logger.dart';
 import 'error_service.dart';
 
 /// Simplified Firebase Auth wrapper service for RIVR
@@ -51,7 +52,7 @@ class AuthService {
     required String password,
   }) async {
     try {
-      print("AUTH_SERVICE: Signing in with email: $email");
+      AppLogger.debug('AuthService', 'Signing in with email: $email');
 
       final credential = await _firebaseAuth
           .signInWithEmailAndPassword(email: email.trim(), password: password)
@@ -67,15 +68,13 @@ class AuthService {
         return AuthResult.failure('Sign in failed - no user returned');
       }
 
-      print(
-        "AUTH_SERVICE: Sign in successful for user: ${credential.user!.uid}",
-      );
+      AppLogger.info('AuthService', 'Sign in successful for user: ${credential.user!.uid}');
       return AuthResult.success(credential.user!);
     } on FirebaseAuthException catch (e) {
-      print("AUTH_SERVICE: FirebaseAuthException: ${e.code} - ${e.message}");
+      AppLogger.error('AuthService', 'FirebaseAuthException: ${e.code} - ${e.message}', e);
       return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
     } catch (e) {
-      print("AUTH_SERVICE: Unexpected sign in error: $e");
+      AppLogger.error('AuthService', 'Unexpected sign in error: $e', e);
       return AuthResult.failure('Sign in failed: ${e.toString()}');
     }
   }
@@ -88,7 +87,7 @@ class AuthService {
     required String lastName,
   }) async {
     try {
-      print("AUTH_SERVICE: Registering user with email: $email");
+      AppLogger.debug('AuthService', 'Registering user with email: $email');
 
       final credential = await _firebaseAuth
           .createUserWithEmailAndPassword(
@@ -108,7 +107,7 @@ class AuthService {
       }
 
       final user = credential.user!;
-      print("AUTH_SERVICE: Registration successful for user: ${user.uid}");
+      AppLogger.info('AuthService', 'Registration successful for user: ${user.uid}');
 
       // Update display name
       await user.updateDisplayName('$firstName $lastName');
@@ -123,12 +122,10 @@ class AuthService {
 
       return AuthResult.success(user);
     } on FirebaseAuthException catch (e) {
-      print(
-        "AUTH_SERVICE: Registration FirebaseAuthException: ${e.code} - ${e.message}",
-      );
+      AppLogger.error('AuthService', 'Registration FirebaseAuthException: ${e.code} - ${e.message}', e);
       return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
     } catch (e) {
-      print("AUTH_SERVICE: Unexpected registration error: $e");
+      AppLogger.error('AuthService', 'Unexpected registration error: $e', e);
       return AuthResult.failure('Registration failed: ${e.toString()}');
     }
   }
@@ -141,7 +138,7 @@ class AuthService {
     required String lastName,
   }) async {
     try {
-      print("AUTH_SERVICE: Creating UserSettings for user: $userId");
+      AppLogger.debug('AuthService', 'Creating UserSettings for user: $userId');
 
       final userSettings = UserSettings(
         userId: userId,
@@ -167,9 +164,9 @@ class AuthService {
             onTimeout: () => throw Exception('UserSettings creation timed out'),
           );
 
-      print("AUTH_SERVICE: UserSettings created successfully");
+      AppLogger.info('AuthService', 'UserSettings created successfully');
     } catch (e) {
-      print("AUTH_SERVICE: Error creating UserSettings: $e");
+      AppLogger.error('AuthService', 'Error creating UserSettings: $e', e);
       // Don't throw - registration was successful, this is just cleanup
     }
   }
@@ -177,7 +174,7 @@ class AuthService {
   /// Send password reset email
   Future<AuthResult> sendPasswordResetEmail({required String email}) async {
     try {
-      print("AUTH_SERVICE: Sending password reset email to: $email");
+      AppLogger.debug('AuthService', 'Sending password reset email to: $email');
 
       await _firebaseAuth
           .sendPasswordResetEmail(email: email.trim())
@@ -189,15 +186,13 @@ class AuthService {
             ),
           );
 
-      print("AUTH_SERVICE: Password reset email sent successfully");
+      AppLogger.info('AuthService', 'Password reset email sent successfully');
       return AuthResult.success(null, message: 'Password reset email sent');
     } on FirebaseAuthException catch (e) {
-      print(
-        "AUTH_SERVICE: Password reset FirebaseAuthException: ${e.code} - ${e.message}",
-      );
+      AppLogger.error('AuthService', 'Password reset FirebaseAuthException: ${e.code} - ${e.message}', e);
       return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
     } catch (e) {
-      print("AUTH_SERVICE: Unexpected password reset error: $e");
+      AppLogger.error('AuthService', 'Unexpected password reset error: $e', e);
       return AuthResult.failure(
         'Failed to send password reset email: ${e.toString()}',
       );
@@ -207,12 +202,12 @@ class AuthService {
   /// Sign out current user
   Future<AuthResult> signOut() async {
     try {
-      print("AUTH_SERVICE: Signing out current user");
+      AppLogger.debug('AuthService', 'Signing out current user');
 
       await _firebaseAuth.signOut().timeout(
         const Duration(seconds: 5),
         onTimeout: () {
-          print("AUTH_SERVICE: Sign out timed out, but continuing");
+          AppLogger.warning('AuthService', 'Sign out timed out, but continuing');
           // Continue anyway - local session will be cleared
         },
       );
@@ -220,10 +215,10 @@ class AuthService {
       // Clear biometric credentials on sign out
       await _clearBiometricCredentials();
 
-      print("AUTH_SERVICE: Sign out successful");
+      AppLogger.info('AuthService', 'Sign out successful');
       return AuthResult.success(null, message: 'Signed out successfully');
     } catch (e) {
-      print("AUTH_SERVICE: Sign out error: $e");
+      AppLogger.error('AuthService', 'Sign out error: $e', e);
       return AuthResult.failure('Sign out failed: ${e.toString()}');
     }
   }
@@ -237,7 +232,7 @@ class AuthService {
       final isDeviceSupported = await _localAuth.isDeviceSupported();
       return canCheckBiometrics && isDeviceSupported;
     } catch (e) {
-      print("AUTH_SERVICE: Error checking biometric availability: $e");
+      AppLogger.error('AuthService', 'Error checking biometric availability: $e', e);
       return false;
     }
   }
@@ -248,7 +243,7 @@ class AuthService {
       final value = await _secureStorage.read(key: _biometricEnabledKey);
       return value == 'true';
     } catch (e) {
-      print("AUTH_SERVICE: Error checking biometric enabled status: $e");
+      AppLogger.error('AuthService', 'Error checking biometric enabled status: $e', e);
       return false;
     }
   }
@@ -284,10 +279,10 @@ class AuthService {
         value: currentUser!.email ?? '',
       );
 
-      print("AUTH_SERVICE: Biometric login enabled successfully");
+      AppLogger.info('AuthService', 'Biometric login enabled successfully');
       return AuthResult.success(null, message: 'Biometric login enabled');
     } catch (e) {
-      print("AUTH_SERVICE: Error enabling biometric login: $e");
+      AppLogger.error('AuthService', 'Error enabling biometric login: $e', e);
       return AuthResult.failure(
         'Failed to enable biometric login: ${e.toString()}',
       );
@@ -298,10 +293,10 @@ class AuthService {
   Future<AuthResult> disableBiometricLogin() async {
     try {
       await _clearBiometricCredentials();
-      print("AUTH_SERVICE: Biometric login disabled successfully");
+      AppLogger.info('AuthService', 'Biometric login disabled successfully');
       return AuthResult.success(null, message: 'Biometric login disabled');
     } catch (e) {
-      print("AUTH_SERVICE: Error disabling biometric login: $e");
+      AppLogger.error('AuthService', 'Error disabling biometric login: $e', e);
       return AuthResult.failure(
         'Failed to disable biometric login: ${e.toString()}',
       );
@@ -343,13 +338,13 @@ class AuthService {
         return AuthResult.failure('Biometric credentials no longer valid');
       }
 
-      print("AUTH_SERVICE: Biometric sign in successful for user: $userId");
+      AppLogger.info('AuthService', 'Biometric sign in successful for user: $userId');
       return AuthResult.success(
         currentUser!,
         message: 'Biometric sign in successful',
       );
     } catch (e) {
-      print("AUTH_SERVICE: Biometric sign in error: $e");
+      AppLogger.error('AuthService', 'Biometric sign in error: $e', e);
       return AuthResult.failure('Biometric sign in failed: ${e.toString()}');
     }
   }
@@ -367,7 +362,7 @@ class AuthService {
           )
           .timeout(const Duration(seconds: 30), onTimeout: () => false);
     } catch (e) {
-      print("AUTH_SERVICE: Biometric authentication error: $e");
+      AppLogger.error('AuthService', 'Biometric authentication error: $e', e);
       return false;
     }
   }
@@ -379,7 +374,7 @@ class AuthService {
       await _secureStorage.delete(key: _biometricUserIdKey);
       await _secureStorage.delete(key: _biometricEmailKey);
     } catch (e) {
-      print("AUTH_SERVICE: Error clearing biometric credentials: $e");
+      AppLogger.error('AuthService', 'Error clearing biometric credentials: $e', e);
     }
   }
 
@@ -393,10 +388,10 @@ class AuthService {
       }
 
       await currentUser!.updateDisplayName(displayName);
-      print("AUTH_SERVICE: Display name updated successfully");
+      AppLogger.info('AuthService', 'Display name updated successfully');
       return AuthResult.success(currentUser!, message: 'Display name updated');
     } catch (e) {
-      print("AUTH_SERVICE: Error updating display name: $e");
+      AppLogger.error('AuthService', 'Error updating display name: $e', e);
       return AuthResult.failure(
         'Failed to update display name: ${e.toString()}',
       );
@@ -408,7 +403,7 @@ class AuthService {
     try {
       await currentUser?.reload();
     } catch (e) {
-      print("AUTH_SERVICE: Error reloading user: $e");
+      AppLogger.error('AuthService', 'Error reloading user: $e', e);
     }
   }
 }

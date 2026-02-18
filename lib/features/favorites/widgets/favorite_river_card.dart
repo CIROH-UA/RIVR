@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/models/favorite_river.dart';
 import '../../../core/providers/favorites_provider.dart';
 import '../services/flood_risk_video_service.dart';
@@ -62,7 +63,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     // Reinitialize video when switching from custom image to null
     if (oldWidget.favorite.customImageAsset != null &&
         widget.favorite.customImageAsset == null) {
-      print(
+      AppLogger.debug(
+        'FavoriteRiverCard',
         'Switching from custom image to video for ${widget.favorite.reachId}',
       );
 
@@ -80,7 +82,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     // Dispose video when switching from null to custom image
     else if (oldWidget.favorite.customImageAsset == null &&
         widget.favorite.customImageAsset != null) {
-      print(
+      AppLogger.debug(
+        'FavoriteRiverCard',
         'Switching from video to custom image for ${widget.favorite.reachId}',
       );
       _videoController?.dispose();
@@ -120,7 +123,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
           });
         }
       } catch (e) {
-        print('Failed to initialize video: $e');
+        AppLogger.error('FavoriteRiverCard', 'Failed to initialize video', e);
         if (mounted) {
           setState(() {
             _isVideoInitialized = false;
@@ -133,8 +136,9 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   String _getFloodRiskCategory() {
     final rawFlow = widget.favorite.lastKnownFlow;
     if (rawFlow == null) {
-      print(
-        'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no flow)',
+      AppLogger.debug(
+        'FavoriteRiverCard',
+        '${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no flow)',
       );
       return 'NoData';
     }
@@ -146,8 +150,9 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
 
     if (returnPeriods == null || returnPeriods.isEmpty) {
-      print(
-        'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no return periods)',
+      AppLogger.debug(
+        'FavoriteRiverCard',
+        '${widget.favorite.displayName} (${widget.favorite.reachId}) - Flood Risk: NoData (no return periods)',
       );
       return 'NoData';
     }
@@ -192,8 +197,9 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
       category = 'Extreme';
     }
 
-    print(
-      'CARD: ${widget.favorite.displayName} (${widget.favorite.reachId}) - Current: ${currentFlow.toStringAsFixed(1)} $currentUnit, Flood Risk: $category',
+    AppLogger.debug(
+      'FavoriteRiverCard',
+      '${widget.favorite.displayName} (${widget.favorite.reachId}) - Current: ${currentFlow.toStringAsFixed(1)} $currentUnit, Flood Risk: $category',
     );
     return category;
   }
@@ -322,7 +328,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         );
       } catch (e) {
         // If accessing controller throws error (disposed), fall back to gradient
-        print('Video controller error: $e');
+        AppLogger.error('FavoriteRiverCard', 'Video controller error', e);
         return _buildDefaultGradient();
       }
     } else {
@@ -338,7 +344,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
           // If custom image fails, fall back to video
-          print(
+          AppLogger.error(
+            'FavoriteRiverCard',
             'Failed to load custom image: ${widget.favorite.customImageAsset}',
           );
           return _buildVideoBackground();

@@ -2,6 +2,7 @@
 
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import '../../../core/config.dart';
+import '../../../core/services/app_logger.dart';
 
 /// Service for managing vector tiles display on the map
 /// Handles loading/removing river reaches from vector tiles
@@ -12,7 +13,7 @@ class MapVectorTilesService {
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
     _mapboxMap = map;
-    print('✅ Vector tiles service ready');
+    AppLogger.info('MapVectorTilesService', 'Vector tiles service ready');
   }
 
   /// Load river reaches vector tiles
@@ -22,12 +23,12 @@ class MapVectorTilesService {
     }
 
     if (_isLoaded) {
-      print('ℹ️ Vector tiles already loaded');
+      AppLogger.debug('MapVectorTilesService', 'Vector tiles already loaded');
       return;
     }
 
     try {
-      print('🚀 Loading river reaches vector tiles...');
+      AppLogger.debug('MapVectorTilesService', 'Loading river reaches vector tiles...');
 
       // Remove existing source/layers if they exist
       await _removeExistingLayers();
@@ -39,9 +40,9 @@ class MapVectorTilesService {
       await _addStyledLayers();
 
       _isLoaded = true;
-      print('✅ River reaches vector tiles loaded successfully');
+      AppLogger.info('MapVectorTilesService', 'River reaches vector tiles loaded successfully');
     } catch (e) {
-      print('❌ Failed to load vector tiles: $e');
+      AppLogger.error('MapVectorTilesService', 'Failed to load vector tiles', e);
       rethrow;
     }
   }
@@ -70,9 +71,9 @@ class MapVectorTilesService {
         }
       }
 
-      print('✅ River reaches ${visible == true ? 'shown' : 'hidden'}');
+      AppLogger.info('MapVectorTilesService', 'River reaches ${visible == true ? 'shown' : 'hidden'}');
     } catch (e) {
-      print('❌ Error toggling river reaches visibility: $e');
+      AppLogger.error('MapVectorTilesService', 'Error toggling river reaches visibility', e);
     }
   }
 
@@ -83,9 +84,9 @@ class MapVectorTilesService {
     try {
       await _removeExistingLayers();
       _isLoaded = false;
-      print('✅ Vector tiles removed completely');
+      AppLogger.info('MapVectorTilesService', 'Vector tiles removed completely');
     } catch (e) {
-      print('❌ Error removing vector tiles: $e');
+      AppLogger.error('MapVectorTilesService', 'Error removing vector tiles', e);
     }
   }
 
@@ -100,7 +101,7 @@ class MapVectorTilesService {
         url: AppConfig.getVectorTileSourceUrl(),
       ),
     );
-    print('✅ Vector source added: ${AppConfig.vectorSourceId}');
+    AppLogger.info('MapVectorTilesService', 'Vector source added: ${AppConfig.vectorSourceId}');
   }
 
   /// Add styled layers for river reaches (MULTIPLE LAYERS like working code)
@@ -135,7 +136,7 @@ class MapVectorTilesService {
           ],
         ),
       );
-      print('✅ Added layer: streams2-order-1-2');
+      AppLogger.info('MapVectorTilesService', 'Added layer: streams2-order-1-2');
 
       await _mapboxMap!.style.addLayer(
         LineLayer(
@@ -160,7 +161,7 @@ class MapVectorTilesService {
           ],
         ),
       );
-      print('✅ Added layer: streams2-order-3-4');
+      AppLogger.info('MapVectorTilesService', 'Added layer: streams2-order-3-4');
 
       await _mapboxMap!.style.addLayer(
         LineLayer(
@@ -177,9 +178,9 @@ class MapVectorTilesService {
           ],
         ),
       );
-      print('✅ Added layer: streams2-order-5-plus');
+      AppLogger.info('MapVectorTilesService', 'Added layer: streams2-order-5-plus');
     } catch (e) {
-      print('❌ Failed to add styled layers: $e');
+      AppLogger.error('MapVectorTilesService', 'Failed to add styled layers', e);
       rethrow;
     }
   }
@@ -212,10 +213,10 @@ class MapVectorTilesService {
         // Source might not exist, that's fine
       }
 
-      print('ℹ️ Cleaned up existing layers/sources');
+      AppLogger.debug('MapVectorTilesService', 'Cleaned up existing layers/sources');
     } catch (e) {
       // Ignore errors when removing non-existent layers/sources
-      print('ℹ️ Cleaned up existing layers/sources');
+      AppLogger.debug('MapVectorTilesService', 'Cleaned up existing layers/sources');
     }
   }
 
@@ -249,7 +250,7 @@ class MapVectorTilesService {
         }
       }
     } catch (e) {
-      print('❌ Error updating layer visibility: $e');
+      AppLogger.error('MapVectorTilesService', 'Error updating layer visibility', e);
     }
   }
 
@@ -261,7 +262,7 @@ class MapVectorTilesService {
       final cameraState = await _mapboxMap!.getCameraState();
       return cameraState.zoom;
     } catch (e) {
-      print('❌ Error getting zoom level: $e');
+      AppLogger.error('MapVectorTilesService', 'Error getting zoom level', e);
       return null;
     }
   }

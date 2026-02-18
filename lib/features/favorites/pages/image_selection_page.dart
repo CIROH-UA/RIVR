@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../core/providers/favorites_provider.dart';
 import '../../../core/services/background_image_service.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../features/auth/services/user_settings_service.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 
@@ -113,7 +114,7 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
         });
       }
     } catch (e) {
-      print('Error loading custom images: $e');
+      AppLogger.error('ImageSelectionPage', 'Error loading custom images', e);
     }
   }
 

@@ -2,6 +2,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/pages/navigation_error_page.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
@@ -31,9 +32,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Initialize Firebase if needed
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  print('FCM_BACKGROUND: Received message: ${message.messageId}');
-  print('FCM_BACKGROUND: Title: ${message.notification?.title}');
-  print('FCM_BACKGROUND: Body: ${message.notification?.body}');
+  AppLogger.debug('Main', 'FCM background received message: ${message.messageId}');
+  AppLogger.debug('Main', 'FCM background title: ${message.notification?.title}');
+  AppLogger.debug('Main', 'FCM background body: ${message.notification?.body}');
 
   // Handle the background message (for now, just log it)
   // In the future, you could update local database or trigger other actions
@@ -93,7 +94,7 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
     // Initialize map preference service (loads saved preferences)
     await MapPreferenceService.loadMapPreference();
 
-    print('🚀 App services initialized');
+    AppLogger.info('Main', 'App services initialized');
   }
 
   @override

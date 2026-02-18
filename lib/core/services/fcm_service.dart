@@ -3,6 +3,7 @@
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:rivr/core/services/error_service.dart';
+import 'app_logger.dart';
 import 'package:rivr/features/auth/services/user_settings_service.dart';
 
 /// Simple FCM service for managing push notification tokens
@@ -21,12 +22,12 @@ class FCMService {
   /// Initialize FCM - call this when user enables notifications
   Future<bool> initialize() async {
     try {
-      print('FCM_SERVICE: Initializing Firebase Messaging');
+      AppLogger.debug('FcmService', 'Initializing Firebase Messaging');
 
       // Request permission first
       final permissionGranted = await requestPermission();
       if (!permissionGranted) {
-        print('FCM_SERVICE: Permission denied, cannot initialize');
+        AppLogger.warning('FcmService', 'Permission denied, cannot initialize');
         return false;
       }
 
@@ -43,10 +44,10 @@ class FCMService {
       }
 
       _isInitialized = true;
-      print('FCM_SERVICE: Successfully initialized');
+      AppLogger.info('FcmService', 'Successfully initialized');
       return true;
     } catch (e) {
-      print('FCM_SERVICE: Initialization error: $e');
+      AppLogger.error('FcmService', 'Initialization error: $e', e);
       ErrorService.logError('FCMService.initialize', e);
       return false;
     }
@@ -55,7 +56,7 @@ class FCMService {
   /// Request notification permissions
   Future<bool> requestPermission() async {
     try {
-      print('FCM_SERVICE: Requesting notification permission');
+      AppLogger.debug('FcmService', 'Requesting notification permission');
 
       final settings = await _messaging.requestPermission(
         alert: true,
@@ -71,10 +72,10 @@ class FCMService {
           settings.authorizationStatus == AuthorizationStatus.authorized ||
           settings.authorizationStatus == AuthorizationStatus.provisional;
 
-      print('FCM_SERVICE: Permission status: ${settings.authorizationStatus}');
+      AppLogger.debug('FcmService', 'Permission status: ${settings.authorizationStatus}');
       return isAuthorized;
     } catch (e) {
-      print('FCM_SERVICE: Error requesting permission: $e');
+      AppLogger.error('FcmService', 'Error requesting permission: $e', e);
       ErrorService.logError('FCMService.requestPermission', e);
       return false;
     }
@@ -83,28 +84,29 @@ class FCMService {
   /// Get FCM token and save to user settings
   Future<String?> getAndSaveToken(String userId) async {
     try {
-      print('FCM_SERVICE: Getting FCM token for user: $userId');
+      AppLogger.debug('FcmService', 'Getting FCM token for user: $userId');
 
       // Return cached token if available
       if (_cachedToken != null) {
-        print('FCM_SERVICE: Using cached token');
+        AppLogger.debug('FcmService', 'Using cached token');
         return _cachedToken;
       }
 
       // iOS: Get APNS token first (required)
       if (Platform.isIOS) {
-        print('FCM_SERVICE: Getting APNS token first (iOS requirement)');
+        AppLogger.debug('FcmService', 'Getting APNS token first (iOS requirement)');
         try {
           final apnsToken = await _messaging.getAPNSToken();
           if (apnsToken != null) {
-            print(
-              'FCM_SERVICE: APNS token obtained: ${apnsToken.substring(0, 20)}...',
+            AppLogger.debug(
+              'FcmService',
+              'APNS token obtained: ${apnsToken.substring(0, 20)}...',
             );
           } else {
-            print('FCM_SERVICE: APNS token is null, continuing anyway...');
+            AppLogger.warning('FcmService', 'APNS token is null, continuing anyway...');
           }
         } catch (e) {
-          print('FCM_SERVICE: Error getting APNS token: $e');
+          AppLogger.error('FcmService', 'Error getting APNS token: $e', e);
           // Continue anyway - sometimes this works without explicit APNS token
         }
       }
@@ -112,11 +114,11 @@ class FCMService {
       // Get fresh FCM token
       final token = await _messaging.getToken();
       if (token == null) {
-        print('FCM_SERVICE: Failed to get FCM token');
+        AppLogger.warning('FcmService', 'Failed to get FCM token');
         return null;
       }
 
-      print('FCM_SERVICE: Got FCM token: ${token.substring(0, 20)}...');
+      AppLogger.debug('FcmService', 'Got FCM token: ${token.substring(0, 20)}...');
       _cachedToken = token;
 
       // Save token to user settings
@@ -124,7 +126,7 @@ class FCMService {
 
       return token;
     } catch (e) {
-      print('FCM_SERVICE: Error getting token: $e');
+      AppLogger.error('FcmService', 'Error getting token: $e', e);
       ErrorService.logError('FCMService.getAndSaveToken', e);
       return null;
     }
@@ -133,13 +135,13 @@ class FCMService {
   /// Save FCM token to UserSettings
   Future<void> _saveTokenToUserSettings(String userId, String token) async {
     try {
-      print('FCM_SERVICE: Saving token to user settings');
+      AppLogger.debug('FcmService', 'Saving token to user settings');
 
       final currentSettings = await _userSettingsService.getUserSettings(
         userId,
       );
       if (currentSettings == null) {
-        print('FCM_SERVICE: No user settings found, cannot save token');
+        AppLogger.warning('FcmService', 'No user settings found, cannot save token');
         return;
       }
 
@@ -147,18 +149,18 @@ class FCMService {
       final updatedSettings = currentSettings.copyWith(fcmToken: token);
       await _userSettingsService.saveUserSettings(updatedSettings);
 
-      print('FCM_SERVICE: Token saved to user settings');
+      AppLogger.info('FcmService', 'Token saved to user settings');
     } catch (e) {
-      print('FCM_SERVICE: Error saving token to settings: $e');
+      AppLogger.error('FcmService', 'Error saving token to settings: $e', e);
       ErrorService.logError('FCMService._saveTokenToUserSettings', e);
     }
   }
 
   /// Handle foreground messages (when app is open)
   void _handleForegroundMessage(RemoteMessage message) {
-    print('FCM_SERVICE: Received foreground message: ${message.messageId}');
-    print('FCM_SERVICE: Title: ${message.notification?.title}');
-    print('FCM_SERVICE: Body: ${message.notification?.body}');
+    AppLogger.debug('FcmService', 'Received foreground message: ${message.messageId}');
+    AppLogger.debug('FcmService', 'Title: ${message.notification?.title}');
+    AppLogger.debug('FcmService', 'Body: ${message.notification?.body}');
 
     // For now, just log. In the future, you could show an in-app notification
     // or update the UI to reflect new flood conditions
@@ -166,13 +168,13 @@ class FCMService {
 
   /// Handle notification tap (when user taps notification)
   void _handleNotificationTap(RemoteMessage message) {
-    print('FCM_SERVICE: Notification tapped: ${message.messageId}');
-    print('FCM_SERVICE: Data: ${message.data}');
+    AppLogger.debug('FcmService', 'Notification tapped: ${message.messageId}');
+    AppLogger.debug('FcmService', 'Data: ${message.data}');
 
     // Handle navigation based on notification data
     final reachId = message.data['reachId'];
     if (reachId != null) {
-      print('FCM_SERVICE: Should navigate to reach: $reachId');
+      AppLogger.debug('FcmService', 'Should navigate to reach: $reachId');
       // TODO: Add navigation logic when needed
       // Could use a global navigator key or callback
     }
@@ -181,7 +183,7 @@ class FCMService {
   /// Enable notifications for a user (gets token and saves it)
   Future<bool> enableNotifications(String userId) async {
     try {
-      print('FCM_SERVICE: Enabling notifications for user: $userId');
+      AppLogger.debug('FcmService', 'Enabling notifications for user: $userId');
 
       // Initialize if not already done
       if (!_isInitialized) {
@@ -193,7 +195,7 @@ class FCMService {
       final token = await getAndSaveToken(userId);
       return token != null;
     } catch (e) {
-      print('FCM_SERVICE: Error enabling notifications: $e');
+      AppLogger.error('FcmService', 'Error enabling notifications: $e', e);
       ErrorService.logError('FCMService.enableNotifications', e);
       return false;
     }
@@ -202,7 +204,7 @@ class FCMService {
   /// Disable notifications for a user (clears token)
   Future<void> disableNotifications(String userId) async {
     try {
-      print('FCM_SERVICE: Disabling notifications for user: $userId');
+      AppLogger.debug('FcmService', 'Disabling notifications for user: $userId');
 
       // Clear cached token
       _cachedToken = null;
@@ -214,14 +216,14 @@ class FCMService {
       if (currentSettings != null) {
         final updatedSettings = currentSettings.copyWith(fcmToken: null);
         await _userSettingsService.saveUserSettings(updatedSettings);
-        print('FCM_SERVICE: Token removed from user settings');
+        AppLogger.info('FcmService', 'Token removed from user settings');
       }
 
       // Delete token from Firebase (optional - prevents old tokens from being used)
       await _messaging.deleteToken();
-      print('FCM_SERVICE: Token deleted from Firebase');
+      AppLogger.info('FcmService', 'Token deleted from Firebase');
     } catch (e) {
-      print('FCM_SERVICE: Error disabling notifications: $e');
+      AppLogger.error('FcmService', 'Error disabling notifications: $e', e);
       ErrorService.logError('FCMService.disableNotifications', e);
     }
   }
@@ -232,7 +234,7 @@ class FCMService {
       final settings = await _userSettingsService.getUserSettings(userId);
       return settings?.hasValidFCMToken ?? false;
     } catch (e) {
-      print('FCM_SERVICE: Error checking notification status: $e');
+      AppLogger.error('FcmService', 'Error checking notification status: $e', e);
       return false;
     }
   }
@@ -242,19 +244,19 @@ class FCMService {
     try {
       // Listen for token refresh (happens when app is restored from backup, etc.)
       _messaging.onTokenRefresh.listen((newToken) async {
-        print('FCM_SERVICE: Token refreshed: ${newToken.substring(0, 20)}...');
+        AppLogger.debug('FcmService', 'Token refreshed: ${newToken.substring(0, 20)}...');
         _cachedToken = newToken;
         await _saveTokenToUserSettings(userId, newToken);
       });
     } catch (e) {
-      print('FCM_SERVICE: Error setting up token refresh: $e');
+      AppLogger.error('FcmService', 'Error setting up token refresh: $e', e);
       ErrorService.logError('FCMService.refreshTokenIfNeeded', e);
     }
   }
 
   /// Clear cache (call on user logout)
   void clearCache() {
-    print('FCM_SERVICE: Clearing cache');
+    AppLogger.debug('FcmService', 'Clearing cache');
     _cachedToken = null;
     _isInitialized = false;
   }

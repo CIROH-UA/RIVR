@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:rivr/features/forecast/utils/export_functionality.dart';
 import '../../../core/providers/reach_data_provider.dart';
@@ -329,7 +330,7 @@ class _HydrographPageState extends State<HydrographPage> {
               }
             }
           } catch (itemError) {
-            print('Error processing forecast point: $itemError');
+            AppLogger.error('HydrographPage', 'Error processing forecast point', itemError);
             // Skip this item and continue
             continue;
           }
@@ -361,7 +362,7 @@ class _HydrographPageState extends State<HydrographPage> {
         returnPeriods: returnPeriods,
       );
     } catch (e) {
-      print('Error in _exportSingleSeriesAsCSV: $e');
+      AppLogger.error('HydrographPage', 'Error in _exportSingleSeriesAsCSV', e);
       ExportFunctionality.showErrorMessage(
         context,
         'Failed to export data: ${e.toString()}',
@@ -398,7 +399,7 @@ class _HydrographPageState extends State<HydrographPage> {
             ),
           );
         } catch (e) {
-          print('Error processing ensemble point: $e');
+          AppLogger.error('HydrographPage', 'Error processing ensemble point', e);
           // Skip this point and continue
           continue;
         }
@@ -423,7 +424,7 @@ class _HydrographPageState extends State<HydrographPage> {
         returnPeriods: returnPeriods,
       );
     } catch (e) {
-      print('Error in _exportEnsembleDataAsCSV: $e');
+      AppLogger.error('HydrographPage', 'Error in _exportEnsembleDataAsCSV', e);
       ExportFunctionality.showErrorMessage(
         context,
         'Failed to export ensemble data: ${e.toString()}',

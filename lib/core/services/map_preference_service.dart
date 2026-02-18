@@ -3,7 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/theme_provider.dart';
-import '../../features/map/widgets/base_layer_modal.dart';
+import '../../features/map/models/map_base_layer.dart';
 
 /// Map preference options - mirrors ThemeOption pattern
 enum MapPreferenceOption {

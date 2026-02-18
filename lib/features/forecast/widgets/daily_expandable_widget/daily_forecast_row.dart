@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/core/models/reach_data.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/features/forecast/widgets/daily_expandable_widget/flow_condition_icon.dart';
 import 'package:rivr/features/forecast/widgets/daily_expandable_widget/flow_range_bar.dart';
 import '../../../../core/services/flow_unit_preference_service.dart';
@@ -116,9 +117,7 @@ class _DailyForecastRowState extends State<DailyForecastRow>
     }
 
     if (unitChanged) {
-      print(
-        'DAILY_ROW: Unit changed from $_lastKnownUnit to $currentUnit - rebuilding',
-      );
+      AppLogger.debug('DailyForecastRow', 'Unit changed from $_lastKnownUnit to $currentUnit - rebuilding');
       _lastKnownUnit = currentUnit;
       // Force rebuild by calling setState
       setState(() {});

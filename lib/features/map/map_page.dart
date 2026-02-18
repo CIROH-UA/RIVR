@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/widgets/navigation_button.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/features/map/widgets/map_search_widget.dart';
 // NEW IMPORTS
 import 'package:rivr/features/map/widgets/map_control_buttons.dart';
@@ -86,9 +87,9 @@ class MapPageState extends State<MapPage> {
   Future<void> _initializeCacheService() async {
     try {
       await CacheService().initialize();
-      print('🗄️ Cache service initialized for recent searches');
+      AppLogger.info('MapPage', 'Cache service initialized for recent searches');
     } catch (e) {
-      print('❌ Cache service initialization error: $e');
+      AppLogger.error('MapPage', 'Cache service initialization error', e);
       // Don't fail the whole page if cache fails - search will still work
     }
   }
@@ -246,7 +247,7 @@ class MapPageState extends State<MapPage> {
     _mapboxMap = mapboxMap;
 
     try {
-      print('🗺️ Map created, initializing...');
+      AppLogger.debug('MapPage', 'Map created, initializing...');
 
       // Wait a moment for map to fully initialize
       await Future.delayed(const Duration(milliseconds: 500));
@@ -261,7 +262,7 @@ class MapPageState extends State<MapPage> {
         await _controlsService.initializeMapStyle(_themeProvider!);
       }
 
-      print('🚀 Services initialized, loading initial content...');
+      AppLogger.debug('MapPage', 'Services initialized, loading initial content...');
 
       // Load vector tiles for initial style
       await _vectorTilesService.loadRiverReaches();
@@ -272,13 +273,13 @@ class MapPageState extends State<MapPage> {
       // NEW: Initialize location for controls
       await _controlsService.initializeLocation();
 
-      print('✅ Map setup complete');
+      AppLogger.info('MapPage', 'Map setup complete');
 
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
-      print('❌ Map creation error: $e');
+      AppLogger.error('MapPage', 'Map creation error', e);
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to load river data: ${e.toString()}';
@@ -298,7 +299,7 @@ class MapPageState extends State<MapPage> {
   /// Reload vector tiles after style change (async to avoid blocking style load)
   Future<void> _reloadVectorTilesAfterStyleChange() async {
     try {
-      print('🎨 Style loaded, reloading vector tiles...');
+      AppLogger.debug('MapPage', 'Style loaded, reloading vector tiles...');
 
       // Reset the vector tiles service state since the style changed
       _vectorTilesService.dispose();
@@ -307,12 +308,12 @@ class MapPageState extends State<MapPage> {
       // Reload vector tiles on the new style
       await _vectorTilesService.loadRiverReaches();
 
-      print('✅ Vector tiles automatically reloaded after style change');
+      AppLogger.info('MapPage', 'Vector tiles automatically reloaded after style change');
 
       // NEW: Re-initialize marker service to ensure hearts stay on top
       await _reAddHeartMarkersOnTop();
     } catch (e) {
-      print('❌ Error reloading vector tiles after style change: $e');
+      AppLogger.error('MapPage', 'Error reloading vector tiles after style change', e);
     }
   }
 
@@ -323,17 +324,18 @@ class MapPageState extends State<MapPage> {
       // re-add all current favorites that were stored in the service
       await _markerService.initializeMarkers(_mapboxMap!);
 
-      print(
-        '🔄 Heart markers re-initialized and will appear on top of vector tiles',
+      AppLogger.debug(
+        'MapPage',
+        'Heart markers re-initialized and will appear on top of vector tiles',
       );
     } catch (e) {
-      print('❌ Error re-initializing heart markers: $e');
+      AppLogger.error('MapPage', 'Error re-initializing heart markers', e);
     }
   }
 
   void _showSearchModal() {
     if (_mapboxMap == null) {
-      print('❌ Map not ready for search');
+      AppLogger.warning('MapPage', 'Map not ready for search');
       return;
     }
 
@@ -341,8 +343,9 @@ class MapPageState extends State<MapPage> {
       context,
       mapboxMap: _mapboxMap,
       onPlaceSelected: (place) {
-        print(
-          '🎯 Selected place: ${place.shortName} at ${place.latitude}, ${place.longitude}',
+        AppLogger.debug(
+          'MapPage',
+          'Selected place: ${place.shortName} at ${place.latitude}, ${place.longitude}',
         );
       },
     );
@@ -356,7 +359,7 @@ class MapPageState extends State<MapPage> {
       onLayerSelected: (layer) async {
         // Simply change the base layer - vector tiles will be automatically reloaded
         await _controlsService.changeBaseLayer(layer);
-        print('🗺️ Layer changed to: ${layer.displayName}');
+        AppLogger.debug('MapPage', 'Layer changed to: ${layer.displayName}');
       },
     );
   }
@@ -364,7 +367,7 @@ class MapPageState extends State<MapPage> {
   // NEW: Show streams modal
   void _showStreamsModal() async {
     if (_mapboxMap == null) {
-      print('❌ Map not ready for streams list');
+      AppLogger.warning('MapPage', 'Map not ready for streams list');
       return;
     }
 
@@ -385,11 +388,11 @@ class MapPageState extends State<MapPage> {
         onStreamSelected: (stream) async {
           // Fly to the selected stream and highlight it
           await _reachSelectionService.flyToStream(stream);
-          print('🎯 Flying to stream: ${stream.stationId}');
+          AppLogger.debug('MapPage', 'Flying to stream: ${stream.stationId}');
         },
       );
     } catch (e) {
-      print('❌ Error showing streams modal: $e');
+      AppLogger.error('MapPage', 'Error showing streams modal', e);
     }
   }
 

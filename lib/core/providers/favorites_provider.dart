@@ -8,6 +8,7 @@ import 'package:rivr/core/services/noaa_api_service.dart';
 import 'package:rivr/core/services/reach_cache_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_river.dart';
+import '../services/app_logger.dart';
 import '../services/favorites_service.dart';
 import '../services/forecast_service.dart';
 import '../services/flow_unit_preference_service.dart';
@@ -211,8 +212,9 @@ class FavoritesProvider with ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      print(
-        'FAVORITES_PROVIDER: ⚠️ Failed to load river name for $reachId: $e',
+      AppLogger.warning(
+        'FavoritesProvider',
+        'Failed to load river name for $reachId: $e',
       );
       // This is not critical, so don't throw
     }
@@ -329,7 +331,7 @@ class FavoritesProvider with ChangeNotifier {
         json.encode(_sessionCustomImages),
       );
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error persisting custom properties: $e');
+      AppLogger.error('FavoritesProvider', 'Error persisting custom properties: $e', e);
     }
   }
 
@@ -352,7 +354,7 @@ class FavoritesProvider with ChangeNotifier {
         _sessionCustomImages.addAll(imagesMap.cast<String, String>());
       }
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Error loading custom properties: $e');
+      AppLogger.error('FavoritesProvider', 'Error loading custom properties: $e', e);
     }
   }
 
@@ -373,8 +375,9 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Background refresh of all favorites (app launch)
   Future<void> _refreshAllFavoritesInBackground() async {
-    print(
-      'FAVORITES_PROVIDER: Starting background refresh of ${_favorites.length} favorites',
+    AppLogger.debug(
+      'FavoritesProvider',
+      'Starting background refresh of ${_favorites.length} favorites',
     );
 
     // Refresh favorites one by one to show progressive updates
@@ -384,7 +387,7 @@ class FavoritesProvider with ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 200));
     }
 
-    print('FAVORITES_PROVIDER: Background refresh completed');
+    AppLogger.debug('FavoritesProvider', 'Background refresh completed');
   }
 
   /// Load favorite data in background (when new favorite added)
@@ -466,21 +469,24 @@ class FavoritesProvider with ChangeNotifier {
       final riverName = _sessionRiverNames[reachId] ?? 'Unknown';
       final returnPeriods = _sessionReturnPeriods[reachId];
 
-      print(
-        'FAVORITES_PROVIDER: $riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
+      AppLogger.debug(
+        'FavoritesProvider',
+        '$riverName ($reachId) - Current Flow: ${flow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
       ); // FIXED: Use actual current unit, not hardcoded "CFS"
 
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
-        print(
-          'FAVORITES_PROVIDER: $riverName ($reachId) - Return Periods: ${returnPeriods.toString()}',
+        AppLogger.debug(
+          'FavoritesProvider',
+          '$riverName ($reachId) - Return Periods: ${returnPeriods.toString()}',
         );
       } else {
-        print(
-          'FAVORITES_PROVIDER: $riverName ($reachId) - No return periods available',
+        AppLogger.debug(
+          'FavoritesProvider',
+          '$riverName ($reachId) - No return periods available',
         );
       }
     } catch (e) {
-      print('FAVORITES_PROVIDER: ❌ Failed to refresh $reachId: $e');
+      AppLogger.error('FavoritesProvider', 'Failed to refresh $reachId: $e', e);
     } finally {
       _refreshingReachIds.remove(reachId);
       notifyListeners();
@@ -500,7 +506,7 @@ class FavoritesProvider with ChangeNotifier {
 
       if (cachedReach?.hasReturnPeriods == true) {
         _sessionReturnPeriods[reachId] = cachedReach!.returnPeriods!;
-        print('FAVORITES_PROVIDER: Using cached return periods for $reachId');
+        AppLogger.debug('FavoritesProvider', 'Using cached return periods for $reachId');
         return;
       }
 
@@ -519,8 +525,9 @@ class FavoritesProvider with ChangeNotifier {
         }
       }
     } catch (e) {
-      print(
-        'FAVORITES_PROVIDER: ⚠️ Failed to load return periods for $reachId: $e',
+      AppLogger.warning(
+        'FavoritesProvider',
+        'Failed to load return periods for $reachId: $e',
       );
       // Continue without return periods
     }
@@ -539,13 +546,17 @@ class FavoritesProvider with ChangeNotifier {
 
   // Helper methods
   void _setLoading(bool loading) {
-    _isLoading = loading;
-    notifyListeners();
+    if (_isLoading != loading) {
+      _isLoading = loading;
+      notifyListeners();
+    }
   }
 
   void _setError(String error) {
-    _errorMessage = error;
-    notifyListeners();
+    if (_errorMessage != error) {
+      _errorMessage = error;
+      notifyListeners();
+    }
   }
 
   void _clearError() {
@@ -555,7 +566,7 @@ class FavoritesProvider with ChangeNotifier {
   /// Clear unit-dependent cached values (call when unit preference changes)
   /// FIXED: Also clear stored flow units when units change
   void clearUnitDependentCaches() {
-    print('FAVORITES_PROVIDER: Clearing unit-dependent caches for unit change');
+    AppLogger.debug('FavoritesProvider', 'Clearing unit-dependent caches for unit change');
 
     // Clear flow data and their associated units since they need to be re-fetched
     _sessionFlowData.clear();

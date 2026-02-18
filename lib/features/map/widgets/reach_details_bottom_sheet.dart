@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/forecast_service.dart';
 import '../../../core/services/error_service.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
 import '../../../core/providers/favorites_provider.dart';
 import '../../../core/constants.dart';
@@ -556,8 +557,9 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     });
 
     try {
-      print(
-        'BOTTOM_SHEET: Starting progressive loading for: ${widget.selectedReach.reachId}',
+      AppLogger.debug(
+        'ReachDetailsSheet',
+        'Starting progressive loading for: ${widget.selectedReach.reachId}',
       );
 
       // STEP 1: Load overview data (current flow) - FAST
@@ -594,14 +596,15 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         }
       });
 
-      print(
-        'BOTTOM_SHEET: ✅ Overview data loaded, current flow: $_currentFlow',
+      AppLogger.info(
+        'ReachDetailsSheet',
+        'Overview data loaded, current flow: $_currentFlow',
       );
 
       // STEP 3: Wait for return periods and update classification
       await returnPeriodsFuture;
     } catch (error) {
-      print('BOTTOM_SHEET: ❌ Error in progressive loading: $error');
+      AppLogger.error('ReachDetailsSheet', 'Error in progressive loading', error);
 
       final userMessage = ErrorService.handleError(
         error,
@@ -626,11 +629,11 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       );
 
       if (isReturnPeriodsCached) {
-        print('BOTTOM_SHEET: Return periods already cached');
+        AppLogger.debug('ReachDetailsSheet', 'Return periods already cached');
         return; // Already have them from overview loading
       }
 
-      print('BOTTOM_SHEET: Loading return periods for classification...');
+      AppLogger.debug('ReachDetailsSheet', 'Loading return periods for classification...');
 
       // Load supplementary data (return periods) - this is lightweight
       final currentForecast = await _forecastService.loadOverviewData(reachId);
@@ -653,18 +656,19 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
           _isLoadingClassification = false;
         });
 
-        print('BOTTOM_SHEET: ✅ Flow classification updated: $flowCategory');
+        AppLogger.info('ReachDetailsSheet', 'Flow classification updated: $flowCategory');
       } else {
         if (!mounted) return;
         setState(() {
           _isLoadingClassification = false;
         });
-        print(
-          'BOTTOM_SHEET: ⚠️ Return periods not available for classification',
+        AppLogger.warning(
+          'ReachDetailsSheet',
+          'Return periods not available for classification',
         );
       }
     } catch (e) {
-      print('BOTTOM_SHEET: ⚠️ Failed to load return periods: $e');
+      AppLogger.warning('ReachDetailsSheet', 'Failed to load return periods: $e');
       if (!mounted) return;
       setState(() {
         _isLoadingClassification = false;
@@ -714,7 +718,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _showFeedback('Failed to update favorites', isError: true);
       }
     } catch (e) {
-      print('BOTTOM_SHEET: Error toggling favorite: $e');
+      AppLogger.error('ReachDetailsSheet', 'Error toggling favorite', e);
       _showFeedback('Failed to update favorites', isError: true);
     }
 
@@ -817,7 +821,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       await Clipboard.setData(ClipboardData(text: text));
       _showFeedback('Reach information copied to clipboard');
     } catch (e) {
-      print('BOTTOM_SHEET: Error copying reach info: $e');
+      AppLogger.error('ReachDetailsSheet', 'Error copying reach info', e);
     }
   }
 
@@ -826,7 +830,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       final text = _buildLocationShareText();
       await Share.share(text, subject: widget.selectedReach.displayName);
     } catch (e) {
-      print('BOTTOM_SHEET: Error sharing location: $e');
+      AppLogger.error('ReachDetailsSheet', 'Error sharing location', e);
     }
   }
 
@@ -842,7 +846,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         }
       }
     } catch (e) {
-      print('BOTTOM_SHEET: Error opening maps: $e');
+      AppLogger.error('ReachDetailsSheet', 'Error opening maps', e);
     }
   }
 

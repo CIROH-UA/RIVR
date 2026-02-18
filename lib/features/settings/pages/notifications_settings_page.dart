@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../../features/auth/providers/auth_provider.dart';
 import '../../../features/auth/services/user_settings_service.dart';
 import '../../../core/services/fcm_service.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/models/user_settings.dart';
 import '../widgets/notification_frequency_picker.dart';
 
@@ -38,7 +39,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       final userId = authProvider.currentUser?.uid;
 
       if (userId == null) {
-        print('NOTIFICATIONS_SETTINGS: No user logged in');
+        AppLogger.warning('NotificationSettings', 'No user logged in');
         return;
       }
 
@@ -52,7 +53,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         });
       }
     } catch (e) {
-      print('NOTIFICATIONS_SETTINGS: Error loading settings: $e');
+      AppLogger.error('NotificationSettings', 'Error loading settings', e);
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -79,7 +80,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
 
       if (value) {
         // Enabling notifications - get FCM token
-        print('NOTIFICATIONS_SETTINGS: Enabling notifications');
+        AppLogger.info('NotificationSettings', 'Enabling notifications');
         final success = await _fcmService.enableNotifications(userId);
 
         if (!success) {
@@ -90,7 +91,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         }
       } else {
         // Disabling notifications - clear FCM token
-        print('NOTIFICATIONS_SETTINGS: Disabling notifications');
+        AppLogger.info('NotificationSettings', 'Disabling notifications');
         await _fcmService.disableNotifications(userId);
       }
 
@@ -113,7 +114,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         _showError('Failed to update notification settings');
       }
     } catch (e) {
-      print('NOTIFICATIONS_SETTINGS: Error toggling notifications: $e');
+      AppLogger.error('NotificationSettings', 'Error toggling notifications', e);
       _showError('Error updating notifications: ${e.toString()}');
     } finally {
       if (mounted) {
@@ -154,7 +155,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         _showError('Failed to update frequency');
       }
     } catch (e) {
-      print('NOTIFICATIONS_SETTINGS: Error updating frequency: $e');
+      AppLogger.error('NotificationSettings', 'Error updating frequency', e);
       _showError('Error updating frequency: ${e.toString()}');
     } finally {
       if (mounted) {

@@ -1,6 +1,7 @@
 // lib/features/map/services/map_reach_selection_service.dart
 
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import '../../../core/services/app_logger.dart';
 import '../models/selected_reach.dart';
 import '../models/visible_stream.dart';
 
@@ -17,7 +18,7 @@ class MapReachSelectionService {
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
     _mapboxMap = map;
-    print('✅ Research reach selection service ready');
+    AppLogger.info('MapReachSelectionService', 'Research reach selection service ready');
   }
 
   /// Handle map tap for reach selection (keep existing functionality)
@@ -28,21 +29,22 @@ class MapReachSelectionService {
       final tapPoint = context.point;
       final touchPosition = context.touchPosition;
 
-      print(
-        '🎯 Map tapped at: ${tapPoint.coordinates.lng}, ${tapPoint.coordinates.lat}',
+      AppLogger.debug(
+        'MapReachSelectionService',
+        'Map tapped at: ${tapPoint.coordinates.lng}, ${tapPoint.coordinates.lat}',
       );
 
       final selectedReach = await _queryReachAtPoint(tapPoint, touchPosition);
 
       if (selectedReach != null) {
-        print('✅ Reach selected: ${selectedReach.reachId}');
+        AppLogger.info('MapReachSelectionService', 'Reach selected: ${selectedReach.reachId}');
         onReachSelected?.call(selectedReach);
       } else {
-        print('ℹ️ No reaches found at tap location');
+        AppLogger.debug('MapReachSelectionService', 'No reaches found at tap location');
         onEmptyTap?.call(tapPoint);
       }
     } catch (e) {
-      print('❌ Error handling map tap: $e');
+      AppLogger.error('MapReachSelectionService', 'Error handling map tap', e);
       onEmptyTap?.call(context.point);
     }
   }
@@ -51,7 +53,7 @@ class MapReachSelectionService {
   Future<List<VisibleStream>> getVisibleStreams() async {
     if (_mapboxMap == null) return [];
 
-    print('🔬 Research tool: Querying visible streams...');
+    AppLogger.debug('MapReachSelectionService', 'Querying visible streams...');
 
     // Wait for map to be fully ready
     await Future.delayed(const Duration(milliseconds: 1000));
@@ -68,15 +70,16 @@ class MapReachSelectionService {
     // Strategy 1: Try chunked querying
     streams = await _tryChunkedQuery(streams2LayerIds);
     if (streams.isNotEmpty) {
-      print('🎯 Chunked query successful: ${streams.length} streams found');
+      AppLogger.info('MapReachSelectionService', 'Chunked query successful: ${streams.length} streams found');
       return _sortStreams(streams);
     }
 
     // Strategy 2: Try smaller area query
     streams = await _trySmallerAreaQuery(streams2LayerIds);
     if (streams.isNotEmpty) {
-      print(
-        '🎯 Smaller area query successful: ${streams.length} streams found',
+      AppLogger.info(
+        'MapReachSelectionService',
+        'Smaller area query successful: ${streams.length} streams found',
       );
       return _sortStreams(streams);
     }
@@ -84,20 +87,21 @@ class MapReachSelectionService {
     // Strategy 3: Try center point query
     streams = await _tryCenterPointQuery(streams2LayerIds);
     if (streams.isNotEmpty) {
-      print(
-        '🎯 Center point query successful: ${streams.length} streams found',
+      AppLogger.info(
+        'MapReachSelectionService',
+        'Center point query successful: ${streams.length} streams found',
       );
       return _sortStreams(streams);
     }
 
-    print('❌ All query strategies failed - no streams found');
+    AppLogger.error('MapReachSelectionService', 'All query strategies failed - no streams found');
     return [];
   }
 
   /// Strategy 1: Query in chunks
   Future<List<VisibleStream>> _tryChunkedQuery(List<String> layerIds) async {
     try {
-      print('🔍 Trying chunked query strategy...');
+      AppLogger.debug('MapReachSelectionService', 'Trying chunked query strategy...');
 
       final allStreams = <VisibleStream>[];
       final seenStationIds = <String>{};
@@ -129,7 +133,7 @@ class MapReachSelectionService {
             RenderedQueryOptions(layerIds: layerIds),
           );
 
-          print('✅ Chunk ${i + 1}: ${queryResult.length} features');
+          AppLogger.info('MapReachSelectionService', 'Chunk ${i + 1}: ${queryResult.length} features');
 
           for (final feature in queryResult) {
             if (feature != null) {
@@ -142,14 +146,14 @@ class MapReachSelectionService {
             }
           }
         } catch (e) {
-          print('⚠️ Chunk ${i + 1} failed: $e');
+          AppLogger.warning('MapReachSelectionService', 'Chunk ${i + 1} failed: $e');
           continue;
         }
       }
 
       return allStreams;
     } catch (e) {
-      print('❌ Chunked query failed: $e');
+      AppLogger.error('MapReachSelectionService', 'Chunked query failed', e);
       return [];
     }
   }
@@ -159,7 +163,7 @@ class MapReachSelectionService {
     List<String> layerIds,
   ) async {
     try {
-      print('🔍 Trying smaller area query strategy...');
+      AppLogger.debug('MapReachSelectionService', 'Trying smaller area query strategy...');
 
       // Query just the center 50% of screen
       final smallBox = ScreenBox(
@@ -172,7 +176,7 @@ class MapReachSelectionService {
         RenderedQueryOptions(layerIds: layerIds),
       );
 
-      print('✅ Small area query: ${queryResult.length} features');
+      AppLogger.info('MapReachSelectionService', 'Small area query: ${queryResult.length} features');
 
       final streams = <VisibleStream>[];
       final seenStationIds = <String>{};
@@ -189,7 +193,7 @@ class MapReachSelectionService {
 
       return streams;
     } catch (e) {
-      print('❌ Smaller area query failed: $e');
+      AppLogger.error('MapReachSelectionService', 'Smaller area query failed', e);
       return [];
     }
   }
@@ -199,7 +203,7 @@ class MapReachSelectionService {
     List<String> layerIds,
   ) async {
     try {
-      print('🔍 Trying center point query strategy...');
+      AppLogger.debug('MapReachSelectionService', 'Trying center point query strategy...');
 
       // Query small area around screen center
       final centerBox = ScreenBox(
@@ -212,7 +216,7 @@ class MapReachSelectionService {
         RenderedQueryOptions(layerIds: layerIds),
       );
 
-      print('✅ Center point query: ${queryResult.length} features');
+      AppLogger.info('MapReachSelectionService', 'Center point query: ${queryResult.length} features');
 
       final streams = <VisibleStream>[];
       final seenStationIds = <String>{};
@@ -229,7 +233,7 @@ class MapReachSelectionService {
 
       return streams;
     } catch (e) {
-      print('❌ Center point query failed: $e');
+      AppLogger.error('MapReachSelectionService', 'Center point query failed', e);
       return [];
     }
   }
@@ -268,8 +272,9 @@ class MapReachSelectionService {
       final middleIndex = coordinates.length ~/ 2;
       final middleCoord = coordinates[middleIndex] as List;
 
-      print(
-        '✅ Created stream: ${properties['station_id']} (Order ${properties['streamOrder']})',
+      AppLogger.info(
+        'MapReachSelectionService',
+        'Created stream: ${properties['station_id']} (Order ${properties['streamOrder']})',
       );
 
       return VisibleStream(
@@ -279,7 +284,7 @@ class MapReachSelectionService {
         latitude: middleCoord[1].toDouble(),
       );
     } catch (e) {
-      print('❌ Error creating VisibleStream: $e');
+      AppLogger.error('MapReachSelectionService', 'Error creating VisibleStream', e);
       return null;
     }
   }
@@ -299,7 +304,7 @@ class MapReachSelectionService {
     if (_mapboxMap == null) return;
 
     try {
-      print('🛫 Flying to stream ${stream.stationId}...');
+      AppLogger.debug('MapReachSelectionService', 'Flying to stream ${stream.stationId}...');
 
       await clearHighlight();
 
@@ -317,9 +322,9 @@ class MapReachSelectionService {
       // Highlight the stream
       await highlightStream(stream);
 
-      print('✅ Flew to and highlighted stream ${stream.stationId}');
+      AppLogger.info('MapReachSelectionService', 'Flew to and highlighted stream ${stream.stationId}');
     } catch (e) {
-      print('❌ Error flying to stream: $e');
+      AppLogger.error('MapReachSelectionService', 'Error flying to stream', e);
     }
   }
 
@@ -369,14 +374,14 @@ class MapReachSelectionService {
       );
 
       _currentHighlightLayerId = highlightLayerId;
-      print('✅ Highlighted stream ${stream.stationId}');
+      AppLogger.info('MapReachSelectionService', 'Highlighted stream ${stream.stationId}');
 
       // Auto-clear highlight after 5 seconds
       Future.delayed(const Duration(seconds: 5), () {
         clearHighlight();
       });
     } catch (e) {
-      print('❌ Error highlighting stream: $e');
+      AppLogger.error('MapReachSelectionService', 'Error highlighting stream', e);
     }
   }
 
@@ -388,7 +393,7 @@ class MapReachSelectionService {
       await _mapboxMap!.style.removeStyleLayer(_currentHighlightLayerId!);
       await _mapboxMap!.style.removeStyleSource('stream-highlight-source');
       _currentHighlightLayerId = null;
-      print('✅ Cleared stream highlight');
+      AppLogger.info('MapReachSelectionService', 'Cleared stream highlight');
     } catch (e) {
       _currentHighlightLayerId = null;
     }
@@ -427,7 +432,7 @@ class MapReachSelectionService {
             RenderedQueryOptions(layerIds: streams2LayerIds),
           );
 
-      print('📊 Found ${queryResult.length} streams2 features in tap query');
+      AppLogger.debug('MapReachSelectionService', 'Found ${queryResult.length} streams2 features in tap query');
 
       for (final queriedRenderedFeature in queryResult) {
         if (queriedRenderedFeature != null) {
@@ -440,14 +445,14 @@ class MapReachSelectionService {
               return selectedReach;
             }
           } catch (e) {
-            print('⚠️ Error processing streams2 feature: $e');
+            AppLogger.warning('MapReachSelectionService', 'Error processing streams2 feature: $e');
           }
         }
       }
 
       return null;
     } catch (e) {
-      print('❌ Error querying features: $e');
+      AppLogger.error('MapReachSelectionService', 'Error querying features', e);
       return null;
     }
   }
@@ -466,13 +471,13 @@ class MapReachSelectionService {
 
       final properties = Map<String, dynamic>.from(rawProperties as Map);
 
-      print('🔍 Feature properties: ${properties.keys.toList()}');
-      print('🔍 station_id: ${properties['station_id']}');
-      print('🔍 streamOrder: ${properties['streamOrder']}');
+      AppLogger.debug('MapReachSelectionService', 'Feature properties: ${properties.keys.toList()}');
+      AppLogger.debug('MapReachSelectionService', 'station_id: ${properties['station_id']}');
+      AppLogger.debug('MapReachSelectionService', 'streamOrder: ${properties['streamOrder']}');
 
       if (!properties.containsKey('station_id') ||
           !properties.containsKey('streamOrder')) {
-        print('❌ Missing required properties (station_id or streamOrder)');
+        AppLogger.error('MapReachSelectionService', 'Missing required properties (station_id or streamOrder)');
         return null;
       }
 
@@ -482,7 +487,7 @@ class MapReachSelectionService {
         longitude: tapPoint.coordinates.lng.toDouble(),
       );
     } catch (e) {
-      print('❌ Error creating SelectedReach: $e');
+      AppLogger.error('MapReachSelectionService', 'Error creating SelectedReach', e);
       return null;
     }
   }
@@ -493,6 +498,6 @@ class MapReachSelectionService {
     _mapboxMap = null;
     onReachSelected = null;
     onEmptyTap = null;
-    print('🗑️ Research reach selection service disposed');
+    AppLogger.debug('MapReachSelectionService', 'Research reach selection service disposed');
   }
 }

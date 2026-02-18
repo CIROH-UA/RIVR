@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import '../../../auth/services/user_settings_service.dart';
+import '../../../../core/services/app_logger.dart';
 import '../../../../core/services/cache_service.dart';
 import 'auth_wrapper.dart';
 
@@ -37,7 +38,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
   /// Initialize all required services
   Future<void> _initializeServices() async {
     try {
-      print('AUTH_COORDINATOR: Initializing services...');
+      AppLogger.debug('AuthCoordinator', 'Initializing services...');
 
       // Initialize cache service
       await CacheService().initialize();
@@ -46,7 +47,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       await authProvider.initialize();
 
-      print('AUTH_COORDINATOR: Services initialized successfully');
+      AppLogger.info('AuthCoordinator', 'Services initialized successfully');
 
       if (mounted) {
         setState(() {
@@ -54,7 +55,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
         });
       }
     } catch (e) {
-      print('AUTH_COORDINATOR: Error initializing services: $e');
+      AppLogger.error('AuthCoordinator', 'Error initializing services: $e', e);
 
       if (mounted) {
         setState(() {
@@ -68,12 +69,13 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
   /// Handle successful authentication
   Future<void> _handleAuthSuccess(AuthProvider authProvider) async {
     try {
-      print(
-        'AUTH_COORDINATOR: Handling auth success for user: ${authProvider.currentUser?.uid}',
+      AppLogger.debug(
+        'AuthCoordinator',
+        'Handling auth success for user: ${authProvider.currentUser?.uid}',
       );
 
       if (authProvider.currentUser == null) {
-        print('AUTH_COORDINATOR: No current user found');
+        AppLogger.warning('AuthCoordinator', 'No current user found');
         return;
       }
 
@@ -88,23 +90,24 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
       // Sync user settings after login
       try {
         await UserSettingsService().syncAfterLogin(userId);
-        print('AUTH_COORDINATOR: User settings synced successfully');
+        AppLogger.info('AuthCoordinator', 'User settings synced successfully');
       } catch (e) {
-        print('AUTH_COORDINATOR: Warning - Failed to sync user settings: $e');
+        AppLogger.warning('AuthCoordinator', 'Failed to sync user settings: $e');
         // Don't block auth success for settings sync failure
       }
 
-      print('AUTH_COORDINATOR: Auth success handling completed');
+      AppLogger.info('AuthCoordinator', 'Auth success handling completed');
     } catch (e) {
-      print('AUTH_COORDINATOR: Error handling auth success: $e');
+      AppLogger.error('AuthCoordinator', 'Error handling auth success: $e', e);
       // Don't block auth success for post-auth operations
     }
   }
 
   /// Handle authentication failure
   void _handleAuthFailure(AuthProvider authProvider) {
-    print(
-      'AUTH_COORDINATOR: Handling auth failure: ${authProvider.errorMessage}',
+    AppLogger.warning(
+      'AuthCoordinator',
+      'Handling auth failure: ${authProvider.errorMessage}',
     );
 
     // Clear any cached auth data on failure
@@ -117,7 +120,7 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
   /// Handle sign out
   Future<void> _handleSignOut() async {
     try {
-      print('AUTH_COORDINATOR: Handling sign out');
+      AppLogger.debug('AuthCoordinator', 'Handling sign out');
 
       // Clear all cached data
       await CacheService().clearEverything();
@@ -125,9 +128,9 @@ class _AuthCoordinatorState extends State<AuthCoordinator> {
       // Clear user settings cache
       UserSettingsService().clearCache();
 
-      print('AUTH_COORDINATOR: Sign out completed');
+      AppLogger.info('AuthCoordinator', 'Sign out completed');
     } catch (e) {
-      print('AUTH_COORDINATOR: Error during sign out: $e');
+      AppLogger.error('AuthCoordinator', 'Error during sign out: $e', e);
     }
   }
 

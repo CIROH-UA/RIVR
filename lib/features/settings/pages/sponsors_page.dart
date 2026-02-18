@@ -1,6 +1,7 @@
 // lib/features/settings/pages/sponsors_page.dart
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:rivr/core/services/app_logger.dart';
 
 class SponsorsPage extends StatelessWidget {
   const SponsorsPage({super.key});
@@ -295,10 +296,10 @@ class SponsorsPage extends StatelessWidget {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
-        print('Could not launch $url');
+        AppLogger.warning('SponsorsPage', 'Could not launch $url');
       }
     } catch (e) {
-      print('Error launching URL: $e');
+      AppLogger.error('SponsorsPage', 'Error launching URL: $url', e);
     }
   }
 }

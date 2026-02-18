@@ -5,6 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:csv/csv.dart';
 import 'package:screenshot/screenshot.dart';
@@ -66,7 +67,7 @@ class ExportFunctionality {
 
       HapticFeedback.lightImpact();
     } catch (e) {
-      print('Error sharing chart: $e');
+      AppLogger.error('ExportUtil', 'Error sharing chart', e);
       rethrow;
     }
   }
@@ -115,7 +116,7 @@ class ExportFunctionality {
           'Permission denied to save photos. Please enable photo access in Settings.',
         );
       } else {
-        print('Error saving chart to gallery: $e');
+        AppLogger.error('ExportUtil', 'Error saving chart to gallery', e);
         rethrow;
       }
     }
@@ -251,7 +252,7 @@ class ExportFunctionality {
 
       HapticFeedback.lightImpact();
     } catch (e) {
-      print('Error exporting CSV: $e');
+      AppLogger.error('ExportUtil', 'Error exporting CSV', e);
       rethrow;
     }
   }

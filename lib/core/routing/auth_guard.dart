@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../../features/auth/presentation/pages/auth_coordinator.dart';
 
 /// Simple authentication guard for protecting routes
@@ -69,7 +70,7 @@ class AuthGuard extends StatelessWidget {
 
   /// Handle unauthenticated user trying to access protected route
   Widget _handleUnauthenticated(BuildContext context) {
-    print('AUTH_GUARD: Unauthenticated user accessing protected route');
+    AppLogger.debug('AuthGuard', 'Unauthenticated user accessing protected route');
 
     // Call redirect callback if provided
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -82,7 +83,7 @@ class AuthGuard extends StatelessWidget {
 
   /// Handle authenticated user trying to access guest-only route
   Widget _handleAlreadyAuthenticated(BuildContext context) {
-    print('AUTH_GUARD: Authenticated user accessing guest route');
+    AppLogger.debug('AuthGuard', 'Authenticated user accessing guest route');
 
     // Call redirect callback if provided
     WidgetsBinding.instance.addPostFrameCallback((_) {

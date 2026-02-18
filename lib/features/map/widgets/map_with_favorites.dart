@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/providers/favorites_provider.dart';
+import '../../../core/services/app_logger.dart';
 import '../map_page.dart';
 
 /// Wrapper widget that coordinates between FavoritesProvider and MapPage
@@ -40,7 +41,7 @@ class _MapWithFavoritesState extends State<MapWithFavorites> {
     // Check if map and marker service are ready
     final mapPageState = _mapPageKey.currentState;
     if (mapPageState == null || !mapPageState.markerService.isInitialized) {
-      print('MAP_WITH_FAVORITES: Map not ready for marker updates');
+      AppLogger.debug('MapWithFavorites', 'Map not ready for marker updates');
       return;
     }
 
@@ -50,8 +51,9 @@ class _MapWithFavoritesState extends State<MapWithFavorites> {
 
     // Check if favorites actually changed to avoid unnecessary updates
     if (_haveFavoritesChanged(currentFavoriteIds)) {
-      print(
-        'MAP_WITH_FAVORITES: Favorites changed, updating ${currentFavorites.length} markers',
+      AppLogger.debug(
+        'MapWithFavorites',
+        'Favorites changed, updating ${currentFavorites.length} markers',
       );
 
       // Update markers using the efficient marker service
@@ -97,7 +99,7 @@ class _MapWithFavoritesState extends State<MapWithFavorites> {
     while (attempts < maxAttempts) {
       final mapPageState = _mapPageKey.currentState;
       if (mapPageState?.markerService.isInitialized == true) {
-        print('MAP_WITH_FAVORITES: Map ready, loading initial markers');
+        AppLogger.debug('MapWithFavorites', 'Map ready, loading initial markers');
 
         // Get favorites provider and load initial markers
         if (mounted) {
@@ -114,7 +116,7 @@ class _MapWithFavoritesState extends State<MapWithFavorites> {
     }
 
     if (attempts >= maxAttempts) {
-      print('MAP_WITH_FAVORITES: ⚠️ Timeout waiting for map to initialize');
+      AppLogger.warning('MapWithFavorites', 'Timeout waiting for map to initialize');
     }
   }
 

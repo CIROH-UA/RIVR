@@ -1,6 +1,7 @@
 // lib/features/forecast/widgets/interactive_chart.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'dart:math' as math;
 import '../../../core/providers/reach_data_provider.dart';
@@ -119,9 +120,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
       // React to unit changes
 
       if (unitChanged) {
-        print(
-          'INTERACTIVE_CHART: Unit changed from $_lastKnownUnit to $currentUnit - refreshing chart',
-        );
+        AppLogger.debug('InteractiveChart', 'Unit changed from $_lastKnownUnit to $currentUnit - refreshing chart');
         _lastKnownUnit = currentUnit; // Update tracked unit
       }
 
@@ -311,9 +310,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
     // Clear single series data when showing ensemble
     _chartData = [];
 
-    print(
-      'INTERACTIVE_CHART: Loaded ${_ensembleChartData.length} ensemble series (using already-converted values)',
-    );
+    AppLogger.debug('InteractiveChart', 'Loaded ${_ensembleChartData.length} ensemble series (using already-converted values)');
   }
 
   // FIXED: Get forecast data using already-converted values
@@ -406,9 +403,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
             if (value > _maxY) _maxY = value;
             if (value < _minY) _minY = value;
           }
-          print(
-            'DEBUG: Return periods included in bounds - Y: $_minY to $_maxY',
-          );
+          AppLogger.debug('InteractiveChart', 'Return periods included in bounds - Y: $_minY to $_maxY');
         }
       }
     }
@@ -436,9 +431,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
     final mode = widget.showReturnPeriods
         ? 'with return periods'
         : 'flow data only';
-    print(
-      'DEBUG: Chart bounds ($mode) - Y: $_minY to $_maxY (range: ${(_maxY - _minY).toStringAsFixed(1)})',
-    );
+    AppLogger.debug('InteractiveChart', 'Chart bounds ($mode) - Y: $_minY to $_maxY (range: ${(_maxY - _minY).toStringAsFixed(1)})');
   }
 
   // Build chart series based on current mode
@@ -683,7 +676,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
       );
     }
 
-    print('DEBUG: Added ${plotBands.length} plot bands ($currentUnit)');
+    AppLogger.debug('InteractiveChart', 'Added ${plotBands.length} plot bands ($currentUnit)');
     return plotBands;
   }
 
@@ -892,17 +885,17 @@ class _InteractiveChartState extends State<InteractiveChart> {
 
             onSelectionChanged: (SelectionArgs args) {
               // Handle data point selection
-              print('Selection changed');
+              AppLogger.debug('InteractiveChart', 'Selection changed');
             },
 
             onZooming: (ZoomPanArgs args) {
               // Handle zoom events
-              print('Chart is being zoomed');
+              AppLogger.debug('InteractiveChart', 'Chart is being zoomed');
             },
 
             onActualRangeChanged: (ActualRangeChangedArgs args) {
               // Handle axis range changes during zoom/pan
-              print('Axis range changed');
+              AppLogger.debug('InteractiveChart', 'Axis range changed');
             },
           ),
           _buildEnsembleLegend(),

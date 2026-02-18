@@ -1,5 +1,7 @@
 // lib/core/services/flow_unit_preference_service.dart
 
+import 'package:rivr/core/services/app_logger.dart';
+
 /// Simple service for managing flow unit preferences and conversions
 /// Handles the global flow unit setting and provides conversion utilities
 /// FIXED: Made normalizeUnit public to prevent double conversion
@@ -23,9 +25,9 @@ class FlowUnitPreferenceService {
   void setFlowUnit(String unit) {
     if (unit == 'CFS' || unit == 'CMS') {
       _currentFlowUnit = unit;
-      print('FLOW_UNIT_SERVICE: Flow unit changed to: $unit');
+      AppLogger.debug('FlowUnitPrefService', 'Flow unit changed to: $unit');
     } else {
-      print('FLOW_UNIT_SERVICE: Invalid unit: $unit. Using CFS as default.');
+      AppLogger.warning('FlowUnitPrefService', 'Invalid unit: $unit. Using CFS as default.');
       _currentFlowUnit = 'CFS';
     }
   }
@@ -54,8 +56,9 @@ class FlowUnitPreferenceService {
 
     // CRITICAL: No conversion needed if units are the same
     if (normalizedFromUnit == normalizedToUnit) {
-      print(
-        'FLOW_UNIT_SERVICE: Units match ($normalizedFromUnit), no conversion needed',
+      AppLogger.debug(
+        'FlowUnitPrefService',
+        'Units match ($normalizedFromUnit), no conversion needed',
       );
       return value;
     }
@@ -75,7 +78,7 @@ class FlowUnitPreferenceService {
     }
 
     // Fallback - return original value if unknown units
-    print('FLOW_UNIT_SERVICE: Unknown unit conversion: $fromUnit to $toUnit');
+    AppLogger.warning('FlowUnitPrefService', 'Unknown unit conversion: $fromUnit to $toUnit');
     return value;
   }
 

@@ -1,6 +1,7 @@
 // lib/core/models/favorite_river.dart
 
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
+import 'package:rivr/core/services/app_logger.dart';
 
 /// Simple model for storing user's favorite rivers
 /// Designed for JSON serialization with SharedPreferences
@@ -136,8 +137,9 @@ class FavoriteRiver {
     // CRITICAL FIX: Use stored unit if available, otherwise assume CFS for backward compatibility
     final actualStoredUnit = storedFlowUnit ?? 'CFS';
 
-    print(
-      'FAVORITE_RIVER: Converting flow for $reachId: $lastKnownFlow $actualStoredUnit → $currentUnit',
+    AppLogger.debug(
+      'FavoriteRiver',
+      'Converting flow for $reachId: $lastKnownFlow $actualStoredUnit -> $currentUnit',
     );
 
     // Convert from actual stored unit to user's preferred unit

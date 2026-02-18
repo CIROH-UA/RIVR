@@ -1,13 +1,12 @@
 // lib/core/services/error_service.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:rivr/core/services/app_logger.dart';
 
 /// Comprehensive error handling service for RIVR
 /// Maps Firebase errors to user-friendly messages and provides logging utilities
 class ErrorService {
-  static const String _logPrefix = 'ERROR_SERVICE';
 
   // MARK: - Firebase Auth Error Mapping
 
@@ -242,16 +241,10 @@ class ErrorService {
 
   /// Log error with context for debugging
   static void _logError(String source, String code, String? message) {
-    final timestamp = DateTime.now().toIso8601String();
-    final logMessage =
-        '$_logPrefix [$timestamp] $source Error: $code - ${message ?? 'No message'}';
-
-    if (kDebugMode) {
-      print(logMessage);
-    }
+    AppLogger.error('ErrorService', '$source Error: $code - ${message ?? 'No message'}');
 
     // In production, you might want to send this to Firebase Analytics or Crashlytics
-    // FirebaseCrashlytics.instance.recordError(logMessage, null);
+    // FirebaseCrashlytics.instance.recordError(...);
   }
 
   /// Log general application errors
@@ -260,16 +253,7 @@ class ErrorService {
     dynamic error, {
     StackTrace? stackTrace,
   }) {
-    final timestamp = DateTime.now().toIso8601String();
-    final errorMessage = error.toString();
-    final logMessage = '$_logPrefix [$timestamp] $context: $errorMessage';
-
-    if (kDebugMode) {
-      print(logMessage);
-      if (stackTrace != null) {
-        print('Stack trace: $stackTrace');
-      }
-    }
+    AppLogger.error('ErrorService', '$context: ${error.toString()}', error, stackTrace);
 
     // In production, send to crash reporting service
     // FirebaseCrashlytics.instance.recordError(error, stackTrace, context: context);
@@ -277,10 +261,7 @@ class ErrorService {
 
   /// Log informational messages for debugging
   static void logInfo(String context, String message) {
-    if (kDebugMode) {
-      final timestamp = DateTime.now().toIso8601String();
-      print('$_logPrefix [$timestamp] INFO - $context: $message');
-    }
+    AppLogger.info('ErrorService', '$context: $message');
   }
 
   // MARK: - Utility Methods

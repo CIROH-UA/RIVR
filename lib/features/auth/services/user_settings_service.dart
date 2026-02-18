@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/models/user_settings.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/error_service.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
 import '../../../core/services/background_image_service.dart'; // NEW: For file management
@@ -25,11 +26,11 @@ class UserSettingsService {
   /// Get UserSettings for a user
   Future<UserSettings?> getUserSettings(String userId) async {
     try {
-      print('USER_SETTINGS_SERVICE: Getting settings for user: $userId');
+      AppLogger.debug('UserSettingsService', 'Getting settings for user: $userId');
 
       // Return cached settings if available for this user
       if (_cachedSettings != null && _cachedUserId == userId) {
-        print('USER_SETTINGS_SERVICE: Returning cached settings');
+        AppLogger.debug('UserSettingsService', 'Returning cached settings');
         return _cachedSettings;
       }
 
@@ -44,7 +45,7 @@ class UserSettingsService {
           );
 
       if (!doc.exists) {
-        print('USER_SETTINGS_SERVICE: No settings found for user: $userId');
+        AppLogger.debug('UserSettingsService', 'No settings found for user: $userId');
         return null;
       }
 
@@ -54,13 +55,13 @@ class UserSettingsService {
       _cachedSettings = settings;
       _cachedUserId = userId;
 
-      print('USER_SETTINGS_SERVICE: Settings loaded successfully');
+      AppLogger.info('UserSettingsService', 'Settings loaded successfully');
       return settings;
     } on FirebaseException catch (e) {
-      print('USER_SETTINGS_SERVICE: Firestore error: ${e.code} - ${e.message}');
+      AppLogger.error('UserSettingsService', 'Firestore error: ${e.code} - ${e.message}', e);
       throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error getting user settings: $e');
+      AppLogger.error('UserSettingsService', 'Error getting user settings: $e', e);
       throw Exception('Failed to load user settings: ${e.toString()}');
     }
   }
@@ -68,8 +69,9 @@ class UserSettingsService {
   /// Save UserSettings to Firestore
   Future<void> saveUserSettings(UserSettings settings) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Saving settings for user: ${settings.userId}',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Saving settings for user: ${settings.userId}',
       );
 
       await _firestore
@@ -85,14 +87,16 @@ class UserSettingsService {
       _cachedSettings = settings;
       _cachedUserId = settings.userId;
 
-      print('USER_SETTINGS_SERVICE: Settings saved successfully');
+      AppLogger.info('UserSettingsService', 'Settings saved successfully');
     } on FirebaseException catch (e) {
-      print(
-        'USER_SETTINGS_SERVICE: Firestore save error: ${e.code} - ${e.message}',
+      AppLogger.error(
+        'UserSettingsService',
+        'Firestore save error: ${e.code} - ${e.message}',
+        e,
       );
       throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error saving user settings: $e');
+      AppLogger.error('UserSettingsService', 'Error saving user settings: $e', e);
       throw Exception('Failed to save user settings: ${e.toString()}');
     }
   }
@@ -103,7 +107,7 @@ class UserSettingsService {
     Map<String, dynamic> updates,
   ) async {
     try {
-      print('USER_SETTINGS_SERVICE: Updating settings for user: $userId');
+      AppLogger.debug('UserSettingsService', 'Updating settings for user: $userId');
 
       // Add updatedAt timestamp
       final updateData = {
@@ -126,14 +130,16 @@ class UserSettingsService {
         _cachedUserId = null;
       }
 
-      print('USER_SETTINGS_SERVICE: Settings updated successfully');
+      AppLogger.info('UserSettingsService', 'Settings updated successfully');
     } on FirebaseException catch (e) {
-      print(
-        'USER_SETTINGS_SERVICE: Firestore update error: ${e.code} - ${e.message}',
+      AppLogger.error(
+        'UserSettingsService',
+        'Firestore update error: ${e.code} - ${e.message}',
+        e,
       );
       throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error updating user settings: $e');
+      AppLogger.error('UserSettingsService', 'Error updating user settings: $e', e);
       throw Exception('Failed to update user settings: ${e.toString()}');
     }
   }
@@ -146,8 +152,9 @@ class UserSettingsService {
     String imagePath,
   ) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Adding custom background for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Adding custom background for user: $userId',
       );
 
       final settings = await getUserSettings(userId);
@@ -157,10 +164,10 @@ class UserSettingsService {
       final updatedSettings = settings.addCustomBackground(imagePath);
       await saveUserSettings(updatedSettings);
 
-      print('USER_SETTINGS_SERVICE: Custom background added successfully');
+      AppLogger.info('UserSettingsService', 'Custom background added successfully');
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error adding custom background: $e');
+      AppLogger.error('UserSettingsService', 'Error adding custom background: $e', e);
       throw Exception('Failed to add custom background: ${e.toString()}');
     }
   }
@@ -171,8 +178,9 @@ class UserSettingsService {
     String imagePath,
   ) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Removing custom background for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Removing custom background for user: $userId',
       );
 
       final settings = await getUserSettings(userId);
@@ -185,10 +193,10 @@ class UserSettingsService {
       // Delete the actual image file
       await _backgroundImageService.deleteCustomBackground(imagePath);
 
-      print('USER_SETTINGS_SERVICE: Custom background removed successfully');
+      AppLogger.info('UserSettingsService', 'Custom background removed successfully');
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error removing custom background: $e');
+      AppLogger.error('UserSettingsService', 'Error removing custom background: $e', e);
       throw Exception('Failed to remove custom background: ${e.toString()}');
     }
   }
@@ -199,7 +207,7 @@ class UserSettingsService {
       final settings = await getUserSettings(userId);
       return settings?.customBackgroundImagePaths ?? [];
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error getting custom backgrounds: $e');
+      AppLogger.error('UserSettingsService', 'Error getting custom backgrounds: $e', e);
       return [];
     }
   }
@@ -207,8 +215,9 @@ class UserSettingsService {
   /// Validate custom background images and remove broken references
   Future<UserSettings?> validateCustomBackgrounds(String userId) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Validating custom backgrounds for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Validating custom backgrounds for user: $userId',
       );
 
       final settings = await getUserSettings(userId);
@@ -224,8 +233,9 @@ class UserSettingsService {
         if (exists) {
           validPaths.add(imagePath);
         } else {
-          print(
-            'USER_SETTINGS_SERVICE: Removing invalid background: $imagePath',
+          AppLogger.warning(
+            'UserSettingsService',
+            'Removing invalid background: $imagePath',
           );
         }
       }
@@ -237,16 +247,17 @@ class UserSettingsService {
         );
         await saveUserSettings(updatedSettings);
 
-        print(
-          'USER_SETTINGS_SERVICE: Cleaned up ${settings.customBackgroundImagePaths.length - validPaths.length} invalid backgrounds',
+        AppLogger.info(
+          'UserSettingsService',
+          'Cleaned up ${settings.customBackgroundImagePaths.length - validPaths.length} invalid backgrounds',
         );
         return updatedSettings;
       }
 
-      print('USER_SETTINGS_SERVICE: All custom backgrounds are valid');
+      AppLogger.info('UserSettingsService', 'All custom backgrounds are valid');
       return settings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error validating custom backgrounds: $e');
+      AppLogger.error('UserSettingsService', 'Error validating custom backgrounds: $e', e);
       return null;
     }
   }
@@ -254,8 +265,9 @@ class UserSettingsService {
   /// Clear all custom background images for user
   Future<UserSettings?> clearAllCustomBackgrounds(String userId) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Clearing all custom backgrounds for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Clearing all custom backgrounds for user: $userId',
       );
 
       final settings = await getUserSettings(userId);
@@ -270,10 +282,10 @@ class UserSettingsService {
       final updatedSettings = settings.clearAllCustomBackgrounds();
       await saveUserSettings(updatedSettings);
 
-      print('USER_SETTINGS_SERVICE: All custom backgrounds cleared');
+      AppLogger.info('UserSettingsService', 'All custom backgrounds cleared');
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error clearing custom backgrounds: $e');
+      AppLogger.error('UserSettingsService', 'Error clearing custom backgrounds: $e', e);
       throw Exception('Failed to clear custom backgrounds: ${e.toString()}');
     }
   }
@@ -288,8 +300,9 @@ class UserSettingsService {
     required String lastName,
   }) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Creating default settings for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Creating default settings for user: $userId',
       );
 
       final now = DateTime.now();
@@ -310,11 +323,11 @@ class UserSettingsService {
       );
 
       await saveUserSettings(settings);
-      print('USER_SETTINGS_SERVICE: Default settings created successfully');
+      AppLogger.info('UserSettingsService', 'Default settings created successfully');
 
       return settings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error creating default settings: $e');
+      AppLogger.error('UserSettingsService', 'Error creating default settings: $e', e);
       throw Exception('Failed to create user settings: ${e.toString()}');
     }
   }
@@ -322,14 +335,15 @@ class UserSettingsService {
   /// Sync settings after login (updates lastLoginDate)
   Future<UserSettings?> syncAfterLogin(String userId) async {
     try {
-      print(
-        'USER_SETTINGS_SERVICE: Syncing settings after login for user: $userId',
+      AppLogger.debug(
+        'UserSettingsService',
+        'Syncing settings after login for user: $userId',
       );
 
       // Get current settings
       final settings = await getUserSettings(userId);
       if (settings == null) {
-        print('USER_SETTINGS_SERVICE: No settings found during sync');
+        AppLogger.warning('UserSettingsService', 'No settings found during sync');
         return null;
       }
 
@@ -347,10 +361,10 @@ class UserSettingsService {
       );
       await saveUserSettings(updatedSettings);
 
-      print('USER_SETTINGS_SERVICE: Settings synced successfully');
+      AppLogger.info('UserSettingsService', 'Settings synced successfully');
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error syncing settings: $e');
+      AppLogger.error('UserSettingsService', 'Error syncing settings: $e', e);
       // Don't throw here - login can still succeed even if sync fails
       return null;
     }
@@ -367,7 +381,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error adding favorite: $e');
+      AppLogger.error('UserSettingsService', 'Error adding favorite: $e', e);
       throw Exception('Failed to add favorite: ${e.toString()}');
     }
   }
@@ -386,7 +400,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error removing favorite: $e');
+      AppLogger.error('UserSettingsService', 'Error removing favorite: $e', e);
       throw Exception('Failed to remove favorite: ${e.toString()}');
     }
   }
@@ -402,7 +416,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error updating theme: $e');
+      AppLogger.error('UserSettingsService', 'Error updating theme: $e', e);
       throw Exception('Failed to update theme: ${e.toString()}');
     }
   }
@@ -421,7 +435,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error updating flow unit: $e');
+      AppLogger.error('UserSettingsService', 'Error updating flow unit: $e', e);
       throw Exception('Failed to update flow unit: ${e.toString()}');
     }
   }
@@ -442,7 +456,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error updating notifications: $e');
+      AppLogger.error('UserSettingsService', 'Error updating notifications: $e', e);
       throw Exception('Failed to update notifications: ${e.toString()}');
     }
   }
@@ -463,7 +477,7 @@ class UserSettingsService {
 
       return updatedSettings;
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error updating notification frequency: $e');
+      AppLogger.error('UserSettingsService', 'Error updating notification frequency: $e', e);
       throw Exception(
         'Failed to update notification frequency: ${e.toString()}',
       );
@@ -472,7 +486,7 @@ class UserSettingsService {
 
   /// Clear cached settings (call on sign out)
   void clearCache() {
-    print('USER_SETTINGS_SERVICE: Clearing cache');
+    AppLogger.debug('UserSettingsService', 'Clearing cache');
     _cachedSettings = null;
     _cachedUserId = null;
 
@@ -494,8 +508,10 @@ class UserSettingsService {
 
       return doc.exists;
     } catch (e) {
-      print(
-        'USER_SETTINGS_SERVICE: Error checking user settings existence: $e',
+      AppLogger.error(
+        'UserSettingsService',
+        'Error checking user settings existence: $e',
+        e,
       );
       return false;
     }
@@ -505,7 +521,7 @@ class UserSettingsService {
   void _syncFlowUnitToService(FlowUnit flowUnit) {
     final unitString = flowUnit == FlowUnit.cms ? 'CMS' : 'CFS';
     _flowUnitService.setFlowUnit(unitString);
-    print('USER_SETTINGS_SERVICE: Synced flow unit preference: $unitString');
+    AppLogger.debug('UserSettingsService', 'Synced flow unit preference: $unitString');
   }
 
   /// Public method to manually sync flow unit preference
@@ -516,7 +532,7 @@ class UserSettingsService {
         _syncFlowUnitToService(settings!.preferredFlowUnit);
       }
     } catch (e) {
-      print('USER_SETTINGS_SERVICE: Error syncing flow unit preference: $e');
+      AppLogger.error('UserSettingsService', 'Error syncing flow unit preference: $e', e);
       // Don't throw - this is not critical
     }
   }

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:rivr/core/services/app_logger.dart';
 
 /// Service for handling custom background image operations
 /// Handles picking, compression, storage, and cleanup of custom background images
@@ -25,7 +26,7 @@ class BackgroundImageService {
   /// Pick image from gallery
   Future<BackgroundImageResult> pickFromGallery(String userId) async {
     try {
-      print('BACKGROUND_SERVICE: Picking image from gallery for user: $userId');
+      AppLogger.debug('BackgroundImageService', 'Picking image from gallery for user: $userId');
 
       // Check photo library permission
       final permissionResult = await _checkPhotoPermission();
@@ -44,13 +45,13 @@ class BackgroundImageService {
       );
 
       if (pickedFile == null) {
-        print('BACKGROUND_SERVICE: User cancelled gallery picker');
+        AppLogger.debug('BackgroundImageService', 'User cancelled gallery picker');
         return BackgroundImageResult.failure('No image selected');
       }
 
       return await _processPickedImage(pickedFile, userId, 'gallery');
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error picking from gallery: $e');
+      AppLogger.error('BackgroundImageService', 'Error picking from gallery', e);
       return BackgroundImageResult.failure(
         'Failed to pick image from gallery: ${e.toString()}',
       );
@@ -60,7 +61,7 @@ class BackgroundImageService {
   /// Pick image from camera
   Future<BackgroundImageResult> pickFromCamera(String userId) async {
     try {
-      print('BACKGROUND_SERVICE: Taking photo with camera for user: $userId');
+      AppLogger.debug('BackgroundImageService', 'Taking photo with camera for user: $userId');
 
       // Check camera permission
       final permissionResult = await _checkCameraPermission();
@@ -79,13 +80,13 @@ class BackgroundImageService {
       );
 
       if (pickedFile == null) {
-        print('BACKGROUND_SERVICE: User cancelled camera');
+        AppLogger.debug('BackgroundImageService', 'User cancelled camera');
         return BackgroundImageResult.failure('No photo taken');
       }
 
       return await _processPickedImage(pickedFile, userId, 'camera');
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error taking photo: $e');
+      AppLogger.error('BackgroundImageService', 'Error taking photo', e);
       return BackgroundImageResult.failure(
         'Failed to take photo: ${e.toString()}',
       );
@@ -158,14 +159,15 @@ class BackgroundImageService {
     String source,
   ) async {
     try {
-      print('BACKGROUND_SERVICE: Processing picked image from $source');
+      AppLogger.debug('BackgroundImageService', 'Processing picked image from $source');
 
       // Read original file
       final originalFile = File(pickedFile.path);
       final originalBytes = await originalFile.readAsBytes();
 
-      print(
-        'BACKGROUND_SERVICE: Original image size: ${(originalBytes.length / 1024 / 1024).toStringAsFixed(2)}MB',
+      AppLogger.debug(
+        'BackgroundImageService',
+        'Original image size: ${(originalBytes.length / 1024 / 1024).toStringAsFixed(2)}MB',
       );
 
       // Compress image
@@ -177,8 +179,9 @@ class BackgroundImageService {
         return BackgroundImageResult.failure('Failed to compress image');
       }
 
-      print(
-        'BACKGROUND_SERVICE: Compressed image size: ${(compressedBytes.length / 1024 / 1024).toStringAsFixed(2)}MB',
+      AppLogger.debug(
+        'BackgroundImageService',
+        'Compressed image size: ${(compressedBytes.length / 1024 / 1024).toStringAsFixed(2)}MB',
       );
 
       // Generate unique filename
@@ -193,10 +196,10 @@ class BackgroundImageService {
         return BackgroundImageResult.failure('Failed to save image');
       }
 
-      print('BACKGROUND_SERVICE: ✅ Image saved successfully: $savedPath');
+      AppLogger.info('BackgroundImageService', 'Image saved successfully: $savedPath');
       return BackgroundImageResult.success(savedPath);
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error processing image: $e');
+      AppLogger.error('BackgroundImageService', 'Error processing image', e);
       return BackgroundImageResult.failure(
         'Failed to process image: ${e.toString()}',
       );
@@ -219,7 +222,7 @@ class BackgroundImageService {
 
       return result;
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error compressing image: $e');
+      AppLogger.error('BackgroundImageService', 'Error compressing image', e);
       return null;
     }
   }
@@ -237,7 +240,7 @@ class BackgroundImageService {
       // Create backgrounds directory if it doesn't exist
       if (!await backgroundsDir.exists()) {
         await backgroundsDir.create(recursive: true);
-        print('BACKGROUND_SERVICE: Created backgrounds directory');
+        AppLogger.debug('BackgroundImageService', 'Created backgrounds directory');
       }
 
       // Save file
@@ -245,10 +248,10 @@ class BackgroundImageService {
       final file = File(filePath);
       await file.writeAsBytes(imageBytes);
 
-      print('BACKGROUND_SERVICE: Image saved to: $filePath');
+      AppLogger.debug('BackgroundImageService', 'Image saved to: $filePath');
       return filePath;
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error saving image: $e');
+      AppLogger.error('BackgroundImageService', 'Error saving image', e);
       return null;
     }
   }
@@ -262,19 +265,19 @@ class BackgroundImageService {
   /// Delete custom background image
   Future<bool> deleteCustomBackground(String imagePath) async {
     try {
-      print('BACKGROUND_SERVICE: Deleting custom background: $imagePath');
+      AppLogger.debug('BackgroundImageService', 'Deleting custom background: $imagePath');
 
       final file = File(imagePath);
       if (await file.exists()) {
         await file.delete();
-        print('BACKGROUND_SERVICE: ✅ Custom background deleted');
+        AppLogger.info('BackgroundImageService', 'Custom background deleted');
         return true;
       } else {
-        print('BACKGROUND_SERVICE: File does not exist: $imagePath');
+        AppLogger.debug('BackgroundImageService', 'File does not exist: $imagePath');
         return true; // Consider it successful if file doesn't exist
       }
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error deleting custom background: $e');
+      AppLogger.error('BackgroundImageService', 'Error deleting custom background', e);
       return false;
     }
   }
@@ -282,8 +285,9 @@ class BackgroundImageService {
   /// Clean up old custom backgrounds for user (keep only the latest)
   Future<void> cleanupOldBackgrounds(String userId) async {
     try {
-      print(
-        'BACKGROUND_SERVICE: Cleaning up old backgrounds for user: $userId',
+      AppLogger.debug(
+        'BackgroundImageService',
+        'Cleaning up old backgrounds for user: $userId',
       );
 
       final appDocDir = await getApplicationDocumentsDirectory();
@@ -314,16 +318,18 @@ class BackgroundImageService {
       // Delete all but the newest
       for (int i = 1; i < userFiles.length; i++) {
         await userFiles[i].delete();
-        print(
-          'BACKGROUND_SERVICE: Deleted old background: ${userFiles[i].path}',
+        AppLogger.debug(
+          'BackgroundImageService',
+          'Deleted old background: ${userFiles[i].path}',
         );
       }
 
-      print(
-        'BACKGROUND_SERVICE: ✅ Cleanup completed, kept ${userFiles.isNotEmpty ? 1 : 0} file(s)',
+      AppLogger.info(
+        'BackgroundImageService',
+        'Cleanup completed, kept ${userFiles.isNotEmpty ? 1 : 0} file(s)',
       );
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error during cleanup: $e');
+      AppLogger.error('BackgroundImageService', 'Error during cleanup', e);
     }
   }
 
@@ -333,7 +339,7 @@ class BackgroundImageService {
       final file = File(imagePath);
       return await file.exists();
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error checking image existence: $e');
+      AppLogger.error('BackgroundImageService', 'Error checking image existence', e);
       return false;
     }
   }
@@ -342,18 +348,19 @@ class BackgroundImageService {
   Future<PermissionResult> _checkCameraPermission() async {
     try {
       final status = await Permission.camera.status;
-      print('CAMERA PERMISSION STATUS: $status');
+      AppLogger.debug('BackgroundImageService', 'Camera permission status: $status');
 
       if (status.isGranted) {
         return PermissionResult.success();
       }
 
       if (status.isDenied) {
-        print(
-          'CAMERA PERMISSION: Requesting permission (will show iOS dialog)',
+        AppLogger.debug(
+          'BackgroundImageService',
+          'Camera permission: Requesting permission (will show iOS dialog)',
         );
         final result = await Permission.camera.request();
-        print('CAMERA PERMISSION RESULT: $result');
+        AppLogger.debug('BackgroundImageService', 'Camera permission result: $result');
 
         if (result.isGranted) {
           return PermissionResult.success();
@@ -378,10 +385,10 @@ class BackgroundImageService {
         );
       }
 
-      print('CAMERA PERMISSION: Unhandled status - $status');
+      AppLogger.warning('BackgroundImageService', 'Camera permission: Unhandled status - $status');
       return PermissionResult.denied('Camera permission status: $status');
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error checking camera permission: $e');
+      AppLogger.error('BackgroundImageService', 'Error checking camera permission', e);
       return PermissionResult.denied('Error checking camera permission');
     }
   }
@@ -390,7 +397,7 @@ class BackgroundImageService {
   Future<PermissionResult> _checkPhotoPermission() async {
     try {
       final status = await Permission.photos.status;
-      print('PHOTO PERMISSION STATUS: $status');
+      AppLogger.debug('BackgroundImageService', 'Photo permission status: $status');
 
       // Both granted and limited are valid for photo selection
       if (status.isGranted || status.isLimited) {
@@ -398,9 +405,9 @@ class BackgroundImageService {
       }
 
       if (status.isDenied) {
-        print('PHOTO PERMISSION: Requesting permission (will show iOS dialog)');
+        AppLogger.debug('BackgroundImageService', 'Photo permission: Requesting permission (will show iOS dialog)');
         final result = await Permission.photos.request();
-        print('PHOTO PERMISSION RESULT: $result');
+        AppLogger.debug('BackgroundImageService', 'Photo permission result: $result');
 
         // Accept both granted and limited permission results
         if (result.isGranted || result.isLimited) {
@@ -426,10 +433,10 @@ class BackgroundImageService {
         );
       }
 
-      print('PHOTO PERMISSION: Unhandled status - $status');
+      AppLogger.warning('BackgroundImageService', 'Photo permission: Unhandled status - $status');
       return PermissionResult.denied('Photo permission status: $status');
     } catch (e) {
-      print('BACKGROUND_SERVICE: Error checking photo permission: $e');
+      AppLogger.error('BackgroundImageService', 'Error checking photo permission', e);
       return PermissionResult.denied('Error checking photo permission');
     }
   }

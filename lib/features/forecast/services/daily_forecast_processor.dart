@@ -1,5 +1,6 @@
 // lib/features/forecast/services/daily_forecast_processor.dart
 
+import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/models/reach_data.dart';
 import '../../../core/services/flow_unit_preference_service.dart';
 import '../domain/entities/daily_flow_forecast.dart';
@@ -25,14 +26,14 @@ class DailyForecastProcessor {
     required String forecastType,
   }) {
     if (forecastData.isEmpty) {
-      print('DAILY_PROCESSOR: No forecast data available for $forecastType');
+      AppLogger.debug('DailyForecastProcessor', 'No forecast data available for $forecastType');
       return [];
     }
 
     // Step 1: Get the preferred data source (mean first, then first member)
     final selectedData = _selectDataSource(forecastData);
     if (selectedData == null) {
-      print('DAILY_PROCESSOR: No valid data source found in $forecastType');
+      AppLogger.warning('DailyForecastProcessor', 'No valid data source found in $forecastType');
       return [];
     }
 
@@ -43,9 +44,7 @@ class DailyForecastProcessor {
     final unitService = FlowUnitPreferenceService();
     final currentUnit = unitService.currentFlowUnit;
 
-    print(
-      'DAILY_PROCESSOR: Using $dataSource for $forecastType (${forecastSeries.data.length} points, already in $currentUnit)',
-    );
+    AppLogger.debug('DailyForecastProcessor', 'Using $dataSource for $forecastType (${forecastSeries.data.length} points, already in $currentUnit)');
 
     // Step 2: Group hourly data by calendar date (no conversion needed)
     final dailyGroups = _groupHourlyDataByDate(forecastSeries);
@@ -72,7 +71,7 @@ class DailyForecastProcessor {
           dailyForecasts.add(dailyForecast);
         }
       } catch (e) {
-        print('DAILY_PROCESSOR: Error processing day $date: $e');
+        AppLogger.error('DailyForecastProcessor', 'Error processing day $date', e);
         continue;
       }
     }
@@ -80,9 +79,7 @@ class DailyForecastProcessor {
     // Sort by date for consistent ordering
     dailyForecasts.sort((a, b) => a.date.compareTo(b.date));
 
-    print(
-      'DAILY_PROCESSOR: Generated ${dailyForecasts.length} daily forecasts from $dataSource (already in $currentUnit)',
-    );
+    AppLogger.info('DailyForecastProcessor', 'Generated ${dailyForecasts.length} daily forecasts from $dataSource (already in $currentUnit)');
     return dailyForecasts;
   }
 
@@ -244,7 +241,7 @@ class DailyForecastProcessor {
   /// Validate processed data for debugging
   static bool validateProcessedData(List<DailyFlowForecast> forecasts) {
     if (forecasts.isEmpty) {
-      print('DAILY_PROCESSOR: Warning - No forecasts generated');
+      AppLogger.warning('DailyForecastProcessor', 'No forecasts generated');
       return false;
     }
 
@@ -256,15 +253,11 @@ class DailyForecastProcessor {
         validCount++;
       } else {
         invalidCount++;
-        print(
-          'DAILY_PROCESSOR: Invalid forecast for ${forecast.date}: $forecast',
-        );
+        AppLogger.warning('DailyForecastProcessor', 'Invalid forecast for ${forecast.date}: $forecast');
       }
     }
 
-    print(
-      'DAILY_PROCESSOR: Validation complete - $validCount valid, $invalidCount invalid',
-    );
+    AppLogger.info('DailyForecastProcessor', 'Validation complete - $validCount valid, $invalidCount invalid');
     return invalidCount == 0;
   }
 
@@ -274,7 +267,7 @@ class DailyForecastProcessor {
     String? unit,
   ]) {
     if (forecasts.isEmpty) {
-      print('DAILY_PROCESSOR: No forecasts to summarize');
+      AppLogger.debug('DailyForecastProcessor', 'No forecasts to summarize');
       return;
     }
 
@@ -292,15 +285,11 @@ class DailyForecastProcessor {
     final overallMin = allFlows.reduce((a, b) => a < b ? a : b);
     final overallMax = allFlows.reduce((a, b) => a > b ? a : b);
 
-    print('DAILY_PROCESSOR: ========== Processing Summary ==========');
-    print(
-      'DAILY_PROCESSOR: Period: ${first.date.toLocal().toString().split(' ')[0]} to ${last.date.toLocal().toString().split(' ')[0]}',
-    );
-    print('DAILY_PROCESSOR: Total days: ${forecasts.length}');
-    print(
-      'DAILY_PROCESSOR: Flow range: ${overallMin.toStringAsFixed(1)} - ${overallMax.toStringAsFixed(1)} $displayUnit',
-    );
-    print('DAILY_PROCESSOR: Data source: ${first.dataSource}');
+    AppLogger.debug('DailyForecastProcessor', '========== Processing Summary ==========');
+    AppLogger.debug('DailyForecastProcessor', 'Period: ${first.date.toLocal().toString().split(' ')[0]} to ${last.date.toLocal().toString().split(' ')[0]}');
+    AppLogger.debug('DailyForecastProcessor', 'Total days: ${forecasts.length}');
+    AppLogger.debug('DailyForecastProcessor', 'Flow range: ${overallMin.toStringAsFixed(1)} - ${overallMax.toStringAsFixed(1)} $displayUnit');
+    AppLogger.debug('DailyForecastProcessor', 'Data source: ${first.dataSource}');
 
     // Count by flow category
     final categoryCount = <String, int>{};
@@ -309,7 +298,7 @@ class DailyForecastProcessor {
           (categoryCount[forecast.flowCategory] ?? 0) + 1;
     }
 
-    print('DAILY_PROCESSOR: Flow categories: $categoryCount');
-    print('DAILY_PROCESSOR: ==========================================');
+    AppLogger.debug('DailyForecastProcessor', 'Flow categories: $categoryCount');
+    AppLogger.debug('DailyForecastProcessor', '==========================================');
   }
 }

@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import '../../../core/providers/reach_data_provider.dart';
 import '../widgets/forecast_detail_template.dart';
 import '../widgets/flow_values_usage_guide.dart';
@@ -99,7 +100,7 @@ class _MediumRangeDetailPageState extends State<MediumRangeDetailPage> {
       await reachProvider.loadReach(_reachId!);
     } catch (e) {
       // Error handling is managed by the provider
-      print('Error refreshing forecast data: $e');
+      AppLogger.error('MediumRangeDetailPage', 'Error refreshing forecast data', e);
     }
   }
 

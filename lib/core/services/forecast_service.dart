@@ -1,8 +1,9 @@
 // lib/core/services/forecast_service.dart
 
-import 'package:rivr/features/forecast/widgets/horizontal_flow_timeline.dart';
-import 'package:rivr/features/map/widgets/map_search_widget.dart';
+import 'package:rivr/core/models/hourly_flow_data.dart';
+import 'package:rivr/features/map/services/map_search_service.dart';
 import '../models/reach_data.dart';
+import 'app_logger.dart';
 import 'noaa_api_service.dart';
 import 'reach_cache_service.dart';
 import 'flow_unit_preference_service.dart';
@@ -28,21 +29,19 @@ class ForecastService {
   /// This is the fastest possible load - only what's needed immediately
   Future<ForecastResponse> loadOverviewData(String reachId) async {
     try {
-      print('FORECAST_SERVICE: Loading overview data for reach: $reachId');
+      AppLogger.debug('ForecastService', 'Loading overview data for reach: $reachId');
 
       // Step 1: Check cache for reach data first
       final cachedReach = await _cacheService.get(reachId);
 
       ReachData reach;
       if (cachedReach != null) {
-        print('FORECAST_SERVICE: ✅ Using cached reach data');
+        AppLogger.info('ForecastService', 'Using cached reach data');
         reach = cachedReach;
 
         // KEY: Check if cached reach needs geocoding
         if (reach.city == null || reach.state == null) {
-          print(
-            'FORECAST_SERVICE: Adding location to cached reach via reverse geocoding',
-          );
+          AppLogger.debug('ForecastService', 'Adding location to cached reach via reverse geocoding');
 
           try {
             final locationData = await MapSearchService.reverseGeocode(
@@ -56,27 +55,19 @@ class ForecastService {
               state: locationData['state'],
             );
 
-            print(
-              'FORECAST_SERVICE: ✅ Enhanced cached reach with location: ${reach.city}, ${reach.state}',
-            );
+            AppLogger.info('ForecastService', 'Enhanced cached reach with location: ${reach.city}, ${reach.state}');
 
             // Re-cache the updated reach data
             await _cacheService.store(reach);
-            print(
-              'FORECAST_SERVICE: ✅ Re-cached reach data with location info',
-            );
+            AppLogger.info('ForecastService', 'Re-cached reach data with location info');
           } catch (e) {
-            print(
-              'FORECAST_SERVICE: ⚠️ Reverse geocoding failed for cached reach: $e',
-            );
+            AppLogger.warning('ForecastService', 'Reverse geocoding failed for cached reach: $e');
           }
         } else {
-          print(
-            '🐛 DEBUG: Cached reach already has location: city=${reach.city}, state=${reach.state}',
-          );
+          AppLogger.debug('ForecastService', 'Cached reach already has location: city=${reach.city}, state=${reach.state}');
         }
       } else {
-        print('FORECAST_SERVICE: Cache miss - fetching reach info only');
+        AppLogger.debug('ForecastService', 'Cache miss - fetching reach info only');
 
         // Step 2: Fetch reach info from NOAA API
         final reachInfo = await _apiService.fetchReachInfo(
@@ -89,9 +80,7 @@ class ForecastService {
 
         // Step 4: IMMEDIATELY do reverse geocoding BEFORE any caching
         if (reach.city == null || reach.state == null) {
-          print(
-            'FORECAST_SERVICE: Performing reverse geocoding for complete location data',
-          );
+          AppLogger.debug('ForecastService', 'Performing reverse geocoding for complete location data');
 
           try {
             final locationData = await MapSearchService.reverseGeocode(
@@ -107,22 +96,18 @@ class ForecastService {
                   true, // Still partial since no return periods yet
             );
 
-            print(
-              'FORECAST_SERVICE: ✅ Enhanced with location: ${reach.city}, ${reach.state}',
-            );
+            AppLogger.info('ForecastService', 'Enhanced with location: ${reach.city}, ${reach.state}');
           } catch (e) {
-            print('FORECAST_SERVICE: ⚠️ Reverse geocoding failed: $e');
+            AppLogger.warning('ForecastService', 'Reverse geocoding failed: $e');
             reach = reach.copyWith(isPartiallyLoaded: true);
           }
         } else {
-          print(
-            '🐛 DEBUG: New reach already has location: city=${reach.city}, state=${reach.state}',
-          );
+          AppLogger.debug('ForecastService', 'New reach already has location: city=${reach.city}, state=${reach.state}');
         }
 
         // Step 5: Now cache the reach data with city/state already populated
         await _cacheService.store(reach);
-        print('FORECAST_SERVICE: ✅ Cached reach data with location info');
+        AppLogger.info('ForecastService', 'Cached reach data with location info');
       }
 
       // Step 6: Get only short-range forecast for current flow (already converted by NoaaApiService)
@@ -139,14 +124,12 @@ class ForecastService {
         mediumRangeBlend: null, // This is nullable, so null is OK
       );
 
-      print('FORECAST_SERVICE: ✅ Overview data loaded successfully');
-      print(
-        '🐛 DEBUG: Final response reach: city=${overviewResponse.reach.city}, state=${overviewResponse.reach.state}',
-      );
+      AppLogger.info('ForecastService', 'Overview data loaded successfully');
+      AppLogger.debug('ForecastService', 'Final response reach: city=${overviewResponse.reach.city}, state=${overviewResponse.reach.state}');
 
       return overviewResponse;
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading overview data: $e');
+      AppLogger.error('ForecastService', 'Error loading overview data', e);
       rethrow;
     }
   }
@@ -159,7 +142,7 @@ class ForecastService {
     ForecastResponse existingData,
   ) async {
     try {
-      print('FORECAST_SERVICE: Loading supplementary data for reach: $reachId');
+      AppLogger.debug('ForecastService', 'Loading supplementary data for reach: $reachId');
 
       ReachData reach = existingData.reach;
 
@@ -175,10 +158,10 @@ class ForecastService {
 
             // Update cache with complete data
             await _cacheService.store(reach);
-            print('FORECAST_SERVICE: ✅ Added return period data');
+            AppLogger.info('ForecastService', 'Added return period data');
           }
         } catch (e) {
-          print('FORECAST_SERVICE: ⚠️ Return periods failed, continuing: $e');
+          AppLogger.warning('ForecastService', 'Return periods failed, continuing: $e');
           // Continue without return periods
         }
       }
@@ -202,9 +185,7 @@ class ForecastService {
           mediumRangeBlend: existingData.mediumRangeBlend,
         );
       } catch (e) {
-        print(
-          'FORECAST_SERVICE: ⚠️ Medium range forecast failed, continuing: $e',
-        );
+        AppLogger.warning('ForecastService', 'Medium range forecast failed, continuing: $e');
         // Use existing data if medium range fails
         enhancedResponse = ForecastResponse(
           reach: reach,
@@ -229,10 +210,10 @@ class ForecastService {
         }
       }
 
-      print('FORECAST_SERVICE: ✅ Supplementary data loaded successfully');
+      AppLogger.info('ForecastService', 'Supplementary data loaded successfully');
       return enhancedResponse;
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading supplementary data: $e');
+      AppLogger.error('ForecastService', 'Error loading supplementary data', e);
       // Return existing data if supplementary loading fails
       return existingData;
     }
@@ -244,17 +225,17 @@ class ForecastService {
   /// Uses cache for static reach data, always fetches fresh forecast data
   Future<ForecastResponse> loadCompleteReachData(String reachId) async {
     try {
-      print('FORECAST_SERVICE: Loading complete data for reach: $reachId');
+      AppLogger.debug('ForecastService', 'Loading complete data for reach: $reachId');
 
       // Step 1: Check cache for reach data first
       final cachedReach = await _cacheService.get(reachId);
 
       ReachData reach;
       if (cachedReach != null) {
-        print('FORECAST_SERVICE: ✅ Using cached reach data');
+        AppLogger.info('ForecastService', 'Using cached reach data');
         reach = cachedReach;
       } else {
-        print('FORECAST_SERVICE: Cache miss - fetching fresh reach data');
+        AppLogger.debug('ForecastService', 'Cache miss - fetching fresh reach data');
 
         // Step 2: Get reach info and return periods in parallel
         final futures = await Future.wait([
@@ -265,12 +246,12 @@ class ForecastService {
         final reachInfo = futures[0] as Map<String, dynamic>;
         final returnPeriods = futures[1] as List<dynamic>;
 
-        print('FORECAST_SERVICE: ✅ Loaded reach info and return periods');
+        AppLogger.info('ForecastService', 'Loaded reach info and return periods');
 
         // Step 3: Create complete reach data
         reach = ReachData.fromNoaaApi(reachInfo);
 
-        // 🔧 FIX: Wrap return period processing in try-catch
+        // Wrap return period processing in try-catch
         try {
           // Merge return periods if available
           if (returnPeriods.isNotEmpty) {
@@ -278,26 +259,24 @@ class ForecastService {
               returnPeriods,
             );
             reach = reach.mergeWith(returnPeriodData);
-            print('FORECAST_SERVICE: ✅ Merged return period data');
+            AppLogger.info('ForecastService', 'Merged return period data');
           }
         } catch (e) {
-          print(
-            'FORECAST_SERVICE: ⚠️ Failed to parse return periods for reach $reachId: $e',
-          );
-          print('FORECAST_SERVICE: ✅ Continuing without return period data');
+          AppLogger.warning('ForecastService', 'Failed to parse return periods for reach $reachId: $e');
+          AppLogger.info('ForecastService', 'Continuing without return period data');
           // Continue without return periods - the reach will work fine without them
           // No need to throw or break the entire loading process
         }
 
         // Step 4: Cache the complete reach data
         await _cacheService.store(reach);
-        print('FORECAST_SERVICE: ✅ Cached reach data');
+        AppLogger.info('ForecastService', 'Cached reach data');
       }
 
       // Step 5: Always get fresh forecast data (this changes frequently)
       // Data is already converted by NoaaApiService
       final forecastData = await _apiService.fetchAllForecasts(reachId);
-      print('FORECAST_SERVICE: ✅ Loaded fresh forecast data');
+      AppLogger.info('ForecastService', 'Loaded fresh forecast data');
 
       // Step 6: Create forecast response with cached/fresh reach data + fresh forecasts
       final forecastResponse = ForecastResponse.fromJson(forecastData);
@@ -324,10 +303,10 @@ class ForecastService {
         }
       }
 
-      print('FORECAST_SERVICE: ✅ Complete data loaded successfully');
+      AppLogger.info('ForecastService', 'Complete data loaded successfully');
       return completeResponse;
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading complete data: $e');
+      AppLogger.error('ForecastService', 'Error loading complete data', e);
       rethrow;
     }
   }
@@ -339,18 +318,14 @@ class ForecastService {
     String forecastType,
   ) async {
     try {
-      print(
-        'FORECAST_SERVICE: Loading $forecastType forecast for reach: $reachId',
-      );
+      AppLogger.debug('ForecastService', 'Loading $forecastType forecast for reach: $reachId');
 
       // Check cache for reach data first
       final cachedReach = await _cacheService.get(reachId);
 
       ReachData reach;
       if (cachedReach != null) {
-        print(
-          'FORECAST_SERVICE: ✅ Using cached reach data for specific forecast',
-        );
+        AppLogger.info('ForecastService', 'Using cached reach data for specific forecast');
         reach = cachedReach;
 
         // Only fetch the specific forecast (already converted by NoaaApiService)
@@ -369,9 +344,7 @@ class ForecastService {
           mediumRangeBlend: forecastResponse.mediumRangeBlend,
         );
 
-        print(
-          'FORECAST_SERVICE: ✅ $forecastType forecast loaded with cached reach data',
-        );
+        AppLogger.info('ForecastService', '$forecastType forecast loaded with cached reach data');
         return specificResponse;
       } else {
         // Cache miss - get both reach info and forecast
@@ -398,20 +371,18 @@ class ForecastService {
           mediumRangeBlend: forecastResponse.mediumRangeBlend,
         );
 
-        print(
-          'FORECAST_SERVICE: ✅ $forecastType forecast loaded and reach data cached',
-        );
+        AppLogger.info('ForecastService', '$forecastType forecast loaded and reach data cached');
         return specificResponse;
       }
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading $forecastType forecast: $e');
+      AppLogger.error('ForecastService', 'Error loading $forecastType forecast', e);
       rethrow;
     }
   }
 
   /// Force refresh reach data (clear cache and fetch fresh)
   Future<ForecastResponse> refreshReachData(String reachId) async {
-    print('FORECAST_SERVICE: Force refreshing reach data for: $reachId');
+    AppLogger.debug('ForecastService', 'Force refreshing reach data for: $reachId');
     await _cacheService.forceRefresh(reachId);
 
     // Clear computed caches too
@@ -438,14 +409,14 @@ class ForecastService {
   /// Skips: hourly/daily/extended forecast arrays (90% data reduction)
   Future<ForecastResponse> loadCurrentFlowOnly(String reachId) async {
     try {
-      print('FORECAST_SERVICE: Loading current flow only for: $reachId');
+      AppLogger.debug('ForecastService', 'Loading current flow only for: $reachId');
 
       // Step 1: Check cache for reach data first
       final cachedReach = await _cacheService.get(reachId);
 
       ReachData reach;
       if (cachedReach != null) {
-        print('FORECAST_SERVICE: ✅ Using cached reach data for current flow');
+        AppLogger.info('ForecastService', 'Using cached reach data for current flow');
         reach = cachedReach;
       } else {
         // Load fresh reach data with return periods
@@ -469,13 +440,13 @@ class ForecastService {
             reach = reach.mergeWith(returnPeriodData);
           }
         } catch (e) {
-          print('FORECAST_SERVICE: ⚠️ Failed to parse return periods: $e');
+          AppLogger.warning('ForecastService', 'Failed to parse return periods: $e');
           // Continue without return periods
         }
 
         // Cache the reach data
         await _cacheService.store(reach);
-        print('FORECAST_SERVICE: ✅ Cached reach data');
+        AppLogger.info('ForecastService', 'Cached reach data');
       }
 
       // Step 2: Use the working loadOverviewData method instead
@@ -495,10 +466,10 @@ class ForecastService {
         mediumRangeBlend: null, // Empty for efficiency
       );
 
-      print('FORECAST_SERVICE: ✅ Current flow only loaded successfully');
+      AppLogger.info('ForecastService', 'Current flow only loaded successfully');
       return lightweightResponse;
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading current flow only: $e');
+      AppLogger.error('ForecastService', 'Error loading current flow only', e);
       rethrow;
     }
   }
@@ -507,12 +478,12 @@ class ForecastService {
   /// Ultra-lightweight for map heart button functionality
   Future<ReachData> loadBasicReachInfo(String reachId) async {
     try {
-      print('FORECAST_SERVICE: Loading basic reach info for: $reachId');
+      AppLogger.debug('ForecastService', 'Loading basic reach info for: $reachId');
 
       // Check cache first for super-fast response
       final cachedReach = await _cacheService.get(reachId);
       if (cachedReach != null) {
-        print('FORECAST_SERVICE: ✅ Using cached basic reach info');
+        AppLogger.info('ForecastService', 'Using cached basic reach info');
         return cachedReach;
       }
 
@@ -523,10 +494,10 @@ class ForecastService {
       // Cache for future use
       await _cacheService.store(reach);
 
-      print('FORECAST_SERVICE: ✅ Basic reach info loaded and cached');
+      AppLogger.info('ForecastService', 'Basic reach info loaded and cached');
       return reach;
     } catch (e) {
-      print('FORECAST_SERVICE: ❌ Error loading basic reach info: $e');
+      AppLogger.error('ForecastService', 'Error loading basic reach info', e);
       rethrow;
     }
   }
@@ -571,12 +542,10 @@ class ForecastService {
 
     for (final type in types) {
       final flow = forecast.getLatestFlow(type);
-      // 🔧 Filter out missing data values
+      // Filter out missing data values
       if (flow != null && flow > -9000) {
         // Check for missing data sentinel values
-        print(
-          'FORECAST_SERVICE: Using $type for current flow: $flow ${_unitService.currentFlowUnit}',
-        );
+        AppLogger.debug('ForecastService', 'Using $type for current flow: $flow ${_unitService.currentFlowUnit}');
 
         // Cache the result
         _currentFlowCache[reachId] = flow;
@@ -584,7 +553,7 @@ class ForecastService {
       }
     }
 
-    print('FORECAST_SERVICE: No current flow data available');
+    AppLogger.debug('ForecastService', 'No current flow data available');
     _currentFlowCache[reachId] = null; // Cache null result too
     return null;
   }
@@ -885,9 +854,7 @@ class ForecastService {
       chartSeries[memberName] = chartData;
     }
 
-    print(
-      'FORECAST_SERVICE: Generated ${chartSeries.length} chart series for $forecastType (${_unitService.currentFlowUnit})',
-    );
+    AppLogger.debug('ForecastService', 'Generated ${chartSeries.length} chart series for $forecastType (${_unitService.currentFlowUnit})');
     return chartSeries;
   }
 
@@ -919,7 +886,7 @@ class ForecastService {
   }
 
   void clearUnitDependentCaches() {
-    print('FORECAST_SERVICE: Clearing unit-dependent caches for unit change');
+    AppLogger.debug('ForecastService', 'Clearing unit-dependent caches for unit change');
 
     // Clear flow and category caches (these depend on units)
     _currentFlowCache.clear();
@@ -930,7 +897,7 @@ class ForecastService {
   void clearComputedCaches() {
     _currentFlowCache.clear();
     _flowCategoryCache.clear();
-    print('FORECAST_SERVICE: Cleared computed value caches');
+    AppLogger.debug('ForecastService', 'Cleared computed value caches');
   }
 }
 

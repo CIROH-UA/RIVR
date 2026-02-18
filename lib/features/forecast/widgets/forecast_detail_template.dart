@@ -2,6 +2,7 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
 import 'package:rivr/features/forecast/widgets/horizontal_flow_timeline.dart';
 import '../../../core/providers/reach_data_provider.dart';
@@ -115,14 +116,12 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       // Get current reach ID
       final currentReach = reachProvider.currentReach;
       if (currentReach == null) {
-        print('FORECAST_TEMPLATE: No current reach for refresh');
+        AppLogger.warning('ForecastDetailTemplate', 'No current reach for refresh');
         return;
       }
 
       final reachId = currentReach.reachId;
-      print(
-        'FORECAST_TEMPLATE: Refreshing ${widget.forecastType} for $reachId',
-      );
+      AppLogger.debug('ForecastDetailTemplate', 'Refreshing ${widget.forecastType} for $reachId');
 
       // Clear unit-dependent computed caches (flow values, categories)
       // but keep reach metadata cached
@@ -133,25 +132,23 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       bool success = false;
       switch (widget.forecastType.toLowerCase()) {
         case 'short_range':
-          print('FORECAST_TEMPLATE: Refreshing hourly forecast data...');
+          AppLogger.debug('ForecastDetailTemplate', 'Refreshing hourly forecast data...');
           success = await reachProvider.loadHourlyForecast(reachId);
           break;
 
         case 'medium_range':
-          print('FORECAST_TEMPLATE: Refreshing daily forecast data...');
+          AppLogger.debug('ForecastDetailTemplate', 'Refreshing daily forecast data...');
           success = await reachProvider.loadDailyForecast(reachId);
           break;
 
         case 'long_range':
-          print('FORECAST_TEMPLATE: Refreshing extended forecast data...');
+          AppLogger.debug('ForecastDetailTemplate', 'Refreshing extended forecast data...');
           success = await reachProvider.loadExtendedForecast(reachId);
           break;
 
         case 'analysis_assimilation':
         case 'medium_range_blend':
-          print(
-            'FORECAST_TEMPLATE: Refreshing ${widget.forecastType} forecast data...',
-          );
+          AppLogger.debug('ForecastDetailTemplate', 'Refreshing ${widget.forecastType} forecast data...');
           success = await reachProvider.loadSpecificForecast(
             reachId,
             widget.forecastType,
@@ -159,23 +156,17 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
           break;
 
         default:
-          print(
-            'FORECAST_TEMPLATE: Unknown forecast type: ${widget.forecastType}, falling back to comprehensive refresh',
-          );
+          AppLogger.warning('ForecastDetailTemplate', 'Unknown forecast type: ${widget.forecastType}, falling back to comprehensive refresh');
           success = await reachProvider.refreshCurrentReach();
       }
 
       if (success) {
-        print(
-          'FORECAST_TEMPLATE: ✅ Successfully refreshed ${widget.forecastType} data',
-        );
+        AppLogger.info('ForecastDetailTemplate', 'Successfully refreshed ${widget.forecastType} data');
       } else {
-        print(
-          'FORECAST_TEMPLATE: ⚠️ Failed to refresh ${widget.forecastType} data',
-        );
+        AppLogger.warning('ForecastDetailTemplate', 'Failed to refresh ${widget.forecastType} data');
       }
     } catch (e) {
-      print('FORECAST_TEMPLATE: ❌ Error refreshing ${widget.forecastType}: $e');
+      AppLogger.error('ForecastDetailTemplate', 'Error refreshing ${widget.forecastType}', e);
     } finally {
       if (mounted) {
         setState(() {
@@ -518,7 +509,7 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
       // FIXED: No conversion needed - data is already in user's preferred unit from API service
       return maxFlow;
     } catch (e) {
-      print('Error calculating peak flow: $e');
+      AppLogger.error('ForecastDetailTemplate', 'Error calculating peak flow', e);
       return null;
     }
   }
@@ -568,7 +559,7 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
 
       return 'Stable';
     } catch (e) {
-      print('Error calculating trend: $e');
+      AppLogger.error('ForecastDetailTemplate', 'Error calculating trend', e);
       return 'Unknown';
     }
   }

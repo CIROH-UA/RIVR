@@ -4,8 +4,9 @@ import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/map_preference_service.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/providers/theme_provider.dart';
-import '../widgets/base_layer_modal.dart';
+import '../models/map_base_layer.dart';
 
 class MapControlsService {
   MapboxMap? _mapboxMap;
@@ -29,7 +30,7 @@ class MapControlsService {
   /// Initialize map with correct style based on theme and preferences
   Future<void> initializeMapStyle(ThemeProvider themeProvider) async {
     if (_mapboxMap == null) {
-      print('❌ Map not initialized');
+      AppLogger.error('MapControlsService', 'Map not initialized');
       return;
     }
 
@@ -46,7 +47,7 @@ class MapControlsService {
       if (activeLayer != _currentLayer) {
         await _mapboxMap!.loadStyleURI(activeLayer.styleUrl);
         _currentLayer = activeLayer;
-        print('✅ Map initialized with layer: ${activeLayer.displayName}');
+        AppLogger.info('MapControlsService', 'Map initialized with layer: ${activeLayer.displayName}');
       }
 
       // Apply 3D terrain if enabled (independent of layer)
@@ -54,14 +55,14 @@ class MapControlsService {
         await _enable3DTerrain();
       }
     } catch (e) {
-      print('❌ Error initializing map style: $e');
+      AppLogger.error('MapControlsService', 'Error initializing map style', e);
     }
   }
 
   /// Update map style when theme changes (auto mode only)
   Future<void> updateMapForThemeChange(ThemeProvider themeProvider) async {
     if (_mapboxMap == null) {
-      print('❌ Map not initialized');
+      AppLogger.error('MapControlsService', 'Map not initialized');
       return;
     }
 
@@ -69,7 +70,7 @@ class MapControlsService {
       // Only update if in auto mode
       final isAuto = await MapPreferenceService.isAutoMode();
       if (!isAuto) {
-        print('📍 Map in manual mode, skipping auto theme update');
+        AppLogger.debug('MapControlsService', 'Map in manual mode, skipping auto theme update');
         return;
       }
 
@@ -88,17 +89,17 @@ class MapControlsService {
           await _enable3DTerrain();
         }
 
-        print('✅ Map auto-updated for theme: ${activeLayer.displayName}');
+        AppLogger.info('MapControlsService', 'Map auto-updated for theme: ${activeLayer.displayName}');
       }
     } catch (e) {
-      print('❌ Error updating map for theme: $e');
+      AppLogger.error('MapControlsService', 'Error updating map for theme', e);
     }
   }
 
   /// Change map base layer (manual selection by user)
   Future<void> changeBaseLayer(MapBaseLayer newLayer) async {
     if (_mapboxMap == null) {
-      print('❌ Map not initialized');
+      AppLogger.error('MapControlsService', 'Map not initialized');
       return;
     }
 
@@ -115,9 +116,9 @@ class MapControlsService {
       // Save as manual preference (switches to manual mode)
       await MapPreferenceService.setManualMapLayer(newLayer);
 
-      print('✅ Map layer manually changed to: ${newLayer.displayName}');
+      AppLogger.info('MapControlsService', 'Map layer manually changed to: ${newLayer.displayName}');
     } catch (e) {
-      print('❌ Error changing map layer: $e');
+      AppLogger.error('MapControlsService', 'Error changing map layer', e);
     }
   }
 
@@ -138,9 +139,9 @@ class MapControlsService {
     try {
       final prefs = await SharedPreferences.getInstance();
       _is3DEnabled = prefs.getBool(_terrain3DKey) ?? false;
-      print('📱 Loaded 3D terrain preference: $_is3DEnabled');
+      AppLogger.debug('MapControlsService', 'Loaded 3D terrain preference: $_is3DEnabled');
     } catch (e) {
-      print('❌ Error loading 3D terrain preference: $e');
+      AppLogger.error('MapControlsService', 'Error loading 3D terrain preference', e);
       _is3DEnabled = false;
     }
   }
@@ -150,9 +151,9 @@ class MapControlsService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_terrain3DKey, enabled);
-      print('💾 Saved 3D terrain preference: $enabled');
+      AppLogger.debug('MapControlsService', 'Saved 3D terrain preference: $enabled');
     } catch (e) {
-      print('❌ Error saving 3D terrain preference: $e');
+      AppLogger.error('MapControlsService', 'Error saving 3D terrain preference', e);
     }
   }
 
@@ -187,9 +188,9 @@ class MapControlsService {
       );
 
       _is3DEnabled = true;
-      print('✅ 3D terrain enabled');
+      AppLogger.info('MapControlsService', '3D terrain enabled');
     } catch (e) {
-      print('❌ Error enabling 3D terrain: $e');
+      AppLogger.error('MapControlsService', 'Error enabling 3D terrain', e);
     }
   }
 
@@ -213,9 +214,9 @@ class MapControlsService {
       );
 
       _is3DEnabled = false;
-      print('✅ 3D terrain disabled');
+      AppLogger.info('MapControlsService', '3D terrain disabled');
     } catch (e) {
-      print('❌ Error disabling 3D terrain: $e');
+      AppLogger.error('MapControlsService', 'Error disabling 3D terrain', e);
     }
   }
 
@@ -228,9 +229,9 @@ class MapControlsService {
       // Update map to match current theme
       await updateMapForThemeChange(themeProvider);
 
-      print('✅ Map set to auto mode');
+      AppLogger.info('MapControlsService', 'Map set to auto mode');
     } catch (e) {
-      print('❌ Error enabling auto mode: $e');
+      AppLogger.error('MapControlsService', 'Error enabling auto mode', e);
     }
   }
 
@@ -239,7 +240,7 @@ class MapControlsService {
     try {
       return await MapPreferenceService.isAutoMode();
     } catch (e) {
-      print('❌ Error checking auto mode: $e');
+      AppLogger.error('MapControlsService', 'Error checking auto mode', e);
       return true; // Default to auto mode
     }
   }
@@ -250,7 +251,7 @@ class MapControlsService {
       // Check if location services are enabled
       bool serviceEnabled = await geo.Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        print('❌ Location services are disabled');
+        AppLogger.error('MapControlsService', 'Location services are disabled');
         return null;
       }
 
@@ -260,13 +261,13 @@ class MapControlsService {
       if (permission == geo.LocationPermission.denied) {
         permission = await geo.Geolocator.requestPermission();
         if (permission == geo.LocationPermission.denied) {
-          print('❌ Location permissions are denied');
+          AppLogger.error('MapControlsService', 'Location permissions are denied');
           return null;
         }
       }
 
       if (permission == geo.LocationPermission.deniedForever) {
-        print('❌ Location permissions are permanently denied');
+        AppLogger.error('MapControlsService', 'Location permissions are permanently denied');
         return null;
       }
 
@@ -279,10 +280,10 @@ class MapControlsService {
       );
 
       _lastKnownLocation = position;
-      print('📍 Current location: ${position.latitude}, ${position.longitude}');
+      AppLogger.debug('MapControlsService', 'Current location: ${position.latitude}, ${position.longitude}');
       return position;
     } catch (e) {
-      print('❌ Error getting location: $e');
+      AppLogger.error('MapControlsService', 'Error getting location', e);
       return null;
     }
   }
@@ -290,7 +291,7 @@ class MapControlsService {
   /// Recenter map to device location
   Future<void> recenterToDeviceLocation() async {
     if (_mapboxMap == null) {
-      print('❌ Map not initialized');
+      AppLogger.error('MapControlsService', 'Map not initialized');
       return;
     }
 
@@ -300,7 +301,7 @@ class MapControlsService {
       position ??= _lastKnownLocation;
 
       if (position == null) {
-        print('❌ No location available for recentering');
+        AppLogger.error('MapControlsService', 'No location available for recentering');
         return;
       }
 
@@ -319,9 +320,9 @@ class MapControlsService {
         MapAnimationOptions(duration: _animationDurationMs, startDelay: 0),
       );
 
-      print('✅ Map recentered to device location');
+      AppLogger.info('MapControlsService', 'Map recentered to device location');
     } catch (e) {
-      print('❌ Error recentering map: $e');
+      AppLogger.error('MapControlsService', 'Error recentering map', e);
     }
   }
 
@@ -333,7 +334,7 @@ class MapControlsService {
       final cameraState = await _mapboxMap!.getCameraState();
       return cameraState.center;
     } catch (e) {
-      print('❌ Error getting map center: $e');
+      AppLogger.error('MapControlsService', 'Error getting map center', e);
       return null;
     }
   }

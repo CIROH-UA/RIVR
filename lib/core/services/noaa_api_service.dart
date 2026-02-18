@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 import '../models/reach_data.dart';
+import 'app_logger.dart';
 import 'error_service.dart';
 import 'flow_unit_preference_service.dart';
 
@@ -38,12 +39,13 @@ class NoaaApiService {
     bool isOverview = false,
   }) async {
     try {
-      print(
-        'NOAA_API: Fetching reach info for: $reachId ${isOverview ? "(overview)" : ""}',
+      AppLogger.debug(
+        'NoaaApi',
+        'Fetching reach info for: $reachId ${isOverview ? "(overview)" : ""}',
       );
 
       final url = AppConfig.getReachUrl(reachId);
-      print('NOAA_API: URL: $url');
+      AppLogger.debug('NoaaApi', 'URL: $url');
 
       final timeout = isOverview ? _quickTimeout : _normalTimeout;
 
@@ -59,11 +61,11 @@ class NoaaApiService {
           )
           .timeout(timeout);
 
-      print('NOAA_API: Response status: ${response.statusCode}');
+      AppLogger.debug('NoaaApi', 'Response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        print('NOAA_API: Successfully fetched reach info');
+        AppLogger.debug('NoaaApi', 'Successfully fetched reach info');
         return data;
       } else if (response.statusCode == 404) {
         throw Exception('Reach not found: $reachId');
@@ -73,7 +75,7 @@ class NoaaApiService {
         );
       }
     } catch (e) {
-      print('NOAA_API: Error fetching reach info: $e');
+      AppLogger.error('NoaaApi', 'Error fetching reach info', e);
       final userMessage = ErrorService.handleError(
         e,
         context: 'fetchReachInfo',
@@ -86,7 +88,7 @@ class NoaaApiService {
   /// Fetch only current flow data for overview display
   /// Uses short-range forecast but with optimized timeout
   Future<Map<String, dynamic>> fetchCurrentFlowOnly(String reachId) async {
-    print('NOAA_API: Fetching current flow only for: $reachId');
+    AppLogger.debug('NoaaApi', 'Fetching current flow only for: $reachId');
 
     // Use existing forecast method but with quick timeout and priority
     return await fetchForecast(reachId, 'short_range', isOverview: true);
@@ -98,10 +100,10 @@ class NoaaApiService {
   Future<List<dynamic>> fetchReturnPeriods(String reachId) async {
     final start = DateTime.now();
     try {
-      print('NOAA_API: Fetching return periods for: $reachId');
+      AppLogger.debug('NoaaApi', 'Fetching return periods for: $reachId');
 
       final url = AppConfig.getReturnPeriodUrl(reachId);
-      print('NOAA_API: Return period URL: $url');
+      AppLogger.debug('NoaaApi', 'Return period URL: $url');
 
       final response = await _client
           .get(
@@ -114,9 +116,9 @@ class NoaaApiService {
           .timeout(_normalTimeout); // Use normal timeout for supplementary data
 
       final duration = DateTime.now().difference(start); // ADD THIS
-      print('API_TIME_RETURN_PERIOD: ${duration.inMilliseconds}ms');
+      AppLogger.debug('NoaaApi', 'API_TIME_RETURN_PERIOD: ${duration.inMilliseconds}ms');
 
-      print('NOAA_API: Return period response status: ${response.statusCode}');
+      AppLogger.debug('NoaaApi', 'Return period response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -139,34 +141,37 @@ class NoaaApiService {
           }
 
           if (hasValidData && data.isNotEmpty) {
-            print(
-              'NOAA_API: Successfully fetched return periods (${data.length} items)',
+            AppLogger.debug(
+              'NoaaApi',
+              'Successfully fetched return periods (${data.length} items)',
             );
             return data;
           } else {
-            print(
-              'NOAA_API: Return period data contains invalid values, skipping',
+            AppLogger.debug(
+              'NoaaApi',
+              'Return period data contains invalid values, skipping',
             );
             return []; // Return empty list for invalid data
           }
         } else if (data is Map && data.isNotEmpty) {
-          print(
-            'NOAA_API: Return period API returned single object, wrapping in array',
+          AppLogger.debug(
+            'NoaaApi',
+            'Return period API returned single object, wrapping in array',
           );
           return [data];
         } else {
-          print('NOAA_API: Return period API returned empty or invalid data');
+          AppLogger.debug('NoaaApi', 'Return period API returned empty or invalid data');
           return [];
         }
       } else if (response.statusCode == 404) {
-        print('NOAA_API: No return periods found for reach: $reachId');
+        AppLogger.debug('NoaaApi', 'No return periods found for reach: $reachId');
         return []; // Return empty list instead of throwing
       } else {
-        print('NOAA_API: Return period API error: ${response.statusCode}');
+        AppLogger.debug('NoaaApi', 'Return period API error: ${response.statusCode}');
         return []; // Return empty list for non-critical data
       }
     } catch (e) {
-      print('NOAA_API: Error fetching return periods: $e');
+      AppLogger.error('NoaaApi', 'Error fetching return periods', e);
       // Don't throw for return periods - they're supplementary data
       // Just return empty list so reach loading doesn't fail
       return [];
@@ -185,12 +190,13 @@ class NoaaApiService {
   }) async {
     final start = DateTime.now();
     try {
-      print(
-        'NOAA_API: Fetching $series forecast for: $reachId ${isOverview ? "(overview)" : ""}',
+      AppLogger.debug(
+        'NoaaApi',
+        'Fetching $series forecast for: $reachId ${isOverview ? "(overview)" : ""}',
       );
 
       final url = AppConfig.getForecastUrl(reachId, series);
-      print('NOAA_API: Forecast URL: $url');
+      AppLogger.debug('NoaaApi', 'Forecast URL: $url');
 
       // Use appropriate timeout based on priority
       final timeout = isOverview ? _quickTimeout : _normalTimeout;
@@ -208,9 +214,9 @@ class NoaaApiService {
           .timeout(timeout);
 
       final duration = DateTime.now().difference(start);
-      print('API_TIME_NWM_$series: ${duration.inMilliseconds}ms');
+      AppLogger.debug('NoaaApi', 'API_TIME_NWM_$series: ${duration.inMilliseconds}ms');
 
-      print('NOAA_API: Forecast response status: ${response.statusCode}');
+      AppLogger.debug('NoaaApi', 'Forecast response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -218,8 +224,9 @@ class NoaaApiService {
         // NEW: Apply unit conversion to all forecast data before returning
         final convertedData = _convertForecastResponse(data);
 
-        print(
-          'NOAA_API: Successfully fetched and converted $series forecast to ${_unitService.currentFlowUnit}',
+        AppLogger.info(
+          'NoaaApi',
+          'Successfully fetched and converted $series forecast to ${_unitService.currentFlowUnit}',
         );
         return convertedData;
       } else if (response.statusCode == 404) {
@@ -230,7 +237,7 @@ class NoaaApiService {
         );
       }
     } catch (e) {
-      print('NOAA_API: Error fetching $series forecast: $e');
+      AppLogger.error('NoaaApi', 'Error fetching $series forecast', e);
       final userMessage = ErrorService.handleError(e, context: 'fetchForecast');
       throw ApiException(userMessage);
     }
@@ -241,7 +248,7 @@ class NoaaApiService {
   /// Optimized for speed with shorter timeouts and priority headers
   /// UPDATED: Now includes unit conversion
   Future<Map<String, dynamic>> fetchOverviewData(String reachId) async {
-    print('NOAA_API: Fetching overview data for reach: $reachId');
+    AppLogger.debug('NoaaApi', 'Fetching overview data for reach: $reachId');
 
     try {
       // Fetch reach info and short-range forecast in parallel with overview priority
@@ -259,12 +266,13 @@ class NoaaApiService {
       final overviewResponse = Map<String, dynamic>.from(flowData);
       overviewResponse['reach'] = reachInfo;
 
-      print(
-        'NOAA_API: ✅ Successfully fetched overview data with unit conversion',
+      AppLogger.info(
+        'NoaaApi',
+        'Successfully fetched overview data with unit conversion',
       );
       return overviewResponse;
     } catch (e) {
-      print('NOAA_API: ❌ Error fetching overview data: $e');
+      AppLogger.error('NoaaApi', 'Error fetching overview data', e);
       rethrow;
     }
   }
@@ -275,7 +283,7 @@ class NoaaApiService {
   /// Returns combined data with all available forecasts
   /// UPDATED: Now includes unit conversion for all forecast types
   Future<Map<String, dynamic>> fetchAllForecasts(String reachId) async {
-    print('NOAA_API: Fetching all forecasts for reach: $reachId');
+    AppLogger.debug('NoaaApi', 'Fetching all forecasts for reach: $reachId');
 
     // Initialize combined response structure
     Map<String, dynamic>? combinedResponse;
@@ -285,7 +293,7 @@ class NoaaApiService {
     // Fetch each forecast type with longer timeout for complete data
     for (final forecastType in forecastTypes) {
       try {
-        print('NOAA_API: Attempting to fetch $forecastType...');
+        AppLogger.debug('NoaaApi', 'Attempting to fetch $forecastType...');
         // Use normal timeout for complete data loading
         final response = await _client
             .get(
@@ -305,15 +313,16 @@ class NoaaApiService {
           results[forecastType] = convertedData;
           combinedResponse ??= convertedData;
 
-          print('NOAA_API: ✅ Successfully fetched and converted $forecastType');
+          AppLogger.info('NoaaApi', 'Successfully fetched and converted $forecastType');
         } else {
-          print(
-            'NOAA_API: ⚠️ Failed to fetch $forecastType: ${response.statusCode}',
+          AppLogger.warning(
+            'NoaaApi',
+            'Failed to fetch $forecastType: ${response.statusCode}',
           );
           results[forecastType] = null;
         }
       } catch (e) {
-        print('NOAA_API: ⚠️ Failed to fetch $forecastType: $e');
+        AppLogger.warning('NoaaApi', 'Failed to fetch $forecastType: $e');
         results[forecastType] = null;
         // Continue with other forecast types
       }
@@ -348,8 +357,9 @@ class NoaaApiService {
     }
 
     final successCount = results.values.where((r) => r != null).length;
-    print(
-      'NOAA_API: ✅ Successfully combined $successCount/${forecastTypes.length} forecast types for reach $reachId with unit conversion',
+    AppLogger.info(
+      'NoaaApi',
+      'Successfully combined $successCount/${forecastTypes.length} forecast types for reach $reachId with unit conversion',
     );
 
     return mergedResponse;
@@ -395,7 +405,7 @@ class NoaaApiService {
       final convertedResponse = Map<String, dynamic>.from(rawResponse);
       final targetUnit = _unitService.currentFlowUnit;
 
-      print('NOAA_API: Starting forecast conversion to $targetUnit');
+      AppLogger.debug('NoaaApi', 'Starting forecast conversion to $targetUnit');
 
       // Convert all forecast sections that contain series data
       final sectionsToConvert = [
@@ -408,17 +418,17 @@ class NoaaApiService {
 
       for (final section in sectionsToConvert) {
         if (convertedResponse[section] != null) {
-          print('NOAA_API: Converting section: $section');
+          AppLogger.debug('NoaaApi', 'Converting section: $section');
           convertedResponse[section] = _convertForecastSection(
             convertedResponse[section],
           );
         }
       }
 
-      print('NOAA_API: ✅ Forecast conversion completed');
+      AppLogger.info('NoaaApi', 'Forecast conversion completed');
       return convertedResponse;
     } catch (e) {
-      print('NOAA_API: ❌ Failed to convert units: $e');
+      AppLogger.error('NoaaApi', 'Failed to convert units', e);
       // Return original data if conversion fails
       return rawResponse;
     }
@@ -435,7 +445,7 @@ class NoaaApiService {
 
     // Handle 'series' data (single forecast series)
     if (convertedSection['series'] != null) {
-      print('NOAA_API: Converting single series data');
+      AppLogger.debug('NoaaApi', 'Converting single series data');
       convertedSection['series'] = _convertSingleSeries(
         convertedSection['series'],
       );
@@ -443,7 +453,7 @@ class NoaaApiService {
 
     // Handle 'mean' data (ensemble mean)
     if (convertedSection['mean'] != null) {
-      print('NOAA_API: Converting ensemble mean data');
+      AppLogger.debug('NoaaApi', 'Converting ensemble mean data');
       convertedSection['mean'] = _convertSingleSeries(convertedSection['mean']);
     }
 
@@ -453,7 +463,7 @@ class NoaaApiService {
         .toList();
 
     if (memberKeys.isNotEmpty) {
-      print('NOAA_API: Converting ${memberKeys.length} ensemble members');
+      AppLogger.debug('NoaaApi', 'Converting ${memberKeys.length} ensemble members');
     }
 
     for (final memberKey in memberKeys) {
@@ -479,8 +489,9 @@ class NoaaApiService {
       final originalSeries = ForecastSeries.fromJson(seriesData);
       final targetUnit = _unitService.currentFlowUnit;
 
-      print(
-        'NOAA_API: Series conversion - ${originalSeries.units} → $targetUnit (${originalSeries.data.length} points)',
+      AppLogger.debug(
+        'NoaaApi',
+        'Series conversion - ${originalSeries.units} -> $targetUnit (${originalSeries.data.length} points)',
       );
 
       // FIXED: The ForecastSeries.withPreferredUnits now prevents double conversion
@@ -494,7 +505,7 @@ class NoaaApiService {
       // Convert back to JSON format
       return convertedSeries.toJson();
     } catch (e) {
-      print('NOAA_API: ⚠️ Failed to convert series: $e');
+      AppLogger.warning('NoaaApi', 'Failed to convert series: $e');
       return Map<String, dynamic>.from(seriesData);
     }
   }
