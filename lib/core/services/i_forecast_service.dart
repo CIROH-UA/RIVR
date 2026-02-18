@@ -2,7 +2,7 @@
 
 import '../models/reach_data.dart';
 import '../models/hourly_flow_data.dart';
-import 'forecast_service.dart';
+import '../models/forecast_chart_data.dart';
 
 /// Interface for forecast data loading and processing
 abstract class IForecastService {

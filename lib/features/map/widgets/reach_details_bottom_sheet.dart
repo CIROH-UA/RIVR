@@ -1,18 +1,14 @@
 // lib/features/map/widgets/reach_details_bottom_sheet.dart
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/services.dart';
-import 'package:provider/provider.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../../core/services/error_service.dart';
 import '../../../core/services/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/core/services/i_forecast_service.dart';
 import '../../../core/services/i_flow_unit_preference_service.dart';
-import '../../../core/providers/favorites_provider.dart';
 import '../../../core/constants.dart';
 import '../models/selected_reach.dart';
+import 'components/reach_action_buttons.dart';
 
 /// OPTIMIZED Bottom sheet with efficient return periods loading
 /// Strategy: Progressive loading with immediate flow data enhancement
@@ -50,9 +46,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   String? _flowCategory;
   double? _latitude;
   double? _longitude;
-
-  // Favorites toggle state
-  bool _isTogglingFavorite = false;
 
   @override
   void initState() {
@@ -480,73 +473,14 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   }
 
   Widget _buildActions() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          // View Forecast button (primary action)
-          Expanded(
-            flex: 2,
-            child: CupertinoButton.filled(
-              onPressed: () {
-                Navigator.pushNamed(
-                  context,
-                  '/forecast',
-                  arguments: widget.selectedReach.reachId,
-                );
-              },
-              child: const Text('View Forecast'),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // Heart button with cached data optimization
-          Expanded(
-            child: Consumer<FavoritesProvider>(
-              builder: (context, favoritesProvider, child) {
-                final isFavorited = favoritesProvider.isFavorite(
-                  widget.selectedReach.reachId,
-                );
-
-                return CupertinoButton(
-                  color: isFavorited
-                      ? CupertinoColors.systemRed.withValues(alpha: 0.1)
-                      : CupertinoColors.tertiarySystemGroupedBackground
-                            .resolveFrom(context),
-                  onPressed: _isTogglingFavorite
-                      ? null
-                      : () => _toggleFavoriteOptimized(favoritesProvider),
-                  child: _isTogglingFavorite
-                      ? const CupertinoActivityIndicator(radius: 8)
-                      : Icon(
-                          isFavorited
-                              ? CupertinoIcons.heart_fill
-                              : CupertinoIcons.heart,
-                          color: isFavorited
-                              ? CupertinoColors.systemRed
-                              : CupertinoColors.systemGrey.resolveFrom(context),
-                        ),
-                );
-              },
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // More options
-          CupertinoButton(
-            color: CupertinoColors.tertiarySystemGroupedBackground.resolveFrom(
-              context,
-            ),
-            onPressed: _showMoreOptions,
-            child: Icon(
-              CupertinoIcons.ellipsis,
-              color: CupertinoColors.systemGrey.resolveFrom(context),
-            ),
-          ),
-        ],
-      ),
+    return ReachActionButtons(
+      selectedReach: widget.selectedReach,
+      riverName: _riverName,
+      formattedLocation: _formattedLocation,
+      formattedFlow: _currentFlow != null ? _formatFlow(_currentFlow!) : null,
+      flowCategory: _flowCategory,
+      latitude: _latitude,
+      longitude: _longitude,
     );
   }
 
@@ -678,57 +612,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     }
   }
 
-  // Fast favorite toggle using cached coordinates
-  Future<void> _toggleFavoriteOptimized(
-    FavoritesProvider favoritesProvider,
-  ) async {
-    final reachId = widget.selectedReach.reachId;
-    final isFavorited = favoritesProvider.isFavorite(reachId);
-
-    if (!mounted) return;
-    setState(() {
-      _isTogglingFavorite = true;
-    });
-
-    try {
-      bool success;
-      if (isFavorited) {
-        success = await favoritesProvider.removeFavorite(reachId);
-        if (success) {
-          _showFeedback('Removed from favorites');
-        }
-      } else {
-        // Use coordinates we already loaded
-        if (_latitude != null && _longitude != null) {
-          success = await favoritesProvider.addFavoriteWithKnownCoordinates(
-            reachId,
-            latitude: _latitude!,
-            longitude: _longitude!,
-            riverName: _riverName,
-          );
-        } else {
-          success = await favoritesProvider.addFavorite(reachId);
-        }
-
-        if (success) {
-          _showFeedback('Added to favorites');
-        }
-      }
-
-      if (!success) {
-        _showFeedback('Failed to update favorites', isError: true);
-      }
-    } catch (e) {
-      AppLogger.error('ReachDetailsSheet', 'Error toggling favorite', e);
-      _showFeedback('Failed to update favorites', isError: true);
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _isTogglingFavorite = false;
-    });
-  }
-
   Color _getFlowCategoryColor() {
     // Use the existing AppConstants method for consistent colors
     return AppConstants.getFlowCategoryColor(_flowCategory);
@@ -762,149 +645,4 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     );
   }
 
-  void _showFeedback(String message, {bool isError = false}) {
-    if (!mounted) return;
-
-    showCupertinoDialog(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showMoreOptions() {
-    showCupertinoModalPopup(
-      context: context,
-      builder: (context) => CupertinoActionSheet(
-        title: Text('${widget.selectedReach.displayName} Options'),
-        actions: [
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.pop(context);
-              _copyReachInfo();
-            },
-            child: const Text('Copy Reach Info'),
-          ),
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.pop(context);
-              _shareLocation();
-            },
-            child: const Text('Share Location'),
-          ),
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.pop(context);
-              _openInMaps();
-            },
-            child: const Text('Open in Maps'),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          isDefaultAction: true,
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _copyReachInfo() async {
-    try {
-      final text = _buildReachInfoText();
-      await Clipboard.setData(ClipboardData(text: text));
-      _showFeedback('Reach information copied to clipboard');
-    } catch (e) {
-      AppLogger.error('ReachDetailsSheet', 'Error copying reach info', e);
-    }
-  }
-
-  Future<void> _shareLocation() async {
-    try {
-      final text = _buildLocationShareText();
-      await SharePlus.instance.share(ShareParams(text: text, subject: widget.selectedReach.displayName));
-    } catch (e) {
-      AppLogger.error('ReachDetailsSheet', 'Error sharing location', e);
-    }
-  }
-
-  Future<void> _openInMaps() async {
-    try {
-      final coords = widget.selectedReach.coordinatesString.split(', ');
-      if (coords.length == 2) {
-        final lat = coords[0];
-        final lng = coords[1];
-        final url = 'https://maps.google.com/?q=$lat,$lng';
-        if (await canLaunchUrl(Uri.parse(url))) {
-          await launchUrl(Uri.parse(url));
-        }
-      }
-    } catch (e) {
-      AppLogger.error('ReachDetailsSheet', 'Error opening maps', e);
-    }
-  }
-
-  String _buildReachInfoText() {
-    final buffer = StringBuffer();
-
-    buffer.writeln(_riverName ?? widget.selectedReach.displayName);
-    buffer.writeln('Reach ID: ${widget.selectedReach.reachId}');
-    buffer.writeln('🌊 Stream Order: ${widget.selectedReach.streamOrder}');
-    buffer.writeln('📍 Coordinates: ${widget.selectedReach.coordinatesString}');
-
-    if (_formattedLocation?.isNotEmpty == true) {
-      buffer.writeln('📍 Location: $_formattedLocation');
-    } else if (widget.selectedReach.hasLocation) {
-      buffer.writeln('📍 Location: ${widget.selectedReach.formattedLocation}');
-    }
-
-    if (_currentFlow != null) {
-      buffer.writeln('\n💧 Current Flow: ${_formatFlow(_currentFlow!)}');
-      if (_flowCategory != null) {
-        buffer.writeln('Risk Level: $_flowCategory');
-      }
-    }
-
-    buffer.writeln('\n📱 Shared from RIVR');
-    return buffer.toString();
-  }
-
-  String _buildLocationShareText() {
-    final buffer = StringBuffer();
-
-    buffer.writeln('📍 ${_riverName ?? widget.selectedReach.displayName}');
-    buffer.writeln(
-      '\n📍 Coordinates: ${widget.selectedReach.coordinatesString}',
-    );
-
-    if (_formattedLocation?.isNotEmpty == true) {
-      buffer.writeln('📍 $_formattedLocation');
-    } else if (widget.selectedReach.hasLocation) {
-      buffer.writeln('📍 ${widget.selectedReach.formattedLocation}');
-    }
-
-    if (_currentFlow != null && _flowCategory != null) {
-      buffer.writeln(
-        '\n💧 Current Flow: ${_formatFlow(_currentFlow!)} ($_flowCategory)',
-      );
-    }
-
-    final coords = widget.selectedReach.coordinatesString.split(', ');
-    if (coords.length == 2) {
-      final lat = coords[0];
-      final lng = coords[1];
-      buffer.writeln('\n🗺️ View on Google Maps:');
-      buffer.writeln('https://maps.google.com/?q=$lat,$lng');
-    }
-
-    buffer.writeln('\n📱 Shared from RIVR');
-    return buffer.toString();
-  }
 }

@@ -1,6 +1,7 @@
 // lib/core/services/forecast_service.dart
 
 import 'package:rivr/core/models/hourly_flow_data.dart';
+import 'package:rivr/core/models/forecast_chart_data.dart';
 import 'geocoding_service.dart';
 import '../models/reach_data.dart';
 import 'app_logger.dart';
@@ -927,44 +928,4 @@ class ForecastService implements IForecastService {
     _flowCategoryCache.clear();
     AppLogger.debug('ForecastService', 'Cleared computed value caches');
   }
-}
-
-// Simple data classes for ensemble display
-class EnsembleStatPoint {
-  final DateTime time;
-  final double minFlow;
-  final double maxFlow;
-  final double meanFlow;
-  final int memberCount;
-
-  const EnsembleStatPoint({
-    required this.time,
-    required this.minFlow,
-    required this.maxFlow,
-    required this.meanFlow,
-    required this.memberCount,
-  });
-}
-
-// Internal ChartDataPoint class for forecast_service.dart (time-based)
-class ChartDataPoint {
-  final DateTime time;
-  final double flow;
-  final double? confidence;
-  final Map<String, dynamic>? metadata;
-
-  const ChartDataPoint({
-    required this.time,
-    required this.flow,
-    this.confidence,
-    this.metadata,
-  });
-}
-
-// Simple ChartData class for chart output (x,y coordinates)
-class ChartData {
-  final double x;
-  final double y;
-
-  ChartData(this.x, this.y);
 }

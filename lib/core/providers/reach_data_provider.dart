@@ -2,18 +2,25 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
-import 'package:rivr/core/models/hourly_flow_data.dart';
 import '../models/reach_data.dart';
 import '../services/app_logger.dart';
 import '../services/i_forecast_service.dart';
+import 'reach_data_cache_mixin.dart';
 
 /// State management for reach and forecast data
 /// Now with phased loading and progressive forecast category loading
-class ReachDataProvider with ChangeNotifier {
+class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
   final IForecastService _forecastService;
 
   ReachDataProvider({IForecastService? forecastService})
       : _forecastService = forecastService ?? GetIt.I<IForecastService>();
+
+  // Mixin abstract getters
+  @override
+  IForecastService get forecastService => _forecastService;
+
+  @override
+  ForecastResponse? get currentForecast => _currentForecast;
 
   // Current state
   bool _isLoading = false;
@@ -31,22 +38,12 @@ class ReachDataProvider with ChangeNotifier {
   bool _isLoadingDaily = false;
   bool _isLoadingExtended = false;
 
-  // Simple in-memory cache for current session
-  final Map<String, ForecastResponse> _sessionCache = {};
-
-  // Computed value caches (avoid repeated calculations)
-  final Map<String, double?> _currentFlowCache = {};
-  final Map<String, String> _flowCategoryCache = {};
-  final Map<String, String> _formattedLocationCache = {};
-  final Map<String, List<String>> _availableForecastTypesCache = {};
-
   // Getters
   bool get isLoading => _isLoading;
   bool get isLoadingOverview => _isLoadingOverview;
   bool get isLoadingSupplementary => _isLoadingSupplementary;
   String get loadingPhase => _loadingPhase;
   String? get errorMessage => _errorMessage;
-  ForecastResponse? get currentForecast => _currentForecast;
   bool get hasData => _currentForecast != null;
 
   // Forecast category loading state getters
@@ -76,7 +73,7 @@ class ReachDataProvider with ChangeNotifier {
   // Immediately clear current reach display (fixes wrong river issue)
   void clearCurrentReach() {
     _currentForecast = null;
-    _clearAllComputedCaches();
+    clearAllComputedCaches();
     _errorMessage = null;
     _loadingPhase = 'none';
     _resetAllLoadingStates();
@@ -114,10 +111,10 @@ class ReachDataProvider with ChangeNotifier {
 
     try {
       // Check session cache first
-      if (_sessionCache.containsKey(reachId)) {
+      if (sessionCache.containsKey(reachId)) {
         AppLogger.debug('ReachProvider', 'Using cached data for overview: $reachId');
-        _currentForecast = _sessionCache[reachId];
-        _updateComputedCaches(reachId);
+        _currentForecast = sessionCache[reachId];
+        updateComputedCaches(reachId);
         _setLoadingOverview(false);
         _setLoadingPhase('complete'); // If cached, we have complete data
         return true;
@@ -127,7 +124,7 @@ class ReachDataProvider with ChangeNotifier {
       final forecast = await _forecastService.loadOverviewData(reachId);
 
       _currentForecast = forecast;
-      _updateComputedCaches(reachId);
+      updateComputedCaches(reachId);
 
       _setLoadingOverview(false);
       _setLoadingPhase('overview');
@@ -163,8 +160,8 @@ class ReachDataProvider with ChangeNotifier {
 
       // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, hourlyForecast);
-      _sessionCache[reachId] = _currentForecast!;
-      _updateComputedCaches(reachId);
+      sessionCache[reachId] = _currentForecast!;
+      updateComputedCaches(reachId);
 
       _setLoadingHourly(false);
       return true;
@@ -197,8 +194,8 @@ class ReachDataProvider with ChangeNotifier {
 
       // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, dailyForecast);
-      _sessionCache[reachId] = _currentForecast!;
-      _updateComputedCaches(reachId);
+      sessionCache[reachId] = _currentForecast!;
+      updateComputedCaches(reachId);
 
       _setLoadingDaily(false);
       return true;
@@ -234,8 +231,8 @@ class ReachDataProvider with ChangeNotifier {
         _currentForecast!,
         extendedForecast,
       );
-      _sessionCache[reachId] = _currentForecast!;
-      _updateComputedCaches(reachId);
+      sessionCache[reachId] = _currentForecast!;
+      updateComputedCaches(reachId);
 
       _setLoadingExtended(false);
       return true;
@@ -275,8 +272,8 @@ class ReachDataProvider with ChangeNotifier {
   // Comprehensive refresh - loads all forecast categories systematically
   Future<bool> comprehensiveRefresh(String reachId) async {
     // Clear caches first
-    _sessionCache.remove(reachId);
-    _clearComputedCaches(reachId);
+    sessionCache.remove(reachId);
+    clearComputedCachesForReach(reachId);
     _forecastService.clearComputedCaches();
 
     try {
@@ -323,10 +320,10 @@ class ReachDataProvider with ChangeNotifier {
       );
 
       _currentForecast = enhancedForecast;
-      _sessionCache[reachId] = enhancedForecast; // Update cache
+      sessionCache[reachId] = enhancedForecast; // Update cache
 
       // Update computed caches
-      _updateComputedCaches(reachId);
+      updateComputedCaches(reachId);
 
       _setLoadingSupplementary(false);
       _setLoadingPhase('complete');
@@ -349,9 +346,9 @@ class ReachDataProvider with ChangeNotifier {
 
     try {
       // Check session cache first
-      if (_sessionCache.containsKey(reachId)) {
-        _currentForecast = _sessionCache[reachId];
-        _updateComputedCaches(reachId);
+      if (sessionCache.containsKey(reachId)) {
+        _currentForecast = sessionCache[reachId];
+        updateComputedCaches(reachId);
         _setLoading(false);
         _setLoadingPhase('complete');
         return true;
@@ -361,8 +358,8 @@ class ReachDataProvider with ChangeNotifier {
       final forecast = await _forecastService.loadCompleteReachData(reachId);
 
       _currentForecast = forecast;
-      _sessionCache[reachId] = forecast; // Cache for session
-      _updateComputedCaches(reachId);
+      sessionCache[reachId] = forecast; // Cache for session
+      updateComputedCaches(reachId);
 
       _setLoading(false);
       _setLoadingPhase('complete');
@@ -388,8 +385,8 @@ class ReachDataProvider with ChangeNotifier {
       );
 
       _currentForecast = forecast;
-      _sessionCache[reachId] = forecast;
-      _updateComputedCaches(reachId);
+      sessionCache[reachId] = forecast;
+      updateComputedCaches(reachId);
 
       _setLoading(false);
       _setLoadingPhase('specific');
@@ -412,99 +409,11 @@ class ReachDataProvider with ChangeNotifier {
     return await comprehensiveRefresh(reachId);
   }
 
-  // Use cached values instead of computing each time
-  /// Get current flow value for display - now with caching
-  double? getCurrentFlow({String? preferredType}) {
-    if (_currentForecast == null) return null;
-
-    final reachId = _currentForecast!.reach.reachId;
-    final cacheKey = '$reachId-${preferredType ?? 'default'}';
-
-    // Return cached value if available
-    if (_currentFlowCache.containsKey(cacheKey)) {
-      final cachedValue = _currentFlowCache[cacheKey];
-      return cachedValue;
-    }
-
-    // Compute and cache
-    final flow = _forecastService.getCurrentFlow(
-      _currentForecast!,
-      preferredType: preferredType,
-    );
-
-    _currentFlowCache[cacheKey] = flow;
-    return flow;
-  }
-
-  // Use cached values instead of computing each time
-  /// Get flow category - now with caching
-  String getFlowCategory({String? preferredType}) {
-    if (_currentForecast == null) return 'Unknown';
-
-    final reachId = _currentForecast!.reach.reachId;
-    final cacheKey = '$reachId-${preferredType ?? 'default'}';
-
-    // Return cached value if available
-    if (_flowCategoryCache.containsKey(cacheKey)) {
-      return _flowCategoryCache[cacheKey]!;
-    }
-
-    // Compute and cache
-    final category = _forecastService.getFlowCategory(
-      _currentForecast!,
-      preferredType: preferredType,
-    );
-    _flowCategoryCache[cacheKey] = category;
-    return category;
-  }
-
-  // Cached formatted location (fixes subtitle issue)
-  /// Get formatted location for display - cached to avoid repeated computation
-  String getFormattedLocation() {
-    if (_currentForecast == null) return '';
-
-    final reachId = _currentForecast!.reach.reachId;
-
-    // Return cached value if available
-    if (_formattedLocationCache.containsKey(reachId)) {
-      return _formattedLocationCache[reachId]!;
-    }
-
-    // Compute and cache - use the improved subtitle formatter
-    final location = _currentForecast!.reach.formattedLocationSubtitle;
-    _formattedLocationCache[reachId] = location;
-    return location;
-  }
-
-  // Use cached values
-  /// Get available forecast types - now with caching
-  List<String> getAvailableForecastTypes() {
-    if (_currentForecast == null) return [];
-
-    final reachId = _currentForecast!.reach.reachId;
-
-    // Return cached value if available
-    if (_availableForecastTypesCache.containsKey(reachId)) {
-      return _availableForecastTypesCache[reachId]!;
-    }
-
-    // Compute and cache
-    final types = _forecastService.getAvailableForecastTypes(_currentForecast!);
-    _availableForecastTypesCache[reachId] = types;
-    return types;
-  }
-
-  /// Check if current reach has ensemble data
-  bool hasEnsembleData() {
-    if (_currentForecast == null) return false;
-    return _forecastService.hasEnsembleData(_currentForecast!);
-  }
-
   /// Clear current data
   void clear() {
     _currentForecast = null;
-    _sessionCache.clear();
-    _clearAllComputedCaches();
+    sessionCache.clear();
+    clearAllComputedCaches();
     _errorMessage = null;
     _loadingPhase = 'none';
     _resetAllLoadingStates();
@@ -514,77 +423,6 @@ class ReachDataProvider with ChangeNotifier {
   /// Clear error message
   void clearError() {
     _clearError();
-  }
-
-  /// Get cache statistics for debugging
-  Future<Map<String, dynamic>> getCacheStats() async {
-    final diskStats = await _forecastService.getCacheStats();
-    return {
-      'sessionCached': _sessionCache.length,
-      'sessionReaches': _sessionCache.keys.toList(),
-      'diskCache': diskStats,
-      'computedCaches': {
-        'currentFlow': _currentFlowCache.length,
-        'flowCategory': _flowCategoryCache.length,
-        'formattedLocation': _formattedLocationCache.length,
-        'availableForecastTypes': _availableForecastTypesCache.length,
-      },
-    };
-  }
-
-  /// Get hourly data for short-range forecast with calculated trends
-  List<HourlyFlowDataPoint> getShortRangeHourlyData() {
-    if (_currentForecast == null) return [];
-    return _forecastService.getShortRangeHourlyData(_currentForecast!);
-  }
-
-  /// Get ALL hourly data for charts (including past hours)
-  List<HourlyFlowDataPoint> getAllShortRangeHourlyData() {
-    if (_currentForecast == null) return [];
-    return _forecastService.getAllShortRangeHourlyData(_currentForecast!);
-  }
-
-  // Update all computed caches when data changes
-  void _updateComputedCaches(String reachId) {
-    if (_currentForecast == null) return;
-
-    // Pre-compute commonly used values
-    getCurrentFlow(); // This will cache the result
-    getFlowCategory(); // This will cache the result
-    getFormattedLocation(); // This will cache the result
-    getAvailableForecastTypes(); // This will cache the result
-  }
-
-  // Clear computed caches for specific reach
-  void _clearComputedCaches(String reachId) {
-    _currentFlowCache.removeWhere((key, value) => key.startsWith(reachId));
-    _flowCategoryCache.removeWhere((key, value) => key.startsWith(reachId));
-    _formattedLocationCache.remove(reachId);
-    _availableForecastTypesCache.remove(reachId);
-  }
-
-  /// Clear unit-dependent cached values (call when unit preference changes)
-  void clearUnitDependentCaches() {
-    // Clear flow and category caches (these depend on units)
-    _currentFlowCache.clear();
-    _flowCategoryCache.clear();
-
-    // FIXED: Also clear session cache since it may contain unconverted data
-    _sessionCache.clear();
-
-    // Also clear ForecastService unit-dependent caches
-    _forecastService.clearUnitDependentCaches();
-
-    // Trigger UI update to refresh displayed values
-    notifyListeners();
-  }
-
-  // Clear all computed caches
-  void _clearAllComputedCaches() {
-    _currentFlowCache.clear();
-    _flowCategoryCache.clear();
-    _formattedLocationCache.clear();
-    _availableForecastTypesCache.clear();
   }
 
   // Helper methods
