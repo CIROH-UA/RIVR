@@ -1,8 +1,6 @@
 // lib/core/services/noaa_api_service.dart
 
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 import '../models/reach_data.dart';
@@ -40,64 +38,21 @@ class NoaaApiService implements INoaaApiService {
     'User-Agent': 'RIVR/1.0',
   };
 
-  /// Tracks in-flight HTTP requests to deduplicate concurrent identical calls.
-  final Map<String, Future<http.Response>> _inFlightRequests = {};
-
-  /// Shared HTTP GET with 1-retry for transient errors.
-  /// Retries on: TimeoutException, SocketException, 5xx status codes.
-  Future<http.Response> _httpGetWithRetry(
+  /// Simple HTTP GET with timeout.
+  Future<http.Response> _httpGet(
     String url, {
     required Duration timeout,
-    Map<String, String>? headers,
+    Map<String, String>? extraHeaders,
   }) async {
-    final mergedHeaders = {..._defaultHeaders, ...?headers};
-
-    try {
-      final response = await _client
-          .get(Uri.parse(url), headers: mergedHeaders)
-          .timeout(timeout);
-
-      if (response.statusCode >= 500) {
-        AppLogger.debug('NoaaApi', 'Server error ${response.statusCode}, retrying in 1s...');
-        await Future.delayed(const Duration(seconds: 1));
-        return await _client
-            .get(Uri.parse(url), headers: mergedHeaders)
-            .timeout(timeout);
-      }
-
-      return response;
-    } on TimeoutException {
-      AppLogger.debug('NoaaApi', 'Timeout, retrying in 1s...');
-      await Future.delayed(const Duration(seconds: 1));
-      return await _client
-          .get(Uri.parse(url), headers: mergedHeaders)
-          .timeout(timeout);
-    } on SocketException {
-      AppLogger.debug('NoaaApi', 'Socket error, retrying in 1s...');
-      await Future.delayed(const Duration(seconds: 1));
-      return await _client
-          .get(Uri.parse(url), headers: mergedHeaders)
-          .timeout(timeout);
-    }
-  }
-
-  /// Deduplicated HTTP GET. If an identical URL is already in-flight,
-  /// returns the same Future instead of making a new request.
-  Future<http.Response> _deduplicatedGet(
-    String url, {
-    required Duration timeout,
-    Map<String, String>? headers,
-  }) {
-    if (_inFlightRequests.containsKey(url)) {
-      AppLogger.debug('NoaaApi', 'Dedup: sharing in-flight request for $url');
-      return _inFlightRequests[url]!;
-    }
-
-    final future = _httpGetWithRetry(url, timeout: timeout, headers: headers)
-        .whenComplete(() => _inFlightRequests.remove(url));
-
-    _inFlightRequests[url] = future;
-    return future;
+    return await _client
+        .get(
+          Uri.parse(url),
+          headers: {
+            ..._defaultHeaders,
+            ...?extraHeaders,
+          },
+        )
+        .timeout(timeout);
   }
 
   // Reach Info Fetching (OPTIMIZED for overview)
@@ -120,10 +75,10 @@ class NoaaApiService implements INoaaApiService {
 
       final timeout = isOverview ? _quickTimeout : _normalTimeout;
 
-      final response = await _deduplicatedGet(
+      final response = await _httpGet(
         url,
         timeout: timeout,
-        headers: {if (isOverview) 'X-Request-Priority': 'high'},
+        extraHeaders: {if (isOverview) 'X-Request-Priority': 'high'},
       );
 
       AppLogger.debug('NoaaApi', 'Response status: ${response.statusCode}');
@@ -172,12 +127,12 @@ class NoaaApiService implements INoaaApiService {
       final url = AppConfig.getReturnPeriodUrl(reachId);
       AppLogger.debug('NoaaApi', 'Return period URL: $url');
 
-      final response = await _deduplicatedGet(
+      final response = await _httpGet(
         url,
         timeout: _normalTimeout,
       );
 
-      final duration = DateTime.now().difference(start); // ADD THIS
+      final duration = DateTime.now().difference(start);
       AppLogger.debug('NoaaApi', 'API_TIME_RETURN_PERIOD: ${duration.inMilliseconds}ms');
 
       AppLogger.debug('NoaaApi', 'Return period response status: ${response.statusCode}');
@@ -264,10 +219,10 @@ class NoaaApiService implements INoaaApiService {
       // Use appropriate timeout based on priority
       final timeout = isOverview ? _quickTimeout : _normalTimeout;
 
-      final response = await _deduplicatedGet(
+      final response = await _httpGet(
         url,
         timeout: timeout,
-        headers: {if (isOverview) 'X-Request-Priority': 'high'},
+        extraHeaders: {if (isOverview) 'X-Request-Priority': 'high'},
       );
 
       final duration = DateTime.now().difference(start);
@@ -353,7 +308,7 @@ class NoaaApiService implements INoaaApiService {
     final futures = forecastTypes.map((forecastType) async {
       try {
         AppLogger.debug('NoaaApi', 'Attempting to fetch $forecastType...');
-        final response = await _deduplicatedGet(
+        final response = await _httpGet(
           AppConfig.getForecastUrl(reachId, forecastType),
           timeout: _longTimeout,
         );

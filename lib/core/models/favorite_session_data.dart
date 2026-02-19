@@ -61,6 +61,42 @@ class FavoriteSessionData {
     );
   }
 
+  /// Serialize to JSON for SharedPreferences persistence.
+  Map<String, dynamic> toJson() => {
+        if (riverName != null) 'riverName': riverName,
+        if (lastKnownFlow != null) 'lastKnownFlow': lastKnownFlow,
+        if (flowUnit != null) 'flowUnit': flowUnit,
+        if (lastUpdated != null)
+          'lastUpdated': lastUpdated!.toIso8601String(),
+        if (coordinates != null) 'lat': coordinates!.lat,
+        if (coordinates != null) 'lon': coordinates!.lon,
+        if (customName != null) 'customName': customName,
+        if (customImageAsset != null) 'customImageAsset': customImageAsset,
+      };
+
+  /// Deserialize from JSON stored in SharedPreferences.
+  factory FavoriteSessionData.fromJson(Map<String, dynamic> json) {
+    ({double lat, double lon})? coords;
+    if (json['lat'] != null && json['lon'] != null) {
+      coords = (
+        lat: (json['lat'] as num).toDouble(),
+        lon: (json['lon'] as num).toDouble(),
+      );
+    }
+
+    return FavoriteSessionData(
+      riverName: json['riverName'] as String?,
+      lastKnownFlow: (json['lastKnownFlow'] as num?)?.toDouble(),
+      flowUnit: json['flowUnit'] as String?,
+      lastUpdated: json['lastUpdated'] != null
+          ? DateTime.tryParse(json['lastUpdated'] as String)
+          : null,
+      coordinates: coords,
+      customName: json['customName'] as String?,
+      customImageAsset: json['customImageAsset'] as String?,
+    );
+  }
+
   static const empty = FavoriteSessionData();
 }
 

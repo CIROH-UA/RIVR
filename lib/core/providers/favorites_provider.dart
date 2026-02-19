@@ -103,19 +103,26 @@ class FavoritesProvider with ChangeNotifier {
     };
   }
 
-  /// Initialize favorites and start background refresh
+  /// Initialize favorites and start background refresh.
+  /// Shows last-known data instantly, then refreshes in background.
   Future<void> initializeAndRefresh() async {
     _setLoading(true);
     _clearError();
 
     try {
-      // Load favorites from cloud storage first
+      // 1. Load reach IDs from Firestore
       await _loadFavoritesFromStorage();
 
-      // LOAD CUSTOM PROPERTIES FROM LOCAL STORAGE
-      await _loadCustomPropertiesFromLocal();
+      // 2. Restore full session data from SharedPreferences (instant display)
+      await _loadSessionDataFromLocal();
 
-      // Start background refresh after short delay (let UI show cached data)
+      // 3. Fill gaps from reach cache (edge case: prefs cleared, cache intact)
+      await _enrichFromReachCache();
+
+      // 4. Notify UI so cards show last-known flow immediately
+      notifyListeners();
+
+      // 5. Background refresh with batched parallelism
       Future.delayed(const Duration(milliseconds: 500), () {
         _refreshAllFavoritesInBackground();
       });
@@ -239,7 +246,7 @@ class FavoritesProvider with ChangeNotifier {
       _refreshingReachIds.remove(reachId);
 
       // PERSIST CHANGES TO LOCAL STORAGE
-      await _persistCustomPropertiesToLocal();
+      await _persistSessionDataToLocal();
 
       // Reload from storage
       await _loadFavoritesFromStorage();
@@ -296,7 +303,7 @@ class FavoritesProvider with ChangeNotifier {
       );
 
       // PERSISTS TO LOCAL STORAGE
-      await _persistCustomPropertiesToLocal();
+      await _persistSessionDataToLocal();
 
       notifyListeners();
       return true;
@@ -306,42 +313,49 @@ class FavoritesProvider with ChangeNotifier {
     }
   }
 
-  /// Persist custom properties to SharedPreferences for persistence across app restarts
-  Future<void> _persistCustomPropertiesToLocal() async {
+  /// Persist full session data to SharedPreferences for instant display on cold start.
+  Future<void> _persistSessionDataToLocal() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Extract custom names and images from session data
-      final customNames = <String, String>{};
-      final customImages = <String, String>{};
+      final dataMap = <String, dynamic>{};
       for (final entry in _sessionData.entries) {
-        if (entry.value.customName != null) {
-          customNames[entry.key] = entry.value.customName!;
-        }
-        if (entry.value.customImageAsset != null) {
-          customImages[entry.key] = entry.value.customImageAsset!;
+        final jsonVal = entry.value.toJson();
+        if (jsonVal.isNotEmpty) {
+          dataMap[entry.key] = jsonVal;
         }
       }
 
       await prefs.setString(
-        'favorites_custom_names',
-        json.encode(customNames),
-      );
-      await prefs.setString(
-        'favorites_custom_images',
-        json.encode(customImages),
+        'favorites_session_data',
+        json.encode(dataMap),
       );
     } catch (e) {
-      AppLogger.error('FavoritesProvider', 'Error persisting custom properties: $e', e);
+      AppLogger.error('FavoritesProvider', 'Error persisting session data: $e', e);
     }
   }
 
-  /// Load custom properties from SharedPreferences on app start
-  Future<void> _loadCustomPropertiesFromLocal() async {
+  /// Load full session data from SharedPreferences for instant cold-start display.
+  /// Falls back to legacy separate-key format and migrates if needed.
+  Future<void> _loadSessionDataFromLocal() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Load custom names
+      // Try new unified format first
+      final sessionJson = prefs.getString('favorites_session_data');
+      if (sessionJson != null) {
+        final dataMap = json.decode(sessionJson) as Map<String, dynamic>;
+        for (final entry in dataMap.entries) {
+          _sessionData[entry.key] = FavoriteSessionData.fromJson(
+            entry.value as Map<String, dynamic>,
+          );
+        }
+        return;
+      }
+
+      // Fall back to legacy separate-key format and migrate
+      bool migrated = false;
+
       final namesJson = prefs.getString('favorites_custom_names');
       if (namesJson != null) {
         final namesMap = json.decode(namesJson) as Map<String, dynamic>;
@@ -350,9 +364,9 @@ class FavoritesProvider with ChangeNotifier {
             customName: entry.value as String,
           );
         }
+        migrated = true;
       }
 
-      // Load custom images
       final imagesJson = prefs.getString('favorites_custom_images');
       if (imagesJson != null) {
         final imagesMap = json.decode(imagesJson) as Map<String, dynamic>;
@@ -361,9 +375,42 @@ class FavoritesProvider with ChangeNotifier {
             customImageAsset: entry.value as String,
           );
         }
+        migrated = true;
+      }
+
+      // Migrate to new format and clean up legacy keys
+      if (migrated) {
+        await _persistSessionDataToLocal();
+        await prefs.remove('favorites_custom_names');
+        await prefs.remove('favorites_custom_images');
+        AppLogger.debug('FavoritesProvider', 'Migrated legacy custom properties to session data');
       }
     } catch (e) {
-      AppLogger.error('FavoritesProvider', 'Error loading custom properties: $e', e);
+      AppLogger.error('FavoritesProvider', 'Error loading session data: $e', e);
+    }
+  }
+
+  /// Fill gaps in session data from reach cache (covers edge case where
+  /// SharedPreferences was cleared but reach cache still has data).
+  Future<void> _enrichFromReachCache() async {
+    for (final favorite in _favorites) {
+      final reachId = favorite.reachId;
+      final session = _sessionData[reachId];
+
+      // Only enrich if missing key display fields
+      final needsName = session?.riverName == null;
+      final needsCoords = session?.coordinates == null;
+      if (!needsName && !needsCoords) continue;
+
+      final cached = await _reachCacheService.get(reachId);
+      if (cached == null) continue;
+
+      _sessionData[reachId] = (session ?? FavoriteSessionData.empty).copyWith(
+        riverName: needsName ? cached.riverName : null,
+        coordinates: needsCoords
+            ? (lat: cached.latitude, lon: cached.longitude)
+            : null,
+      );
     }
   }
 
@@ -382,8 +429,8 @@ class FavoritesProvider with ChangeNotifier {
     await Future.wait(refreshTasks);
   }
 
-  /// Background refresh of all favorites (app launch)
-  /// Uses batched parallel requests (groups of 3) for faster loading
+  /// Background refresh of all favorites (app launch).
+  /// Batched parallel (2 at a time) for faster loading without connection exhaustion.
   Future<void> _refreshAllFavoritesInBackground() async {
     AppLogger.debug(
       'FavoritesProvider',
@@ -391,8 +438,7 @@ class FavoritesProvider with ChangeNotifier {
     );
 
     final reachIds = _favorites.map((f) => f.reachId).toList();
-    const batchSize = 3;
-
+    const batchSize = 2;
     for (var i = 0; i < reachIds.length; i += batchSize) {
       final batch = reachIds.skip(i).take(batchSize);
       await Future.wait(batch.map((id) => _refreshSingleFavorite(id)));
@@ -484,6 +530,9 @@ class FavoritesProvider with ChangeNotifier {
         'FavoritesProvider',
         '$riverName ($reachId) - Current Flow: ${session.lastKnownFlow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
       );
+
+      // Persist updated session data after each successful refresh
+      _persistSessionDataToLocal();
 
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         AppLogger.debug(
