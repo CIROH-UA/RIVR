@@ -1,7 +1,9 @@
 // lib/features/auth/presentation/pages/login_page.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import '../widgets/live_validation_field.dart';
 import '../widgets/managed_async_button.dart';
@@ -254,6 +256,44 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Terms of Service & Privacy Policy
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text.rich(
+                      TextSpan(
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: CupertinoColors.systemGrey,
+                        ),
+                        children: [
+                          const TextSpan(text: 'By continuing, you agree to our '),
+                          TextSpan(
+                            text: 'Terms of Service',
+                            style: TextStyle(color: primaryColor),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () => launchUrl(
+                                    Uri.parse('https://www.hydromap.com'),
+                                    mode: LaunchMode.externalApplication,
+                                  ),
+                          ),
+                          const TextSpan(text: ' and '),
+                          TextSpan(
+                            text: 'Privacy Policy',
+                            style: TextStyle(color: primaryColor),
+                            recognizer: TapGestureRecognizer()
+                              ..onTap = () => launchUrl(
+                                    Uri.parse('https://www.hydromap.com'),
+                                    mode: LaunchMode.externalApplication,
+                                  ),
+                          ),
+                          const TextSpan(text: '. v1.0.1'),
+                        ],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                   const SizedBox(height: 30),
                 ],
