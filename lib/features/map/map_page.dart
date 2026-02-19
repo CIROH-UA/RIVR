@@ -44,6 +44,9 @@ class MapPageState extends State<MapPage> {
   MapboxMap? _mapboxMap;
   ThemeProvider? _themeProvider;
 
+  // Restored camera position (loaded before first build)
+  ({double lat, double lng, double zoom})? _savedCamera;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +57,7 @@ class MapPageState extends State<MapPage> {
     _controlsService = factory.createControlsService();
     _setupSelectionCallbacks();
     _initializeCacheService();
+    _loadSavedCamera();
   }
 
   @override
@@ -77,11 +81,21 @@ class MapPageState extends State<MapPage> {
     }
   }
 
+  /// Load last camera position from storage before first build
+  Future<void> _loadSavedCamera() async {
+    final saved = await MapControlsService.loadLastCameraPosition();
+    if (saved != null && mounted) {
+      setState(() => _savedCamera = saved);
+    }
+  }
+
   @override
   void dispose() {
+    // Save camera position before tearing down (fire-and-forget)
+    _controlsService.saveLastCameraPosition();
     _vectorTilesService.dispose();
     _markerService.dispose();
-    _controlsService.dispose(); // NEW: Clean up controls service
+    _controlsService.dispose();
     super.dispose();
   }
 
@@ -175,23 +189,29 @@ class MapPageState extends State<MapPage> {
   }
 
   Widget _buildMap() {
+    final cam = _savedCamera;
     return MapWidget(
-      key: const ValueKey('map'),
       cameraOptions: CameraOptions(
         center: Point(
           coordinates: Position(
-            AppConfig.defaultLongitude,
-            AppConfig.defaultLatitude,
+            cam?.lng ?? AppConfig.defaultLongitude,
+            cam?.lat ?? AppConfig.defaultLatitude,
           ),
         ),
-        zoom: AppConfig.defaultZoom,
+        zoom: cam?.zoom ?? AppConfig.defaultZoom,
       ),
       styleUri: AppConstants.defaultMapboxStyleUrl,
       textureView: true,
       onMapCreated: _onMapCreated,
       onTapListener: _onMapTap,
-      onStyleLoadedListener: _onStyleLoaded, // NEW: Style loaded listener
+      onStyleLoadedListener: _onStyleLoaded,
+      onMapIdleListener: _onMapIdle,
     );
+  }
+
+  /// Save camera position when the map stops moving
+  void _onMapIdle(MapIdleEventData data) {
+    _controlsService.saveLastCameraPosition();
   }
 
   Widget _buildLoadingOverlay() {
@@ -291,12 +311,13 @@ class MapPageState extends State<MapPage> {
     }
   }
 
-  /// Called automatically when map style finishes loading
-  /// This ensures vector tiles are always reloaded after base layer changes
+  /// Called automatically when map style finishes loading.
+  /// Reloads vector tiles, markers, and re-applies 3D terrain after any style change.
   void _onStyleLoaded(StyleLoadedEventData data) {
     // Don't reload on the initial style load (already loaded in _onMapCreated)
     if (!_isLoading) {
       _reloadVectorTilesAfterStyleChange();
+      _controlsService.applyTerrainIfEnabled();
     }
   }
 

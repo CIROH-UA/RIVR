@@ -18,6 +18,9 @@ class MapControlsService {
   static const double _defaultZoom = 14.0;
   static const int _animationDurationMs = 1000;
   static const String _terrain3DKey = 'terrain_3d_enabled';
+  static const String _cameraLatKey = 'map_camera_lat';
+  static const String _cameraLngKey = 'map_camera_lng';
+  static const String _cameraZoomKey = 'map_camera_zoom';
 
   MapBaseLayer get currentLayer => _currentLayer;
   geo.Position? get lastKnownLocation => _lastKnownLocation;
@@ -83,12 +86,7 @@ class MapControlsService {
       if (activeLayer != _currentLayer) {
         await _mapboxMap!.loadStyleURI(activeLayer.styleUrl);
         _currentLayer = activeLayer;
-
-        // Re-apply 3D terrain if it was enabled (after style change)
-        if (_is3DEnabled) {
-          await _enable3DTerrain();
-        }
-
+        // 3D terrain will be re-applied via onStyleLoaded → applyTerrainIfEnabled()
         AppLogger.info('MapControlsService', 'Map auto-updated for theme: ${activeLayer.displayName}');
       }
     } catch (e) {
@@ -107,11 +105,7 @@ class MapControlsService {
       // Update the map style
       await _mapboxMap!.loadStyleURI(newLayer.styleUrl);
       _currentLayer = newLayer;
-
-      // Re-apply 3D terrain if it was enabled (after style change)
-      if (_is3DEnabled) {
-        await _enable3DTerrain();
-      }
+      // 3D terrain will be re-applied via onStyleLoaded → applyTerrainIfEnabled()
 
       // Save as manual preference (switches to manual mode)
       await MapPreferenceService.setManualMapLayer(newLayer);
@@ -126,12 +120,22 @@ class MapControlsService {
   Future<void> toggle3DTerrain() async {
     if (_is3DEnabled) {
       await _disable3DTerrain();
+      await _save3DTerrainPreference(false);
     } else {
+      _is3DEnabled = true;
+      await _save3DTerrainPreference(true);
+      // Reload the current style so Standard's 3D buildings activate correctly.
+      // Terrain will be applied via onStyleLoaded → applyTerrainIfEnabled().
+      await _mapboxMap?.loadStyleURI(_currentLayer.styleUrl);
+    }
+  }
+
+  /// Apply 3D terrain if enabled. Called from MapPage._onStyleLoaded
+  /// after every style reload to ensure terrain + 3D buildings are active.
+  Future<void> applyTerrainIfEnabled() async {
+    if (_is3DEnabled) {
       await _enable3DTerrain();
     }
-
-    // Save the preference
-    await _save3DTerrainPreference(_is3DEnabled);
   }
 
   /// Load 3D terrain preference from storage
@@ -337,6 +341,49 @@ class MapControlsService {
       AppLogger.error('MapControlsService', 'Error getting map center', e);
       return null;
     }
+  }
+
+  /// Save the current camera position to SharedPreferences.
+  /// Called from MapPage when the map stops moving.
+  Future<void> saveLastCameraPosition() async {
+    if (_mapboxMap == null) return;
+
+    try {
+      final camera = await _mapboxMap!.getCameraState();
+      final center = camera.center;
+      final lat = center.coordinates.lat.toDouble();
+      final lng = center.coordinates.lng.toDouble();
+      final zoom = camera.zoom;
+
+      final prefs = await SharedPreferences.getInstance();
+      await Future.wait([
+        prefs.setDouble(_cameraLatKey, lat),
+        prefs.setDouble(_cameraLngKey, lng),
+        prefs.setDouble(_cameraZoomKey, zoom),
+      ]);
+
+      AppLogger.debug('MapControlsService', 'Saved camera: $lat, $lng @ zoom $zoom');
+    } catch (e) {
+      AppLogger.warning('MapControlsService', 'Failed to save camera position: $e');
+    }
+  }
+
+  /// Load the last saved camera position, or null if none exists.
+  static Future<({double lat, double lng, double zoom})?> loadLastCameraPosition() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lat = prefs.getDouble(_cameraLatKey);
+      final lng = prefs.getDouble(_cameraLngKey);
+      final zoom = prefs.getDouble(_cameraZoomKey);
+
+      if (lat != null && lng != null && zoom != null) {
+        AppLogger.debug('MapControlsService', 'Loaded camera: $lat, $lng @ zoom $zoom');
+        return (lat: lat, lng: lng, zoom: zoom);
+      }
+    } catch (e) {
+      AppLogger.warning('MapControlsService', 'Failed to load camera position: $e');
+    }
+    return null;
   }
 
   /// Clean up resources
