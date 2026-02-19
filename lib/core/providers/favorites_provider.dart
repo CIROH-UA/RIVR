@@ -623,20 +623,12 @@ class FavoritesProvider with ChangeNotifier {
     _errorMessage = null;
   }
 
-  /// Clear unit-dependent cached values (call when unit preference changes)
+  /// Clear unit-dependent cached values (call when unit preference changes).
+  /// Flow data is preserved — formattedFlow and flood risk category convert
+  /// from storedFlowUnit to the current preference at render time.
   void clearUnitDependentCaches() {
-    AppLogger.debug('FavoritesProvider', 'Clearing unit-dependent caches for unit change');
-
-    // Clear flow data while preserving non-flow fields (name, coordinates, custom properties)
-    _sessionData.updateAll((key, session) => session.clearFlowData());
-
-    // Notify UI immediately of the change
+    AppLogger.debug('FavoritesProvider', 'Unit changed, notifying UI');
     notifyListeners();
-
-    // Refresh all favorites to get data in new units
-    Future.delayed(const Duration(milliseconds: 100), () {
-      refreshAllFavorites(); // Use public method for proper error handling
-    });
   }
 
   /// Clear all favorites (for testing)
