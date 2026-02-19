@@ -23,50 +23,18 @@ class AuthWrapper extends StatefulWidget {
   State<AuthWrapper> createState() => _AuthWrapperState();
 }
 
-class _AuthWrapperState extends State<AuthWrapper>
-    with TickerProviderStateMixin {
+class _AuthWrapperState extends State<AuthWrapper> {
   late AuthPageType _currentPage;
-  late AnimationController _animationController;
-  late Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
     _currentPage = widget.initialPage;
-
-    // Setup page transition animation
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(1.0, 0.0), end: Offset.zero).animate(
-          CurvedAnimation(
-            parent: _animationController,
-            curve: Curves.easeInOut,
-          ),
-        );
-
-    _animationController.forward();
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
   }
 
   void _switchToPage(AuthPageType page) {
     if (_currentPage == page) return;
-
-    setState(() {
-      _currentPage = page;
-    });
-
-    // Restart animation for smooth transition
-    _animationController.reset();
-    _animationController.forward();
+    setState(() => _currentPage = page);
   }
 
   void _switchToLogin() => _switchToPage(AuthPageType.login);
@@ -103,10 +71,22 @@ class _AuthWrapperState extends State<AuthWrapper>
           return widget.authenticatedChild ?? _buildDefaultAuthenticatedView();
         }
 
-        // Show authentication pages with smooth transitions
-        return SlideTransition(
-          position: _slideAnimation,
-          child: _buildCurrentPage(),
+        // Show authentication pages with crossfade transition
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          layoutBuilder: (currentChild, previousChildren) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                ...previousChildren,
+                if (currentChild != null) currentChild,
+              ],
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey(_currentPage),
+            child: _buildCurrentPage(),
+          ),
         );
       },
     );
