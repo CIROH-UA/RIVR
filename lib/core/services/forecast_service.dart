@@ -10,6 +10,17 @@ import 'i_reach_cache_service.dart';
 import 'i_flow_unit_preference_service.dart';
 import 'i_forecast_service.dart';
 
+/// Timed cache entry with expiration
+class _TimedEntry<T> {
+  final T value;
+  final DateTime cachedAt;
+
+  _TimedEntry(this.value) : cachedAt = DateTime.now();
+
+  bool isExpiredAfter(Duration ttl) =>
+      DateTime.now().difference(cachedAt) > ttl;
+}
+
 /// Simple service for loading complete forecast data
 /// Combines reach info, return periods, and all forecast types
 /// Now with phased loading for better performance
@@ -26,9 +37,15 @@ class ForecastService implements IForecastService {
         _cacheService = cacheService,
         _unitService = unitService;
 
-  // Cache computed values to avoid repeated calculations
-  final Map<String, double?> _currentFlowCache = {};
-  final Map<String, String> _flowCategoryCache = {};
+  // Cache computed values with TTL to avoid repeated calculations
+  final Map<String, _TimedEntry<double?>> _currentFlowCache = {};
+  final Map<String, _TimedEntry<String>> _flowCategoryCache = {};
+
+  // Recent ForecastResponse cache for re-taps (5-min TTL, max 10 entries)
+  final Map<String, _TimedEntry<ForecastResponse>> _recentResponseCache = {};
+  static const _responseCacheTtl = Duration(minutes: 5);
+  static const _responseCacheMaxSize = 10;
+  static const _flowCacheTtl = Duration(hours: 1);
 
   // PHASE 1 - Load minimal data for overview page
   /// Load only essential data for overview page: reach info + current flow
@@ -36,6 +53,13 @@ class ForecastService implements IForecastService {
   @override
   Future<ForecastResponse> loadOverviewData(String reachId) async {
     try {
+      // Check recent response cache first (for rapid re-taps)
+      final cached = _recentResponseCache[reachId];
+      if (cached != null && !cached.isExpiredAfter(_responseCacheTtl)) {
+        AppLogger.info('ForecastService', 'Cache hit for recent overview: $reachId');
+        return cached.value;
+      }
+
       AppLogger.debug('ForecastService', 'Loading overview data for reach: $reachId');
 
       // Step 1: Check cache
@@ -128,6 +152,9 @@ class ForecastService implements IForecastService {
       AppLogger.info('ForecastService', 'Overview data loaded successfully');
       AppLogger.debug('ForecastService', 'Final response reach: city=${overviewResponse.reach.city}, state=${overviewResponse.reach.state}');
 
+      // Cache the response for re-taps
+      _storeRecentResponse(reachId, overviewResponse);
+
       return overviewResponse;
     } catch (e) {
       AppLogger.error('ForecastService', 'Error loading overview data', e);
@@ -203,12 +230,11 @@ class ForecastService implements IForecastService {
       if (reach.hasReturnPeriods) {
         final currentFlow = getCurrentFlow(enhancedResponse);
         if (currentFlow != null) {
-          // Use the current unit from service - forecast data is already converted
           final currentUnit = _unitService.currentFlowUnit;
-          _flowCategoryCache[reachId] = reach.getFlowCategory(
+          _flowCategoryCache[reachId] = _TimedEntry(reach.getFlowCategory(
             currentFlow,
             currentUnit,
-          );
+          ));
         }
       }
 
@@ -295,14 +321,13 @@ class ForecastService implements IForecastService {
       // UPDATED: Update caches with unit-aware flow category
       final currentFlow = getCurrentFlow(completeResponse);
       if (currentFlow != null) {
-        _currentFlowCache[reachId] = currentFlow;
+        _currentFlowCache[reachId] = _TimedEntry(currentFlow);
         if (reach.hasReturnPeriods) {
-          // Use the current unit from service - forecast data is already converted
           final currentUnit = _unitService.currentFlowUnit;
-          _flowCategoryCache[reachId] = reach.getFlowCategory(
+          _flowCategoryCache[reachId] = _TimedEntry(reach.getFlowCategory(
             currentFlow,
             currentUnit,
-          );
+          ));
         }
       }
 
@@ -384,15 +409,31 @@ class ForecastService implements IForecastService {
     }
   }
 
+  /// Store a recent response in the bounded cache
+  void _storeRecentResponse(String reachId, ForecastResponse response) {
+    // Evict expired entries
+    _recentResponseCache.removeWhere(
+      (_, entry) => entry.isExpiredAfter(_responseCacheTtl),
+    );
+    // Evict oldest if at capacity
+    if (_recentResponseCache.length >= _responseCacheMaxSize) {
+      final oldest = _recentResponseCache.entries
+          .reduce((a, b) => a.value.cachedAt.isBefore(b.value.cachedAt) ? a : b);
+      _recentResponseCache.remove(oldest.key);
+    }
+    _recentResponseCache[reachId] = _TimedEntry(response);
+  }
+
   /// Force refresh reach data (clear cache and fetch fresh)
   @override
   Future<ForecastResponse> refreshReachData(String reachId) async {
     AppLogger.debug('ForecastService', 'Force refreshing reach data for: $reachId');
     await _cacheService.forceRefresh(reachId);
 
-    // Clear computed caches too
+    // Clear all caches for this reach
     _currentFlowCache.remove(reachId);
     _flowCategoryCache.remove(reachId);
+    _recentResponseCache.remove(reachId);
 
     return await loadCompleteReachData(reachId);
   }
@@ -534,16 +575,16 @@ class ForecastService implements IForecastService {
     );
   }
 
-  // Use cache first, then compute if needed
-  /// Get current flow value for display - now with caching
+  /// Get current flow value for display - with TTL caching
   /// NOTE: Flow values are already converted by NoaaApiService
   @override
   double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) {
     final reachId = forecast.reach.reachId;
 
-    // Check cache first
-    if (_currentFlowCache.containsKey(reachId)) {
-      return _currentFlowCache[reachId];
+    // Check cache first (with TTL)
+    final cached = _currentFlowCache[reachId];
+    if (cached != null && !cached.isExpiredAfter(_flowCacheTtl)) {
+      return cached.value;
     }
 
     // Priority order for current flow display
@@ -553,43 +594,36 @@ class ForecastService implements IForecastService {
 
     for (final type in types) {
       final flow = forecast.getLatestFlow(type);
-      // Filter out missing data values
       if (flow != null && flow > -9000) {
-        // Check for missing data sentinel values
         AppLogger.debug('ForecastService', 'Using $type for current flow: $flow ${_unitService.currentFlowUnit}');
-
-        // Cache the result
-        _currentFlowCache[reachId] = flow;
+        _currentFlowCache[reachId] = _TimedEntry(flow);
         return flow;
       }
     }
 
     AppLogger.debug('ForecastService', 'No current flow data available');
-    _currentFlowCache[reachId] = null; // Cache null result too
+    _currentFlowCache[reachId] = _TimedEntry(null);
     return null;
   }
 
-  // Use cache first, then compute if needed
-  /// UPDATED: Get flow category with return period context - now unit-aware
+  /// Get flow category with return period context - with TTL caching
   @override
   String getFlowCategory(ForecastResponse forecast, {String? preferredType}) {
     final reachId = forecast.reach.reachId;
 
-    // Check cache first
-    if (_flowCategoryCache.containsKey(reachId)) {
-      return _flowCategoryCache[reachId]!;
+    // Check cache first (with TTL)
+    final cached = _flowCategoryCache[reachId];
+    if (cached != null && !cached.isExpiredAfter(_flowCacheTtl)) {
+      return cached.value;
     }
 
     final flow = getCurrentFlow(forecast, preferredType: preferredType);
     if (flow == null) return 'Unknown';
 
-    // UPDATED: Use unit-aware flow category calculation
-    // Flow values are already in the correct unit from NoaaApiService
     final currentUnit = _unitService.currentFlowUnit;
     final category = forecast.reach.getFlowCategory(flow, currentUnit);
 
-    // Cache the result
-    _flowCategoryCache[reachId] = category;
+    _flowCategoryCache[reachId] = _TimedEntry(category);
     return category;
   }
 
@@ -913,13 +947,57 @@ class ForecastService implements IForecastService {
     // Clear flow and category caches (these depend on units)
     _currentFlowCache.clear();
     _flowCategoryCache.clear();
+    _recentResponseCache.clear();
   }
 
-  // Clear all caches (useful for testing)
   @override
   void clearComputedCaches() {
     _currentFlowCache.clear();
     _flowCategoryCache.clear();
+    _recentResponseCache.clear();
     AppLogger.debug('ForecastService', 'Cleared computed value caches');
+  }
+
+  /// Load all data needed for the reach details bottom sheet.
+  /// Encapsulates overview + return periods loading in one call.
+  @override
+  Future<ReachDetailsData> loadReachDetailsData(String reachId) async {
+    AppLogger.debug('ForecastService', 'Loading reach details data for: $reachId');
+
+    // Step 1: Load overview (uses response cache internally)
+    final overview = await loadOverviewData(reachId);
+    final currentFlow = getCurrentFlow(overview);
+
+    String? flowCategory;
+    bool classificationAvailable = false;
+
+    // Step 2: If we already have return periods, classify immediately
+    if (overview.reach.hasReturnPeriods && currentFlow != null) {
+      final currentUnit = _unitService.currentFlowUnit;
+      flowCategory = overview.reach.getFlowCategory(currentFlow, currentUnit);
+      classificationAvailable = true;
+    } else if (currentFlow != null) {
+      // Step 3: Load supplementary data for return periods
+      try {
+        final enhanced = await loadSupplementaryData(reachId, overview);
+        if (enhanced.reach.hasReturnPeriods) {
+          final currentUnit = _unitService.currentFlowUnit;
+          flowCategory = enhanced.reach.getFlowCategory(currentFlow, currentUnit);
+          classificationAvailable = true;
+        }
+      } catch (e) {
+        AppLogger.warning('ForecastService', 'Return periods failed in details load: $e');
+      }
+    }
+
+    return ReachDetailsData(
+      riverName: overview.reach.riverName,
+      formattedLocation: overview.reach.formattedLocation,
+      currentFlow: currentFlow,
+      flowCategory: flowCategory,
+      latitude: overview.reach.latitude,
+      longitude: overview.reach.longitude,
+      isClassificationAvailable: classificationAvailable,
+    );
   }
 }

@@ -116,14 +116,26 @@ class SearchedPlace {
   }
 }
 
-/// Search service using Mapbox Geocoding API
+/// Search service using Mapbox Geocoding API with in-memory result caching
 class MapSearchService {
+  static final Map<String, _SearchCacheEntry> _searchCache = {};
+  static const _searchCacheTtl = Duration(minutes: 5);
+  static const _searchCacheMaxSize = 20;
+
   static Future<List<SearchedPlace>> searchPlaces({
     required String query,
     int limit = 8,
     bool usOnly = true,
   }) async {
     if (query.trim().isEmpty) return [];
+
+    // Check cache (normalized key)
+    final cacheKey = query.trim().toLowerCase();
+    final cached = _searchCache[cacheKey];
+    if (cached != null && !cached.isExpired(_searchCacheTtl)) {
+      AppLogger.debug('MapSearchService', 'Search cache hit for: $cacheKey');
+      return cached.results;
+    }
 
     try {
       final queryParams = {
@@ -147,15 +159,32 @@ class MapSearchService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final features = data['features'] as List;
-        return features
+        final results = features
             .map((feature) => SearchedPlace.fromJson(feature))
             .toList();
+
+        // Store in cache
+        _storeSearchResult(cacheKey, results);
+
+        return results;
       }
       return [];
     } catch (e) {
       AppLogger.error('MapSearchService', 'Search error', e);
       return [];
     }
+  }
+
+  static void _storeSearchResult(String key, List<SearchedPlace> results) {
+    // Evict expired entries
+    _searchCache.removeWhere((_, entry) => entry.isExpired(_searchCacheTtl));
+    // Evict oldest if at capacity
+    if (_searchCache.length >= _searchCacheMaxSize) {
+      final oldest = _searchCache.entries
+          .reduce((a, b) => a.value.cachedAt.isBefore(b.value.cachedAt) ? a : b);
+      _searchCache.remove(oldest.key);
+    }
+    _searchCache[key] = _SearchCacheEntry(results);
   }
 
   /// Convert coordinates to city, state using Mapbox Geocoding API.
@@ -166,4 +195,13 @@ class MapSearchService {
   ) {
     return GeocodingService.reverseGeocode(latitude, longitude);
   }
+}
+
+class _SearchCacheEntry {
+  final List<SearchedPlace> results;
+  final DateTime cachedAt;
+
+  _SearchCacheEntry(this.results) : cachedAt = DateTime.now();
+
+  bool isExpired(Duration ttl) => DateTime.now().difference(cachedAt) > ttl;
 }

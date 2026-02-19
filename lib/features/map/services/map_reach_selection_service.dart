@@ -49,14 +49,15 @@ class MapReachSelectionService {
     }
   }
 
-  /// Get all visible streams in current map view for research purposes
-  Future<List<VisibleStream>> getVisibleStreams() async {
+  /// Get all visible streams in current map view for research purposes.
+  /// Pass [screenWidth] and [screenHeight] for proportional chunked queries.
+  Future<List<VisibleStream>> getVisibleStreams({
+    double screenWidth = 400,
+    double screenHeight = 800,
+  }) async {
     if (_mapboxMap == null) return [];
 
     AppLogger.debug('MapReachSelectionService', 'Querying visible streams...');
-
-    // Wait for map to be fully ready
-    await Future.delayed(const Duration(milliseconds: 1000));
 
     final streams2LayerIds = [
       'streams2-order-1-2', // Small streams
@@ -64,28 +65,18 @@ class MapReachSelectionService {
       'streams2-order-5-plus', // Large rivers
     ];
 
-    // Try multiple strategies to get streams
-    List<VisibleStream> streams = [];
+    final width = screenWidth;
+    final height = screenHeight;
 
-    // Strategy 1: Try chunked querying
-    streams = await _tryChunkedQuery(streams2LayerIds);
+    // Strategy 1: Screen-aware chunked query (4 quadrants)
+    var streams = await _tryChunkedQuery(streams2LayerIds, width, height);
     if (streams.isNotEmpty) {
       AppLogger.info('MapReachSelectionService', 'Chunked query successful: ${streams.length} streams found');
       return _sortStreams(streams);
     }
 
-    // Strategy 2: Try smaller area query
-    streams = await _trySmallerAreaQuery(streams2LayerIds);
-    if (streams.isNotEmpty) {
-      AppLogger.info(
-        'MapReachSelectionService',
-        'Smaller area query successful: ${streams.length} streams found',
-      );
-      return _sortStreams(streams);
-    }
-
-    // Strategy 3: Try center point query
-    streams = await _tryCenterPointQuery(streams2LayerIds);
+    // Strategy 2: Fallback center point query
+    streams = await _tryCenterPointQuery(streams2LayerIds, width, height);
     if (streams.isNotEmpty) {
       AppLogger.info(
         'MapReachSelectionService',
@@ -98,31 +89,37 @@ class MapReachSelectionService {
     return [];
   }
 
-  /// Strategy 1: Query in chunks
-  Future<List<VisibleStream>> _tryChunkedQuery(List<String> layerIds) async {
+  /// Query screen in proportional chunks based on actual dimensions
+  Future<List<VisibleStream>> _tryChunkedQuery(
+    List<String> layerIds,
+    double screenWidth,
+    double screenHeight,
+  ) async {
     try {
-      AppLogger.debug('MapReachSelectionService', 'Trying chunked query strategy...');
+      AppLogger.debug('MapReachSelectionService', 'Trying chunked query (${screenWidth.toInt()}x${screenHeight.toInt()})...');
 
       final allStreams = <VisibleStream>[];
       final seenStationIds = <String>{};
 
-      // Create smaller chunks to avoid API limits
+      final halfW = screenWidth / 2;
+      final halfH = screenHeight / 2;
+
       final chunks = [
         ScreenBox(
           min: ScreenCoordinate(x: 0, y: 0),
-          max: ScreenCoordinate(x: 150, y: 300),
+          max: ScreenCoordinate(x: halfW, y: halfH),
         ),
         ScreenBox(
-          min: ScreenCoordinate(x: 150, y: 0),
-          max: ScreenCoordinate(x: 300, y: 300),
+          min: ScreenCoordinate(x: halfW, y: 0),
+          max: ScreenCoordinate(x: screenWidth, y: halfH),
         ),
         ScreenBox(
-          min: ScreenCoordinate(x: 0, y: 300),
-          max: ScreenCoordinate(x: 150, y: 600),
+          min: ScreenCoordinate(x: 0, y: halfH),
+          max: ScreenCoordinate(x: halfW, y: screenHeight),
         ),
         ScreenBox(
-          min: ScreenCoordinate(x: 150, y: 300),
-          max: ScreenCoordinate(x: 300, y: 600),
+          min: ScreenCoordinate(x: halfW, y: halfH),
+          max: ScreenCoordinate(x: screenWidth, y: screenHeight),
         ),
       ];
 
@@ -158,57 +155,20 @@ class MapReachSelectionService {
     }
   }
 
-  /// Strategy 2: Query smaller central area
-  Future<List<VisibleStream>> _trySmallerAreaQuery(
-    List<String> layerIds,
-  ) async {
-    try {
-      AppLogger.debug('MapReachSelectionService', 'Trying smaller area query strategy...');
-
-      // Query just the center 50% of screen
-      final smallBox = ScreenBox(
-        min: ScreenCoordinate(x: 50, y: 100),
-        max: ScreenCoordinate(x: 250, y: 400),
-      );
-
-      final queryResult = await _mapboxMap!.queryRenderedFeatures(
-        RenderedQueryGeometry.fromScreenBox(smallBox),
-        RenderedQueryOptions(layerIds: layerIds),
-      );
-
-      AppLogger.info('MapReachSelectionService', 'Small area query: ${queryResult.length} features');
-
-      final streams = <VisibleStream>[];
-      final seenStationIds = <String>{};
-
-      for (final feature in queryResult) {
-        if (feature != null) {
-          final stream = _createVisibleStreamFromFeature(feature);
-          if (stream != null && !seenStationIds.contains(stream.stationId)) {
-            streams.add(stream);
-            seenStationIds.add(stream.stationId);
-          }
-        }
-      }
-
-      return streams;
-    } catch (e) {
-      AppLogger.error('MapReachSelectionService', 'Smaller area query failed', e);
-      return [];
-    }
-  }
-
-  /// Strategy 3: Query around center point
+  /// Fallback: Query around screen center
   Future<List<VisibleStream>> _tryCenterPointQuery(
     List<String> layerIds,
+    double screenWidth,
+    double screenHeight,
   ) async {
     try {
       AppLogger.debug('MapReachSelectionService', 'Trying center point query strategy...');
 
-      // Query small area around screen center
+      final cx = screenWidth / 2;
+      final cy = screenHeight / 2;
       final centerBox = ScreenBox(
-        min: ScreenCoordinate(x: 140, y: 290),
-        max: ScreenCoordinate(x: 160, y: 310),
+        min: ScreenCoordinate(x: cx - 20, y: cy - 20),
+        max: ScreenCoordinate(x: cx + 20, y: cy + 20),
       );
 
       final queryResult = await _mapboxMap!.queryRenderedFeatures(

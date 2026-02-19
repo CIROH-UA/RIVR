@@ -20,7 +20,8 @@ import '../../core/constants.dart';
 import '../../core/providers/theme_provider.dart';
 import 'services/map_vector_tiles_service.dart';
 import 'services/map_reach_selection_service.dart';
-import 'services/map_marker_service.dart'; // Dedicated marker service
+import 'services/map_marker_service.dart';
+import 'services/map_service_factory.dart';
 import 'models/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'widgets/reach_details_bottom_sheet.dart';
@@ -33,10 +34,10 @@ class MapPage extends StatefulWidget {
 }
 
 class MapPageState extends State<MapPage> {
-  final _vectorTilesService = MapVectorTilesService();
-  final _reachSelectionService = MapReachSelectionService();
-  final _markerService = MapMarkerService(); // Marker service
-  final _controlsService = MapControlsService(); // NEW: Controls service
+  late final MapVectorTilesService _vectorTilesService;
+  late final MapReachSelectionService _reachSelectionService;
+  late final MapMarkerService _markerService;
+  late final MapControlsService _controlsService;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -46,6 +47,11 @@ class MapPageState extends State<MapPage> {
   @override
   void initState() {
     super.initState();
+    final factory = GetIt.I<MapServiceFactory>();
+    _vectorTilesService = factory.createVectorTilesService();
+    _reachSelectionService = factory.createReachSelectionService();
+    _markerService = factory.createMarkerService();
+    _controlsService = factory.createControlsService();
     _setupSelectionCallbacks();
     _initializeCacheService();
   }
@@ -250,9 +256,6 @@ class MapPageState extends State<MapPage> {
     try {
       AppLogger.debug('MapPage', 'Map created, initializing...');
 
-      // Wait a moment for map to fully initialize
-      await Future.delayed(const Duration(milliseconds: 500));
-
       // Initialize core map services
       _vectorTilesService.setMapboxMap(mapboxMap);
       _reachSelectionService.setMapboxMap(mapboxMap);
@@ -265,14 +268,14 @@ class MapPageState extends State<MapPage> {
 
       AppLogger.debug('MapPage', 'Services initialized, loading initial content...');
 
-      // Load vector tiles for initial style
-      await _vectorTilesService.loadRiverReaches();
+      // Load vector tiles and location in parallel (independent operations)
+      await Future.wait([
+        _vectorTilesService.loadRiverReaches(),
+        _controlsService.initializeLocation(),
+      ]);
 
-      // Initialize marker service
+      // Initialize markers after vector tiles (needs correct z-ordering)
       await _markerService.initializeMarkers(mapboxMap);
-
-      // NEW: Initialize location for controls
-      await _controlsService.initializeLocation();
 
       AppLogger.info('MapPage', 'Map setup complete');
 
@@ -373,8 +376,12 @@ class MapPageState extends State<MapPage> {
     }
 
     try {
-      // Get visible streams from the reach selection service
-      final visibleStreams = await _reachSelectionService.getVisibleStreams();
+      // Get visible streams using actual screen dimensions
+      final size = MediaQuery.of(context).size;
+      final visibleStreams = await _reachSelectionService.getVisibleStreams(
+        screenWidth: size.width,
+        screenHeight: size.height,
+      );
 
       if (!mounted) return;
 

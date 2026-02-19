@@ -4,6 +4,27 @@ import '../models/reach_data.dart';
 import '../models/hourly_flow_data.dart';
 import '../models/forecast_chart_data.dart';
 
+/// Data bundle returned by [IForecastService.loadReachDetailsData].
+class ReachDetailsData {
+  final String? riverName;
+  final String? formattedLocation;
+  final double? currentFlow;
+  final String? flowCategory;
+  final double? latitude;
+  final double? longitude;
+  final bool isClassificationAvailable;
+
+  const ReachDetailsData({
+    this.riverName,
+    this.formattedLocation,
+    this.currentFlow,
+    this.flowCategory,
+    this.latitude,
+    this.longitude,
+    this.isClassificationAvailable = false,
+  });
+}
+
 /// Interface for forecast data loading and processing
 abstract class IForecastService {
   Future<ForecastResponse> loadOverviewData(String reachId);
@@ -55,4 +76,8 @@ abstract class IForecastService {
   );
   void clearUnitDependentCaches();
   void clearComputedCaches();
+
+  /// Load all data needed for the reach details bottom sheet in one call.
+  /// Returns overview data with return periods loaded (if available).
+  Future<ReachDetailsData> loadReachDetailsData(String reachId);
 }

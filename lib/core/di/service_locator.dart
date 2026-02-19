@@ -21,6 +21,7 @@ import '../services/i_fcm_service.dart';
 import '../services/fcm_service.dart';
 import '../services/i_user_settings_service.dart';
 import '../services/user_settings_service.dart';
+import '../../features/map/services/map_service_factory.dart';
 
 final sl = GetIt.instance;
 
@@ -69,4 +70,7 @@ void setupServiceLocator() {
   sl.registerLazySingleton<IFCMService>(
     () => FCMService(settingsService: sl<IUserSettingsService>()),
   );
+
+  // Map service factory (produces fresh page-scoped services)
+  sl.registerFactory<MapServiceFactory>(() => MapServiceFactory());
 }

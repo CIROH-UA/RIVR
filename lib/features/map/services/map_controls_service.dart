@@ -162,7 +162,7 @@ class MapControlsService {
     if (_mapboxMap == null) return;
 
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 100));
 
       final terrainSource = RasterDemSource(
         id: 'mapbox-dem',

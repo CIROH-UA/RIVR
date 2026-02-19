@@ -37,6 +37,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   // Progressive loading states
   bool _isLoadingFlow = false;
   bool _isLoadingClassification = false;
+  bool _isCancelled = false;
   String? _errorMessage;
 
   // Essential data
@@ -53,27 +54,14 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     _loadDataProgressively();
   }
 
-  // Get current flow units from preference service
-  String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit; // Returns 'CFS' or 'CMS' directly
-  }
-
-  // Calculate flow category using already-converted values
-  String _calculateFlowCategory(double? currentFlow, dynamic reach) {
-    if (currentFlow == null || reach?.returnPeriods == null) {
-      return 'Unknown';
-    }
-
-    final currentUnit = _getCurrentFlowUnit();
-
-    // No conversion needed - flow is already in user's preferred unit from API service
-    return reach.getFlowCategory(currentFlow, currentUnit);
+  @override
+  void dispose() {
+    _isCancelled = true;
+    super.dispose();
   }
 
   String _formatFlow(double flow) {
-    // FIXED: Use flow directly (already in user's preferred unit from API service)
-    final currentUnit = _getCurrentFlowUnit();
+    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
 
     // Format the value (no conversion needed)
     String formattedValue;
@@ -484,62 +472,44 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     );
   }
 
-  // FIXED: Progressive loading with corrected flow classification
+  /// Load all reach details via the consolidated service method
   Future<void> _loadDataProgressively() async {
     setState(() {
       _isLoadingFlow = true;
+      _isLoadingClassification = true;
       _errorMessage = null;
     });
 
     try {
       AppLogger.debug(
         'ReachDetailsSheet',
-        'Starting progressive loading for: ${widget.selectedReach.reachId}',
+        'Loading details for: ${widget.selectedReach.reachId}',
       );
 
-      // STEP 1: Load overview data (current flow) - FAST
-      final overviewFuture = _forecastService.loadOverviewData(
+      final details = await _forecastService.loadReachDetailsData(
         widget.selectedReach.reachId,
       );
 
-      // STEP 2: Load return periods separately (if not cached) - PARALLEL
-      final returnPeriodsFuture = _loadReturnPeriodsIfNeeded(
-        widget.selectedReach.reachId,
-      );
+      if (_isCancelled || !mounted) return;
 
-      // Wait for overview data first (shows flow immediately)
-      final forecast = await overviewFuture;
-
-      if (!mounted) return;
       setState(() {
-        _riverName = forecast.reach.riverName;
-        _formattedLocation = forecast.reach.formattedLocation;
-        _currentFlow = _forecastService.getCurrentFlow(
-          forecast,
-        ); // Already converted!
-        _latitude = forecast.reach.latitude;
-        _longitude = forecast.reach.longitude;
+        _riverName = details.riverName;
+        _formattedLocation = details.formattedLocation;
+        _currentFlow = details.currentFlow;
+        _flowCategory = details.flowCategory;
+        _latitude = details.latitude;
+        _longitude = details.longitude;
         _isLoadingFlow = false;
-
-        // Check if we already have return periods (cached)
-        if (forecast.reach.hasReturnPeriods && _currentFlow != null) {
-          // FIXED: Use flow directly (already converted by API service)
-          _flowCategory = _calculateFlowCategory(_currentFlow!, forecast.reach);
-        } else if (_currentFlow != null) {
-          // We have flow but not return periods yet
-          _isLoadingClassification = true;
-        }
+        _isLoadingClassification = false;
       });
 
       AppLogger.info(
         'ReachDetailsSheet',
-        'Overview data loaded, current flow: $_currentFlow',
+        'Details loaded, flow: $_currentFlow, category: $_flowCategory',
       );
-
-      // STEP 3: Wait for return periods and update classification
-      await returnPeriodsFuture;
     } catch (error) {
-      AppLogger.error('ReachDetailsSheet', 'Error in progressive loading', error);
+      if (_isCancelled) return;
+      AppLogger.error('ReachDetailsSheet', 'Error loading details', error);
 
       final userMessage = ErrorService.handleError(
         error,
@@ -552,63 +522,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _isLoadingFlow = false;
         _isLoadingClassification = false;
       });
-    }
-  }
-
-  // FIXED: Load return periods with corrected flow classification
-  Future<void> _loadReturnPeriodsIfNeeded(String reachId) async {
-    try {
-      // Check if we already have cached return periods
-      final isReturnPeriodsCached = await _forecastService.isReachCached(
-        reachId,
-      );
-
-      if (isReturnPeriodsCached) {
-        AppLogger.debug('ReachDetailsSheet', 'Return periods already cached');
-        return; // Already have them from overview loading
-      }
-
-      AppLogger.debug('ReachDetailsSheet', 'Loading return periods for classification...');
-
-      // Load supplementary data (return periods) - this is lightweight
-      final currentForecast = await _forecastService.loadOverviewData(reachId);
-      final enhancedForecast = await _forecastService.loadSupplementaryData(
-        reachId,
-        currentForecast,
-      );
-
-      // Update flow classification if we now have return periods
-      if (enhancedForecast.reach.hasReturnPeriods && _currentFlow != null) {
-        // FIXED: Use flow directly (already converted by API service)
-        final flowCategory = _calculateFlowCategory(
-          _currentFlow!,
-          enhancedForecast.reach,
-        );
-
-        if (!mounted) return;
-        setState(() {
-          _flowCategory = flowCategory;
-          _isLoadingClassification = false;
-        });
-
-        AppLogger.info('ReachDetailsSheet', 'Flow classification updated: $flowCategory');
-      } else {
-        if (!mounted) return;
-        setState(() {
-          _isLoadingClassification = false;
-        });
-        AppLogger.warning(
-          'ReachDetailsSheet',
-          'Return periods not available for classification',
-        );
-      }
-    } catch (e) {
-      AppLogger.warning('ReachDetailsSheet', 'Failed to load return periods: $e');
-      if (!mounted) return;
-      setState(() {
-        _isLoadingClassification = false;
-      });
-      // Don't throw - classification is nice-to-have
     }
   }
 
