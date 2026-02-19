@@ -6,14 +6,16 @@ import 'package:flutter_svg/flutter_svg.dart';
 class OnboardingPageContent extends StatelessWidget {
   const OnboardingPageContent({
     super.key,
-    required this.svgAsset,
+    this.svgAsset,
+    this.imageAsset,
     required this.title,
     required this.subtitle,
     required this.description,
     required this.accentColor,
-  });
+  }) : assert(svgAsset != null || imageAsset != null);
 
-  final String svgAsset;
+  final String? svgAsset;
+  final String? imageAsset;
   final String title;
   final String subtitle;
   final String description;
@@ -32,11 +34,18 @@ class OnboardingPageContent extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Spacer(flex: 2),
-          SvgPicture.asset(
-            svgAsset,
-            width: 200,
-            height: 200,
-          ),
+          if (svgAsset != null)
+            SvgPicture.asset(
+              svgAsset!,
+              width: 200,
+              height: 200,
+            )
+          else
+            Image.asset(
+              imageAsset!,
+              width: 200,
+              height: 200,
+            ),
           const Spacer(),
           Text(
             title,

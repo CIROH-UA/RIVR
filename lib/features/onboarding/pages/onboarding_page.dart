@@ -20,7 +20,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   static const _pages = [
     _PageData(
-      svgAsset: 'assets/images/onboarding/welcome.svg',
+      imageAsset: 'assets/images/rivr_logo.png',
       title: 'Welcome to RIVR',
       subtitle: 'River Information Visualization and Risk',
       description:
@@ -126,6 +126,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   final page = _pages[index];
                   return OnboardingPageContent(
                     svgAsset: page.svgAsset,
+                    imageAsset: page.imageAsset,
                     title: page.title,
                     subtitle: page.subtitle,
                     description: page.description,
@@ -164,14 +165,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
 class _PageData {
   const _PageData({
-    required this.svgAsset,
+    this.svgAsset,
+    this.imageAsset,
     required this.title,
     required this.subtitle,
     required this.description,
     required this.accentColor,
-  });
+  }) : assert(svgAsset != null || imageAsset != null);
 
-  final String svgAsset;
+  final String? svgAsset;
+  final String? imageAsset;
   final String title;
   final String subtitle;
   final String description;
