@@ -110,6 +110,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 return _buildLoadingState();
               }
 
+              if (favoritesProvider.isEmpty &&
+                  favoritesProvider.errorMessage != null) {
+                return _buildInitErrorState(favoritesProvider.errorMessage!);
+              }
+
               if (favoritesProvider.isEmpty) {
                 return _buildEmptyState();
               }
@@ -182,6 +187,47 @@ class _FavoritesPageState extends State<FavoritesPage> {
             style: TextStyle(fontSize: 16, color: CupertinoColors.systemGrey),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInitErrorState(String error) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              CupertinoIcons.exclamationmark_triangle,
+              size: 48,
+              color: CupertinoColors.systemRed,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Unable to Load Favorites',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: CupertinoColors.label,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              error,
+              style: const TextStyle(
+                fontSize: 14,
+                color: CupertinoColors.secondaryLabel,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            CupertinoButton.filled(
+              onPressed: _initializeFavorites,
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
       ),
     );
   }

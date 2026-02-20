@@ -101,12 +101,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 child: AnimatedOpacity(
                   opacity: _isLastPage ? 0.0 : 1.0,
                   duration: const Duration(milliseconds: 200),
-                  child: CupertinoButton(
-                    onPressed: _isLastPage ? null : _completeOnboarding,
-                    child: Text(
-                      'Skip',
-                      style: TextStyle(
-                        color: CupertinoColors.systemGrey.resolveFrom(context),
+                  child: IgnorePointer(
+                    ignoring: _isLastPage,
+                    child: CupertinoButton(
+                      onPressed: _completeOnboarding,
+                      child: Text(
+                        'Skip',
+                        style: TextStyle(
+                          color: CupertinoColors.systemGrey.resolveFrom(context),
+                        ),
                       ),
                     ),
                   ),

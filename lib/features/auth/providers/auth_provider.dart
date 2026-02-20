@@ -1,5 +1,6 @@
 // lib/features/auth/providers/auth_provider.dart
 
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/features/auth/models/auth_user.dart';
@@ -41,6 +42,9 @@ class AuthProvider with ChangeNotifier {
   String get successMessage => _successMessage;
   bool get isInitialized => _isInitialized;
 
+  // Auth state subscription
+  StreamSubscription<dynamic>? _authStateSubscription;
+
   // Biometric capabilities (cached)
   bool? _biometricAvailable;
   bool? _biometricEnabled;
@@ -50,7 +54,7 @@ class AuthProvider with ChangeNotifier {
     AppLogger.info('AuthProvider', 'Initializing...');
 
     // Listen to auth state changes
-    _authService.authStateChanges.listen((firebaseUser) async {
+    _authStateSubscription = _authService.authStateChanges.listen((firebaseUser) async {
       if (firebaseUser != null) {
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
         AppLogger.info('AuthProvider', 'User signed in: ${_currentUser!.uid}');
@@ -246,24 +250,32 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Check if current user's email has been verified
+  /// Check if current user's email has been verified (retries up to 3 times)
   Future<bool> checkEmailVerified() async {
     _setLoading(true);
     _clearMessages();
 
-    final verified = await _authService.checkEmailVerified();
+    // Retry up to 3 times with increasing delay to handle propagation lag
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      final verified = await _authService.checkEmailVerified();
+
+      if (verified) {
+        _setLoading(false);
+        _isAwaitingEmailVerification = false;
+        _setSuccess('Email verified successfully!');
+        notifyListeners();
+        return true;
+      }
+
+      if (attempt < 3) {
+        // Brief delay before retry to allow Firebase to propagate
+        await Future.delayed(Duration(seconds: attempt));
+      }
+    }
 
     _setLoading(false);
-
-    if (verified) {
-      _isAwaitingEmailVerification = false;
-      _setSuccess('Email verified successfully!');
-      notifyListeners();
-      return true;
-    } else {
-      _setError('Email not yet verified. Check your inbox and try again.');
-      return false;
-    }
+    _setError('Email not yet verified. Check your inbox and try again.');
+    return false;
   }
 
   /// Get the current user's email address (for display on verification page)
@@ -437,5 +449,11 @@ class AuthProvider with ChangeNotifier {
     return _errorMessage.contains('network') ||
         _errorMessage.contains('connection') ||
         _errorMessage.contains('timeout');
+  }
+
+  @override
+  void dispose() {
+    _authStateSubscription?.cancel();
+    super.dispose();
   }
 }

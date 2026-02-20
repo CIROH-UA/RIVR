@@ -20,6 +20,7 @@ class ReachOverviewPage extends StatefulWidget {
 
 class _ReachOverviewPageState extends State<ReachOverviewPage> {
   bool _isInitialized = false;
+  bool _loadingTimedOut = false;
   String? _currentLoadingReachId; // Track which reach we're loading
 
   @override
@@ -55,9 +56,17 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
       reachProvider.clearCurrentReach();
       setState(() {
         _isInitialized = false;
+        _loadingTimedOut = false;
         _currentLoadingReachId = widget.reachId;
       });
     }
+
+    // Start a 30-second timeout for the overview load
+    Future.delayed(const Duration(seconds: 30), () {
+      if (mounted && !_isInitialized && !_loadingTimedOut) {
+        setState(() => _loadingTimedOut = true);
+      }
+    });
 
     try {
       // PHASE 1: Load overview data first (fast - shows name, location, current flow)
@@ -205,6 +214,10 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
       child: Consumer<ReachDataProvider>(
         builder: (context, reachProvider, child) {
           // Handle different loading and error states
+          if (_loadingTimedOut && !_isInitialized) {
+            return _buildErrorState('Loading timed out. The server may be slow or unreachable.');
+          }
+
           if (!_isInitialized && reachProvider.isLoadingOverview) {
             return _buildInitialLoadingState();
           }

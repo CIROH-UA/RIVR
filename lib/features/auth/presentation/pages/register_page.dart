@@ -167,7 +167,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     textInputAction: TextInputAction.next,
                     prefixIcon: CupertinoIcons.person,
                     validator: _validateName,
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                     onSubmitted: (_) =>
                         _lastNameFocusNode.requestFocus(),
                   ),
@@ -181,7 +181,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     textInputAction: TextInputAction.next,
                     prefixIcon: CupertinoIcons.person,
                     validator: _validateName,
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                     onSubmitted: (_) =>
                         _emailFocusNode.requestFocus(),
                   ),
@@ -195,7 +195,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     textInputAction: TextInputAction.next,
                     prefixIcon: CupertinoIcons.mail,
                     validator: _validateEmail,
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                     onSubmitted: (_) =>
                         _passwordFocusNode.requestFocus(),
                   ),
@@ -225,7 +225,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         size: 20,
                       ),
                     ),
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                     onSubmitted: (_) =>
                         _confirmPasswordFocusNode.requestFocus(),
                   ),
@@ -265,7 +265,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         size: 20,
                       ),
                     ),
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                     onSubmitted: (_) => _handleRegister(),
                   ),
                   const SizedBox(height: 10),

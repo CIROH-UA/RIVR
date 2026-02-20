@@ -130,7 +130,7 @@ class _LoginPageState extends State<LoginPage> {
                     keyboardType: TextInputType.emailAddress,
                     prefixIcon: CupertinoIcons.mail,
                     validator: _validateEmail,
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                   ),
 
                   // Password field
@@ -157,7 +157,7 @@ class _LoginPageState extends State<LoginPage> {
                         size: 20,
                       ),
                     ),
-                    onChanged: (_) => authProvider.clearMessages(),
+                    onChanged: (_) {},
                   ),
                   const SizedBox(height: 10),
 
