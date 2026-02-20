@@ -281,33 +281,24 @@ class MapPageState extends State<MapPage> {
       _reachSelectionService.setMapboxMap(mapboxMap);
       _controlsService.setMapboxMap(mapboxMap);
 
-      // NEW: Initialize map style based on preferences and theme
+      // Initialize map style based on preferences and theme
       if (_themeProvider != null) {
         await _controlsService.initializeMapStyle(_themeProvider!);
       }
 
-      AppLogger.debug('MapPage', 'Services initialized, loading initial content...');
+      AppLogger.debug('MapPage', 'Services initialized, waiting for style to load...');
 
-      // Load vector tiles and location in parallel (independent operations)
-      final results = await Future.wait<Object?>([
-        _vectorTilesService.loadRiverReaches(),
-        _controlsService.initializeLocation(),
-      ]);
-
-      // Initialize markers after vector tiles (needs correct z-ordering)
-      await _markerService.initializeMarkers(mapboxMap);
-
-      AppLogger.info('MapPage', 'Map setup complete');
-
-      setState(() {
-        _isLoading = false;
+      // Start location initialization (does not depend on style being loaded)
+      _controlsService.initializeLocation().then((position) {
+        // On first visit (no saved camera), fly to device location
+        if (_savedCamera == null && position != null && mounted) {
+          _controlsService.recenterToDeviceLocation();
+          AppLogger.info('MapPage', 'First visit — centered on device location');
+        }
       });
 
-      // On first visit (no saved camera), fly to device location
-      if (_savedCamera == null && results[1] != null) {
-        await _controlsService.recenterToDeviceLocation();
-        AppLogger.info('MapPage', 'First visit — centered on device location');
-      }
+      // Vector tiles, markers, and terrain are loaded in _onStyleLoaded
+      // to ensure the map style is fully ready before adding layers.
     } catch (e) {
       AppLogger.error('MapPage', 'Map creation error', e);
       setState(() {
@@ -318,49 +309,48 @@ class MapPageState extends State<MapPage> {
   }
 
   /// Called automatically when map style finishes loading.
-  /// Reloads vector tiles, markers, and re-applies 3D terrain after any style change.
+  /// Loads vector tiles, markers, and 3D terrain on every style load
+  /// (initial + style changes) so layers are always added to a ready style.
   void _onStyleLoaded(StyleLoadedEventData data) {
-    // Don't reload on the initial style load (already loaded in _onMapCreated)
-    if (!_isLoading) {
-      _reloadVectorTilesAfterStyleChange();
-      _controlsService.applyTerrainIfEnabled();
-    }
+    _loadLayersAfterStyleReady();
   }
 
-  /// Reload vector tiles after style change (async to avoid blocking style load)
-  Future<void> _reloadVectorTilesAfterStyleChange() async {
+  /// Load vector tiles and markers after the style is fully ready.
+  /// Called on every style load (initial and subsequent style changes).
+  Future<void> _loadLayersAfterStyleReady() async {
     try {
-      AppLogger.debug('MapPage', 'Style loaded, reloading vector tiles...');
+      AppLogger.debug('MapPage', 'Style loaded, loading vector tiles...');
 
-      // Reset the vector tiles service state since the style changed
+      // Reset vector tiles state (safe for both initial and subsequent loads)
       _vectorTilesService.dispose();
       _vectorTilesService.setMapboxMap(_mapboxMap!);
 
-      // Reload vector tiles on the new style
+      // Load vector tiles
       await _vectorTilesService.loadRiverReaches();
 
-      AppLogger.info('MapPage', 'Vector tiles automatically reloaded after style change');
-
-      // NEW: Re-initialize marker service to ensure hearts stay on top
-      await _reAddHeartMarkersOnTop();
-    } catch (e) {
-      AppLogger.error('MapPage', 'Error reloading vector tiles after style change', e);
-    }
-  }
-
-  /// Re-add heart markers to ensure they stay on top of vector tiles
-  Future<void> _reAddHeartMarkersOnTop() async {
-    try {
-      // Re-initialize the marker service - this will automatically
-      // re-add all current favorites that were stored in the service
+      // Initialize markers on top of vector tiles (correct z-ordering)
       await _markerService.initializeMarkers(_mapboxMap!);
 
-      AppLogger.debug(
-        'MapPage',
-        'Heart markers re-initialized and will appear on top of vector tiles',
-      );
+      // Apply 3D terrain if enabled
+      _controlsService.applyTerrainIfEnabled();
+
+      // Complete initial loading if this is the first style load
+      if (_isLoading) {
+        setState(() {
+          _isLoading = false;
+        });
+        AppLogger.info('MapPage', 'Map setup complete');
+      } else {
+        AppLogger.info('MapPage', 'Vector tiles reloaded after style change');
+      }
     } catch (e) {
-      AppLogger.error('MapPage', 'Error re-initializing heart markers', e);
+      AppLogger.error('MapPage', 'Error loading layers after style ready', e);
+      if (_isLoading) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load river data: ${e.toString()}';
+        });
+      }
     }
   }
 
