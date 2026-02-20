@@ -202,6 +202,19 @@ The following files contain secrets and are **gitignored**:
 | `ios/Runner/GoogleService-Info.plist` | iOS Firebase config |
 | `ios/Flutter/Secrets.xcconfig` | iOS secrets |
 | `functions/.env` | Cloud Functions environment variables |
+| `android/key.properties` | Android upload keystore path and passwords |
+
+### Android Upload Keystore
+
+The release signing keystore is **not in the repo**. It is backed up at:
+
+**Google Drive (admin@hydromap.com) → `RIVR Release Keys/`**
+
+Contents: `rivr-upload-keystore.jks` + `rivr-keystore-credentials.txt`
+
+To set up signing on a new machine:
+1. Download `rivr-upload-keystore.jks` from the Google Drive folder above
+2. Create `android/key.properties` with the credentials from `rivr-keystore-credentials.txt`
 
 Use `lib/core/config.template.dart` and `android/local.properties.template` as references when setting up a new environment.
 
@@ -213,6 +226,7 @@ flutter run                           # Run on connected device/emulator
 flutter analyze                       # Static analysis
 flutter test                          # Run tests
 flutter build apk --debug             # Debug Android build
+flutter build appbundle --release     # Signed release AAB (requires android/key.properties)
 flutter build ios --no-codesign       # Debug iOS build (no signing)
 cd functions && npm install           # Install Cloud Functions deps
 cd functions && npm run build         # Build Cloud Functions
