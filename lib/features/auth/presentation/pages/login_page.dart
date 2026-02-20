@@ -277,7 +277,7 @@ class _LoginPageState extends State<LoginPage> {
                                               LaunchMode.externalApplication,
                                         ),
                                 ),
-                                const TextSpan(text: '. v1.0.1'),
+                                const TextSpan(text: '. v1.0.0'),
                               ],
                             ),
                             textAlign: TextAlign.center,

@@ -160,14 +160,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
                     ),
                   ),
                   const SizedBox(height: 40),
-                  const Text(
-                    'This is a placeholder for your main app content.\nReplace this with your home page or main navigation.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: CupertinoColors.systemGrey2,
-                    ),
-                  ),
+                  const CupertinoActivityIndicator(),
                 ],
               );
             },

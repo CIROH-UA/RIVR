@@ -365,7 +365,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                               LaunchMode.externalApplication,
                                         ),
                                 ),
-                                const TextSpan(text: '. v1.0.1'),
+                                const TextSpan(text: '. v1.0.0'),
                               ],
                             ),
                             textAlign: TextAlign.center,

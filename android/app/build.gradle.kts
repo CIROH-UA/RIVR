@@ -55,6 +55,9 @@ android {
 
         // Inject Mapbox token from local.properties into AndroidManifest.xml
         manifestPlaceholders["MAPBOX_TOKEN"] = localProperties.getProperty("mapbox.token", "YOUR_MAPBOX_TOKEN_HERE")
+
+        // Inject Mapbox token as string resource (used by Mapbox SDK at runtime)
+        resValue("string", "mapbox_access_token", localProperties.getProperty("mapbox.token", ""))
     }
 
     // Signing configuration for release builds (only if key.properties exists)

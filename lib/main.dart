@@ -1,8 +1,10 @@
 // lib/main.dart
+import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/core/services/app_logger.dart';
+import 'package:rivr/core/services/error_service.dart';
 import 'package:rivr/core/di/service_locator.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
@@ -43,6 +45,19 @@ Future<void> main() async {
 
   // Register all services with dependency injection
   setupServiceLocator();
+
+  // Catch Flutter framework errors (widget build failures, layout errors, etc.)
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    ErrorService.logError(
+        'FlutterError', details.exception, stackTrace: details.stack);
+  };
+
+  // Catch platform/async errors not caught by Flutter framework
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorService.logError('PlatformError', error, stackTrace: stack);
+    return true;
+  };
 
   // ADD: Register background message handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
