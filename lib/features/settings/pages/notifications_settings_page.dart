@@ -117,10 +117,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         if (mounted) {
           context.read<AuthProvider>().refreshUserSettings();
         }
-
-        _showSuccess(
-          value ? 'Notifications enabled' : 'Notifications disabled',
-        );
       } else {
         _showError('Failed to update notification settings');
       }
@@ -160,8 +156,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           _userSettings = updatedSettings;
           _notificationFrequency = frequency;
         });
-
-        _showSuccess('Check frequency updated');
       } else {
         _showError('Failed to update frequency');
       }
@@ -184,24 +178,6 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       context: context,
       builder: (context) => CupertinoAlertDialog(
         title: const Text('Error'),
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('OK'),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSuccess(String message) {
-    if (!mounted) return;
-
-    showCupertinoDialog(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('Success'),
         content: Text(message),
         actions: [
           CupertinoDialogAction(
@@ -245,200 +221,112 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground,
       navigationBar: const CupertinoNavigationBar(
         middle: Text('Notifications'),
+        previousPageTitle: 'Settings',
       ),
       child: SafeArea(
         child: _isLoading
             ? const Center(child: CupertinoActivityIndicator())
             : ListView(
-                padding: const EdgeInsets.all(16),
                 children: [
-                  // Main notification toggle
-                  _buildNotificationToggle(),
+                  const SizedBox(height: 20),
 
-                  const SizedBox(height: 16),
+                  // Section 1 — Flood alerts toggle
+                  _buildToggleSection(),
 
-                  // Frequency picker (only show when notifications enabled)
-                  if (_notificationsEnabled) ...[
+                  // Section 2 — Frequency picker (only when enabled)
+                  if (_notificationsEnabled)
                     NotificationFrequencyPicker(
                       selectedFrequency: _notificationFrequency,
                       onChanged: _updateFrequency,
                       isEnabled: !_isUpdating,
                     ),
-                    const SizedBox(height: 16),
-                  ],
 
-                  const SizedBox(height: 24),
-
-                  // Status section
-                  _buildStatusSection(),
+                  // Section 3 — Monitoring (only when enabled)
+                  if (_notificationsEnabled) _buildMonitoringSection(),
                 ],
               ),
       ),
     );
   }
 
-  Widget _buildNotificationToggle() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: CupertinoColors.secondarySystemGroupedBackground.resolveFrom(
-          context,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: CupertinoColors.systemGrey.resolveFrom(context),
-        ),
+  Widget _buildToggleSection() {
+    return CupertinoListSection.insetGrouped(
+      header: const Text('FLOOD ALERTS'),
+      footer: const Text(
+        'Receive notifications when your favorite rivers exceed flood thresholds.',
       ),
-      child: Row(
-        children: [
-          Icon(
-            _notificationsEnabled
-                ? CupertinoIcons.bell_fill
-                : CupertinoIcons.bell_slash,
-            color: _notificationsEnabled
-                ? CupertinoColors.systemBlue.resolveFrom(context)
-                : CupertinoColors.systemGrey.resolveFrom(context),
-            size: 24,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'River Flood Alerts',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: CupertinoColors.label.resolveFrom(context),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Get notified when your favorite rivers exceed flood thresholds',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
-                  ),
-                ),
-              ],
+      children: [
+        CupertinoListTile(
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _notificationsEnabled
+                  ? CupertinoColors.systemBlue
+                  : CupertinoColors.systemGrey,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              CupertinoIcons.bell_fill,
+              color: CupertinoColors.white,
+              size: 18,
             ),
           ),
-          const SizedBox(width: 12),
-          if (_isUpdating)
-            const CupertinoActivityIndicator()
-          else
-            CupertinoSwitch(
-              value: _notificationsEnabled,
-              onChanged: _toggleNotifications,
-            ),
-        ],
-      ),
+          title: const Text('River Flood Alerts'),
+          trailing: _isUpdating
+              ? const CupertinoActivityIndicator()
+              : CupertinoSwitch(
+                  value: _notificationsEnabled,
+                  onChanged: _toggleNotifications,
+                ),
+        ),
+      ],
     );
   }
 
-  Widget _buildStatusSection() {
-    if (_userSettings == null) return const SizedBox.shrink();
+  Widget _buildMonitoringSection() {
+    final favoriteCount = _userSettings?.favoriteReachIds.length ?? 0;
+    final hasFavorites = favoriteCount > 0;
 
-    final hasToken = _userSettings!.hasValidFCMToken;
-    final isEnabled = _userSettings!.enableNotifications;
-    final favoriteCount = _userSettings!.favoriteReachIds.length;
-
-    // Determine status display
-    final IconData statusIcon;
-    final Color statusColor;
-    final String statusText;
-
-    if (hasToken && isEnabled) {
-      statusIcon = CupertinoIcons.checkmark_circle_fill;
-      statusColor = CupertinoColors.systemGreen.resolveFrom(context);
-      statusText = 'Device registered for notifications';
-    } else if (isEnabled && !hasToken) {
-      statusIcon = CupertinoIcons.clock_fill;
-      statusColor = CupertinoColors.systemOrange.resolveFrom(context);
-      statusText = 'Registering device...';
-    } else {
-      statusIcon = CupertinoIcons.bell_slash_fill;
-      statusColor = CupertinoColors.systemGrey.resolveFrom(context);
-      statusText = 'Notifications disabled';
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: CupertinoColors.secondarySystemBackground.resolveFrom(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Status',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: CupertinoColors.label.resolveFrom(context),
+    return CupertinoListSection.insetGrouped(
+      header: const Text('MONITORING'),
+      footer: !hasFavorites
+          ? const Text(
+              'Add rivers to your favorites to receive flood alerts.',
+            )
+          : null,
+      children: [
+        CupertinoListTile(
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: hasFavorites
+                  ? CupertinoColors.systemRed
+                  : CupertinoColors.systemGrey,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              CupertinoIcons.heart_fill,
+              color: CupertinoColors.white,
+              size: 18,
             ),
           ),
-          const SizedBox(height: 12),
-
-          // Notification status
-          Row(
-            children: [
-              Icon(statusIcon, color: statusColor, size: 16),
-              const SizedBox(width: 8),
-              Text(
-                statusText,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: CupertinoColors.secondaryLabel.resolveFrom(context),
-                ),
-              ),
-            ],
+          title: Text(
+            hasFavorites
+                ? '$favoriteCount favorite river${favoriteCount == 1 ? '' : 's'}'
+                : 'No favorite rivers',
           ),
-
-          const SizedBox(height: 8),
-
-          // Favorites count
-          Row(
-            children: [
-              Icon(
-                favoriteCount > 0
-                    ? CupertinoIcons.heart_fill
-                    : CupertinoIcons.heart,
-                color: favoriteCount > 0
-                    ? CupertinoColors.systemRed.resolveFrom(context)
-                    : CupertinoColors.systemGrey.resolveFrom(context),
-                size: 16,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                favoriteCount > 0
-                    ? '$favoriteCount favorite rivers being monitored'
-                    : 'No favorite rivers to monitor',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: CupertinoColors.secondaryLabel.resolveFrom(context),
-                ),
-              ),
-            ],
+          subtitle: Text(
+            hasFavorites
+                ? 'Being monitored for flood alerts'
+                : 'None being monitored',
           ),
-
-          if (favoriteCount == 0) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Add rivers to your favorites to receive flood alerts',
-              style: TextStyle(
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-                color: CupertinoColors.tertiaryLabel.resolveFrom(context),
-              ),
-            ),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
