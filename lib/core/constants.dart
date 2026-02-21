@@ -45,7 +45,7 @@ class AppConstants {
 
   /// Default map style URL for initial load (before preferences are loaded)
   static const String defaultMapboxStyleUrl =
-      'mapbox://styles/mapbox/streets-v12';
+      'mapbox://styles/mapbox/standard';
 
   /// Get active map style URL based on user preferences and theme
   /// This is the main method the map should use

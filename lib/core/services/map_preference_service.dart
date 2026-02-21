@@ -97,14 +97,10 @@ class MapPreferenceService {
     return preference == MapPreferenceOption.auto;
   }
 
-  /// Get map layer for auto mode based on brightness
+  /// Get map layer for auto mode based on brightness.
+  /// Always returns Standard — lightPreset handles dark appearance.
   static MapBaseLayer _getAutoMapLayer(Brightness brightness) {
-    switch (brightness) {
-      case Brightness.light:
-        return MapBaseLayer.standard; // Changed from MapBaseLayer.streets
-      case Brightness.dark:
-        return MapBaseLayer.dark; // Keep dark theme -> dark map
-    }
+    return MapBaseLayer.standard;
   }
 
   /// Get the map layer that would be used in auto mode (for preview/comparison)

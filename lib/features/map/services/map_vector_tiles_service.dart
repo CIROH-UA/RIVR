@@ -9,6 +9,10 @@ import '../../../core/services/app_logger.dart';
 class MapVectorTilesService {
   MapboxMap? _mapboxMap;
   bool _isLoaded = false;
+  bool _isDark = false;
+
+  static const int _streamColorLight = 0xFF191970; // Midnight blue (for light basemaps)
+  static const int _streamColorDark = 0xFF64B5F6;  // Light blue (for dark basemaps)
 
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
@@ -17,7 +21,7 @@ class MapVectorTilesService {
   }
 
   /// Load river reaches vector tiles
-  Future<void> loadRiverReaches() async {
+  Future<void> loadRiverReaches({bool isDark = false}) async {
     if (_mapboxMap == null) {
       throw Exception('MapboxMap not set');
     }
@@ -28,7 +32,8 @@ class MapVectorTilesService {
     }
 
     try {
-      AppLogger.debug('MapVectorTilesService', 'Loading river reaches vector tiles...');
+      _isDark = isDark;
+      AppLogger.debug('MapVectorTilesService', 'Loading river reaches vector tiles (isDark: $isDark)...');
 
       // Remove existing source/layers if they exist
       await _removeExistingLayers();
@@ -77,6 +82,21 @@ class MapVectorTilesService {
     }
   }
 
+  /// Update stream colors in-place without removing/re-adding layers.
+  /// Used when lightPreset changes (which does not trigger onStyleLoaded).
+  Future<void> updateStreamColors({required bool isDark}) async {
+    if (!_isLoaded || _mapboxMap == null) return;
+    _isDark = isDark;
+    final color = isDark ? _streamColorDark : _streamColorLight;
+    final layerIds = ['streams2-order-1-2', 'streams2-order-3-4', 'streams2-order-5-plus'];
+    for (final layerId in layerIds) {
+      try {
+        await _mapboxMap!.style.setStyleLayerProperty(layerId, 'line-color', color);
+      } catch (_) {}
+    }
+    AppLogger.info('MapVectorTilesService', 'Stream colors updated (isDark: $isDark)');
+  }
+
   /// Remove vector tiles completely from map (for cleanup/switching layers)
   Future<void> removeRiverReaches() async {
     if (_mapboxMap == null || !_isLoaded) return;
@@ -107,31 +127,20 @@ class MapVectorTilesService {
   /// Add styled layers for river reaches (MULTIPLE LAYERS like working code)
   Future<void> _addStyledLayers() async {
     try {
-      // Add the main debug layer
-      // await _mapboxMap!.style.addLayer(
-      //   LineLayer(
-      //     id: 'streams2-debug-correct',
-      //     sourceId: AppConfig.vectorSourceId,
-      //     sourceLayer: AppConfig.vectorSourceLayer, // 'streams2-7jgd8p'
-      //     lineColor: 0xFFFF0000, // Bright red for debug
-      //     lineWidth: 5.0, // Very thick so it's visible
-      //     lineOpacity: 1.0, // Full opacity
-      //   ),
-      // );
-      // print('✅ Added debug layer: streams2-debug-correct');
+      final color = _isDark ? _streamColorDark : _streamColorLight;
 
       // Add stream order layers with proper styling and filters
       await _mapboxMap!.style.addLayer(
         LineLayer(
           id: 'streams2-order-1-2',
           sourceId: AppConfig.vectorSourceId,
-          sourceLayer: AppConfig.vectorSourceLayer, // 'streams2-7jgd8p'
-          lineColor: 0xFF191970, // Midnight blue
+          sourceLayer: AppConfig.vectorSourceLayer,
+          lineColor: color,
           lineWidth: 1.0,
           lineOpacity: 0.8,
           filter: [
             "<=",
-            ["get", "streamOrder"], // Note: it's "streamOrde" not "streamOrder"
+            ["get", "streamOrder"],
             2,
           ],
         ),
@@ -142,8 +151,8 @@ class MapVectorTilesService {
         LineLayer(
           id: 'streams2-order-3-4',
           sourceId: AppConfig.vectorSourceId,
-          sourceLayer: AppConfig.vectorSourceLayer, // 'streams2-7jgd8p'
-          lineColor: 0xFF191970, // Midnight blue
+          sourceLayer: AppConfig.vectorSourceLayer,
+          lineColor: color,
           lineWidth: 2.0,
           lineOpacity: 0.8,
           filter: [
@@ -168,7 +177,7 @@ class MapVectorTilesService {
           id: 'streams2-order-5-plus',
           sourceId: AppConfig.vectorSourceId,
           sourceLayer: AppConfig.vectorSourceLayer,
-          lineColor: 0xFF191970, // Midnight blue
+          lineColor: color,
           lineWidth: 3.5,
           lineOpacity: 0.9,
           filter: [

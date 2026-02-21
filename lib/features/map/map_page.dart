@@ -119,6 +119,10 @@ class MapPageState extends State<MapPage> {
   Future<void> _updateMapForThemeChange() async {
     if (_themeProvider != null) {
       await _controlsService.updateMapForThemeChange(_themeProvider!);
+      // lightPreset change doesn't trigger onStyleLoaded, update stream colors in-place
+      if (_vectorTilesService.isLoaded) {
+        await _vectorTilesService.updateStreamColors(isDark: _controlsService.isMapDark);
+      }
     }
   }
 
@@ -321,12 +325,17 @@ class MapPageState extends State<MapPage> {
     try {
       AppLogger.debug('MapPage', 'Style loaded, loading vector tiles...');
 
+      // Apply lightPreset for Standard style (handles initial load + basemap changes)
+      if (_themeProvider != null) {
+        await _controlsService.applyLightPreset(_themeProvider!);
+      }
+
       // Reset vector tiles state (safe for both initial and subsequent loads)
       _vectorTilesService.dispose();
       _vectorTilesService.setMapboxMap(_mapboxMap!);
 
-      // Load vector tiles
-      await _vectorTilesService.loadRiverReaches();
+      // Load vector tiles with appropriate stream color
+      await _vectorTilesService.loadRiverReaches(isDark: _controlsService.isMapDark);
 
       // Initialize markers on top of vector tiles (correct z-ordering)
       await _markerService.initializeMarkers(_mapboxMap!);

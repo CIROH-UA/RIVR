@@ -13,15 +13,18 @@ enum MapBaseLayer {
     'Satellite Streets',
     'mapbox://styles/mapbox/satellite-streets-v12',
   ),
-  outdoors('Outdoors', 'mapbox://styles/mapbox/outdoors-v12'),
-  light('Light', 'mapbox://styles/mapbox/light-v11', supports3D: false),
-  dark('Dark', 'mapbox://styles/mapbox/dark-v11', supports3D: false);
+  outdoors('Outdoors', 'mapbox://styles/mapbox/outdoors-v12');
 
-  const MapBaseLayer(this.displayName, this.styleUrl, {this.supports3D = true});
+  const MapBaseLayer(this.displayName, this.styleUrl);
 
   final String displayName;
   final String styleUrl;
-  final bool supports3D;
+
+  /// All remaining basemaps support 3D terrain.
+  bool get supports3D => true;
+
+  /// Whether this basemap has an inherently dark background (satellite imagery)
+  bool get hasDarkBackground => this == satellite || this == satelliteStreets;
 
   IconData get icon {
     switch (this) {
@@ -35,10 +38,6 @@ enum MapBaseLayer {
         return CupertinoIcons.location;
       case MapBaseLayer.outdoors:
         return CupertinoIcons.tree;
-      case MapBaseLayer.light:
-        return CupertinoIcons.sun_max;
-      case MapBaseLayer.dark:
-        return CupertinoIcons.moon;
     }
   }
 }

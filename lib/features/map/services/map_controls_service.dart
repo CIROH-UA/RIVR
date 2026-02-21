@@ -1,5 +1,6 @@
 // lib/features/map/services/map_controls_service.dart
 
+import 'dart:ui' show Brightness;
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,8 @@ class MapControlsService {
   MapBaseLayer _currentLayer = MapBaseLayer.standard;
   geo.Position? _lastKnownLocation;
   bool _is3DEnabled = false;
+  bool _isToggling3D = false;
+  String _currentLightPreset = 'day';
 
   // Default camera settings (you can adjust these based on your app's needs)
   static const double _defaultZoom = 14.0;
@@ -27,8 +30,27 @@ class MapControlsService {
   bool get is3DEnabled => _is3DEnabled;
   bool get supports3D => _currentLayer.supports3D;
 
+  /// Whether the current map appearance has a dark background.
+  bool get isMapDark {
+    if (_currentLayer.hasDarkBackground) return true;
+    if (_currentLayer == MapBaseLayer.standard && _currentLightPreset == 'night') return true;
+    return false;
+  }
+
   void setMapboxMap(MapboxMap mapboxMap) {
     _mapboxMap = mapboxMap;
+  }
+
+  /// Apply lightPreset on Standard style based on theme brightness.
+  /// No-op for non-Standard layers.
+  Future<void> applyLightPreset(ThemeProvider themeProvider) async {
+    if (_currentLayer != MapBaseLayer.standard || _mapboxMap == null) return;
+    final preset = themeProvider.currentBrightness == Brightness.dark ? 'night' : 'day';
+    if (preset != _currentLightPreset) {
+      await _mapboxMap!.style.setStyleImportConfigProperty("basemap", "lightPreset", preset);
+      _currentLightPreset = preset;
+      AppLogger.info('MapControlsService', 'Light preset set to: $preset');
+    }
   }
 
   /// Initialize map with correct style based on theme and preferences
@@ -54,16 +76,16 @@ class MapControlsService {
         AppLogger.info('MapControlsService', 'Map initialized with layer: ${activeLayer.displayName}');
       }
 
-      // Apply 3D terrain if enabled (independent of layer)
-      if (_is3DEnabled) {
-        await _enable3DTerrain();
-      }
+      // 3D terrain is applied via onStyleLoaded → _loadLayersAfterStyleReady
+      // → applyTerrainIfEnabled(), not here, to ensure the style is fully ready.
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error initializing map style', e);
     }
   }
 
-  /// Update map style when theme changes (auto mode only)
+  /// Update map appearance when theme changes.
+  /// For Standard style, updates lightPreset (does NOT trigger onStyleLoaded).
+  /// Non-Standard basemaps don't change with theme.
   Future<void> updateMapForThemeChange(ThemeProvider themeProvider) async {
     if (_mapboxMap == null) {
       AppLogger.error('MapControlsService', 'Map not initialized');
@@ -71,25 +93,10 @@ class MapControlsService {
     }
 
     try {
-      // Only update if in auto mode
-      final isAuto = await MapPreferenceService.isAutoMode();
-      if (!isAuto) {
-        AppLogger.debug('MapControlsService', 'Map in manual mode, skipping auto theme update');
-        return;
+      if (_currentLayer == MapBaseLayer.standard) {
+        await applyLightPreset(themeProvider);
       }
-
-      // Get the active layer for current theme
-      final activeLayer = await MapPreferenceService.getActiveMapLayer(
-        themeProvider,
-      );
-
-      // Apply the style if it's different from current
-      if (activeLayer != _currentLayer) {
-        await _mapboxMap!.loadStyleURI(activeLayer.styleUrl);
-        _currentLayer = activeLayer;
-        // 3D terrain will be re-applied via onStyleLoaded → applyTerrainIfEnabled()
-        AppLogger.info('MapControlsService', 'Map auto-updated for theme: ${activeLayer.displayName}');
-      }
+      // Non-Standard basemaps don't change with theme
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error updating map for theme', e);
     }
@@ -112,6 +119,7 @@ class MapControlsService {
       // Update the map style
       await _mapboxMap!.loadStyleURI(newLayer.styleUrl);
       _currentLayer = newLayer;
+      _currentLightPreset = 'day'; // Reset; actual preset applied in _loadLayersAfterStyleReady
       // 3D terrain will be re-applied via onStyleLoaded → applyTerrainIfEnabled()
 
       // Save as manual preference (switches to manual mode)
@@ -123,17 +131,23 @@ class MapControlsService {
     }
   }
 
-  /// Toggle 3D terrain on/off (public method for UI button)
+  /// Toggle 3D terrain on/off (public method for UI button).
+  /// Adds/removes terrain directly — no style reload needed.
+  /// Guard prevents concurrent toggles from creating race conditions.
   Future<void> toggle3DTerrain() async {
-    if (_is3DEnabled) {
-      await _disable3DTerrain();
-      await _save3DTerrainPreference(false);
-    } else {
-      _is3DEnabled = true;
-      await _save3DTerrainPreference(true);
-      // Reload the current style so Standard's 3D buildings activate correctly.
-      // Terrain will be applied via onStyleLoaded → applyTerrainIfEnabled().
-      await _mapboxMap?.loadStyleURI(_currentLayer.styleUrl);
+    if (_isToggling3D) return;
+    _isToggling3D = true;
+    try {
+      if (_is3DEnabled) {
+        await _disable3DTerrain();
+        await _save3DTerrainPreference(false);
+      } else {
+        _is3DEnabled = true;
+        await _save3DTerrainPreference(true);
+        await _enable3DTerrain();
+      }
+    } finally {
+      _isToggling3D = false;
     }
   }
 
@@ -173,22 +187,25 @@ class MapControlsService {
     if (_mapboxMap == null) return;
 
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Add terrain source (may already exist after a style reload)
+      try {
+        final terrainSource = RasterDemSource(
+          id: 'mapbox-dem',
+          url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+          tileSize: 512,
+          maxzoom: 14,
+        );
+        await _mapboxMap!.style.addSource(terrainSource);
+      } catch (_) {
+        // Source already exists — safe to continue
+      }
 
-      final terrainSource = RasterDemSource(
-        id: 'mapbox-dem',
-        url: "mapbox://mapbox.mapbox-terrain-dem-v1",
-        tileSize: 512,
-        maxzoom: 14,
-      );
-
-      await _mapboxMap!.style.addSource(terrainSource);
       await _mapboxMap!.style.setStyleTerrainProperty("source", "mapbox-dem");
       await _mapboxMap!.style.setStyleTerrainProperty("exaggeration", 1.5);
 
-      // Tilt camera for 3D effect
+      // Tilt camera for 3D effect (fire-and-forget so toggle releases quickly)
       final currentCamera = await _mapboxMap!.getCameraState();
-      await _mapboxMap!.flyTo(
+      _mapboxMap!.flyTo(
         CameraOptions(
           center: currentCamera.center,
           zoom: currentCamera.zoom,
@@ -218,9 +235,9 @@ class MapControlsService {
         // Source may not exist if terrain was never fully enabled
       }
 
-      // Reset camera to flat view
+      // Reset camera to flat view (fire-and-forget so toggle releases quickly)
       final currentCamera = await _mapboxMap!.getCameraState();
-      await _mapboxMap!.flyTo(
+      _mapboxMap!.flyTo(
         CameraOptions(
           center: currentCamera.center,
           zoom: currentCamera.zoom,
@@ -245,8 +262,16 @@ class MapControlsService {
       // Enable auto mode in preferences
       await MapPreferenceService.enableAutoMode();
 
-      // Update map to match current theme
-      await updateMapForThemeChange(themeProvider);
+      // Auto mode always uses Standard — switch if needed
+      final autoLayer = await MapPreferenceService.getActiveMapLayer(themeProvider);
+      if (autoLayer != _currentLayer) {
+        await _mapboxMap?.loadStyleURI(autoLayer.styleUrl);
+        _currentLayer = autoLayer;
+        _currentLightPreset = 'day'; // Reset; actual preset applied after style loads
+      } else {
+        // Already on Standard, just update lightPreset
+        await applyLightPreset(themeProvider);
+      }
 
       AppLogger.info('MapControlsService', 'Map set to auto mode');
     } catch (e) {
