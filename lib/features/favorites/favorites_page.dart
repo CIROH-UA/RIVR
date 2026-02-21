@@ -892,15 +892,18 @@ class _FavoritesPageState extends State<FavoritesPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w400,
+            Flexible(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: CupertinoColors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
             Icon(icon, color: CupertinoColors.white, size: 22),
           ],
         ),
