@@ -232,3 +232,5 @@ cd functions && npm install           # Install Cloud Functions deps
 cd functions && npm run build         # Build Cloud Functions
 firebase deploy --only functions      # Deploy Cloud Functions
 ```
+
+**Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
