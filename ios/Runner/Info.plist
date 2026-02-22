@@ -37,6 +37,8 @@
 	<string>$(MAPBOX_ACCESS_TOKEN)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app needs camera access to take photos for custom backgrounds.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs access to your location to show your position on the map and help you navigate to nearby streams.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>This app needs access to your location to show your position on the map.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
