@@ -1,6 +1,5 @@
 // lib/features/map/services/map_controls_service.dart
 
-import 'dart:ui' show Brightness;
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,25 +30,23 @@ class MapControlsService {
   bool get supports3D => _currentLayer.supports3D;
 
   /// Whether the current map appearance has a dark background.
+  /// Standard basemap always uses light preset, so only satellite layers are dark.
   bool get isMapDark {
-    if (_currentLayer.hasDarkBackground) return true;
-    if (_currentLayer == MapBaseLayer.standard && _currentLightPreset == 'night') return true;
-    return false;
+    return _currentLayer.hasDarkBackground;
   }
 
   void setMapboxMap(MapboxMap mapboxMap) {
     _mapboxMap = mapboxMap;
   }
 
-  /// Apply lightPreset on Standard style based on theme brightness.
-  /// No-op for non-Standard layers.
+  /// Apply lightPreset on Standard style.
+  /// Always forces 'day' so the Standard basemap stays light regardless of app theme.
   Future<void> applyLightPreset(ThemeProvider themeProvider) async {
     if (_currentLayer != MapBaseLayer.standard || _mapboxMap == null) return;
-    final preset = themeProvider.currentBrightness == Brightness.dark ? 'night' : 'day';
-    if (preset != _currentLightPreset) {
-      await _mapboxMap!.style.setStyleImportConfigProperty("basemap", "lightPreset", preset);
-      _currentLightPreset = preset;
-      AppLogger.info('MapControlsService', 'Light preset set to: $preset');
+    if (_currentLightPreset != 'day') {
+      await _mapboxMap!.style.setStyleImportConfigProperty("basemap", "lightPreset", "day");
+      _currentLightPreset = 'day';
+      AppLogger.info('MapControlsService', 'Light preset set to: day');
     }
   }
 
@@ -84,22 +81,11 @@ class MapControlsService {
   }
 
   /// Update map appearance when theme changes.
-  /// For Standard style, updates lightPreset (does NOT trigger onStyleLoaded).
-  /// Non-Standard basemaps don't change with theme.
+  /// Standard basemap always stays light, so this is a no-op for it.
+  /// Non-Standard basemaps don't change with theme either.
   Future<void> updateMapForThemeChange(ThemeProvider themeProvider) async {
-    if (_mapboxMap == null) {
-      AppLogger.error('MapControlsService', 'Map not initialized');
-      return;
-    }
-
-    try {
-      if (_currentLayer == MapBaseLayer.standard) {
-        await applyLightPreset(themeProvider);
-      }
-      // Non-Standard basemaps don't change with theme
-    } catch (e) {
-      AppLogger.error('MapControlsService', 'Error updating map for theme', e);
-    }
+    // No basemap changes on theme switch — Standard is always light,
+    // and other basemaps have fixed styles.
   }
 
   /// Change map base layer (manual selection by user)

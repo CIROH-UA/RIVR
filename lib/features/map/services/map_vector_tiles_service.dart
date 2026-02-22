@@ -9,10 +9,8 @@ import '../../../core/services/app_logger.dart';
 class MapVectorTilesService {
   MapboxMap? _mapboxMap;
   bool _isLoaded = false;
-  bool _isDark = false;
 
-  static const int _streamColorLight = 0xFF191970; // Midnight blue (for light basemaps)
-  static const int _streamColorDark = 0xFF64B5F6;  // Light blue (for dark basemaps)
+  static const int _streamColor = 0xFF191970; // Midnight blue
 
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
@@ -21,7 +19,7 @@ class MapVectorTilesService {
   }
 
   /// Load river reaches vector tiles
-  Future<void> loadRiverReaches({bool isDark = false}) async {
+  Future<void> loadRiverReaches() async {
     if (_mapboxMap == null) {
       throw Exception('MapboxMap not set');
     }
@@ -32,8 +30,7 @@ class MapVectorTilesService {
     }
 
     try {
-      _isDark = isDark;
-      AppLogger.debug('MapVectorTilesService', 'Loading river reaches vector tiles (isDark: $isDark)...');
+      AppLogger.debug('MapVectorTilesService', 'Loading river reaches vector tiles...');
 
       // Remove existing source/layers if they exist
       await _removeExistingLayers();
@@ -82,21 +79,6 @@ class MapVectorTilesService {
     }
   }
 
-  /// Update stream colors in-place without removing/re-adding layers.
-  /// Used when lightPreset changes (which does not trigger onStyleLoaded).
-  Future<void> updateStreamColors({required bool isDark}) async {
-    if (!_isLoaded || _mapboxMap == null) return;
-    _isDark = isDark;
-    final color = isDark ? _streamColorDark : _streamColorLight;
-    final layerIds = ['streams2-order-1-2', 'streams2-order-3-4', 'streams2-order-5-plus'];
-    for (final layerId in layerIds) {
-      try {
-        await _mapboxMap!.style.setStyleLayerProperty(layerId, 'line-color', color);
-      } catch (_) {}
-    }
-    AppLogger.info('MapVectorTilesService', 'Stream colors updated (isDark: $isDark)');
-  }
-
   /// Remove vector tiles completely from map (for cleanup/switching layers)
   Future<void> removeRiverReaches() async {
     if (_mapboxMap == null || !_isLoaded) return;
@@ -127,7 +109,7 @@ class MapVectorTilesService {
   /// Add styled layers for river reaches (MULTIPLE LAYERS like working code)
   Future<void> _addStyledLayers() async {
     try {
-      final color = _isDark ? _streamColorDark : _streamColorLight;
+      final color = _streamColor;
 
       // Add stream order layers with proper styling and filters
       await _mapboxMap!.style.addLayer(
