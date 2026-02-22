@@ -151,7 +151,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
     return CupertinoNavigationBar(
       // No middle title anymore
       trailing: CupertinoButton(
-        key: _settingsButtonKey,
+        key: (_isTourActive || !_hasShownFavoritesTour) ? _settingsButtonKey : null,
         padding: EdgeInsets.zero,
         onPressed: _showSettingsMenu,
         child: const Icon(CupertinoIcons.ellipsis),
@@ -456,7 +456,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                   _maybeShowSearchTip(favoritesProvider);
                 }
                 return CupertinoButton(
-                  key: _searchIconKey,
+                  key: (_isTourActive || !_hasShownSearchTip) ? _searchIconKey : null,
                   padding: EdgeInsets.zero,
                   onPressed: _toggleSearch,
                   child: Icon(
@@ -549,7 +549,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       itemBuilder: (context, index) {
         final favorite = favorites[index];
         return FavoriteRiverCard(
-          key: index == 0 ? _firstCardKey : ValueKey(favorite.reachId),
+          key: index == 0 && (_isTourActive || !_hasShownFavoritesTour) ? _firstCardKey : ValueKey(favorite.reachId),
           favorite: favorite,
           onTap: () => _navigateToForecast(favorite.reachId),
           onRename: () => _showRenameDialog(favorite),
@@ -717,11 +717,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
           // Check if Phase B should follow immediately
           if (!_hasShownSearchTip && provider.shouldShowSearch) {
             _maybeShowSearchTip(provider);
+          } else if (mounted) {
+            setState(() {});
           }
         },
         onSkip: () {
           CoachMarkService.completeFavoritesTour();
           _isTourActive = false;
+          if (mounted) setState(() {});
           return true;
         },
       ).show(context: context);
@@ -754,10 +757,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
         onFinish: () {
           CoachMarkService.completeSearchTip();
           _isTourActive = false;
+          if (mounted) setState(() {});
         },
         onSkip: () {
           CoachMarkService.completeSearchTip();
           _isTourActive = false;
+          if (mounted) setState(() {});
           return true;
         },
       ).show(context: context);
