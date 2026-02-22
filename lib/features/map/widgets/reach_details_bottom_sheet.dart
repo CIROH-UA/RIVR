@@ -469,6 +469,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       flowCategory: _flowCategory,
       latitude: _latitude,
       longitude: _longitude,
+      currentFlow: _currentFlow,
     );
   }
 

@@ -20,6 +20,7 @@ class ReachActionButtons extends StatefulWidget {
   final String? flowCategory;
   final double? latitude;
   final double? longitude;
+  final double? currentFlow;
 
   const ReachActionButtons({
     super.key,
@@ -30,6 +31,7 @@ class ReachActionButtons extends StatefulWidget {
     this.flowCategory,
     this.latitude,
     this.longitude,
+    this.currentFlow,
   });
 
   @override
@@ -140,6 +142,7 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
             latitude: widget.latitude!,
             longitude: widget.longitude!,
             riverName: widget.riverName,
+            currentFlow: widget.currentFlow,
           );
         } else {
           success = await favoritesProvider.addFavorite(reachId);

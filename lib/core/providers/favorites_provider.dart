@@ -181,6 +181,7 @@ class FavoritesProvider with ChangeNotifier {
     required double latitude,
     required double longitude,
     String? riverName,
+    double? currentFlow,
   }) async {
     try {
       // Check if already exists using O(1) lookup
@@ -196,41 +197,21 @@ class FavoritesProvider with ChangeNotifier {
       _sessionData[reachId] = (_sessionData[reachId] ?? FavoriteSessionData.empty).copyWith(
         coordinates: (lat: latitude, lon: longitude),
         riverName: riverName,
+        lastKnownFlow: currentFlow,
+        flowUnit: currentFlow != null ? _unitService.currentFlowUnit : null,
+        lastUpdated: currentFlow != null ? DateTime.now() : null,
       );
 
       // Reload from storage to get updated list
       await _loadFavoritesFromStorage();
 
-      // Load remaining data in background if needed
-      if (riverName == null) {
-        _loadFavoriteRiverNameInBackground(reachId);
-      }
+      // Load return periods and remaining data in background
+      _loadFavoriteDataInBackground(reachId);
 
       return true;
     } catch (e) {
       _setError(e.toString());
       return false;
-    }
-  }
-
-  /// Load only river name in background (lightweight)
-  Future<void> _loadFavoriteRiverNameInBackground(String reachId) async {
-    try {
-      // Use the lightweight overview data loading
-      final forecast = await _forecastService.loadOverviewData(reachId);
-
-      // Store in session data
-      _sessionData[reachId] = (_sessionData[reachId] ?? FavoriteSessionData.empty).copyWith(
-        riverName: forecast.reach.riverName,
-      );
-
-      notifyListeners();
-    } catch (e) {
-      AppLogger.warning(
-        'FavoritesProvider',
-        'Failed to load river name for $reachId: $e',
-      );
-      // This is not critical, so don't throw
     }
   }
 
