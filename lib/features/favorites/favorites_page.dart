@@ -903,7 +903,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
+            const Spacer(),
             Icon(icon, color: CupertinoColors.white, size: 22),
           ],
         ),
