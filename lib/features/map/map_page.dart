@@ -43,6 +43,7 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
   ThemeProvider? _themeProvider;
+  Brightness? _lastBrightness;
 
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
@@ -64,21 +65,18 @@ class MapPageState extends State<MapPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // Set up theme listener
     final themeProvider = Provider.of<ThemeProvider>(context);
+    _themeProvider = themeProvider;
 
-    // If theme provider changed, update map
-    if (_themeProvider != themeProvider) {
-      final oldTheme = _themeProvider?.currentBrightness;
-      _themeProvider = themeProvider;
-
-      // Update map if theme changed and map is ready
-      if (oldTheme != null &&
-          oldTheme != themeProvider.currentBrightness &&
-          _mapboxMap != null) {
-        _updateMapForThemeChange();
-      }
+    // Compare brightness values instead of provider references, since
+    // Provider always returns the same ChangeNotifier instance.
+    final newBrightness = themeProvider.currentBrightness;
+    if (_lastBrightness != null &&
+        _lastBrightness != newBrightness &&
+        _mapboxMap != null) {
+      _updateMapForThemeChange();
     }
+    _lastBrightness = newBrightness;
   }
 
   /// Load last camera position from storage before first build

@@ -81,6 +81,12 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _themeProvider = ThemeProvider();
+    // Set system brightness immediately so the first build has the correct
+    // value. _initializeServices is async, so without this the ThemeProvider
+    // defaults to Brightness.light until the async call completes.
+    _themeProvider.updateSystemBrightness(
+      WidgetsBinding.instance.platformDispatcher.platformBrightness,
+    );
     WidgetsBinding.instance.addObserver(this);
     _initializeServices();
 
