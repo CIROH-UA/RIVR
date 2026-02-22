@@ -11,10 +11,9 @@ class FloodCategoriesInfoSheet extends StatelessWidget {
 
   const FloodCategoriesInfoSheet({super.key, this.returnPeriods});
 
-  // Get current flow units from preference service
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   // Convert return period value to user's preferred unit

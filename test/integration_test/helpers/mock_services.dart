@@ -975,7 +975,7 @@ class MockFlowUnitPreferenceService implements IFlowUnitPreferenceService {
       convertFlow(value, _currentUnit, toUnit);
 
   @override
-  String getDisplayUnit() => _currentUnit;
+  String getDisplayUnit() => _currentUnit == 'CMS' ? 'm³/s' : 'ft³/s';
 
   @override
   bool get isCFS => _currentUnit == 'CFS';

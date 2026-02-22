@@ -56,7 +56,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
   List<ChartData> _chartData =
       []; // Keep for backward compatibility (mean line)
   List<ChartDataPoint> _forecastData = [];
-  String _lastKnownUnit = 'CFS'; // Track unit changes
+  String _lastKnownUnit = 'ft³/s'; // Track unit changes
 
   // Store ensemble data for multiple series
   Map<String, List<ChartData>> _ensembleChartData = {};
@@ -79,10 +79,9 @@ class _InteractiveChartState extends State<InteractiveChart> {
   late ZoomPanBehavior _zoomPanBehavior;
   late TooltipBehavior _tooltipBehavior;
 
-  // Get current flow units from preference service
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   // REMOVED: _convertFlowToCurrentUnit() - no longer needed!

@@ -41,10 +41,10 @@ void main() {
         expect(service.currentFlowUnit, 'CFS');
       });
 
-      test('getDisplayUnit returns current unit', () {
-        expect(service.getDisplayUnit(), 'CFS');
+      test('getDisplayUnit returns display label', () {
+        expect(service.getDisplayUnit(), 'ft³/s');
         service.setFlowUnit('CMS');
-        expect(service.getDisplayUnit(), 'CMS');
+        expect(service.getDisplayUnit(), 'm³/s');
       });
     });
 

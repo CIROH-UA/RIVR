@@ -44,10 +44,9 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
     super.dispose();
   }
 
-  // Get current flow units from preference service
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final unitService = GetIt.I<IFlowUnitPreferenceService>();
-    return unitService.currentFlowUnit; // Returns 'CFS' or 'CMS' directly
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   // Calculate flow category using already-converted values

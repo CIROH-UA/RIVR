@@ -228,8 +228,8 @@ void main() {
       expect(find.text('Sign Out'), findsOneWidget);
 
       // Flow unit toggle visible
-      expect(find.text('CFS'), findsOneWidget);
-      expect(find.text('CMS'), findsOneWidget);
+      expect(find.text('ft³/s'), findsOneWidget);
+      expect(find.text('m³/s'), findsOneWidget);
 
       // User name displayed
       expect(find.text('Test User'), findsOneWidget);

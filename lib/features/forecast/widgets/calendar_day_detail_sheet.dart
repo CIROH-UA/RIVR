@@ -21,10 +21,9 @@ class CalendarDayDetailSheet extends StatefulWidget {
 }
 
 class _CalendarDayDetailSheetState extends State<CalendarDayDetailSheet> {
-  // Get current flow units from preference service
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   @override

@@ -54,12 +54,11 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
   int? _expandedIndex;
   bool _isProcessing = false;
   String? _errorMessage;
-  String _lastKnownUnit = 'CFS'; // Track unit changes for UI rebuild only
+  String _lastKnownUnit = 'ft³/s'; // Track unit changes for UI rebuild only
 
-  // Get current flow units from preference service
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   @override

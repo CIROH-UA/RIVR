@@ -34,7 +34,7 @@ class HorizontalFlowTimeline extends StatefulWidget {
 class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
   late FlowTimelineViewMode _viewMode;
   ScrollController? _scrollController;
-  String _lastKnownUnit = 'CFS';
+  String _lastKnownUnit = 'ft³/s';
 
   @override
   void initState() {
@@ -50,10 +50,9 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     super.dispose();
   }
 
-  // Get current flow units from preference service (string-based)
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   // REMOVED: _convertFlowToCurrentUnit() - no longer needed!

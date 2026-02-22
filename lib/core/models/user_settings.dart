@@ -5,6 +5,7 @@ enum FlowUnit {
   cms;
 
   String get value => name;
+  String get displayLabel => this == cfs ? 'ft³/s' : 'm³/s';
 }
 
 enum TimeFormat {

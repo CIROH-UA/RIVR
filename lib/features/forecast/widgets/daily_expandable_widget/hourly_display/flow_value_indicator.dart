@@ -32,7 +32,7 @@ class FlowValueIndicator extends StatelessWidget {
     this.flowCategory,
     this.size = 80.0,
     this.borderColor,
-    this.units = 'CFS', // Default to CFS for backward compatibility
+    this.units = 'ft³/s',
   });
 
   @override
@@ -248,7 +248,7 @@ class CompactFlowValueIndicator extends StatelessWidget {
     this.flowValue,
     this.time,
     this.flowCategory,
-    this.units = 'CFS', // Default to CFS for backward compatibility
+    this.units = 'ft³/s',
   });
 
   @override
@@ -275,7 +275,7 @@ class LargeFlowValueIndicator extends StatelessWidget {
     this.flowValue,
     this.time,
     this.flowCategory,
-    this.units = 'CFS', // Default to CFS for backward compatibility
+    this.units = 'ft³/s',
   });
 
   @override

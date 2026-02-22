@@ -446,14 +446,14 @@ class _ForecastDetailTemplateState extends State<ForecastDetailTemplate> {
 
     // Get current unit for display
     final unitService = GetIt.I<IFlowUnitPreferenceService>();
-    final currentUnit = unitService.currentFlowUnit;
+    final displayUnit = unitService.getDisplayUnit();
 
     return Column(
       children: [
         _buildMetricRow(
           'Peak Flow',
           peakFlow != null
-              ? '${peakFlow.toStringAsFixed(0)} $currentUnit'
+              ? '${peakFlow.toStringAsFixed(0)} $displayUnit'
               : 'N/A',
           CupertinoIcons.arrow_up,
         ),

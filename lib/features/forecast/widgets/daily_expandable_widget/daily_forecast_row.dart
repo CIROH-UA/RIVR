@@ -61,14 +61,11 @@ class _DailyForecastRowState extends State<DailyForecastRow>
   late bool _isExpanded;
   late AnimationController _animationController;
   late Animation<double> _expandAnimation;
-  String _lastKnownUnit = 'CFS'; // ✅ NEW: Track unit changes
+  String _lastKnownUnit = 'ft³/s';
 
-  // ✅ FIXED: Get current flow units from preference service (string-based)
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS'
-        ? 'CMS'
-        : 'CFS'; // ✅ Fixed: Use strings consistently
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   @override

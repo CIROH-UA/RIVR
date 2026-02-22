@@ -96,9 +96,9 @@ class FlowUnitPreferenceService implements IFlowUnitPreferenceService {
     return convertFlow(value, _currentFlowUnit, toUnit);
   }
 
-  /// Get display unit for UI elements
+  /// Get display unit label for UI elements (e.g. 'ft³/s' or 'm³/s')
   @override
-  String getDisplayUnit() => _currentFlowUnit;
+  String getDisplayUnit() => isCFS ? 'ft³/s' : 'm³/s';
 
   /// Check if current unit is CFS
   @override

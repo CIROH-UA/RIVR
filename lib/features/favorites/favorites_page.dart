@@ -32,7 +32,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
   String _searchQuery = '';
   bool _isRefreshing = false;
   bool _showSearch = false; // New state for search visibility
-  String _selectedFlowUnit = 'CFS';
+  String _selectedFlowUnit = 'ft³/s';
   bool _notificationBannerDismissed = true; // Default hidden until loaded
 
   static const _bannerDismissedKey = 'notification_banner_dismissed';
@@ -85,9 +85,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         );
         if (userSettings != null && mounted) {
           setState(() {
-            _selectedFlowUnit = userSettings.preferredFlowUnit == FlowUnit.cms
-                ? 'CMS'
-                : 'CFS';
+            _selectedFlowUnit = userSettings.preferredFlowUnit.displayLabel;
           });
         }
       }
@@ -606,11 +604,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
       if (userId != null) {
         // Update user settings with new flow unit
-        final flowUnit = value == 'CMS' ? FlowUnit.cms : FlowUnit.cfs;
+        final flowUnit = value == 'm³/s' ? FlowUnit.cms : FlowUnit.cfs;
 
         await GetIt.I<IUserSettingsService>().updateFlowUnit(userId, flowUnit);
         if (!mounted) return;
-        GetIt.I<IFlowUnitPreferenceService>().setFlowUnit(value);
+        GetIt.I<IFlowUnitPreferenceService>().setFlowUnit(
+          flowUnit == FlowUnit.cms ? 'CMS' : 'CFS',
+        );
 
         // Clear unit-dependent caches for BOTH providers
         final reachProvider = context.read<ReachDataProvider>();
@@ -623,7 +623,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         // Revert UI state if no user
         if (mounted) {
           setState(() {
-            _selectedFlowUnit = _selectedFlowUnit == 'CFS' ? 'CMS' : 'CFS';
+            _selectedFlowUnit = _selectedFlowUnit == 'ft³/s' ? 'm³/s' : 'ft³/s';
           });
         }
       }
@@ -631,7 +631,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       // Revert UI state on error
       if (mounted) {
         setState(() {
-          _selectedFlowUnit = _selectedFlowUnit == 'CFS' ? 'CMS' : 'CFS';
+          _selectedFlowUnit = _selectedFlowUnit == 'ft³/s' ? 'm³/s' : 'ft³/s';
         });
 
         // Show error to user
@@ -777,13 +777,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
               }
             },
             children: const {
-              'CFS': Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Text('CFS', style: TextStyle(fontSize: 13)),
+              'ft³/s': Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text('ft³/s', style: TextStyle(fontSize: 13)),
               ),
-              'CMS': Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Text('CMS', style: TextStyle(fontSize: 13)),
+              'm³/s': Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text('m³/s', style: TextStyle(fontSize: 13)),
               ),
             },
           ),
@@ -892,15 +892,18 @@ class _FavoritesPageState extends State<FavoritesPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Row(
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w400,
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  color: CupertinoColors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
+            const SizedBox(width: 8),
             Icon(icon, color: CupertinoColors.white, size: 22),
           ],
         ),

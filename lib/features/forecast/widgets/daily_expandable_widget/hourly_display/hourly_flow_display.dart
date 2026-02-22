@@ -52,10 +52,9 @@ class _HourlyFlowDisplayState extends State<HourlyFlowDisplay> {
   double? _selectedFlow;
   String? _selectedCategory;
 
-  // Get current flow units
+  // Get current flow unit display label from preference service
   String _getCurrentFlowUnit() {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
-    return currentUnit == 'CMS' ? 'CMS' : 'CFS';
+    return GetIt.I<IFlowUnitPreferenceService>().getDisplayUnit();
   }
 
   @override
