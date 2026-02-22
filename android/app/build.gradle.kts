@@ -29,7 +29,7 @@ plugins {
 android {
     namespace = "com.hydromap.rivr"
     compileSdk = 36 // Updated for latest Firebase and notification support
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         // Enable core library desugaring for flutter_local_notifications and modern Java features

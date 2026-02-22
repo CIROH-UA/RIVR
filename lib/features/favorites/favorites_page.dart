@@ -11,6 +11,9 @@ import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
+import 'package:rivr/features/favorites/services/coach_mark_service.dart';
+import 'package:rivr/features/favorites/services/coach_mark_targets.dart';
 import 'package:rivr/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/features/favorites/widgets/favorites_search_bar.dart';
 import 'package:rivr/features/favorites/widgets/notification_prompt_banner.dart';
@@ -37,6 +40,16 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
   static const _bannerDismissedKey = 'notification_banner_dismissed';
 
+  // Coach mark keys
+  final GlobalKey _settingsButtonKey = GlobalKey();
+  final GlobalKey _firstCardKey = GlobalKey();
+  final GlobalKey _searchIconKey = GlobalKey();
+
+  // Coach mark state
+  bool _hasShownFavoritesTour = true; // Default true until loaded
+  bool _hasShownSearchTip = true;
+  bool _isTourActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +58,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       _initializeFavorites();
       _loadUserFlowUnitPreference();
       _loadBannerDismissalState();
+      _checkAndShowCoachMarks();
     });
   }
 
@@ -117,6 +131,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 return _buildEmptyState();
               }
 
+              // Trigger Phase A coach marks when favorites are loaded
+              if (!_hasShownFavoritesTour && !_isTourActive) {
+                _maybeShowFavoritesTour(favoritesProvider);
+              }
+
               return _buildFavoritesList(favoritesProvider);
             },
           ),
@@ -132,6 +151,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
     return CupertinoNavigationBar(
       // No middle title anymore
       trailing: CupertinoButton(
+        key: _settingsButtonKey,
         padding: EdgeInsets.zero,
         onPressed: _showSettingsMenu,
         child: const Icon(CupertinoIcons.ellipsis),
@@ -431,7 +451,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
             builder: (context, favoritesProvider, child) {
               if (favoritesProvider.shouldShowSearch &&
                   !favoritesProvider.isEmpty) {
+                // Trigger Phase B search tip when search icon appears
+                if (!_hasShownSearchTip && !_isTourActive) {
+                  _maybeShowSearchTip(favoritesProvider);
+                }
                 return CupertinoButton(
+                  key: _searchIconKey,
                   padding: EdgeInsets.zero,
                   onPressed: _toggleSearch,
                   child: Icon(
@@ -524,7 +549,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       itemBuilder: (context, index) {
         final favorite = favorites[index];
         return FavoriteRiverCard(
-          key: ValueKey(favorite.reachId),
+          key: index == 0 ? _firstCardKey : ValueKey(favorite.reachId),
           favorite: favorite,
           onTap: () => _navigateToForecast(favorite.reachId),
           onRename: () => _showRenameDialog(favorite),
@@ -650,6 +675,93 @@ class _FavoritesPageState extends State<FavoritesPage> {
         );
       }
     }
+  }
+
+  // Coach marks
+  Future<void> _checkAndShowCoachMarks() async {
+    final seenTour = await CoachMarkService.hasSeenFavoritesTour();
+    final seenSearch = await CoachMarkService.hasSeenSearchTip();
+    if (mounted) {
+      setState(() {
+        _hasShownFavoritesTour = seenTour;
+        _hasShownSearchTip = seenSearch;
+      });
+    }
+  }
+
+  void _maybeShowFavoritesTour(FavoritesProvider provider) {
+    if (_hasShownFavoritesTour || _isTourActive || provider.isEmpty) return;
+
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+
+    _isTourActive = true;
+    _hasShownFavoritesTour = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      final targets = CoachMarkTargets.buildFavoritesTourTargets(
+        firstCardKey: _firstCardKey,
+        settingsButtonKey: _settingsButtonKey,
+      );
+
+      TutorialCoachMark(
+        targets: targets,
+        colorShadow: CupertinoColors.black,
+        opacityShadow: 0.9,
+        hideSkip: true,
+        onFinish: () {
+          CoachMarkService.completeFavoritesTour();
+          _isTourActive = false;
+          // Check if Phase B should follow immediately
+          if (!_hasShownSearchTip && provider.shouldShowSearch) {
+            _maybeShowSearchTip(provider);
+          }
+        },
+        onSkip: () {
+          CoachMarkService.completeFavoritesTour();
+          _isTourActive = false;
+          return true;
+        },
+      ).show(context: context);
+    });
+  }
+
+  void _maybeShowSearchTip(FavoritesProvider provider) {
+    if (_hasShownSearchTip || _isTourActive || !provider.shouldShowSearch) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return;
+
+    _isTourActive = true;
+    _hasShownSearchTip = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      final targets = CoachMarkTargets.buildSearchTipTargets(
+        searchIconKey: _searchIconKey,
+      );
+
+      TutorialCoachMark(
+        targets: targets,
+        colorShadow: CupertinoColors.black,
+        opacityShadow: 0.9,
+        hideSkip: true,
+        onFinish: () {
+          CoachMarkService.completeSearchTip();
+          _isTourActive = false;
+        },
+        onSkip: () {
+          CoachMarkService.completeSearchTip();
+          _isTourActive = false;
+          return true;
+        },
+      ).show(context: context);
+    });
   }
 
   // Event handlers
