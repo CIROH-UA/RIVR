@@ -234,3 +234,4 @@ firebase deploy --only functions      # Deploy Cloud Functions
 ```
 
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
+**Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.
