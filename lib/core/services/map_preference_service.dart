@@ -1,18 +1,16 @@
 // lib/core/services/map_preference_service.dart
 
-import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../providers/theme_provider.dart';
 import '../models/map_base_layer.dart';
 
-/// Map preference options - mirrors ThemeOption pattern
+/// Map preference options
 enum MapPreferenceOption {
-  auto, // Follow app theme (light theme = streets, dark theme = dark)
+  auto, // Use default map style (standard/light)
   manual, // User manually selected a specific map style
 }
 
 /// Service for managing map base layer preferences
-/// Follows the same pattern as ThemeService for consistency
+/// Manages map base layer preferences
 class MapPreferenceService {
   static const String _mapPreferenceKey = 'map_preference_option';
   static const String _mapBaseLayerKey = 'map_base_layer';
@@ -59,20 +57,16 @@ class MapPreferenceService {
     await prefs.setString(_mapBaseLayerKey, layer.name);
   }
 
-  /// Get the appropriate map layer based on current preference and theme
+  /// Get the appropriate map layer based on current preference
   /// This is the main method that determines what map style to use
-  static Future<MapBaseLayer> getActiveMapLayer(
-    ThemeProvider themeProvider,
-  ) async {
+  static Future<MapBaseLayer> getActiveMapLayer() async {
     final preference = await loadMapPreference();
 
     switch (preference) {
       case MapPreferenceOption.auto:
-        // Auto mode - follow app theme
-        return _getAutoMapLayer(themeProvider.currentBrightness);
+        return MapBaseLayer.standard;
 
       case MapPreferenceOption.manual:
-        // Manual mode - use saved selection
         return await loadManualMapLayer();
     }
   }
@@ -95,17 +89,6 @@ class MapPreferenceService {
   static Future<bool> isAutoMode() async {
     final preference = await loadMapPreference();
     return preference == MapPreferenceOption.auto;
-  }
-
-  /// Get map layer for auto mode based on brightness.
-  /// Always returns Standard — lightPreset handles dark appearance.
-  static MapBaseLayer _getAutoMapLayer(Brightness brightness) {
-    return MapBaseLayer.standard;
-  }
-
-  /// Get the map layer that would be used in auto mode (for preview/comparison)
-  static MapBaseLayer getAutoMapLayerForBrightness(Brightness brightness) {
-    return _getAutoMapLayer(brightness);
   }
 
   /// Reset all map preferences to defaults

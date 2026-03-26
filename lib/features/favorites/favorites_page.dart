@@ -853,11 +853,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
                   _buildMenuDivider(),
                   _buildFlowUnitsToggleWithModalState(setModalState),
                   _buildMenuDivider(),
-                  _buildMenuOption('App Theme', CupertinoIcons.moon, () {
-                    Navigator.pop(context);
-                    AppRouter.pushAppThemeSettings(context);
-                  }),
-                  _buildMenuDivider(),
                   _buildMenuOption('Sponsors', CupertinoIcons.creditcard, () {
                     Navigator.pop(context);
                     AppRouter.pushSponsors(context);

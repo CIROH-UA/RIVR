@@ -13,13 +13,10 @@ class EmailVerificationPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
     final primaryColor = CupertinoTheme.of(context).primaryColor;
 
     return CupertinoPageScaffold(
-      backgroundColor: brightness == Brightness.dark
-          ? CupertinoColors.black
-          : CupertinoColors.systemGroupedBackground,
+      backgroundColor: CupertinoColors.systemGroupedBackground,
       child: SafeArea(
         child: Consumer<AuthProvider>(
           builder: (context, authProvider, _) {
@@ -51,9 +48,7 @@ class EmailVerificationPage extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
-                      color: brightness == Brightness.dark
-                          ? CupertinoColors.white
-                          : CupertinoColors.black,
+                      color: CupertinoColors.black,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -66,9 +61,7 @@ class EmailVerificationPage extends StatelessWidget {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 16,
-                        color: brightness == Brightness.dark
-                            ? CupertinoColors.systemGrey
-                            : CupertinoColors.systemGrey2,
+                        color: CupertinoColors.systemGrey2,
                         height: 1.4,
                       ),
                     ),

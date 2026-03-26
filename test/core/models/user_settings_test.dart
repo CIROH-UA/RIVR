@@ -13,7 +13,6 @@ void main() {
     TimeFormat preferredTimeFormat = TimeFormat.twelveHour,
     bool enableNotifications = true,
     int notificationFrequency = 1,
-    bool enableDarkMode = false,
     List<String> favoriteReachIds = const [],
     String? fcmToken,
     List<String> customBackgroundImagePaths = const [],
@@ -30,7 +29,6 @@ void main() {
       preferredTimeFormat: preferredTimeFormat,
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
-      enableDarkMode: enableDarkMode,
       favoriteReachIds: favoriteReachIds,
       fcmToken: fcmToken,
       customBackgroundImagePaths: customBackgroundImagePaths,
@@ -62,7 +60,6 @@ void main() {
           preferredTimeFormat: TimeFormat.twentyFourHour,
           enableNotifications: false,
           notificationFrequency: 3,
-          enableDarkMode: true,
           favoriteReachIds: ['123', '456'],
           fcmToken: 'token_abc',
           customBackgroundImagePaths: ['/path/to/img.jpg'],
@@ -79,7 +76,6 @@ void main() {
         expect(restored.preferredTimeFormat, TimeFormat.twentyFourHour);
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
-        expect(restored.enableDarkMode, true);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.fcmToken, 'token_abc');
         expect(restored.customBackgroundImagePaths, ['/path/to/img.jpg']);
@@ -99,13 +95,12 @@ void main() {
           'lastLoginDate': now.toIso8601String(),
           'createdAt': now.toIso8601String(),
           'updatedAt': now.toIso8601String(),
-          // enableNotifications, notificationFrequency, enableDarkMode missing
+          // enableNotifications, notificationFrequency missing
         };
 
         final settings = UserSettings.fromJson(json);
         expect(settings.enableNotifications, false);
         expect(settings.notificationFrequency, 1);
-        expect(settings.enableDarkMode, false);
         expect(settings.favoriteReachIds, isEmpty);
         expect(settings.fcmToken, isNull);
         expect(settings.customBackgroundImagePaths, isEmpty);
@@ -137,12 +132,10 @@ void main() {
         final original = createSettings();
         final copy = original.copyWith(
           firstName: 'Jane',
-          enableDarkMode: true,
           preferredFlowUnit: FlowUnit.cms,
         );
 
         expect(copy.firstName, 'Jane');
-        expect(copy.enableDarkMode, true);
         expect(copy.preferredFlowUnit, FlowUnit.cms);
         expect(copy.userId, original.userId);
         expect(copy.email, original.email);

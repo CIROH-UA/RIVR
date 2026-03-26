@@ -108,7 +108,6 @@ class _LiveValidationFieldState extends State<LiveValidationField> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
     final primaryColor = CupertinoTheme.of(context).primaryColor;
 
     final isValid =
@@ -128,9 +127,7 @@ class _LiveValidationFieldState extends State<LiveValidationField> {
         children: [
           Container(
             decoration: BoxDecoration(
-              color: brightness == Brightness.dark
-                  ? CupertinoColors.systemGrey6.darkColor
-                  : CupertinoColors.systemGrey6.color,
+              color: CupertinoColors.systemGrey6.color,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: borderColor, width: _isFocused ? 2 : 1),
             ),

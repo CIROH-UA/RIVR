@@ -53,17 +53,12 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
     final primaryColor = CupertinoTheme.of(context).primaryColor;
 
     return CupertinoPageScaffold(
-      backgroundColor: brightness == Brightness.dark
-          ? CupertinoColors.black
-          : CupertinoColors.systemGroupedBackground,
+      backgroundColor: CupertinoColors.systemGroupedBackground,
       navigationBar: CupertinoNavigationBar(
-        backgroundColor: brightness == Brightness.dark
-            ? CupertinoColors.black
-            : CupertinoColors.systemGroupedBackground,
+        backgroundColor: CupertinoColors.systemGroupedBackground,
         border: null,
         leading: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -111,9 +106,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w700,
-                          color: brightness == Brightness.dark
-                              ? CupertinoColors.white
-                              : CupertinoColors.black,
+                          color: CupertinoColors.black,
                         ),
                       ),
                       const SizedBox(height: 15),
@@ -123,9 +116,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 16,
-                          color: brightness == Brightness.dark
-                              ? CupertinoColors.systemGrey
-                              : CupertinoColors.systemGrey2,
+                          color: CupertinoColors.systemGrey2,
                         ),
                       ),
                       const SizedBox(height: 40),
@@ -189,9 +180,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w700,
-                        color: brightness == Brightness.dark
-                            ? CupertinoColors.white
-                            : CupertinoColors.black,
+                        color: CupertinoColors.black,
                       ),
                     ),
                     const SizedBox(height: 15),
@@ -201,9 +190,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 16,
-                        color: brightness == Brightness.dark
-                            ? CupertinoColors.systemGrey
-                            : CupertinoColors.systemGrey2,
+                        color: CupertinoColors.systemGrey2,
                       ),
                     ),
                     const SizedBox(height: 40),

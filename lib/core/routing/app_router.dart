@@ -10,7 +10,6 @@ import 'package:rivr/features/forecast/pages/long_range_detail_page.dart';
 import 'package:rivr/features/forecast/pages/hydrograph_page.dart';
 import 'package:rivr/features/favorites/pages/image_selection_page.dart';
 import 'package:rivr/features/settings/pages/notifications_settings_page.dart';
-import 'package:rivr/features/settings/pages/app_theme_settings_page.dart';
 import 'package:rivr/features/settings/pages/sponsors_page.dart';
 import 'package:rivr/features/map/widgets/map_with_favorites.dart';
 import 'app_routes.dart';
@@ -40,7 +39,6 @@ class AppRouter {
     },
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
-    AppRoutes.appThemeSettings: (context) => const AppThemeSettingsPage(),
     AppRoutes.sponsors: (context) => const SponsorsPage(),
   };
 
@@ -167,10 +165,6 @@ class AppRouter {
 
   static Future<T?> pushNotificationsSettings<T>(BuildContext context) {
     return Navigator.pushNamed<T>(context, AppRoutes.notificationsSettings);
-  }
-
-  static Future<T?> pushAppThemeSettings<T>(BuildContext context) {
-    return Navigator.pushNamed<T>(context, AppRoutes.appThemeSettings);
   }
 
   static Future<T?> pushSponsors<T>(BuildContext context) {

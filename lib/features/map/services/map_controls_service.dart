@@ -5,7 +5,6 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/map_preference_service.dart';
 import '../../../core/services/app_logger.dart';
-import '../../../core/providers/theme_provider.dart';
 import 'package:rivr/core/models/map_base_layer.dart';
 
 class MapControlsService {
@@ -40,8 +39,8 @@ class MapControlsService {
   }
 
   /// Apply lightPreset on Standard style.
-  /// Always forces 'day' so the Standard basemap stays light regardless of app theme.
-  Future<void> applyLightPreset(ThemeProvider themeProvider) async {
+  /// Always forces 'day' so the Standard basemap stays light.
+  Future<void> applyLightPreset() async {
     if (_currentLayer != MapBaseLayer.standard || _mapboxMap == null) return;
     if (_currentLightPreset != 'day') {
       await _mapboxMap!.style.setStyleImportConfigProperty("basemap", "lightPreset", "day");
@@ -50,18 +49,16 @@ class MapControlsService {
     }
   }
 
-  /// Initialize map with correct style based on theme and preferences
-  Future<void> initializeMapStyle(ThemeProvider themeProvider) async {
+  /// Initialize map with correct style based on preferences
+  Future<void> initializeMapStyle() async {
     if (_mapboxMap == null) {
       AppLogger.error('MapControlsService', 'Map not initialized');
       return;
     }
 
     try {
-      // Get the active map layer based on preferences and theme
-      final activeLayer = await MapPreferenceService.getActiveMapLayer(
-        themeProvider,
-      );
+      // Get the active map layer based on preferences
+      final activeLayer = await MapPreferenceService.getActiveMapLayer();
 
       // Load 3D terrain preference
       await _load3DTerrainPreference();
@@ -78,14 +75,6 @@ class MapControlsService {
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error initializing map style', e);
     }
-  }
-
-  /// Update map appearance when theme changes.
-  /// Standard basemap always stays light, so this is a no-op for it.
-  /// Non-Standard basemaps don't change with theme either.
-  Future<void> updateMapForThemeChange(ThemeProvider themeProvider) async {
-    // No basemap changes on theme switch — Standard is always light,
-    // and other basemaps have fixed styles.
   }
 
   /// Change map base layer (manual selection by user)
@@ -242,21 +231,21 @@ class MapControlsService {
     }
   }
 
-  /// Reset to auto mode (follows app theme)
-  Future<void> enableAutoMode(ThemeProvider themeProvider) async {
+  /// Reset to auto mode (uses standard/light map style)
+  Future<void> enableAutoMode() async {
     try {
       // Enable auto mode in preferences
       await MapPreferenceService.enableAutoMode();
 
       // Auto mode always uses Standard — switch if needed
-      final autoLayer = await MapPreferenceService.getActiveMapLayer(themeProvider);
+      final autoLayer = await MapPreferenceService.getActiveMapLayer();
       if (autoLayer != _currentLayer) {
         await _mapboxMap?.loadStyleURI(autoLayer.styleUrl);
         _currentLayer = autoLayer;
         _currentLightPreset = 'day'; // Reset; actual preset applied after style loads
       } else {
         // Already on Standard, just update lightPreset
-        await applyLightPreset(themeProvider);
+        await applyLightPreset();
       }
 
       AppLogger.info('MapControlsService', 'Map set to auto mode');

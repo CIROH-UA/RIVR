@@ -51,7 +51,6 @@ class _ManagedAsyncButtonState extends State<ManagedAsyncButton> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
     final primaryColor = CupertinoTheme.of(context).primaryColor;
 
     final buttonColor = widget.color ?? primaryColor;
@@ -59,9 +58,7 @@ class _ManagedAsyncButtonState extends State<ManagedAsyncButton> {
 
     final isDisabled = !widget.isEnabled || _isLoading;
     final displayColor = isDisabled
-        ? (brightness == Brightness.dark
-              ? CupertinoColors.systemGrey5.darkColor
-              : CupertinoColors.systemGrey5.color)
+        ? CupertinoColors.systemGrey5.color
         : buttonColor;
 
     return Padding(

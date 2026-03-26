@@ -27,7 +27,6 @@ abstract class IUserSettingsService {
   Future<UserSettings?> syncAfterLogin(String userId);
   Future<UserSettings?> addFavoriteReach(String userId, String reachId);
   Future<UserSettings?> removeFavoriteReach(String userId, String reachId);
-  Future<UserSettings?> updateTheme(String userId, bool enableDarkMode);
   Future<UserSettings?> updateFlowUnit(String userId, FlowUnit flowUnit);
   Future<UserSettings?> updateNotifications(
     String userId,

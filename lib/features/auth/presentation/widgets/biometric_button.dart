@@ -88,7 +88,6 @@ class _BiometricButtonState extends State<BiometricButton> {
     }
 
     final primaryColor = CupertinoTheme.of(context).primaryColor;
-    final brightness = CupertinoTheme.brightnessOf(context);
 
     final isDisabled = !widget.enabled || _isLoading;
     final borderColor = isDisabled ? CupertinoColors.systemGrey4 : primaryColor;
@@ -106,9 +105,7 @@ class _BiometricButtonState extends State<BiometricButton> {
             width: double.infinity,
             height: double.infinity,
             decoration: BoxDecoration(
-              color: brightness == Brightness.dark
-                  ? CupertinoColors.black
-                  : CupertinoColors.white,
+              color: CupertinoColors.white,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: borderColor, width: 1.5),
             ),

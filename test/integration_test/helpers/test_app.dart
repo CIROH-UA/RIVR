@@ -12,7 +12,6 @@ import 'package:rivr/core/models/favorite_river.dart';
 import 'package:rivr/core/models/user_settings.dart';
 import 'package:rivr/core/providers/favorites_provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
-import 'package:rivr/core/providers/theme_provider.dart';
 import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/core/services/i_auth_service.dart';
 import 'package:rivr/core/services/i_background_image_service.dart';
@@ -102,7 +101,6 @@ class TestServices {
       preferredFlowUnit: FlowUnit.cfs,
       preferredTimeFormat: TimeFormat.twelveHour,
       enableNotifications: false,
-      enableDarkMode: false,
       favoriteReachIds: [],
       lastLoginDate: now,
       createdAt: now,
@@ -157,19 +155,16 @@ Widget buildTestApp({
   AuthProvider? authProvider,
   FavoritesProvider? favoritesProvider,
   ReachDataProvider? reachDataProvider,
-  ThemeProvider? themeProvider,
 }) {
   final auth = authProvider ?? createAuthProvider(services);
   final favs = favoritesProvider ?? createFavoritesProvider(services);
   final reach = reachDataProvider ?? createReachDataProvider(services);
-  final theme = themeProvider ?? ThemeProvider();
 
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<AuthProvider>.value(value: auth),
       ChangeNotifierProvider<FavoritesProvider>.value(value: favs),
       ChangeNotifierProvider<ReachDataProvider>.value(value: reach),
-      ChangeNotifierProvider<ThemeProvider>.value(value: theme),
     ],
     child: CupertinoApp(
       debugShowCheckedModeBanner: false,

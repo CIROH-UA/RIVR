@@ -2,7 +2,6 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
-import 'package:provider/provider.dart';
 import 'package:rivr/core/widgets/navigation_button.dart';
 import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/routing/app_router.dart';
@@ -17,7 +16,6 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/core/services/i_cache_service.dart';
 import '../../core/config.dart';
 import '../../core/constants.dart';
-import '../../core/providers/theme_provider.dart';
 import 'services/map_vector_tiles_service.dart';
 import 'services/map_reach_selection_service.dart';
 import 'services/map_marker_service.dart';
@@ -42,8 +40,6 @@ class MapPageState extends State<MapPage> {
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
-  ThemeProvider? _themeProvider;
-  Brightness? _lastBrightness;
 
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
@@ -59,24 +55,6 @@ class MapPageState extends State<MapPage> {
     _setupSelectionCallbacks();
     _initializeCacheService();
     _loadSavedCamera();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    _themeProvider = themeProvider;
-
-    // Compare brightness values instead of provider references, since
-    // Provider always returns the same ChangeNotifier instance.
-    final newBrightness = themeProvider.currentBrightness;
-    if (_lastBrightness != null &&
-        _lastBrightness != newBrightness &&
-        _mapboxMap != null) {
-      _updateMapForThemeChange();
-    }
-    _lastBrightness = newBrightness;
   }
 
   /// Load last camera position from storage before first build
@@ -110,13 +88,6 @@ class MapPageState extends State<MapPage> {
     } catch (e) {
       AppLogger.error('MapPage', 'Cache service initialization error', e);
       // Don't fail the whole page if cache fails - search will still work
-    }
-  }
-
-  /// Update map when theme changes
-  Future<void> _updateMapForThemeChange() async {
-    if (_themeProvider != null) {
-      await _controlsService.updateMapForThemeChange(_themeProvider!);
     }
   }
 
@@ -279,10 +250,8 @@ class MapPageState extends State<MapPage> {
       _reachSelectionService.setMapboxMap(mapboxMap);
       _controlsService.setMapboxMap(mapboxMap);
 
-      // Initialize map style based on preferences and theme
-      if (_themeProvider != null) {
-        await _controlsService.initializeMapStyle(_themeProvider!);
-      }
+      // Initialize map style based on preferences
+      await _controlsService.initializeMapStyle();
 
       AppLogger.debug('MapPage', 'Services initialized, waiting for style to load...');
 
@@ -320,9 +289,7 @@ class MapPageState extends State<MapPage> {
       AppLogger.debug('MapPage', 'Style loaded, loading vector tiles...');
 
       // Apply lightPreset for Standard style (handles initial load + basemap changes)
-      if (_themeProvider != null) {
-        await _controlsService.applyLightPreset(_themeProvider!);
-      }
+      await _controlsService.applyLightPreset();
 
       // Reset vector tiles state (safe for both initial and subsequent loads)
       _vectorTilesService.dispose();

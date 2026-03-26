@@ -6,7 +6,6 @@
 
 import 'package:flutter/cupertino.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
-import 'providers/theme_provider.dart';
 import 'services/map_preference_service.dart';
 
 /// Forecast information for display
@@ -47,21 +46,10 @@ class AppConstants {
   static const String defaultMapboxStyleUrl =
       'mapbox://styles/mapbox/standard';
 
-  /// Get active map style URL based on user preferences and theme
-  /// This is the main method the map should use
-  static Future<String> getActiveMapStyleUrl(
-    ThemeProvider themeProvider,
-  ) async {
-    final activeLayer = await MapPreferenceService.getActiveMapLayer(
-      themeProvider,
-    );
+  /// Get active map style URL based on user preferences
+  static Future<String> getActiveMapStyleUrl() async {
+    final activeLayer = await MapPreferenceService.getActiveMapLayer();
     return activeLayer.styleUrl;
-  }
-
-  /// Get map style URL for a specific brightness (for auto mode)
-  static String getAutoMapStyleUrl(Brightness brightness) {
-    final layer = MapPreferenceService.getAutoMapLayerForBrightness(brightness);
-    return layer.styleUrl;
   }
 
   // MARK: - Return Period Chart Colors

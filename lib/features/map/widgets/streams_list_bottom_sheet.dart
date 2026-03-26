@@ -59,9 +59,6 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
-
     return Container(
       height: MediaQuery.of(context).size.height * 0.75, // 75% of screen height
       decoration: BoxDecoration(
@@ -75,8 +72,8 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
         top: false,
         child: Column(
           children: [
-            _buildHeader(isDark),
-            _buildSearchBar(isDark),
+            _buildHeader(),
+            _buildSearchBar(),
             Expanded(child: _buildStreamsList()),
           ],
         ),
@@ -84,7 +81,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
     );
   }
 
-  Widget _buildHeader(bool isDark) {
+  Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -95,7 +92,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
             decoration: BoxDecoration(
               color: CupertinoColors.systemBlue
                   .resolveFrom(context)
-                  .withValues(alpha: isDark ? 0.15 : 0.1),
+                  .withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
@@ -145,7 +142,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
     );
   }
 
-  Widget _buildSearchBar(bool isDark) {
+  Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         16,
@@ -156,9 +153,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isDark
-              ? CupertinoColors.systemGrey5.resolveFrom(context)
-              : CupertinoColors.systemGrey6.resolveFrom(context),
+          color: CupertinoColors.systemGrey6.resolveFrom(context),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -253,9 +248,6 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
   }
 
   Widget _buildStreamItem(VisibleStream stream) {
-    final brightness = MediaQuery.of(context).platformBrightness;
-    final isDark = brightness == Brightness.dark;
-
     return CupertinoButton(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
       onPressed: () => _onStreamTap(stream),
@@ -267,7 +259,7 @@ class _StreamsListBottomSheetState extends State<StreamsListBottomSheet> {
             decoration: BoxDecoration(
               color: AppConstants.getStreamOrderColor(
                 stream.streamOrder,
-              ).withValues(alpha: isDark ? 0.15 : 0.1),
+              ).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(

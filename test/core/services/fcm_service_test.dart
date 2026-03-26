@@ -115,8 +115,6 @@ class SpyUserSettingsService implements IUserSettingsService {
   @override
   Future<UserSettings?> removeFavoriteReach(String u, String r) async => null;
   @override
-  Future<UserSettings?> updateTheme(String u, bool d) async => null;
-  @override
   Future<UserSettings?> updateFlowUnit(String u, FlowUnit f) async => null;
   @override
   Future<UserSettings?> updateNotifications(String u, bool e) async => null;
@@ -138,7 +136,6 @@ class SpyUserSettingsService implements IUserSettingsService {
         preferredFlowUnit: FlowUnit.cfs,
         preferredTimeFormat: TimeFormat.twelveHour,
         enableNotifications: false,
-        enableDarkMode: false,
         favoriteReachIds: [],
         customBackgroundImagePaths: [],
         lastLoginDate: DateTime(2026, 1, 1),
@@ -533,7 +530,6 @@ void main() {
         preferredFlowUnit: FlowUnit.cfs,
         preferredTimeFormat: TimeFormat.twelveHour,
         enableNotifications: true,
-        enableDarkMode: false,
         favoriteReachIds: [],
         customBackgroundImagePaths: [],
         fcmToken: testToken,
@@ -564,7 +560,6 @@ void main() {
         preferredFlowUnit: FlowUnit.cfs,
         preferredTimeFormat: TimeFormat.twelveHour,
         enableNotifications: true,
-        enableDarkMode: false,
         favoriteReachIds: [],
         customBackgroundImagePaths: [],
         fcmToken: null,

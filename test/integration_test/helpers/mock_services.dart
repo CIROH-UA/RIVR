@@ -846,7 +846,6 @@ class MockUserSettingsService implements IUserSettingsService {
       preferredFlowUnit: FlowUnit.cfs,
       preferredTimeFormat: TimeFormat.twelveHour,
       enableNotifications: false,
-      enableDarkMode: false,
       favoriteReachIds: [],
       lastLoginDate: now,
       createdAt: now,
@@ -869,12 +868,6 @@ class MockUserSettingsService implements IUserSettingsService {
   Future<UserSettings?> removeFavoriteReach(
       String userId, String reachId) async {
     _settings = _settings?.removeFavorite(reachId);
-    return _settings;
-  }
-
-  @override
-  Future<UserSettings?> updateTheme(String userId, bool enableDarkMode) async {
-    _settings = _settings?.copyWith(enableDarkMode: enableDarkMode);
     return _settings;
   }
 

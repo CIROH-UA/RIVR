@@ -326,7 +326,6 @@ class UserSettingsService implements IUserSettingsService {
         preferredFlowUnit: FlowUnit.cfs,
         preferredTimeFormat: TimeFormat.twelveHour,
         enableNotifications: false,
-        enableDarkMode: false,
         favoriteReachIds: [],
         customBackgroundImagePaths: [], // NEW: Initialize empty list
         lastLoginDate: now,
@@ -417,23 +416,6 @@ class UserSettingsService implements IUserSettingsService {
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error removing favorite: $e', e);
       throw Exception('Failed to remove favorite: ${e.toString()}');
-    }
-  }
-
-  /// Update theme preference
-  @override
-  Future<UserSettings?> updateTheme(String userId, bool enableDarkMode) async {
-    try {
-      final settings = await getUserSettings(userId);
-      if (settings == null) return null;
-
-      final updatedSettings = settings.copyWith(enableDarkMode: enableDarkMode);
-      await saveUserSettings(updatedSettings);
-
-      return updatedSettings;
-    } catch (e) {
-      AppLogger.error('UserSettingsService', 'Error updating theme: $e', e);
-      throw Exception('Failed to update theme: ${e.toString()}');
     }
   }
 

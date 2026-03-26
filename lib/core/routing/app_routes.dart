@@ -16,7 +16,6 @@ class AppRoutes {
   static const hydrograph = '/hydrograph';
   static const imageSelection = '/image-selection';
   static const notificationsSettings = '/notifications-settings';
-  static const appThemeSettings = '/app-theme-settings';
   static const sponsors = '/sponsors';
 
   /// Map forecast type string to the corresponding detail route.

@@ -8,8 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rivr/features/settings/pages/notifications_settings_page.dart';
-import 'package:rivr/features/settings/pages/app_theme_settings_page.dart';
-import 'package:rivr/core/providers/theme_provider.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 
 import 'helpers/test_app.dart';
@@ -104,71 +102,4 @@ void main() {
     });
   });
 
-  group('Theme settings', () {
-    testWidgets('shows all three theme options', (tester) async {
-      await tester.pumpWidget(buildTestApp(
-        home: const AppThemeSettingsPage(),
-        services: services,
-        authProvider: authProvider,
-      ));
-      await tester.pumpAndSettle();
-
-      // Page title
-      expect(find.text('App Theme'), findsOneWidget);
-
-      // Section header
-      expect(find.text('APPEARANCE'), findsOneWidget);
-
-      // Three options
-      expect(find.text('Light'), findsOneWidget);
-      expect(find.text('Dark'), findsOneWidget);
-      expect(find.text('System'), findsOneWidget);
-
-      // Subtitles
-      expect(find.text('Always use light appearance'), findsOneWidget);
-      expect(find.text('Always use dark appearance'), findsOneWidget);
-      expect(find.text('Match device settings'), findsOneWidget);
-    });
-
-    testWidgets('selecting a theme shows checkmark on selected option',
-        (tester) async {
-      final themeProvider = ThemeProvider();
-
-      await tester.pumpWidget(buildTestApp(
-        home: const AppThemeSettingsPage(),
-        services: services,
-        authProvider: authProvider,
-        themeProvider: themeProvider,
-      ));
-      await tester.pumpAndSettle();
-
-      // Tap "Dark" option
-      await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
-
-      // Checkmark should appear (on the dark option)
-      expect(find.byIcon(CupertinoIcons.checkmark), findsOneWidget);
-
-      // Tap "Light" option
-      await tester.tap(find.text('Light'));
-      await tester.pumpAndSettle();
-
-      // Checkmark should still be one (moved to light)
-      expect(find.byIcon(CupertinoIcons.checkmark), findsOneWidget);
-    });
-
-    testWidgets('shows footer description', (tester) async {
-      await tester.pumpWidget(buildTestApp(
-        home: const AppThemeSettingsPage(),
-        services: services,
-        authProvider: authProvider,
-      ));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.textContaining('Choose how RIVR looks'),
-        findsOneWidget,
-      );
-    });
-  });
 }

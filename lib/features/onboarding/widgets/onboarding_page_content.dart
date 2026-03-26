@@ -23,9 +23,7 @@ class OnboardingPageContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
-    final isDark = brightness == Brightness.dark;
-    final textColor = isDark ? CupertinoColors.white : CupertinoColors.black;
+    final textColor = CupertinoColors.black;
     final secondaryTextColor = CupertinoColors.systemGrey;
 
     return Padding(

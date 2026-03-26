@@ -3,7 +3,6 @@ import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/providers/favorites_provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
-import 'package:rivr/core/providers/theme_provider.dart';
 import 'package:rivr/core/services/flow_unit_preference_service.dart';
 import 'package:rivr/core/services/i_flow_unit_preference_service.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
@@ -33,7 +32,6 @@ void tearDownServiceLocator() {
 Widget pumpApp(
   Widget child, {
   AuthProvider? authProvider,
-  ThemeProvider? themeProvider,
   ReachDataProvider? reachDataProvider,
   FavoritesProvider? favoritesProvider,
 }) {
@@ -41,9 +39,6 @@ Widget pumpApp(
     providers: [
       ChangeNotifierProvider<AuthProvider>.value(
         value: authProvider ?? AuthProvider(),
-      ),
-      ChangeNotifierProvider<ThemeProvider>.value(
-        value: themeProvider ?? ThemeProvider(),
       ),
       ChangeNotifierProvider<ReachDataProvider>.value(
         value: reachDataProvider ?? ReachDataProvider(),

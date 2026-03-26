@@ -10,8 +10,6 @@ import 'package:provider/provider.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
 import 'package:rivr/core/providers/favorites_provider.dart';
-import 'package:rivr/core/providers/theme_provider.dart';
-import 'package:rivr/core/services/theme_service.dart';
 import 'package:rivr/core/services/map_preference_service.dart';
 import 'package:rivr/core/routing/app_router.dart';
 import 'package:rivr/core/services/i_fcm_service.dart';
@@ -72,22 +70,13 @@ class RivrApp extends StatefulWidget {
   State<RivrApp> createState() => _RivrAppState();
 }
 
-class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
-  late ThemeProvider _themeProvider;
+class _RivrAppState extends State<RivrApp> {
   bool _hasSeenOnboarding = true; // Default true so failure skips onboarding
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
-    _themeProvider = ThemeProvider();
-    // Set system brightness immediately so the first build has the correct
-    // value. _initializeServices is async, so without this the ThemeProvider
-    // defaults to Brightness.light until the async call completes.
-    _themeProvider.updateSystemBrightness(
-      WidgetsBinding.instance.platformDispatcher.platformBrightness,
-    );
-    WidgetsBinding.instance.addObserver(this);
     _initializeServices();
 
     // Provide the navigator key to the FCM service so notification taps
@@ -95,27 +84,7 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
     GetIt.I<IFCMService>().navigatorKey = _navigatorKey;
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangePlatformBrightness() {
-    _themeProvider.updateSystemBrightness(
-      WidgetsBinding.instance.platformDispatcher.platformBrightness,
-    );
-  }
-
   Future<void> _initializeServices() async {
-    // Initialize theme service
-    final savedTheme = await ThemeService.loadTheme();
-    _themeProvider.setTheme(savedTheme);
-    _themeProvider.updateSystemBrightness(
-      WidgetsBinding.instance.platformDispatcher.platformBrightness,
-    );
-
     // Initialize map preference service (loads saved preferences)
     await MapPreferenceService.loadMapPreference();
 
@@ -132,34 +101,29 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: _themeProvider),
         ChangeNotifierProvider(create: (context) => AuthProvider()),
         ChangeNotifierProvider(create: (context) => ReachDataProvider()),
         ChangeNotifierProvider(create: (context) => FavoritesProvider()),
       ],
-      child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, child) {
-          return CupertinoApp(
-            navigatorKey: _navigatorKey,
-            title: 'RIVR',
-            theme: themeProvider.themeData,
-            localizationsDelegates: const [
-              GlobalMaterialLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-            ],
-            supportedLocales: const [Locale('en', 'US')],
-            home: _hasSeenOnboarding
-                ? AuthCoordinator(
-                    onAuthSuccess: (context) => const FavoritesPage(),
-                  )
-                : const OnboardingPage(),
-            routes: AppRouter.namedRoutes,
-            onGenerateRoute: AppRouter.onGenerateRoute,
-            onUnknownRoute: AppRouter.onUnknownRoute,
-            debugShowCheckedModeBanner: false,
-          );
-        },
+      child: CupertinoApp(
+        navigatorKey: _navigatorKey,
+        title: 'RIVR',
+        theme: const CupertinoThemeData(brightness: Brightness.light),
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('en', 'US')],
+        home: _hasSeenOnboarding
+            ? AuthCoordinator(
+                onAuthSuccess: (context) => const FavoritesPage(),
+              )
+            : const OnboardingPage(),
+        routes: AppRouter.namedRoutes,
+        onGenerateRoute: AppRouter.onGenerateRoute,
+        onUnknownRoute: AppRouter.onUnknownRoute,
+        debugShowCheckedModeBanner: false,
       ),
     );
   }

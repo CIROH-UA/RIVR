@@ -111,13 +111,10 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = CupertinoTheme.brightnessOf(context);
     final primaryColor = CupertinoTheme.of(context).primaryColor;
 
     return CupertinoPageScaffold(
-      backgroundColor: brightness == Brightness.dark
-          ? CupertinoColors.black
-          : CupertinoColors.systemGroupedBackground,
+      backgroundColor: CupertinoColors.systemGroupedBackground,
       child: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -139,9 +136,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     'Create your',
                     style: TextStyle(
                       fontSize: 16,
-                      color: brightness == Brightness.dark
-                          ? CupertinoColors.systemGrey
-                          : CupertinoColors.systemGrey2,
+                      color: CupertinoColors.systemGrey2,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -151,9 +146,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.w800,
-                      color: brightness == Brightness.dark
-                          ? CupertinoColors.white
-                          : CupertinoColors.black,
+                      color: CupertinoColors.black,
                     ),
                   ),
                   const SizedBox(height: 30),
@@ -301,9 +294,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       Text(
                         'Already have an account? ',
                         style: TextStyle(
-                          color: brightness == Brightness.dark
-                              ? CupertinoColors.systemGrey
-                              : CupertinoColors.systemGrey2,
+                          color: CupertinoColors.systemGrey2,
                           fontSize: 16,
                         ),
                       ),

@@ -24,7 +24,6 @@ class UserSettings {
   final TimeFormat preferredTimeFormat;
   final bool enableNotifications;
   final int notificationFrequency; // 1, 2, 3, or 4 times per day
-  final bool enableDarkMode;
   final List<String> favoriteReachIds;
   final String? fcmToken;
   final List<String>
@@ -42,7 +41,6 @@ class UserSettings {
     required this.preferredTimeFormat,
     required this.enableNotifications,
     this.notificationFrequency = 1, // Default to once daily
-    required this.enableDarkMode,
     required this.favoriteReachIds,
     this.fcmToken,
     this.customBackgroundImagePaths = const [], // Default to empty list
@@ -65,7 +63,6 @@ class UserSettings {
           : TimeFormat.twelveHour,
       enableNotifications: json['enableNotifications'] as bool? ?? false,
       notificationFrequency: json['notificationFrequency'] as int? ?? 1,
-      enableDarkMode: json['enableDarkMode'] as bool? ?? false,
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
       ),
@@ -89,7 +86,6 @@ class UserSettings {
       'preferredTimeFormat': preferredTimeFormat.value,
       'enableNotifications': enableNotifications,
       'notificationFrequency': notificationFrequency,
-      'enableDarkMode': enableDarkMode,
       'favoriteReachIds': favoriteReachIds,
       'fcmToken': fcmToken,
       'customBackgroundImagePaths': customBackgroundImagePaths,
@@ -107,7 +103,6 @@ class UserSettings {
     TimeFormat? preferredTimeFormat,
     bool? enableNotifications,
     int? notificationFrequency,
-    bool? enableDarkMode,
     List<String>? favoriteReachIds,
     String? fcmToken,
     List<String>? customBackgroundImagePaths,
@@ -123,7 +118,6 @@ class UserSettings {
       enableNotifications: enableNotifications ?? this.enableNotifications,
       notificationFrequency:
           notificationFrequency ?? this.notificationFrequency,
-      enableDarkMode: enableDarkMode ?? this.enableDarkMode,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       fcmToken: fcmToken ?? this.fcmToken,
       customBackgroundImagePaths:

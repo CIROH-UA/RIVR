@@ -253,9 +253,7 @@ class _MicroBarChartPainter extends CustomPainter {
       // Draw selection highlight
       if (isSelected) {
         final highlightPaint = Paint()
-          ..color = theme.brightness == Brightness.dark
-              ? CupertinoColors.white.withValues(alpha: 0.3)
-              : CupertinoColors.black.withValues(alpha: 0.2)
+          ..color = CupertinoColors.black.withValues(alpha: 0.2)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5;
 
@@ -277,11 +275,7 @@ class _MicroBarChartPainter extends CustomPainter {
   /// Draw subtle grid lines for reference
   void _drawGridLines(Canvas canvas, Size size, double maxBarHeight) {
     final gridPaint = Paint()
-      ..color =
-          (theme.brightness == Brightness.dark
-                  ? CupertinoColors.systemGrey4
-                  : CupertinoColors.systemGrey5)
-              .withValues(alpha: 0.5)
+      ..color = CupertinoColors.systemGrey5.withValues(alpha: 0.5)
       ..strokeWidth = 0.5;
 
     // Draw horizontal lines at 25%, 50%, 75% heights
