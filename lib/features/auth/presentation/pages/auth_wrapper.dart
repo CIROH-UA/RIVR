@@ -35,6 +35,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   void _switchToPage(AuthPageType page) {
     if (_currentPage == page) return;
+    context.read<AuthProvider>().clearMessages();
     setState(() => _currentPage = page);
   }
 

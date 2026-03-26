@@ -9,6 +9,7 @@ import '../widgets/live_validation_field.dart';
 import '../widgets/managed_async_button.dart';
 import '../widgets/auth_error_display.dart';
 import '../widgets/biometric_button.dart';
+import '../../utils/email_validator.dart';
 
 class LoginPage extends StatefulWidget {
   final VoidCallback onSwitchToRegister;
@@ -40,15 +41,7 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email is required';
-    }
-    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(value.trim())) {
-      return 'Please enter a valid email';
-    }
-    return null;
-  }
+  String? _validateEmail(String? value) => validateEmail(value);
 
   String? _validatePassword(String? value) {
     if (value == null || value.isEmpty) {

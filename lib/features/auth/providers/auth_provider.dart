@@ -142,7 +142,6 @@ class AuthProvider with ChangeNotifier {
     _setLoading(false);
 
     if (result.isSuccess) {
-      _setSuccess('Signed in successfully');
       return true;
     } else {
       _setError(result.error ?? 'Sign in failed');
@@ -179,7 +178,7 @@ class AuthProvider with ChangeNotifier {
 
     if (result.isSuccess) {
       _isAwaitingEmailVerification = true;
-      _setSuccess('Account created! Please verify your email.');
+      notifyListeners();
       return true;
     } else {
       _setError(result.error ?? 'Registration failed');

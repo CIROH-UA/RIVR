@@ -195,7 +195,7 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
               Navigator.pop(context);
               _copyReachInfo();
             },
-            child: const Text('Copy Reach Info'),
+            child: const Text('Copy Info'),
           ),
           CupertinoActionSheetAction(
             onPressed: () {

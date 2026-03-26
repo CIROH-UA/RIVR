@@ -6,6 +6,7 @@ import 'package:rivr/features/auth/providers/auth_provider.dart';
 import '../widgets/live_validation_field.dart';
 import '../widgets/managed_async_button.dart';
 import '../widgets/auth_error_display.dart';
+import '../../utils/email_validator.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   final VoidCallback onBackToLogin;
@@ -28,15 +29,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     super.dispose();
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email is required';
-    }
-    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+$').hasMatch(value.trim())) {
-      return 'Please enter a valid email';
-    }
-    return null;
-  }
+  String? _validateEmail(String? value) => validateEmail(value);
 
   Future<void> _handleSendReset() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
