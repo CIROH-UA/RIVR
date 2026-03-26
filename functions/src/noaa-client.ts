@@ -254,7 +254,7 @@ export async function getReturnPeriods(
             data: [],
             cachedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
-        } catch (_) { /* ignore cache write failure */ }
+        } catch { /* ignore cache write failure */ }
         return [];
       }
       throw new Error(
