@@ -22,7 +22,7 @@ class CoachMarkTargets {
         radius: 12,
         contents: [
           TargetContent(
-            align: ContentAlign.top,
+            align: ContentAlign.bottom,
             builder: (context, controller) => _buildTipContent(
               icon: CupertinoIcons.arrow_down,
               title: 'Pull to Refresh',

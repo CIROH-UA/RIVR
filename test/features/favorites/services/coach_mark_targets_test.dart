@@ -40,8 +40,8 @@ void main() {
         }
       });
 
-      test('pull_to_refresh content aligns to top', () {
-        expect(targets[0].contents!.first.align, ContentAlign.top);
+      test('all content aligns to bottom', () {
+        expect(targets[0].contents!.first.align, ContentAlign.bottom);
       });
 
       test('swipe_left and settings content aligns to bottom', () {
