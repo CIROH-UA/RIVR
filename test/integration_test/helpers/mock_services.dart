@@ -187,12 +187,23 @@ class MockAuthService implements IAuthService {
 
 class MockForecastService implements IForecastService {
   ForecastResponse? _stubbedResponse;
+  final Map<String, ForecastResponse> _reachResponses = {};
   bool shouldFail = false;
   String failureMessage = 'Mock forecast error';
   Duration delay = const Duration(milliseconds: 50);
 
   void stubResponse(ForecastResponse response) {
     _stubbedResponse = response;
+  }
+
+  /// Stub a response for a specific reach ID. Used by seedFavorites to ensure
+  /// background refreshes preserve seeded river names.
+  void stubReachResponse(String reachId, ForecastResponse response) {
+    _reachResponses[reachId] = response;
+  }
+
+  ForecastResponse _responseForReach(String reachId) {
+    return _reachResponses[reachId] ?? _defaultResponse;
   }
 
   ForecastResponse get _defaultResponse {
@@ -261,7 +272,7 @@ class MockForecastService implements IForecastService {
   Future<ForecastResponse> loadOverviewData(String reachId) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
@@ -271,14 +282,14 @@ class MockForecastService implements IForecastService {
   ) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
   Future<ForecastResponse> loadCompleteReachData(String reachId) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
@@ -288,14 +299,14 @@ class MockForecastService implements IForecastService {
   ) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
   Future<ForecastResponse> refreshReachData(String reachId) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
@@ -308,13 +319,13 @@ class MockForecastService implements IForecastService {
   Future<ForecastResponse> loadCurrentFlowOnly(String reachId) async {
     await Future.delayed(delay);
     if (shouldFail) throw Exception(failureMessage);
-    return _defaultResponse;
+    return _responseForReach(reachId);
   }
 
   @override
   Future<ReachData> loadBasicReachInfo(String reachId) async {
     await Future.delayed(delay);
-    return _defaultResponse.reach;
+    return _responseForReach(reachId).reach;
   }
 
   @override

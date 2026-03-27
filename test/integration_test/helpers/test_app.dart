@@ -9,6 +9,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/models/favorite_river.dart';
+import 'package:rivr/core/models/reach_data.dart';
 import 'package:rivr/core/models/user_settings.dart';
 import 'package:rivr/core/providers/favorites_provider.dart';
 import 'package:rivr/core/providers/reach_data_provider.dart';
@@ -109,8 +110,38 @@ class TestServices {
   }
 
   /// Seed favorites for the signed-in user.
+  /// Also stubs the forecast service to return matching river names so
+  /// background refreshes don't overwrite seeded data.
   void seedFavorites(List<FavoriteRiver> favs) {
     favorites.seedFavorites(favs);
+    for (final fav in favs) {
+      final reach = ReachData(
+        reachId: fav.reachId,
+        riverName: fav.displayName,
+        latitude: fav.latitude ?? 47.0,
+        longitude: fav.longitude ?? -117.0,
+        availableForecasts: ['analysis_assimilation', 'short_range'],
+        cachedAt: DateTime.now(),
+      );
+      forecast.stubReachResponse(
+        fav.reachId,
+        ForecastResponse(
+          reach: reach,
+          analysisAssimilation: ForecastSeries(
+            referenceTime: DateTime.now().subtract(const Duration(hours: 1)),
+            units: 'CFS',
+            data: [
+              ForecastPoint(
+                validTime: DateTime.now(),
+                flow: fav.lastKnownFlow ?? 150.0,
+              ),
+            ],
+          ),
+          mediumRange: {},
+          longRange: {},
+        ),
+      );
+    }
   }
 }
 
