@@ -46,17 +46,16 @@ app.*.map.json
 
 # Configuration files with sensitive API keys
 lib/core/config.dart
+
 # Firebase configuration files with API keys
-android/app/google-services.json
 lib/firebase_options.dart
-functions/.env
-functions/.runtimeconfig.json
-ios/build/android/app/google-services.json
-lib/firebase_options.dart
-functions/.env
-functions/.runtimeconfig.json
-ios/build/
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
-# iOS Secrets configuration
+
+# Cloud Functions secrets
+functions/.env
+functions/.runtimeconfig.json
+
+# iOS build artifacts and secrets
+ios/build/
 ios/Flutter/Secrets.xcconfig
