@@ -65,7 +65,7 @@ class NoaaApiService implements INoaaApiService {
   }) async {
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        final response = await _httpGetWithRetry(
+        final response = await _httpGet(
           url,
           timeout: timeout,
           extraHeaders: extraHeaders,
