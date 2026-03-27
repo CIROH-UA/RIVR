@@ -193,21 +193,22 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(context);
-              _copyReachInfo();
+              Future.delayed(const Duration(milliseconds: 350), _copyReachInfo);
             },
             child: const Text('Copy Info'),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(context);
-              _shareLocation();
+              Future.delayed(
+                  const Duration(milliseconds: 350), _shareLocation);
             },
             child: const Text('Share Location'),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(context);
-              _openInMaps();
+              Future.delayed(const Duration(milliseconds: 350), _openInMaps);
             },
             child: const Text('Open in Maps'),
           ),
@@ -234,14 +235,19 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
   Future<void> _shareLocation() async {
     try {
       final text = _buildLocationShareText();
+      final box = context.findRenderObject() as RenderBox?;
       await SharePlus.instance.share(
         ShareParams(
           text: text,
           subject: widget.selectedReach.displayName,
+          sharePositionOrigin: box != null
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null,
         ),
       );
     } catch (e) {
       AppLogger.error('ReachActionButtons', 'Error sharing location', e);
+      _showFeedback('Unable to share. Please try again.', isError: true);
     }
   }
 
