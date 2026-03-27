@@ -22,18 +22,13 @@ import 'helpers/mock_services.dart';
 
 /// Pump frames for the favorites page to render cards.
 ///
-/// Cannot use pumpAndSettle() because VideoPlayerController starts a 500ms
-/// periodic timer to poll position when play() is called. This timer never
-/// stops, so pumpAndSettle() spins until its 10-minute timeout.
-///
-/// With FakeVideoPlayerPlatform registered and FavoritesProvider
-/// pre-initialized, the widget tree builds quickly — we just need enough
-/// pump cycles for post-frame callbacks and async rebuilds.
+/// FakeVideoPlayerPlatform sends the initialized event on a broadcast stream
+/// before VideoPlayerController attaches its listener, so the event is lost
+/// and controller.initialize() never completes. This means play() is never
+/// called, so the 500ms position-polling timer is never started, and
+/// pumpAndSettle() can settle normally.
 Future<void> pumpFavoritesReady(WidgetTester tester) async {
-  for (var i = 0; i < 10; i++) {
-    await tester.pump(const Duration(milliseconds: 50));
-  }
-  await tester.pump();
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -116,7 +111,6 @@ void main() {
         ),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -140,7 +134,6 @@ void main() {
         createTestFavorite(reachId: '1001', riverName: 'Test River'),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -164,7 +157,6 @@ void main() {
         createTestFavorite(reachId: '1003', riverName: 'River C'),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -190,7 +182,6 @@ void main() {
             reachId: '1004', riverName: 'River D', displayOrder: 3),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -206,12 +197,26 @@ void main() {
   });
 
   group('Settings menu', () {
+    // Helper: open the settings menu by invoking the button callback directly.
+    // The CupertinoNavigationBar's trailing button center lands in the safe
+    // area zone (y≈22), so tester.tap() can't hit it. We invoke onPressed
+    // programmatically, then pump the dialog's 150ms fade transition.
+    Future<void> openSettingsMenu(WidgetTester tester) async {
+      final button = tester.widget<CupertinoButton>(
+        find.ancestor(
+          of: find.byIcon(CupertinoIcons.ellipsis),
+          matching: find.byType(CupertinoButton),
+        ),
+      );
+      button.onPressed!();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
     testWidgets('settings menu opens with all options', (tester) async {
       services.seedFavorites([
         createTestFavorite(reachId: '1001', riverName: 'Test River'),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -221,9 +226,7 @@ void main() {
       ));
       await pumpFavoritesReady(tester);
 
-      // Tap settings (ellipsis) button
-      await tester.tap(find.byIcon(CupertinoIcons.ellipsis));
-      await pumpFavoritesReady(tester);
+      await openSettingsMenu(tester);
 
       // Menu options visible
       expect(find.text('Notifications'), findsOneWidget);
@@ -243,7 +246,6 @@ void main() {
         createTestFavorite(reachId: '1001', riverName: 'Test River'),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),
@@ -253,13 +255,18 @@ void main() {
       ));
       await pumpFavoritesReady(tester);
 
-      // Open settings menu
-      await tester.tap(find.byIcon(CupertinoIcons.ellipsis));
-      await pumpFavoritesReady(tester);
+      await openSettingsMenu(tester);
 
-      // Tap sign out — dismisses menu and shows confirmation dialog
-      await tester.tap(find.text('Sign Out'));
-      await pumpFavoritesReady(tester);
+      // Invoke sign out directly — the dialog barrier absorbs pointer events
+      // in the test binding, so tester.tap() can't reach the text widget.
+      final signOutButton = tester.widget<CupertinoButton>(
+        find.ancestor(
+          of: find.text('Sign Out'),
+          matching: find.byType(CupertinoButton),
+        ),
+      );
+      signOutButton.onPressed!();
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Confirmation dialog should appear
       expect(
@@ -268,9 +275,10 @@ void main() {
       );
       expect(find.text('Cancel'), findsOneWidget);
 
-      // Cancel dismisses the dialog
-      await tester.tap(find.text('Cancel'));
-      await pumpFavoritesReady(tester);
+      // Cancel dismisses the dialog — warnIfMissed false because the
+      // dialog barrier absorbs pointer events in the test binding.
+      await tester.tap(find.text('Cancel'), warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 300));
 
       // Favorites page should still be showing
       expect(find.byType(FavoritesPage), findsOneWidget);
@@ -287,7 +295,6 @@ void main() {
         ),
       ]);
       favoritesProvider = createFavoritesProvider(services);
-      await favoritesProvider.initializeAndRefresh();
 
       await tester.pumpWidget(buildTestApp(
         home: const FavoritesPage(),

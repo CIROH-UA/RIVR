@@ -27,8 +27,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Initialize Firebase if needed
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  AppLogger.debug('Main', 'FCM background received message: ${message.messageId}');
-  AppLogger.debug('Main', 'FCM background title: ${message.notification?.title}');
+  AppLogger.debug(
+    'Main',
+    'FCM background received message: ${message.messageId}',
+  );
+  AppLogger.debug(
+    'Main',
+    'FCM background title: ${message.notification?.title}',
+  );
   AppLogger.debug('Main', 'FCM background body: ${message.notification?.body}');
 
   // Handle the background message (for now, just log it)
@@ -48,7 +54,10 @@ Future<void> main() async {
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
     ErrorService.logError(
-        'FlutterError', details.exception, stackTrace: details.stack);
+      'FlutterError',
+      details.exception,
+      stackTrace: details.stack,
+    );
   };
 
   // Catch platform/async errors not caught by Flutter framework
@@ -116,9 +125,7 @@ class _RivrAppState extends State<RivrApp> {
         ],
         supportedLocales: const [Locale('en', 'US')],
         home: _hasSeenOnboarding
-            ? AuthCoordinator(
-                onAuthSuccess: (context) => const FavoritesPage(),
-              )
+            ? AuthCoordinator(onAuthSuccess: (context) => const FavoritesPage())
             : const OnboardingPage(),
         routes: AppRouter.namedRoutes,
         onGenerateRoute: AppRouter.onGenerateRoute,
