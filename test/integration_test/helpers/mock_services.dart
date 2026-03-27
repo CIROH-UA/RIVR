@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart' show MockUser;
 import 'package:rivr/core/models/reach_data.dart';
 import 'package:rivr/core/models/favorite_river.dart';
@@ -978,4 +979,74 @@ class MockFlowUnitPreferenceService implements IFlowUnitPreferenceService {
 
   @override
   void resetToDefault() => _currentUnit = 'CFS';
+}
+
+// ---------------------------------------------------------------------------
+// FakeVideoPlayerPlatform
+// ---------------------------------------------------------------------------
+// Prevents FavoriteRiverCard's VideoPlayerController.initialize() from hanging
+// in tests. Returns immediately for all platform calls.
+
+class FakeVideoPlayerPlatform extends VideoPlayerPlatform {
+  int _nextId = 0;
+  final Map<int, StreamController<VideoEvent>> _eventControllers = {};
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<int?> create(DataSource dataSource) async => _createPlayer();
+
+  @override
+  Future<int?> createWithOptions(VideoCreationOptions options) async =>
+      _createPlayer();
+
+  int _createPlayer() {
+    final id = _nextId++;
+    final controller = StreamController<VideoEvent>.broadcast();
+    _eventControllers[id] = controller;
+    // Immediately signal initialized so VideoPlayerController completes init.
+    controller.add(VideoEvent(
+      eventType: VideoEventType.initialized,
+      size: const Size(320, 240),
+      duration: const Duration(seconds: 10),
+    ));
+    return id;
+  }
+
+  @override
+  Stream<VideoEvent> videoEventsFor(int playerId) =>
+      _eventControllers[playerId]?.stream ?? const Stream.empty();
+
+  @override
+  Future<void> dispose(int playerId) async {
+    await _eventControllers[playerId]?.close();
+    _eventControllers.remove(playerId);
+  }
+
+  @override
+  Future<void> setLooping(int playerId, bool looping) async {}
+  @override
+  Future<void> play(int playerId) async {}
+  @override
+  Future<void> pause(int playerId) async {}
+  @override
+  Future<void> setVolume(int playerId, double volume) async {}
+  @override
+  Future<void> seekTo(int playerId, Duration position) async {}
+  @override
+  Future<void> setPlaybackSpeed(int playerId, double speed) async {}
+  @override
+  Future<Duration> getPosition(int playerId) async => Duration.zero;
+  @override
+  Widget buildView(int playerId) => const SizedBox.shrink();
+  @override
+  Widget buildViewWithOptions(VideoViewOptions options) =>
+      const SizedBox.shrink();
+  @override
+  Future<void> setMixWithOthers(bool mixWithOthers) async {}
+  @override
+  Future<void> setAllowBackgroundPlayback(bool allow) async {}
+  @override
+  Future<void> setWebOptions(int playerId, VideoPlayerWebOptions options) async {}
 }

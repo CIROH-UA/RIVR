@@ -76,6 +76,7 @@ dev_dependencies:
   fake_cloud_firestore: ^4.0.1
   firebase_auth_mocks: ^0.15.1
   network_image_mock: ^2.1.1
+  video_player_platform_interface: ^6.6.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
