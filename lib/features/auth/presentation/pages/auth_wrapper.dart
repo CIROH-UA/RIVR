@@ -93,7 +93,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
 
         // Show authentication pages with crossfade transition
-        return AnimatedSwitcher(
+        // Block back button — there's no screen behind auth
+        return PopScope(
+          canPop: false,
+          child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 300),
           layoutBuilder: (currentChild, previousChildren) {
             return Stack(
@@ -108,6 +111,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
             key: ValueKey(_currentPage),
             child: _buildCurrentPage(),
           ),
+        ),
         );
       },
     );

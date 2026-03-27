@@ -24,7 +24,7 @@
 - [x] **Rename "Copy Reach Info" to "Copy Info"** — The word "reach" is confusing to non-technical users. Simplify the label. *(Phebe Ramsdell)* -- Fixed: renamed to "Copy Info".
 - [x] **Empty favorites screen guidance for new users** — When a new user opens the app for the first time, the home screen shows an empty favorites list with no guidance. The helpful guide that appears after adding a favorite should be shown from the start, before any favorites are added. *(Xueyi Li)* -- Fixed: replaced vague description and help dialog with clear inline CTA pointing to the + button.
 - [ ] **Clarify the "Wave" section's purpose** — The Wave view on the Hourly Timeline feels redundant given the "View Hourly Hydrograph" button below it. Consider adding interactivity (tap data points to see specific values) to differentiate it, or reconsider its role. *(Xueyi Li)*
-- [ ] **Add a back/home route for navigation edge cases** — Ensure there is a root "Welcome" or "Landing" route so users are not forced out of the app when navigating back. *(Henok Teklu)*
+- [x] **Add a back/home route for navigation edge cases** — Ensure there is a root "Welcome" or "Landing" route so users are not forced out of the app when navigating back. *(Henok Teklu)* -- Fixed: added `PopScope` to FavoritesPage with double-back-to-exit pattern (press back once shows "Press back again to exit" hint, press again within 2 seconds to exit). Also blocked back navigation from auth screens since there's no meaningful screen behind them.
 
 ## Feature Requests
 

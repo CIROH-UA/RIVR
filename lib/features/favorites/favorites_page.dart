@@ -37,6 +37,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
   bool _showSearch = false; // New state for search visibility
   String _selectedFlowUnit = 'ft³/s';
   bool _notificationBannerDismissed = true; // Default hidden until loaded
+  DateTime? _lastBackPressTime;
 
   static const _bannerDismissedKey = 'notification_banner_dismissed';
 
@@ -111,38 +112,52 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      navigationBar: _buildNavigationBar(),
-      child: Stack(
-        children: [
-          // Main content
-          Consumer<FavoritesProvider>(
-            builder: (context, favoritesProvider, child) {
-              if (favoritesProvider.isLoading) {
-                return _buildLoadingState();
-              }
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastBackPressTime != null &&
+            now.difference(_lastBackPressTime!) < const Duration(seconds: 2)) {
+          Navigator.of(context).pop();
+          return;
+        }
+        _lastBackPressTime = now;
+        _showExitHint();
+      },
+      child: CupertinoPageScaffold(
+        navigationBar: _buildNavigationBar(),
+        child: Stack(
+          children: [
+            // Main content
+            Consumer<FavoritesProvider>(
+              builder: (context, favoritesProvider, child) {
+                if (favoritesProvider.isLoading) {
+                  return _buildLoadingState();
+                }
 
-              if (favoritesProvider.isEmpty &&
-                  favoritesProvider.errorMessage != null) {
-                return _buildInitErrorState(favoritesProvider.errorMessage!);
-              }
+                if (favoritesProvider.isEmpty &&
+                    favoritesProvider.errorMessage != null) {
+                  return _buildInitErrorState(favoritesProvider.errorMessage!);
+                }
 
-              if (favoritesProvider.isEmpty) {
-                return _buildEmptyState();
-              }
+                if (favoritesProvider.isEmpty) {
+                  return _buildEmptyState();
+                }
 
-              // Trigger Phase A coach marks when favorites are loaded
-              if (!_hasShownFavoritesTour && !_isTourActive) {
-                _maybeShowFavoritesTour(favoritesProvider);
-              }
+                // Trigger Phase A coach marks when favorites are loaded
+                if (!_hasShownFavoritesTour && !_isTourActive) {
+                  _maybeShowFavoritesTour(favoritesProvider);
+                }
 
-              return _buildFavoritesList(favoritesProvider);
-            },
-          ),
+                return _buildFavoritesList(favoritesProvider);
+              },
+            ),
 
-          // Floating action button
-          _buildFloatingActionButton(),
-        ],
+            // Floating action button
+            _buildFloatingActionButton(),
+          ],
+        ),
       ),
     );
   }
@@ -794,6 +809,47 @@ class _FavoritesPageState extends State<FavoritesPage> {
       if (!_showSearch) {
         _searchQuery = ''; // Clear search when hiding
       }
+    });
+  }
+
+  void _showExitHint() {
+    if (!mounted) return;
+    final overlay = Overlay.of(context);
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (context) => Positioned(
+        bottom: MediaQuery.of(context).padding.bottom + 60,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 200),
+            builder: (context, opacity, child) => Opacity(
+              opacity: opacity,
+              child: child,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: CupertinoColors.black.withValues(alpha: 0.75),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'Press back again to exit',
+                style: TextStyle(
+                  color: CupertinoColors.white,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    Future.delayed(const Duration(seconds: 2), () {
+      entry.remove();
     });
   }
 
