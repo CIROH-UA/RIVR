@@ -296,28 +296,38 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     const SizedBox(height: 12),
 
                     // Description
-                    Text(
-                      'Discover rivers on the map and add them to your favorites for quick access to flow forecasts.',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: CupertinoColors.systemGrey2
-                          ..resolveFrom(context),
-                        height: 1.4,
+                    Text.rich(
+                      TextSpan(
+                        children: [
+                          const TextSpan(text: 'Tap the '),
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: CupertinoColors.systemBlue,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                CupertinoIcons.add,
+                                color: CupertinoColors.white,
+                                size: 14,
+                              ),
+                            ),
+                          ),
+                          const TextSpan(
+                              text:
+                                  ' button below to explore the map and add your first river.'),
+                        ],
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: CupertinoColors.systemGrey2
+                            ..resolveFrom(context),
+                          height: 1.4,
+                        ),
                       ),
                       textAlign: TextAlign.center,
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Spacer to keep "How do I add favorites?" positioned
-                    const SizedBox(height: 48),
-
-                    const SizedBox(height: 16),
-
-                    // Secondary action
-                    CupertinoButton(
-                      onPressed: _showHelpDialog,
-                      child: const Text('How do I add favorites?'),
                     ),
                   ],
                 ),
@@ -1171,33 +1181,4 @@ class _FavoritesPageState extends State<FavoritesPage> {
     }
   }
 
-  void _showHelpDialog() {
-    showCupertinoDialog(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('Adding Favorites'),
-        content: const Text(
-          '1. Tap the + button to open the map\n'
-          '2. Find a river you\'re interested in\n'
-          '3. Tap the river to view details\n'
-          '4. Tap the heart button to add it to favorites\n\n'
-          'Your favorites will appear here for quick access to flow forecasts.',
-          textAlign: TextAlign.center,
-        ),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Got it'),
-          ),
-          CupertinoDialogAction(
-            onPressed: () {
-              Navigator.pop(context);
-              _navigateToMap();
-            },
-            child: const Text('Explore Now'),
-          ),
-        ],
-      ),
-    );
-  }
 }
