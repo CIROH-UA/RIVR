@@ -21,6 +21,7 @@ class FavoriteRiverCard extends StatefulWidget {
   final VoidCallback? onRename;
   final VoidCallback? onChangeImage;
   final bool isReorderable;
+  final int cardIndex;
 
   const FavoriteRiverCard({
     super.key,
@@ -29,6 +30,7 @@ class FavoriteRiverCard extends StatefulWidget {
     this.onRename,
     this.onChangeImage,
     this.isReorderable = true,
+    this.cardIndex = 0,
   });
 
   @override
@@ -164,8 +166,19 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
 
       _currentVideoPath = videoPath;
 
+      // Stagger initialization across cards to avoid exhausting
+      // hardware decoder slots on Android (typically 3-6 slots).
+      if (widget.cardIndex > 0) {
+        await Future.delayed(Duration(milliseconds: 100 * widget.cardIndex));
+        if (!mounted) return;
+      }
+
       // Use local variable during async gap
-      final controller = VideoPlayerController.asset(videoPath);
+      final controller = VideoPlayerController.asset(
+        videoPath,
+        // Allow background audio (e.g. music) to continue playing
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
       await controller.initialize();
       await controller.setLooping(true);
       await controller.setVolume(0.0);

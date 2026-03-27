@@ -537,6 +537,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         return FavoriteRiverCard(
           key: index == 0 && (_isTourActive || !_hasShownFavoritesTour) ? _firstCardKey : ValueKey(favorite.reachId),
           favorite: favorite,
+          cardIndex: index,
           onTap: () => _navigateToForecast(favorite.reachId),
           onRename: () => _showRenameDialog(favorite),
           onChangeImage: () => _navigateToImageSelection(favorite),
