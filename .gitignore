@@ -59,3 +59,6 @@ functions/.runtimeconfig.json
 # iOS build artifacts and secrets
 ios/build/
 ios/Flutter/Secrets.xcconfig
+
+# Claude Code local configuration
+.claude/
