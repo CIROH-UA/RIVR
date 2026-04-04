@@ -1,16 +1,49 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:rivr/core/services/reach_cache_service.dart';
 
 import '../../helpers/fake_data.dart';
 
+// ---------------------------------------------------------------------------
+// Minimal PathProviderPlatform mock that routes getApplicationCachePath to
+// a temporary directory created for the test run.
+// ---------------------------------------------------------------------------
+class _TempPathProvider extends Fake
+    with MockPlatformInterfaceMixin
+    implements PathProviderPlatform {
+  final String tempPath;
+  _TempPathProvider(this.tempPath);
+
+  @override
+  Future<String?> getApplicationCachePath() async => tempPath;
+
+  // All other path methods are unused by ReachCacheService — throw to make
+  // any unexpected call visible rather than silently returning null.
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName} not mocked');
+}
+
+// ---------------------------------------------------------------------------
+
 void main() {
   late ReachCacheService cache;
+  late Directory tempDir;
 
-  setUpAll(() {
+  setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    // Set up mock once — the cache service singleton will hold this reference
-    SharedPreferences.setMockInitialValues({});
+    tempDir = await Directory.systemTemp.createTemp('rivr_cache_test_');
+    PathProviderPlatform.instance = _TempPathProvider(tempDir.path);
+  });
+
+  tearDownAll(() async {
+    // Clean up temp directory after all tests complete
+    if (await tempDir.exists()) {
+      await tempDir.delete(recursive: true);
+    }
   });
 
   setUp(() async {
