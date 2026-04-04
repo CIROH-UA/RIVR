@@ -16,6 +16,8 @@ import 'package:rivr/features/favorites/services/coach_mark_service.dart';
 import 'package:rivr/features/favorites/services/coach_mark_targets.dart';
 import 'package:rivr/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/features/favorites/widgets/favorites_search_bar.dart';
+import 'package:rivr/features/favorites/widgets/skeleton_river_card.dart';
+import 'package:rivr/core/widgets/offline_banner.dart';
 import 'package:rivr/features/favorites/widgets/notification_prompt_banner.dart';
 import '../../../core/providers/favorites_provider.dart';
 import '../../../core/models/favorite_river.dart';
@@ -154,6 +156,17 @@ class _FavoritesPageState extends State<FavoritesPage> {
               },
             ),
 
+            // Offline connectivity banner (pinned below nav bar)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                bottom: false,
+                child: OfflineBanner(),
+              ),
+            ),
+
             // Floating action button
             _buildFloatingActionButton(),
           ],
@@ -209,18 +222,10 @@ class _FavoritesPageState extends State<FavoritesPage> {
   }
 
   Widget _buildLoadingState() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          CupertinoActivityIndicator(radius: 16),
-          SizedBox(height: 16),
-          Text(
-            'Loading your rivers...',
-            style: TextStyle(fontSize: 16, color: CupertinoColors.systemGrey),
-          ),
-        ],
-      ),
+    return ListView.builder(
+      padding: const EdgeInsets.only(top: 16),
+      itemCount: 5,
+      itemBuilder: (_, __) => const SkeletonRiverCard(),
     );
   }
 

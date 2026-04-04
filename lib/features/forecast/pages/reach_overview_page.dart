@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/core/models/reach_data.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:rivr/core/services/app_logger.dart';
 import 'package:rivr/core/routing/app_router.dart';
 import '../../../core/providers/favorites_provider.dart';
@@ -23,7 +24,6 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
   bool _isInitialized = false;
   bool _loadingTimedOut = false;
   bool _isTogglingFavorite = false;
-  String? _currentLoadingReachId; // Track which reach we're loading
 
   @override
   void initState() {
@@ -59,7 +59,6 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
       setState(() {
         _isInitialized = false;
         _loadingTimedOut = false;
-        _currentLoadingReachId = widget.reachId;
       });
     }
 
@@ -511,6 +510,8 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
               fontWeight: FontWeight.w500,
               color: CupertinoColors.label.resolveFrom(context),
             ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -618,11 +619,16 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
               color: CupertinoColors.secondaryLabel.resolveFrom(context),
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.w500,
-              color: CupertinoColors.label.resolveFrom(context),
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: CupertinoColors.label.resolveFrom(context),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
             ),
           ),
         ],
@@ -630,40 +636,60 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     );
   }
 
-  // Better initial loading state showing correct river being loaded
   Widget _buildInitialLoadingState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CupertinoActivityIndicator(radius: 20),
-          const SizedBox(height: 16),
-          Text(
-            'Loading river overview...',
-            style: TextStyle(
-              fontSize: 16,
-              color: CupertinoColors.secondaryLabel.resolveFrom(context),
-            ),
-          ),
-          if (_currentLoadingReachId != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Reach ID: $_currentLoadingReachId',
-              style: TextStyle(
-                fontSize: 12,
-                color: CupertinoColors.tertiaryLabel.resolveFrom(context),
+    return Shimmer.fromColors(
+      baseColor: CupertinoColors.systemGrey4.resolveFrom(context),
+      highlightColor: CupertinoColors.systemGrey6.resolveFrom(context),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title placeholder
+            Container(
+              height: 28,
+              width: 220,
+              decoration: BoxDecoration(
+                color: CupertinoColors.white,
+                borderRadius: BorderRadius.circular(6),
               ),
             ),
-          ],
-          const SizedBox(height: 8),
-          Text(
-            'This should only take a moment',
-            style: TextStyle(
-              fontSize: 14,
-              color: CupertinoColors.tertiaryLabel.resolveFrom(context),
+            const SizedBox(height: 12),
+            // Chart area placeholder
+            Container(
+              height: 200,
+              decoration: BoxDecoration(
+                color: CupertinoColors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            // Stats row placeholder
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.white,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    height: 60,
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.white,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
