@@ -24,14 +24,14 @@ Establish the error handling pattern and shared infrastructure that every subseq
 
 Migrate the simplest feature end-to-end to validate the pattern before tackling complex features.
 
-- [ ] Extract `SettingsFirestoreDatasource` from `UserSettingsService` (raw Firestore calls only)
-- [ ] Extract `SettingsLocalDatasource` from `UserSettingsService` (SharedPreferences/local calls only)
-- [ ] Create `SettingsRepositoryImpl` as coordinator (cache strategy, error mapping) implementing `ISettingsRepository`
-- [ ] Update settings use cases to return `ServiceResult<T>` instead of raw types
-- [ ] Update `ISettingsRepository` contract to return `ServiceResult<T>`
-- [ ] Remove old `SettingsRepository` thin wrapper (replaced by coordinator)
-- [ ] Update settings-related tests for new datasource + coordinator pattern
-- [ ] Verify settings feature works end-to-end (load, save, sync)
+- [x] Extract `SettingsFirestoreDatasource` from `UserSettingsService` (raw Firestore calls only) *(2026-04-06 11:30)*
+- [x] ~~Extract `SettingsLocalDatasource`~~ — N/A: no SharedPreferences usage; in-memory cache stays in `UserSettingsService` *(2026-04-06 11:30)*
+- [x] Create `SettingsRepositoryImpl` as coordinator (error mapping to `ServiceResult`) implementing `ISettingsRepository` *(2026-04-06 11:35)*
+- [x] Update settings use cases to return `ServiceResult<T>` instead of raw types *(2026-04-06 11:35)*
+- [x] Update `ISettingsRepository` contract to return `ServiceResult<T>` *(2026-04-06 11:35)*
+- [x] Remove old `SettingsRepository` thin wrapper (replaced by `SettingsRepositoryImpl`) *(2026-04-06 11:35)*
+- [x] Update settings-related tests for new datasource + coordinator pattern (8 datasource + 14 repository tests) *(2026-04-06 11:40)*
+- [x] Verify settings feature works end-to-end — `flutter analyze` clean, 66/66 unit tests pass *(2026-04-06 11:45)*
 
 ---
 

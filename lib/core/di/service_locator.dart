@@ -31,7 +31,8 @@ import '../../features/favorites/data/repositories/favorites_repository.dart';
 import '../../features/auth/domain/repositories/i_auth_repository.dart';
 import '../../features/auth/data/repositories/auth_repository.dart';
 import '../../features/settings/domain/repositories/i_settings_repository.dart';
-import '../../features/settings/data/repositories/settings_repository.dart';
+import '../../features/settings/data/repositories/settings_repository_impl.dart';
+import '../../features/settings/data/datasources/settings_firestore_datasource.dart';
 
 // Forecast use cases
 import '../../features/forecast/domain/usecases/load_forecast_overview_usecase.dart';
@@ -85,6 +86,11 @@ void setupServiceLocator() {
   );
   sl.registerLazySingleton<IAuthService>(() => AuthService());
 
+  // ── Datasources ─────────────────────────────────────────────────────────
+  sl.registerLazySingleton<SettingsFirestoreDatasource>(
+    () => SettingsFirestoreDatasource(),
+  );
+
   // ── Services with one dependency ─────────────────────────────────────────
   sl.registerLazySingleton<INoaaApiService>(
     () => NoaaApiService(unitService: sl<IFlowUnitPreferenceService>()),
@@ -93,6 +99,7 @@ void setupServiceLocator() {
   // ── Services with multiple dependencies ──────────────────────────────────
   sl.registerLazySingleton<IUserSettingsService>(
     () => UserSettingsService(
+      datasource: sl<SettingsFirestoreDatasource>(),
       unitService: sl<IFlowUnitPreferenceService>(),
       imageService: sl<IBackgroundImageService>(),
     ),
@@ -143,7 +150,7 @@ void setupServiceLocator() {
   );
 
   sl.registerLazySingleton<ISettingsRepository>(
-    () => SettingsRepository(settingsService: sl<IUserSettingsService>()),
+    () => SettingsRepositoryImpl(settingsService: sl<IUserSettingsService>()),
   );
 
   // ── Use cases (registerFactory — stateless, new instance per injection) ──

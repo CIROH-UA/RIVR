@@ -1,24 +1,28 @@
 // lib/core/services/user_settings_service.dart
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_settings.dart';
 import 'app_logger.dart';
 import 'error_service.dart';
 import 'i_flow_unit_preference_service.dart';
 import 'i_background_image_service.dart';
 import 'i_user_settings_service.dart';
+import '../../features/settings/data/datasources/settings_firestore_datasource.dart';
 
-/// Simple service for managing UserSettings with Firestore
+/// Service for managing UserSettings with Firestore via [SettingsFirestoreDatasource].
+///
+/// Owns in-memory caching, flow-unit sync, and background-image orchestration.
+/// Implements [IUserSettingsService] for backward compatibility with consumers
+/// that haven't migrated to [ISettingsRepository] + use cases yet.
 class UserSettingsService implements IUserSettingsService {
-  final FirebaseFirestore _firestore;
+  final SettingsFirestoreDatasource _datasource;
   final IFlowUnitPreferenceService _flowUnitService;
   final IBackgroundImageService _backgroundImageService;
 
   UserSettingsService({
-    FirebaseFirestore? firestore,
+    required SettingsFirestoreDatasource datasource,
     required IFlowUnitPreferenceService unitService,
     required IBackgroundImageService imageService,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
+  })  : _datasource = datasource,
         _flowUnitService = unitService,
         _backgroundImageService = imageService;
 
@@ -38,22 +42,11 @@ class UserSettingsService implements IUserSettingsService {
         return _cachedSettings;
       }
 
-      // Fetch from Firestore
-      final doc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .get()
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw Exception('Settings fetch timed out'),
-          );
-
-      if (!doc.exists) {
+      final settings = await _datasource.getSettings(userId);
+      if (settings == null) {
         AppLogger.debug('UserSettingsService', 'No settings found for user: $userId');
         return null;
       }
-
-      final settings = UserSettings.fromJson(doc.data()!);
 
       // Cache the settings
       _cachedSettings = settings;
@@ -61,12 +54,9 @@ class UserSettingsService implements IUserSettingsService {
 
       AppLogger.info('UserSettingsService', 'Settings loaded successfully');
       return settings;
-    } on FirebaseException catch (e) {
-      AppLogger.error('UserSettingsService', 'Firestore error: ${e.code} - ${e.message}', e);
-      throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error getting user settings: $e', e);
-      throw Exception('Failed to load user settings: ${e.toString()}');
+      throw Exception(ErrorService.handleError(e, context: 'getUserSettings'));
     }
   }
 
@@ -79,30 +69,16 @@ class UserSettingsService implements IUserSettingsService {
         'Saving settings for user: ${settings.userId}',
       );
 
-      await _firestore
-          .collection('users')
-          .doc(settings.userId)
-          .set(settings.toJson())
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw Exception('Settings save timed out'),
-          );
+      await _datasource.saveSettings(settings);
 
       // Update cache
       _cachedSettings = settings;
       _cachedUserId = settings.userId;
 
       AppLogger.info('UserSettingsService', 'Settings saved successfully');
-    } on FirebaseException catch (e) {
-      AppLogger.error(
-        'UserSettingsService',
-        'Firestore save error: ${e.code} - ${e.message}',
-        e,
-      );
-      throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error saving user settings: $e', e);
-      throw Exception('Failed to save user settings: ${e.toString()}');
+      throw Exception(ErrorService.handleError(e, context: 'saveUserSettings'));
     }
   }
 
@@ -115,20 +91,7 @@ class UserSettingsService implements IUserSettingsService {
     try {
       AppLogger.debug('UserSettingsService', 'Updating settings for user: $userId');
 
-      // Add updatedAt timestamp
-      final updateData = {
-        ...updates,
-        'updatedAt': DateTime.now().toIso8601String(),
-      };
-
-      await _firestore
-          .collection('users')
-          .doc(userId)
-          .update(updateData)
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw Exception('Settings update timed out'),
-          );
+      await _datasource.updateFields(userId, updates);
 
       // Clear cache to force refresh on next get
       if (_cachedUserId == userId) {
@@ -137,20 +100,11 @@ class UserSettingsService implements IUserSettingsService {
       }
 
       AppLogger.info('UserSettingsService', 'Settings updated successfully');
-    } on FirebaseException catch (e) {
-      AppLogger.error(
-        'UserSettingsService',
-        'Firestore update error: ${e.code} - ${e.message}',
-        e,
-      );
-      throw Exception(ErrorService.mapFirestoreError(e));
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error updating user settings: $e', e);
-      throw Exception('Failed to update user settings: ${e.toString()}');
+      throw Exception(ErrorService.handleError(e, context: 'updateUserSettings'));
     }
   }
-
-  // NEW: Custom Background Management Methods
 
   /// Add custom background image to user's collection
   @override
@@ -167,7 +121,6 @@ class UserSettingsService implements IUserSettingsService {
       final settings = await getUserSettings(userId);
       if (settings == null) return null;
 
-      // Add to user's collection
       final updatedSettings = settings.addCustomBackground(imagePath);
       await saveUserSettings(updatedSettings);
 
@@ -194,7 +147,6 @@ class UserSettingsService implements IUserSettingsService {
       final settings = await getUserSettings(userId);
       if (settings == null) return null;
 
-      // Remove from user's collection
       final updatedSettings = settings.removeCustomBackground(imagePath);
       await saveUserSettings(updatedSettings);
 
@@ -237,7 +189,6 @@ class UserSettingsService implements IUserSettingsService {
 
       final validPaths = <String>[];
 
-      // Check each custom background image
       for (final imagePath in settings.customBackgroundImagePaths) {
         final exists = await _backgroundImageService.imageExists(imagePath);
         if (exists) {
@@ -250,7 +201,6 @@ class UserSettingsService implements IUserSettingsService {
         }
       }
 
-      // Update settings if any paths were removed
       if (validPaths.length != settings.customBackgroundImagePaths.length) {
         final updatedSettings = settings.copyWith(
           customBackgroundImagePaths: validPaths,
@@ -284,12 +234,10 @@ class UserSettingsService implements IUserSettingsService {
       final settings = await getUserSettings(userId);
       if (settings == null) return null;
 
-      // Delete all image files
       for (final imagePath in settings.customBackgroundImagePaths) {
         await _backgroundImageService.deleteCustomBackground(imagePath);
       }
 
-      // Update settings
       final updatedSettings = settings.clearAllCustomBackgrounds();
       await saveUserSettings(updatedSettings);
 
@@ -300,8 +248,6 @@ class UserSettingsService implements IUserSettingsService {
       throw Exception('Failed to clear custom backgrounds: ${e.toString()}');
     }
   }
-
-  // END: Custom Background Management Methods
 
   /// Create default settings for a new user
   @override
@@ -327,7 +273,7 @@ class UserSettingsService implements IUserSettingsService {
         preferredTimeFormat: TimeFormat.twelveHour,
         enableNotifications: false,
         favoriteReachIds: [],
-        customBackgroundImagePaths: [], // NEW: Initialize empty list
+        customBackgroundImagePaths: [],
         lastLoginDate: now,
         createdAt: now,
         updatedAt: now,
@@ -352,7 +298,6 @@ class UserSettingsService implements IUserSettingsService {
         'Syncing settings after login for user: $userId',
       );
 
-      // Get current settings
       final settings = await getUserSettings(userId);
       if (settings == null) {
         AppLogger.warning('UserSettingsService', 'No settings found during sync');
@@ -377,7 +322,6 @@ class UserSettingsService implements IUserSettingsService {
       return updatedSettings;
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error syncing settings: $e', e);
-      // Don't throw here - login can still succeed even if sync fails
       return null;
     }
   }
@@ -503,13 +447,7 @@ class UserSettingsService implements IUserSettingsService {
   @override
   Future<bool> userHasSettings(String userId) async {
     try {
-      final doc = await _firestore
-          .collection('users')
-          .doc(userId)
-          .get()
-          .timeout(const Duration(seconds: 5));
-
-      return doc.exists;
+      return await _datasource.exists(userId);
     } catch (e) {
       AppLogger.error(
         'UserSettingsService',
@@ -537,7 +475,6 @@ class UserSettingsService implements IUserSettingsService {
       }
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error syncing flow unit preference: $e', e);
-      // Don't throw - this is not critical
     }
   }
 }
