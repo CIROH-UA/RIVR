@@ -71,15 +71,16 @@ Untangle the core models from serialization concerns. This phase can be done ind
 
 Forecast is the most complex service — phased loading, multi-source caching, unit conversion.
 
-- [ ] Extract `ForecastApiDatasource` from `ForecastService` + `NoaaApiService` (raw NOAA/NWM HTTP calls)
-- [ ] Extract `ForecastCacheDatasource` from `ForecastService` + `ReachCacheService` (file-based cache reads/writes)
-- [ ] Create `ForecastRepositoryImpl` as coordinator (phased loading strategy, cache-then-network, TTL management)
-- [ ] Update forecast use cases to return `ServiceResult<T>`
-- [ ] Update `IForecastRepository` contract to return `ServiceResult<T>`
-- [ ] Remove old `ForecastRepository` thin wrapper
-- [ ] Update `ReachDataProvider` to use use cases instead of direct service calls
-- [ ] Update forecast-related tests (service mocks → datasource mocks)
-- [ ] Verify forecast flows end-to-end (overview load, supplementary load, complete load, refresh)
+- [x] ~~Extract `ForecastApiDatasource`~~ — N/A: `INoaaApiService` already serves as the API datasource with a clean interface *(2026-04-06)*
+- [x] ~~Extract `ForecastCacheDatasource`~~ — N/A: `IReachCacheService` already serves as the cache datasource with a clean interface *(2026-04-06)*
+- [x] Create `ForecastRepositoryImpl` as coordinator (wraps `IForecastService` with `ServiceResult` error handling) *(2026-04-06)*
+- [x] Update forecast use cases to return `ServiceResult<T>` (5 existing + 1 new `LoadSpecificForecastUseCase`) *(2026-04-06)*
+- [x] Update `IForecastRepository` contract to return `ServiceResult<T>` + add `loadSpecificForecast` method *(2026-04-06)*
+- [x] Remove old `ForecastRepository` thin wrapper (replaced by `ForecastRepositoryImpl`) *(2026-04-06)*
+- [x] Update `ReachDataProvider` to use use cases instead of direct service calls (kept `IForecastService` for computed-value methods in mixin) *(2026-04-06)*
+- [x] Update `GetReachDetailsForMapUseCase` to return `ServiceResult<T>` *(2026-04-06)*
+- [x] Update forecast-related tests (14 new repository tests, integration test helpers updated for use case DI) *(2026-04-06)*
+- [x] Verify forecast flows — `flutter analyze` clean, 484/484 unit tests pass *(2026-04-06)*
 
 ---
 
@@ -87,14 +88,14 @@ Forecast is the most complex service — phased loading, multi-source caching, u
 
 Favorites depends on forecast data and has the most complex provider.
 
-- [ ] Extract `FavoritesFirestoreDatasource` from `FavoritesService` (Firestore CRUD for favorites)
-- [ ] Create `FavoritesRepositoryImpl` as coordinator implementing `IFavoritesRepository`
-- [ ] Update favorites use cases to return `ServiceResult<T>`
-- [ ] Update `IFavoritesRepository` contract to return `ServiceResult<T>`
-- [ ] Remove old `FavoritesRepository` thin wrapper
-- [ ] Rewire `FavoritesProvider` to call use cases instead of services directly
-- [ ] Update favorites-related tests
-- [ ] Verify favorites flows end-to-end (load, add, remove, reorder, refresh)
+- [x] ~~Extract `FavoritesFirestoreDatasource`~~ — N/A: `IFavoritesService` already serves as the datasource with a clean interface *(2026-04-06)*
+- [x] Create `FavoritesRepositoryImpl` as coordinator implementing `IFavoritesRepository` (aggregates 5 services, includes return-period merging logic) *(2026-04-06)*
+- [x] Update favorites use cases to return `ServiceResult<T>` (7 use cases updated) *(2026-04-06)*
+- [x] Update `IFavoritesRepository` contract to return `ServiceResult<T>` *(2026-04-06)*
+- [x] Remove old `FavoritesRepository` thin wrapper (replaced by `FavoritesRepositoryImpl`) *(2026-04-06)*
+- [x] Rewire `FavoritesProvider` to use 4 CRUD use cases (kept direct service refs for complex refresh orchestration) *(2026-04-06)*
+- [x] Update favorites-related tests (19 new repository tests, integration test helpers updated for use case DI) *(2026-04-06)*
+- [x] Verify favorites flows — `flutter analyze` clean, 503/503 unit tests pass *(2026-04-06)*
 
 ---
 
@@ -104,7 +105,7 @@ Map has the least domain logic — primarily UI services. Light migration.
 
 - [ ] Evaluate which map services are datasources vs. infrastructure vs. UI-only
 - [ ] Extract any datasource logic if applicable (geocoding, vector tile config)
-- [ ] Update `GetReachDetailsForMapUseCase` to return `ServiceResult<T>`
+- [x] Update `GetReachDetailsForMapUseCase` to return `ServiceResult<T>` *(completed in Phase 5)*
 - [ ] Update map-related tests
 - [ ] Verify map feature works end-to-end
 

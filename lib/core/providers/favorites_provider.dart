@@ -16,10 +16,21 @@ import '../services/i_reach_cache_service.dart';
 import '../services/i_flow_unit_preference_service.dart';
 import '../services/i_noaa_api_service.dart';
 import '../services/analytics_service.dart';
+import '../../features/favorites/domain/usecases/initialize_favorites_usecase.dart';
+import '../../features/favorites/domain/usecases/add_favorite_usecase.dart';
+import '../../features/favorites/domain/usecases/remove_favorite_usecase.dart';
+import '../../features/favorites/domain/usecases/reorder_favorites_usecase.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
 class FavoritesProvider with ChangeNotifier {
+  // Use cases for CRUD operations
+  final InitializeFavoritesUseCase _initializeFavorites;
+  final AddFavoriteUseCase _addFavoriteUseCase;
+  final RemoveFavoriteUseCase _removeFavoriteUseCase;
+  final ReorderFavoritesUseCase _reorderFavoritesUseCase;
+
+  // Services kept for complex orchestration (refresh, return periods, cache)
   final IFavoritesService _favoritesService;
   final IForecastService _forecastService;
   final IReachCacheService _reachCacheService;
@@ -34,13 +45,25 @@ class FavoritesProvider with ChangeNotifier {
     IReachCacheService? reachCacheService,
     IFlowUnitPreferenceService? unitService,
     INoaaApiService? apiService,
+    InitializeFavoritesUseCase? initializeFavorites,
+    AddFavoriteUseCase? addFavoriteUseCase,
+    RemoveFavoriteUseCase? removeFavoriteUseCase,
+    ReorderFavoritesUseCase? reorderFavoritesUseCase,
   })  : _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
         _forecastService = forecastService ?? GetIt.I<IForecastService>(),
         _reachCacheService =
             reachCacheService ?? GetIt.I<IReachCacheService>(),
         _unitService =
             unitService ?? GetIt.I<IFlowUnitPreferenceService>(),
-        _apiService = apiService ?? GetIt.I<INoaaApiService>();
+        _apiService = apiService ?? GetIt.I<INoaaApiService>(),
+        _initializeFavorites =
+            initializeFavorites ?? GetIt.I<InitializeFavoritesUseCase>(),
+        _addFavoriteUseCase =
+            addFavoriteUseCase ?? GetIt.I<AddFavoriteUseCase>(),
+        _removeFavoriteUseCase =
+            removeFavoriteUseCase ?? GetIt.I<RemoveFavoriteUseCase>(),
+        _reorderFavoritesUseCase =
+            reorderFavoritesUseCase ?? GetIt.I<ReorderFavoritesUseCase>();
 
   // Current state
   List<FavoriteRiver> _favorites = [];
@@ -117,7 +140,7 @@ class FavoritesProvider with ChangeNotifier {
     _clearError();
 
     try {
-      // 1. Load reach IDs from Firestore
+      // 1. Load reach IDs from Firestore via use case
       await _loadFavoritesFromStorage();
 
       // 2. Restore full session data from SharedPreferences (instant display)
@@ -140,15 +163,17 @@ class FavoritesProvider with ChangeNotifier {
     }
   }
 
-  /// Load favorites from cloud storage (reach IDs only)
+  /// Load favorites from cloud storage (reach IDs only) via use case
   Future<void> _loadFavoritesFromStorage() async {
-    try {
-      _favorites = await _favoritesService.loadFavorites();
-      _updateFavoriteReachIds(); // Update lookup set
-      notifyListeners();
-    } catch (e) {
-      rethrow;
+    final result = await _initializeFavorites();
+
+    if (result.isFailure) {
+      throw Exception(result.errorMessage ?? 'Failed to load favorites');
     }
+
+    _favorites = result.data;
+    _updateFavoriteReachIds(); // Update lookup set
+    notifyListeners();
   }
 
   /// Update the lookup set when favorites list changes
@@ -164,9 +189,13 @@ class FavoritesProvider with ChangeNotifier {
         return false;
       }
 
-      // Add to cloud storage (reach ID only)
-      final success = await _favoritesService.addFavorite(reachId);
-      if (!success) return false;
+      // Add to cloud storage via use case
+      final result = await _addFavoriteUseCase(reachId);
+      if (result.isFailure) {
+        _setError(result.errorMessage ?? 'Failed to add favorite');
+        return false;
+      }
+      if (!result.data) return false;
 
       AnalyticsService.instance.logFavoriteAdded(reachId);
 
@@ -198,9 +227,13 @@ class FavoritesProvider with ChangeNotifier {
         return false;
       }
 
-      // Add to cloud storage (reach ID only)
-      final success = await _favoritesService.addFavorite(reachId);
-      if (!success) return false;
+      // Add to cloud storage via use case
+      final result = await _addFavoriteUseCase(reachId);
+      if (result.isFailure) {
+        _setError(result.errorMessage ?? 'Failed to add favorite');
+        return false;
+      }
+      if (!result.data) return false;
 
       AnalyticsService.instance.logFavoriteAdded(reachId);
 
@@ -229,8 +262,13 @@ class FavoritesProvider with ChangeNotifier {
   /// Remove a favorite river and clean up all session data
   Future<bool> removeFavorite(String reachId) async {
     try {
-      final success = await _favoritesService.removeFavorite(reachId);
-      if (!success) return false;
+      // Remove from cloud storage via use case
+      final result = await _removeFavoriteUseCase(reachId);
+      if (result.isFailure) {
+        _setError(result.errorMessage ?? 'Failed to remove favorite');
+        return false;
+      }
+      if (!result.data) return false;
 
       AnalyticsService.instance.logFavoriteRemoved(reachId);
 
@@ -265,9 +303,14 @@ class FavoritesProvider with ChangeNotifier {
       _updateFavoriteReachIds(); // Update lookup set
       notifyListeners();
 
-      // Persist the reordering
-      final success = await _favoritesService.reorderFavorites(_favorites);
-      if (!success) {
+      // Persist the reordering via use case
+      final result = await _reorderFavoritesUseCase(_favorites);
+      if (result.isFailure) {
+        // Revert on failure
+        await _loadFavoritesFromStorage();
+        return false;
+      }
+      if (!result.data) {
         // Revert on failure
         await _loadFavoritesFromStorage();
         return false;
@@ -469,9 +512,13 @@ class FavoritesProvider with ChangeNotifier {
         return false;
       }
 
-      // Add to cloud storage (reach ID only)
-      final success = await _favoritesService.addFavorite(reachId);
-      if (!success) return false;
+      // Add to cloud storage via use case
+      final result = await _addFavoriteUseCase(reachId);
+      if (result.isFailure) {
+        _setError(result.errorMessage ?? 'Failed to add favorite');
+        return false;
+      }
+      if (!result.data) return false;
 
       AnalyticsService.instance.logFavoriteAdded(reachId);
 

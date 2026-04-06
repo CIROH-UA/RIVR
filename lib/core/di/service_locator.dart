@@ -25,9 +25,9 @@ import '../../features/map/services/map_service_factory.dart';
 
 // Repositories
 import '../../features/forecast/domain/repositories/i_forecast_repository.dart';
-import '../../features/forecast/data/repositories/forecast_repository.dart';
+import '../../features/forecast/data/repositories/forecast_repository_impl.dart';
 import '../../features/favorites/domain/repositories/i_favorites_repository.dart';
-import '../../features/favorites/data/repositories/favorites_repository.dart';
+import '../../features/favorites/data/repositories/favorites_repository_impl.dart';
 import '../../features/auth/domain/repositories/i_auth_repository.dart';
 import '../../features/auth/data/repositories/auth_repository_impl.dart';
 import '../../features/auth/data/datasources/auth_firebase_datasource.dart';
@@ -42,6 +42,7 @@ import '../../features/forecast/domain/usecases/load_forecast_supplementary_usec
 import '../../features/forecast/domain/usecases/load_complete_forecast_usecase.dart';
 import '../../features/forecast/domain/usecases/refresh_forecast_usecase.dart';
 import '../../features/forecast/domain/usecases/get_reach_details_usecase.dart';
+import '../../features/forecast/domain/usecases/load_specific_forecast_usecase.dart';
 
 // Map use cases
 import '../../features/map/domain/usecases/get_reach_details_for_map_usecase.dart';
@@ -143,11 +144,11 @@ void setupServiceLocator() {
 
   // ── Repositories ─────────────────────────────────────────────────────────
   sl.registerLazySingleton<IForecastRepository>(
-    () => ForecastRepository(forecastService: sl<IForecastService>()),
+    () => ForecastRepositoryImpl(forecastService: sl<IForecastService>()),
   );
 
   sl.registerLazySingleton<IFavoritesRepository>(
-    () => FavoritesRepository(
+    () => FavoritesRepositoryImpl(
       favoritesService: sl<IFavoritesService>(),
       forecastService: sl<IForecastService>(),
       cacheService: sl<IReachCacheService>(),
@@ -175,6 +176,7 @@ void setupServiceLocator() {
   sl.registerFactory(() => LoadCompleteForecastUseCase(sl<IForecastRepository>()));
   sl.registerFactory(() => RefreshForecastUseCase(sl<IForecastRepository>()));
   sl.registerFactory(() => GetReachDetailsUseCase(sl<IForecastRepository>()));
+  sl.registerFactory(() => LoadSpecificForecastUseCase(sl<IForecastRepository>()));
 
   // Map
   sl.registerFactory(() => GetReachDetailsForMapUseCase(sl<IForecastRepository>()));

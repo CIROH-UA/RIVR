@@ -25,6 +25,18 @@ import 'package:rivr/core/services/i_noaa_api_service.dart';
 import 'package:rivr/core/services/i_reach_cache_service.dart';
 import 'package:rivr/core/services/i_user_settings_service.dart';
 import 'package:rivr/features/auth/providers/auth_provider.dart';
+import 'package:rivr/features/favorites/data/repositories/favorites_repository_impl.dart';
+import 'package:rivr/features/favorites/domain/repositories/i_favorites_repository.dart';
+import 'package:rivr/features/favorites/domain/usecases/initialize_favorites_usecase.dart';
+import 'package:rivr/features/favorites/domain/usecases/add_favorite_usecase.dart';
+import 'package:rivr/features/favorites/domain/usecases/remove_favorite_usecase.dart';
+import 'package:rivr/features/favorites/domain/usecases/reorder_favorites_usecase.dart';
+import 'package:rivr/features/forecast/data/repositories/forecast_repository_impl.dart';
+import 'package:rivr/features/forecast/domain/repositories/i_forecast_repository.dart';
+import 'package:rivr/features/forecast/domain/usecases/load_forecast_overview_usecase.dart';
+import 'package:rivr/features/forecast/domain/usecases/load_forecast_supplementary_usecase.dart';
+import 'package:rivr/features/forecast/domain/usecases/load_specific_forecast_usecase.dart';
+import 'package:rivr/features/forecast/domain/usecases/load_complete_forecast_usecase.dart';
 
 import 'mock_services.dart';
 
@@ -77,6 +89,28 @@ class TestServices {
     sl.registerSingleton<IUserSettingsService>(userSettings);
     sl.registerSingleton<IBackgroundImageService>(backgroundImage);
     sl.registerSingleton<IFlowUnitPreferenceService>(flowUnit);
+
+    // Forecast repository + use cases (needed by ReachDataProvider)
+    final forecastRepo = ForecastRepositoryImpl(forecastService: forecast);
+    sl.registerSingleton<IForecastRepository>(forecastRepo);
+    sl.registerFactory(() => LoadForecastOverviewUseCase(forecastRepo));
+    sl.registerFactory(() => LoadForecastSupplementaryUseCase(forecastRepo));
+    sl.registerFactory(() => LoadSpecificForecastUseCase(forecastRepo));
+    sl.registerFactory(() => LoadCompleteForecastUseCase(forecastRepo));
+
+    // Favorites repository + use cases (needed by FavoritesProvider)
+    final favoritesRepo = FavoritesRepositoryImpl(
+      favoritesService: favorites,
+      forecastService: forecast,
+      cacheService: reachCache,
+      unitService: flowUnit,
+      apiService: noaaApi,
+    );
+    sl.registerSingleton<IFavoritesRepository>(favoritesRepo);
+    sl.registerFactory(() => InitializeFavoritesUseCase(favoritesRepo));
+    sl.registerFactory(() => AddFavoriteUseCase(favoritesRepo));
+    sl.registerFactory(() => RemoveFavoriteUseCase(favoritesRepo));
+    sl.registerFactory(() => ReorderFavoritesUseCase(favoritesRepo));
   }
 
   /// Seed a default signed-in user with settings.
