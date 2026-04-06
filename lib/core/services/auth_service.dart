@@ -2,50 +2,41 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:local_auth/local_auth.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/user_settings.dart';
 import 'app_logger.dart';
 import 'error_service.dart';
 import 'i_auth_service.dart';
 import 'service_result.dart';
+import '../../features/auth/data/datasources/auth_firebase_datasource.dart';
+import '../../features/auth/data/datasources/biometric_datasource.dart';
 
-/// Simplified Firebase Auth wrapper service for RIVR
-/// Handles all authentication operations with proper error handling
+/// Firebase Auth wrapper service for RIVR.
+///
+/// Delegates raw Firebase Auth calls to [AuthFirebaseDatasource] and
+/// biometric operations to [BiometricDatasource]. Implements [IAuthService]
+/// for backward compatibility with consumers (e.g. [AuthProvider]) that
+/// haven't migrated to use cases yet.
 class AuthService implements IAuthService {
-  AuthService();
+  final AuthFirebaseDatasource _authDatasource;
+  final BiometricDatasource _biometricDatasource;
 
-  // Firebase instances
-  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // Biometric authentication
-  final LocalAuthentication _localAuth = LocalAuthentication();
-
-  // Secure storage for biometric credentials
-  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.first_unlock_this_device,
-    ),
-  );
-
-  // Storage keys
-  static const String _biometricEnabledKey = 'biometric_enabled';
-  static const String _biometricUserIdKey = 'biometric_user_id';
-  static const String _biometricEmailKey = 'biometric_email';
+  AuthService({
+    AuthFirebaseDatasource? authDatasource,
+    BiometricDatasource? biometricDatasource,
+  })  : _authDatasource = authDatasource ?? AuthFirebaseDatasource(),
+        _biometricDatasource = biometricDatasource ?? BiometricDatasource();
 
   /// Get current Firebase user
   @override
-  User? get currentUser => _firebaseAuth.currentUser;
+  User? get currentUser => _authDatasource.currentUser;
 
   /// Stream of authentication state changes
   @override
-  Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
+  Stream<User?> get authStateChanges => _authDatasource.authStateChanges;
 
   /// Check if user is currently signed in
   @override
-  bool get isSignedIn => currentUser != null;
+  bool get isSignedIn => _authDatasource.isSignedIn;
 
   // MARK: - Email/Password Authentication
 
@@ -58,15 +49,10 @@ class AuthService implements IAuthService {
     try {
       AppLogger.debug('AuthService', 'Signing in with email: $email');
 
-      final credential = await _firebaseAuth
-          .signInWithEmailAndPassword(email: email.trim(), password: password)
-          .timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw FirebaseAuthException(
-              code: 'timeout',
-              message: 'Sign in request timed out',
-            ),
-          );
+      final credential = await _authDatasource.signIn(
+        email: email,
+        password: password,
+      );
 
       if (credential.user == null) {
         return AuthResult.failure('Sign in failed - no user returned');
@@ -94,18 +80,10 @@ class AuthService implements IAuthService {
     try {
       AppLogger.debug('AuthService', 'Registering user with email: $email');
 
-      final credential = await _firebaseAuth
-          .createUserWithEmailAndPassword(
-            email: email.trim(),
-            password: password,
-          )
-          .timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw FirebaseAuthException(
-              code: 'timeout',
-              message: 'Registration request timed out',
-            ),
-          );
+      final credential = await _authDatasource.register(
+        email: email,
+        password: password,
+      );
 
       if (credential.user == null) {
         return AuthResult.failure('Registration failed - no user returned');
@@ -115,7 +93,7 @@ class AuthService implements IAuthService {
       AppLogger.info('AuthService', 'Registration successful for user: ${user.uid}');
 
       // Update display name
-      await user.updateDisplayName('$firstName $lastName');
+      await _authDatasource.updateDisplayName(user, '$firstName $lastName');
 
       // Create UserSettings document in Firestore
       await _createUserSettings(
@@ -127,7 +105,7 @@ class AuthService implements IAuthService {
 
       // Send email verification (fire-and-forget)
       try {
-        await user.sendEmailVerification();
+        await _authDatasource.sendEmailVerification(user);
         AppLogger.info('AuthService', 'Verification email sent to ${email.trim()}');
       } catch (e) {
         AppLogger.warning('AuthService', 'Failed to send verification email: $e');
@@ -167,7 +145,7 @@ class AuthService implements IAuthService {
         updatedAt: DateTime.now(),
       );
 
-      await _firestore
+      await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .set(userSettings.toJson())
@@ -189,15 +167,7 @@ class AuthService implements IAuthService {
     try {
       AppLogger.debug('AuthService', 'Sending password reset email to: $email');
 
-      await _firebaseAuth
-          .sendPasswordResetEmail(email: email.trim())
-          .timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw FirebaseAuthException(
-              code: 'timeout',
-              message: 'Password reset request timed out',
-            ),
-          );
+      await _authDatasource.sendPasswordResetEmail(email);
 
       AppLogger.info('AuthService', 'Password reset email sent successfully');
       return AuthResult.success(null, message: 'Password reset email sent');
@@ -218,16 +188,10 @@ class AuthService implements IAuthService {
     try {
       AppLogger.debug('AuthService', 'Signing out current user');
 
-      await _firebaseAuth.signOut().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () {
-          AppLogger.warning('AuthService', 'Sign out timed out, but continuing');
-          // Continue anyway - local session will be cleared
-        },
-      );
+      await _authDatasource.signOut();
 
       // Clear biometric credentials on sign out
-      await _clearBiometricCredentials();
+      await _biometricDatasource.clearCredentials();
 
       AppLogger.info('AuthService', 'Sign out successful');
       return AuthResult.success(null, message: 'Signed out successfully');
@@ -243,9 +207,7 @@ class AuthService implements IAuthService {
   @override
   Future<bool> isBiometricAvailable() async {
     try {
-      final canCheckBiometrics = await _localAuth.canCheckBiometrics;
-      final isDeviceSupported = await _localAuth.isDeviceSupported();
-      return canCheckBiometrics && isDeviceSupported;
+      return await _biometricDatasource.isAvailable();
     } catch (e) {
       AppLogger.error('AuthService', 'Error checking biometric availability: $e', e);
       return false;
@@ -256,8 +218,7 @@ class AuthService implements IAuthService {
   @override
   Future<bool> isBiometricEnabled() async {
     try {
-      final value = await _secureStorage.read(key: _biometricEnabledKey);
-      return value == 'true';
+      return await _biometricDatasource.isEnabled();
     } catch (e) {
       AppLogger.error('AuthService', 'Error checking biometric enabled status: $e', e);
       return false;
@@ -277,7 +238,7 @@ class AuthService implements IAuthService {
       }
 
       // Authenticate with biometrics to confirm setup
-      final authenticated = await _authenticateWithBiometrics(
+      final authenticated = await _biometricDatasource.authenticate(
         'Authenticate to enable biometric login',
       );
 
@@ -286,14 +247,9 @@ class AuthService implements IAuthService {
       }
 
       // Store credentials securely
-      await _secureStorage.write(key: _biometricEnabledKey, value: 'true');
-      await _secureStorage.write(
-        key: _biometricUserIdKey,
-        value: currentUser!.uid,
-      );
-      await _secureStorage.write(
-        key: _biometricEmailKey,
-        value: currentUser!.email ?? '',
+      await _biometricDatasource.storeCredentials(
+        userId: currentUser!.uid,
+        email: currentUser!.email ?? '',
       );
 
       AppLogger.info('AuthService', 'Biometric login enabled successfully');
@@ -310,7 +266,7 @@ class AuthService implements IAuthService {
   @override
   Future<AuthResult> disableBiometricLogin() async {
     try {
-      await _clearBiometricCredentials();
+      await _biometricDatasource.clearCredentials();
       AppLogger.info('AuthService', 'Biometric login disabled successfully');
       return AuthResult.success(null, message: 'Biometric login disabled');
     } catch (e) {
@@ -329,20 +285,20 @@ class AuthService implements IAuthService {
         return AuthResult.failure('Biometric authentication not available');
       }
 
-      if (!await isBiometricEnabled()) {
+      if (!await _biometricDatasource.isEnabled()) {
         return AuthResult.failure('Biometric login not enabled');
       }
 
       // Get stored credentials
-      final userId = await _secureStorage.read(key: _biometricUserIdKey);
-      final email = await _secureStorage.read(key: _biometricEmailKey);
+      final userId = await _biometricDatasource.getStoredUserId();
+      final email = await _biometricDatasource.getStoredEmail();
 
       if (userId == null || email == null) {
         return AuthResult.failure('No biometric credentials found');
       }
 
       // Authenticate with biometrics
-      final authenticated = await _authenticateWithBiometrics(
+      final authenticated = await _biometricDatasource.authenticate(
         'Use biometric authentication to sign in',
       );
 
@@ -352,8 +308,7 @@ class AuthService implements IAuthService {
 
       // Check if user still exists in Firebase
       if (currentUser?.uid != userId) {
-        // User might be signed out or different user
-        await _clearBiometricCredentials();
+        await _biometricDatasource.clearCredentials();
         return AuthResult.failure('Biometric credentials no longer valid');
       }
 
@@ -368,35 +323,6 @@ class AuthService implements IAuthService {
     }
   }
 
-  /// Perform biometric authentication
-  Future<bool> _authenticateWithBiometrics(String reason) async {
-    try {
-      return await _localAuth
-          .authenticate(
-            localizedReason: reason,
-            options: const AuthenticationOptions(
-              stickyAuth: true,
-              biometricOnly: true,
-            ),
-          )
-          .timeout(const Duration(seconds: 30), onTimeout: () => false);
-    } catch (e) {
-      AppLogger.error('AuthService', 'Biometric authentication error: $e', e);
-      return false;
-    }
-  }
-
-  /// Clear biometric credentials from secure storage
-  Future<void> _clearBiometricCredentials() async {
-    try {
-      await _secureStorage.delete(key: _biometricEnabledKey);
-      await _secureStorage.delete(key: _biometricUserIdKey);
-      await _secureStorage.delete(key: _biometricEmailKey);
-    } catch (e) {
-      AppLogger.error('AuthService', 'Error clearing biometric credentials: $e', e);
-    }
-  }
-
   // MARK: - User Profile Management
 
   /// Update user display name
@@ -407,7 +333,7 @@ class AuthService implements IAuthService {
         return AuthResult.failure('No user signed in');
       }
 
-      await currentUser!.updateDisplayName(displayName);
+      await _authDatasource.updateDisplayName(currentUser!, displayName);
       AppLogger.info('AuthService', 'Display name updated successfully');
       return AuthResult.success(currentUser!, message: 'Display name updated');
     } catch (e) {
@@ -422,7 +348,7 @@ class AuthService implements IAuthService {
   @override
   Future<void> reloadUser() async {
     try {
-      await currentUser?.reload();
+      await _authDatasource.reloadUser();
     } catch (e) {
       AppLogger.error('AuthService', 'Error reloading user: $e', e);
     }
@@ -438,10 +364,7 @@ class AuthService implements IAuthService {
         return AuthResult.failure('No user signed in');
       }
 
-      await currentUser!.sendEmailVerification().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Verification email request timed out'),
-      );
+      await _authDatasource.sendEmailVerification(currentUser!);
 
       AppLogger.info('AuthService', 'Verification email sent');
       return AuthResult.success(null, message: 'Verification email sent');
@@ -455,13 +378,7 @@ class AuthService implements IAuthService {
   @override
   Future<bool> checkEmailVerified() async {
     try {
-      if (currentUser == null) return false;
-
-      await currentUser!.reload();
-      // Must re-read from FirebaseAuth after reload to get updated state
-      final verified = _firebaseAuth.currentUser?.emailVerified ?? false;
-      AppLogger.debug('AuthService', 'Email verified: $verified');
-      return verified;
+      return await _authDatasource.checkEmailVerified();
     } catch (e) {
       AppLogger.error('AuthService', 'Error checking email verification: $e', e);
       return false;

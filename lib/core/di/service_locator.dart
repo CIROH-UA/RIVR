@@ -29,7 +29,9 @@ import '../../features/forecast/data/repositories/forecast_repository.dart';
 import '../../features/favorites/domain/repositories/i_favorites_repository.dart';
 import '../../features/favorites/data/repositories/favorites_repository.dart';
 import '../../features/auth/domain/repositories/i_auth_repository.dart';
-import '../../features/auth/data/repositories/auth_repository.dart';
+import '../../features/auth/data/repositories/auth_repository_impl.dart';
+import '../../features/auth/data/datasources/auth_firebase_datasource.dart';
+import '../../features/auth/data/datasources/biometric_datasource.dart';
 import '../../features/settings/domain/repositories/i_settings_repository.dart';
 import '../../features/settings/data/repositories/settings_repository_impl.dart';
 import '../../features/settings/data/datasources/settings_firestore_datasource.dart';
@@ -84,11 +86,23 @@ void setupServiceLocator() {
   sl.registerLazySingleton<IBackgroundImageService>(
     () => BackgroundImageService(),
   );
-  sl.registerLazySingleton<IAuthService>(() => AuthService());
-
   // ── Datasources ─────────────────────────────────────────────────────────
   sl.registerLazySingleton<SettingsFirestoreDatasource>(
     () => SettingsFirestoreDatasource(),
+  );
+  sl.registerLazySingleton<AuthFirebaseDatasource>(
+    () => AuthFirebaseDatasource(),
+  );
+  sl.registerLazySingleton<BiometricDatasource>(
+    () => BiometricDatasource(),
+  );
+
+  // ── Auth service (uses datasources) ───────────────────────────────────
+  sl.registerLazySingleton<IAuthService>(
+    () => AuthService(
+      authDatasource: sl<AuthFirebaseDatasource>(),
+      biometricDatasource: sl<BiometricDatasource>(),
+    ),
   );
 
   // ── Services with one dependency ─────────────────────────────────────────
@@ -143,7 +157,7 @@ void setupServiceLocator() {
   );
 
   sl.registerLazySingleton<IAuthRepository>(
-    () => AuthRepository(
+    () => AuthRepositoryImpl(
       authService: sl<IAuthService>(),
       settingsService: sl<IUserSettingsService>(),
     ),
