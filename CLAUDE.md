@@ -51,7 +51,7 @@ lib/
       onboarding/                        -- OnboardingService
       settings/                          -- UserSettingsService
       shared/                            -- ErrorService, ServiceResult, AnalyticsService
-    5_injection/                         -- service_locator.dart (GetIt DI)
+    5_injection/                         -- dependency_container.dart + per-feature DI files (GetIt)
   ui/
     1_state/
       shared/                            -- ConnectivityProvider
@@ -76,7 +76,7 @@ functions/                               -- Firebase Cloud Functions (TypeScript
 - **Provider pattern:** Providers extend ChangeNotifier, registered in main.dart via MultiProvider
 - **Phased data loading:** ForecastService uses loadOverviewData -> loadSupplementaryData -> loadCompleteReachData
 - **Unit conversion:** All forecast data converted at the API layer (NoaaApiService) before reaching UI
-- **DI:** GetIt service locator in `services/5_injection/service_locator.dart`
+- **DI:** GetIt via `services/5_injection/dependency_container.dart` (orchestrator) + per-feature files (`auth_dependencies.dart`, `favorites_dependencies.dart`, etc.)
 
 ## Git Workflow
 
@@ -220,7 +220,7 @@ flutter test integration_test/                  # Integration tests
 | `lib/ui/1_state/features/auth/auth_provider.dart` | Authentication state |
 | `lib/services/4_infrastructure/auth/auth_service.dart` | Firebase Auth + biometric auth wrapper |
 | `lib/services/4_infrastructure/fcm/fcm_service.dart` | Firebase Cloud Messaging token management |
-| `lib/services/5_injection/service_locator.dart` | GetIt dependency injection setup |
+| `lib/services/5_injection/dependency_container.dart` | GetIt DI orchestrator (calls per-feature setup functions) |
 | `lib/ui/2_presentation/features/map/pages/map_page.dart` | Mapbox map integration |
 | `lib/firebase_options.dart` | Firebase config (**gitignored**) |
 | `functions/src/index.ts` | Cloud Functions entry point |
