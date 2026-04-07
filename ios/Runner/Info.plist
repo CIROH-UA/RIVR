@@ -68,6 +68,8 @@
 			</array>
 		</dict>
 	</dict>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

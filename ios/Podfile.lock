@@ -1198,11 +1198,16 @@ PODS:
     - Firebase/Firestore (= 12.4.0)
     - firebase_core
     - Flutter
+  - connectivity_plus (0.0.1):
+    - Flutter
   - Firebase/Auth (12.4.0):
     - Firebase/CoreOnly
     - FirebaseAuth (~> 12.4.0)
   - Firebase/CoreOnly (12.4.0):
     - FirebaseCore (~> 12.4.0)
+  - Firebase/Crashlytics (12.4.0):
+    - Firebase/CoreOnly
+    - FirebaseCrashlytics (~> 12.4.0)
   - Firebase/Firestore (12.4.0):
     - Firebase/CoreOnly
     - FirebaseFirestore (~> 12.4.0)
@@ -1219,6 +1224,10 @@ PODS:
     - Flutter
   - firebase_core (4.2.0):
     - Firebase/CoreOnly (= 12.4.0)
+    - Flutter
+  - firebase_crashlytics (5.0.3):
+    - Firebase/Crashlytics (= 12.4.0)
+    - firebase_core
     - Flutter
   - firebase_messaging (16.0.3):
     - Firebase/Messaging (= 12.4.0)
@@ -1261,6 +1270,15 @@ PODS:
     - FirebaseCore (~> 12.4.0)
   - FirebaseCoreInternal (12.4.0):
     - "GoogleUtilities/NSData+zlib (~> 8.1)"
+  - FirebaseCrashlytics (12.4.0):
+    - FirebaseCore (~> 12.4.0)
+    - FirebaseInstallations (~> 12.4.0)
+    - FirebaseRemoteConfigInterop (~> 12.4.0)
+    - FirebaseSessions (~> 12.4.0)
+    - GoogleDataTransport (~> 10.1)
+    - GoogleUtilities/Environment (~> 8.1)
+    - nanopb (~> 3.30910.0)
+    - PromisesObjC (~> 2.4)
   - FirebaseFirestore (12.4.0):
     - FirebaseCore (~> 12.4.0)
     - FirebaseCoreExtension (~> 12.4.0)
@@ -1295,6 +1313,16 @@ PODS:
     - GoogleUtilities/Reachability (~> 8.1)
     - GoogleUtilities/UserDefaults (~> 8.1)
     - nanopb (~> 3.30910.0)
+  - FirebaseRemoteConfigInterop (12.4.0)
+  - FirebaseSessions (12.4.0):
+    - FirebaseCore (~> 12.4.0)
+    - FirebaseCoreExtension (~> 12.4.0)
+    - FirebaseInstallations (~> 12.4.0)
+    - GoogleDataTransport (~> 10.1)
+    - GoogleUtilities/Environment (~> 8.1)
+    - GoogleUtilities/UserDefaults (~> 8.1)
+    - nanopb (~> 3.30910.0)
+    - PromisesSwift (~> 2.1)
   - FirebaseSharedSwift (12.4.0)
   - Flutter (1.0.0)
   - flutter_image_compress_common (1.0.0):
@@ -1510,6 +1538,8 @@ PODS:
   - permission_handler_apple (9.3.0):
     - Flutter
   - PromisesObjC (2.4.0)
+  - PromisesSwift (2.4.0):
+    - PromisesObjC (= 2.4.0)
   - RecaptchaInterop (101.0.0)
   - SDWebImage (5.21.6):
     - SDWebImage/Core (= 5.21.6)
@@ -1531,9 +1561,11 @@ PODS:
 
 DEPENDENCIES:
   - cloud_firestore (from `.symlinks/plugins/cloud_firestore/ios`)
+  - connectivity_plus (from `.symlinks/plugins/connectivity_plus/ios`)
   - firebase_analytics (from `.symlinks/plugins/firebase_analytics/ios`)
   - firebase_auth (from `.symlinks/plugins/firebase_auth/ios`)
   - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
+  - firebase_crashlytics (from `.symlinks/plugins/firebase_crashlytics/ios`)
   - firebase_messaging (from `.symlinks/plugins/firebase_messaging/ios`)
   - Flutter (from `Flutter`)
   - flutter_image_compress_common (from `.symlinks/plugins/flutter_image_compress_common/ios`)
@@ -1565,10 +1597,13 @@ SPEC REPOS:
     - FirebaseCore
     - FirebaseCoreExtension
     - FirebaseCoreInternal
+    - FirebaseCrashlytics
     - FirebaseFirestore
     - FirebaseFirestoreInternal
     - FirebaseInstallations
     - FirebaseMessaging
+    - FirebaseRemoteConfigInterop
+    - FirebaseSessions
     - FirebaseSharedSwift
     - GoogleAdsOnDeviceConversion
     - GoogleAppMeasurement
@@ -1585,6 +1620,7 @@ SPEC REPOS:
     - MapboxMaps
     - nanopb
     - PromisesObjC
+    - PromisesSwift
     - RecaptchaInterop
     - SDWebImage
     - SDWebImageWebPCoder
@@ -1593,12 +1629,16 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   cloud_firestore:
     :path: ".symlinks/plugins/cloud_firestore/ios"
+  connectivity_plus:
+    :path: ".symlinks/plugins/connectivity_plus/ios"
   firebase_analytics:
     :path: ".symlinks/plugins/firebase_analytics/ios"
   firebase_auth:
     :path: ".symlinks/plugins/firebase_auth/ios"
   firebase_core:
     :path: ".symlinks/plugins/firebase_core/ios"
+  firebase_crashlytics:
+    :path: ".symlinks/plugins/firebase_crashlytics/ios"
   firebase_messaging:
     :path: ".symlinks/plugins/firebase_messaging/ios"
   Flutter:
@@ -1640,10 +1680,12 @@ SPEC CHECKSUMS:
   abseil: a05cc83bf02079535e17169a73c5be5ba47f714b
   BoringSSL-GRPC: dded2a44897e45f28f08ae87a55ee4bcd19bc508
   cloud_firestore: 3e492984b292c052ae33914223a2602c96fa6cbd
+  connectivity_plus: 2a701ffec2c0ae28a48cf7540e279787e77c447d
   Firebase: f07b15ae5a6ec0f93713e30b923d9970d144af3e
   firebase_analytics: 9499a36a28423125016f8383ee785143ea9e61e4
   firebase_auth: c338c3a796a1fe8a161cb6f522b06461c5992c5c
   firebase_core: 49ffe9d2c7a2659f6e9e8d4a406e966bc084268e
+  firebase_crashlytics: 968e947e59b48a0182b4bd0d26a67caf5e43c014
   firebase_messaging: 42938d0635a4ec080de4cca24216d8a428ab0398
   FirebaseAnalytics: 0fc2b20091f0ddd21bf73397cf8f0eb5346dc24f
   FirebaseAppCheckInterop: f734c802f21fe1da0837708f0f9a27218c8a4ed0
@@ -1652,10 +1694,13 @@ SPEC CHECKSUMS:
   FirebaseCore: bb595f3114953664e3c1dc032f008a244147cfd3
   FirebaseCoreExtension: 7e1f7118ee970e001a8013719fb90950ee5e0018
   FirebaseCoreInternal: d7f5a043c2cd01a08103ab586587c1468047bca6
+  FirebaseCrashlytics: a6ece278a837c7e88de2d9b5da0a3542f2342395
   FirebaseFirestore: 2a6183381cf7679b1bb000eb76a8e3178e25dee2
   FirebaseFirestoreInternal: 6577a27cd5dc3722b900042527f86d4ea1626134
   FirebaseInstallations: ae9f4902cb5bf1d0c5eaa31ec1f4e5495a0714e2
   FirebaseMessaging: d33971b7bb252745ea6cd31ab190d1a1df4b8ed5
+  FirebaseRemoteConfigInterop: 1e31ec72b89c9924367c59bfb5ec9ab60d1d6766
+  FirebaseSessions: ba7c7a7ca8696a8d540eb3fe3800fbe98c79786d
   FirebaseSharedSwift: 93426a1de92f19e1199fac5295a4f8df16458daa
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_image_compress_common: ec1d45c362c9d30a3f6a0426c297f47c52007e3e
@@ -1685,6 +1730,7 @@ SPEC CHECKSUMS:
   path_provider_foundation: 2b6b4c569c0fb62ec74538f866245ac84301af46
   permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
   PromisesObjC: f5707f49cb48b9636751c5b2e7d227e43fba9f47
+  PromisesSwift: 9d77319bbe72ebf6d872900551f7eeba9bce2851
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
   SDWebImage: 1bb6a1b84b6fe87b972a102bdc77dd589df33477
   SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377

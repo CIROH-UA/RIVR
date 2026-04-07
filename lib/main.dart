@@ -28,8 +28,14 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 // ADD: Background message handler (must be top-level function)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Initialize Firebase if needed
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // Initialize Firebase if needed (guard against duplicate init)
+  if (Firebase.apps.isEmpty) {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await Firebase.initializeApp();
+    } else {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    }
+  }
 
   AppLogger.debug(
     'Main',
@@ -48,8 +54,14 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase with proper configuration
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // On iOS, Firebase auto-inits natively from GoogleService-Info.plist before
+  // Dart runs. Calling initializeApp(options:) with different option values
+  // causes a duplicate-app crash. Use no-arg init on iOS to reuse the native app.
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    await Firebase.initializeApp();
+  } else {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  }
 
   // Disable Crashlytics data collection in debug to avoid polluting the dashboard
   await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);

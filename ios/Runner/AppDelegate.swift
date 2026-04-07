@@ -14,9 +14,9 @@ import UserNotifications
 
     print("AppDelegate: Starting initialization...")
 
-    // Configure Firebase
-    FirebaseApp.configure()
-    print("Firebase configured")
+    // Firebase is initialized from Dart via Firebase.initializeApp().
+    // Do NOT call FirebaseApp.configure() here — it conflicts with the
+    // Dart-side init (different option sources cause duplicate-app error).
 
     // Set notification delegate (permission deferred to Flutter side)
     UNUserNotificationCenter.current().delegate = self
