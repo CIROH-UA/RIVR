@@ -24,7 +24,7 @@ jobs:
       - name: Create CI stub files
         run: |
           cp lib/firebase_options.ci.dart lib/firebase_options.dart
-          cp lib/core/config.template.dart lib/core/config.dart
+          cp lib/services/0_config/shared/config.template.dart lib/services/0_config/shared/config.dart
 
       - name: Install dependencies
         run: flutter pub get
@@ -33,4 +33,4 @@ jobs:
         run: flutter analyze
 
       - name: Test (unit & widget only)
-        run: flutter test test/core test/features test/helpers
+        run: flutter test test/models test/services test/ui test/utils test/helpers
