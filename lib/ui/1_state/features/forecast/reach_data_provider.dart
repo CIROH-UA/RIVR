@@ -12,8 +12,11 @@ import 'package:rivr/models/2_usecases/features/forecast/load_complete_forecast_
 import 'package:rivr/ui/1_state/features/forecast/reach_data_cache_mixin.dart';
 import 'package:rivr/ui/1_state/shared/section_load_state.dart';
 
-/// State management for reach and forecast data
-/// Now with phased loading and progressive forecast category loading
+/// State management for reach and forecast data.
+///
+/// Phase 4: All data requests fire in parallel after overview loads.
+/// Each section merges independently and notifies the UI as it arrives.
+/// Current flow recalculates after each merge (short → medium → long priority).
 class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
   final IForecastService _forecastService;
   final LoadForecastOverviewUseCase _loadOverview;
@@ -48,6 +51,10 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
   // in-flight futures can detect they are stale and discard their results.
   int _loadingGeneration = 0;
 
+  // Expose for testing
+  @visibleForTesting
+  int get loadingGeneration => _loadingGeneration;
+
   // Current state
   bool _isLoading = false;
   String? _errorMessage;
@@ -59,7 +66,7 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
   String _loadingPhase =
       'none'; // 'none', 'overview', 'supplementary', 'complete'
 
-  // Per-section load states (Phase 2 — replaces boolean flags)
+  // Per-section load states (Phase 2)
   SectionLoadState _hourlyState = SectionLoadState.idle;
   SectionLoadState _dailyState = SectionLoadState.idle;
   SectionLoadState _extendedState = SectionLoadState.idle;
@@ -152,9 +159,221 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // PHASE 1 - Load overview data only (reach info + current flow)
-  /// Load minimal data for overview page display
-  /// This is the fastest possible load - shows name, location, current flow immediately
+  // ---------------------------------------------------------------------------
+  // Phase 4 — Primary entry point: parallel, non-blocking data loading
+  // ---------------------------------------------------------------------------
+
+  /// Load all data for a reach. Overview loads first (awaited), then all
+  /// forecast sections + supplementary fire in parallel. Returns `true` when
+  /// overview is available. Parallel loads continue in the background —
+  /// each one merges and notifies the UI independently as it resolves.
+  Future<bool> loadAllData(String reachId) async {
+    final gen = ++_loadingGeneration;
+    _clearError();
+
+    // Fast path: session cache has complete data
+    if (sessionCache.containsKey(reachId)) {
+      AppLogger.debug('ReachProvider', 'Using cached data for: $reachId');
+      if (gen != _loadingGeneration) return false;
+      _currentForecast = sessionCache[reachId];
+      updateComputedCaches(reachId);
+      _markAllSectionsFromCache();
+      _setLoadingPhase('complete');
+      return true;
+    }
+
+    // Step 1: Load overview (required base) — must complete first
+    _setLoadingOverview(true);
+    _setSectionState('short_range', SectionLoadState.loading);
+    _setSectionState('medium_range', SectionLoadState.loading);
+    _setSectionState('long_range', SectionLoadState.loading);
+    _returnPeriodsState = SectionLoadState.loading;
+
+    try {
+      final overviewResult = await _loadOverview(reachId);
+      if (gen != _loadingGeneration) return false;
+
+      if (overviewResult.isFailure) {
+        _setError(overviewResult.errorMessage ?? 'Failed to load overview');
+        _setLoadingOverview(false);
+        _setSectionState('short_range', SectionLoadState.error);
+        _setSectionState('medium_range', SectionLoadState.error);
+        _setSectionState('long_range', SectionLoadState.error);
+        _returnPeriodsState = SectionLoadState.error;
+        _setLoadingPhase('none');
+        return false;
+      }
+
+      _currentForecast = overviewResult.data;
+      updateComputedCaches(reachId);
+      _setLoadingOverview(false);
+      _setLoadingPhase('overview');
+
+      // Step 2: Fire all remaining requests in parallel (non-blocking)
+      _fireParallelLoads(reachId, gen);
+
+      return true; // Overview available — UI can render immediately
+    } catch (e) {
+      if (gen != _loadingGeneration) return false;
+      AppLogger.error('ReachProvider', 'Error in loadAllData overview', e);
+      _setError(e.toString());
+      _setLoadingOverview(false);
+      _setLoadingPhase('none');
+      return false;
+    }
+  }
+
+  /// Fire all section loads + supplementary in parallel.
+  /// Each one handles its own errors and notifies independently.
+  void _fireParallelLoads(String reachId, int gen) {
+    _loadSectionParallel(reachId, 'short_range', gen);
+    _loadSectionParallel(reachId, 'medium_range', gen);
+    _loadSectionParallel(reachId, 'long_range', gen);
+    _loadSupplementaryParallel(reachId, gen);
+  }
+
+  /// Load a single forecast section in parallel-safe mode.
+  /// Checks generation for cancellation, merges result, recalculates current
+  /// flow, and notifies the UI.
+  Future<void> _loadSectionParallel(
+    String reachId,
+    String forecastType,
+    int gen,
+  ) async {
+    try {
+      final result = await _loadSpecificForecast(reachId, forecastType);
+      if (gen != _loadingGeneration) return; // Stale — discard
+
+      if (result.isFailure) {
+        AppLogger.error(
+          'ReachProvider',
+          'Error loading $forecastType: ${result.errorMessage}',
+        );
+        _setSectionState(forecastType, SectionLoadState.error);
+        return;
+      }
+
+      // Merge into existing forecast (thread-safe in Dart's single-threaded
+      // event loop — each microtask runs atomically)
+      _currentForecast = _mergeForecastData(_currentForecast!, result.data);
+
+      // Clear flow caches and recalculate — current flow may now come from
+      // this section if a higher-priority section was empty
+      clearFlowCachesForReach(reachId);
+      updateComputedCaches(reachId);
+
+      // Update session cache
+      sessionCache[reachId] = _currentForecast!;
+
+      // Set section state
+      final hasData = _hasSectionData(forecastType);
+      _setSectionState(
+        forecastType,
+        hasData ? SectionLoadState.loaded : SectionLoadState.empty,
+      );
+
+      _checkAllComplete();
+    } catch (e) {
+      if (gen != _loadingGeneration) return;
+      AppLogger.error('ReachProvider', 'Error loading $forecastType', e);
+      _setSectionState(forecastType, SectionLoadState.error);
+      _checkAllComplete();
+    }
+  }
+
+  /// Load supplementary data (return periods) in parallel-safe mode.
+  /// Merges only the reach data (with return periods) — does NOT overwrite
+  /// forecast sections that may have been merged by other parallel loads.
+  Future<void> _loadSupplementaryParallel(String reachId, int gen) async {
+    _setLoadingSupplementary(true);
+
+    try {
+      final result = await _loadSupplementary(reachId, _currentForecast!);
+      if (gen != _loadingGeneration) return;
+
+      if (result.isFailure) {
+        _setLoadingSupplementary(false);
+        _returnPeriodsState = SectionLoadState.error;
+        _checkAllComplete();
+        return;
+      }
+
+      // Merge only the reach data (return periods) — preserve forecast sections
+      _mergeSupplementaryData(result.data);
+      updateComputedCaches(reachId);
+      sessionCache[reachId] = _currentForecast!;
+
+      _setLoadingSupplementary(false);
+      _returnPeriodsState = hasSupplementaryData
+          ? SectionLoadState.loaded
+          : SectionLoadState.empty;
+      _checkAllComplete();
+    } catch (e) {
+      if (gen != _loadingGeneration) return;
+      _setLoadingSupplementary(false);
+      _returnPeriodsState = SectionLoadState.error;
+      _checkAllComplete();
+    }
+  }
+
+  /// Merge supplementary result (return periods) without overwriting
+  /// forecast sections that other parallel loads may have populated.
+  void _mergeSupplementaryData(ForecastResponse supplementary) {
+    if (_currentForecast == null) return;
+    _currentForecast = ForecastResponse(
+      reach: supplementary.reach, // Has return periods
+      shortRange: _currentForecast!.shortRange,
+      mediumRange: _currentForecast!.mediumRange,
+      longRange: _currentForecast!.longRange,
+      analysisAssimilation: _currentForecast!.analysisAssimilation,
+      mediumRangeBlend: _currentForecast!.mediumRangeBlend,
+    );
+  }
+
+  /// Check if ALL sections are done loading; if so, set phase to 'complete'.
+  void _checkAllComplete() {
+    if (_hourlyState.isDone &&
+        _dailyState.isDone &&
+        _extendedState.isDone &&
+        _returnPeriodsState.isDone) {
+      _setLoadingPhase('complete');
+    }
+  }
+
+  /// Set section states from cached data (all sections are already populated).
+  void _markAllSectionsFromCache() {
+    _hourlyState =
+        hasHourlyForecast ? SectionLoadState.loaded : SectionLoadState.empty;
+    _dailyState =
+        hasDailyForecast ? SectionLoadState.loaded : SectionLoadState.empty;
+    _extendedState =
+        hasExtendedForecast ? SectionLoadState.loaded : SectionLoadState.empty;
+    _returnPeriodsState =
+        hasSupplementaryData ? SectionLoadState.loaded : SectionLoadState.empty;
+    _isLoadingOverview = false;
+    _isLoadingSupplementary = false;
+    notifyListeners();
+  }
+
+  /// Check if a section has data.
+  bool _hasSectionData(String forecastType) {
+    switch (forecastType) {
+      case 'short_range':
+        return hasHourlyForecast;
+      case 'medium_range':
+        return hasDailyForecast;
+      case 'long_range':
+        return hasExtendedForecast;
+      default:
+        return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Individual section loaders (used by detail page refresh buttons)
+  // ---------------------------------------------------------------------------
+
+  /// Load overview data only (reach info + current flow).
   Future<bool> loadOverviewData(String reachId) async {
     final gen = ++_loadingGeneration;
     _setLoadingOverview(true);
@@ -162,21 +381,21 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     _clearError();
 
     try {
-      // Check session cache first
       if (sessionCache.containsKey(reachId)) {
-        AppLogger.debug('ReachProvider', 'Using cached data for overview: $reachId');
+        AppLogger.debug(
+          'ReachProvider',
+          'Using cached data for overview: $reachId',
+        );
         if (gen != _loadingGeneration) return false;
         _currentForecast = sessionCache[reachId];
         updateComputedCaches(reachId);
         _setLoadingOverview(false);
-        _setLoadingPhase('complete'); // If cached, we have complete data
+        _setLoadingPhase('complete');
         return true;
       }
 
-      // Load overview data via use case
       final result = await _loadOverview(reachId);
-
-      if (gen != _loadingGeneration) return false; // Stale — discard
+      if (gen != _loadingGeneration) return false;
 
       if (result.isFailure) {
         _setError(result.errorMessage ?? 'Failed to load overview');
@@ -187,7 +406,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
 
       _currentForecast = result.data;
       updateComputedCaches(reachId);
-
       _setLoadingOverview(false);
       _setLoadingPhase('overview');
       return true;
@@ -201,12 +419,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Load hourly forecast data specifically (short-range)
+  /// Load hourly forecast (short-range) — standalone for detail page refresh.
   Future<bool> loadHourlyForecast(String reachId) async {
     _setSectionState('short_range', SectionLoadState.loading);
 
     try {
-      // If we don't have any data yet, load overview first
       if (_currentForecast == null) {
         final overviewSuccess = await loadOverviewData(reachId);
         if (!overviewSuccess) {
@@ -215,7 +432,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         }
       }
 
-      // Load hourly data via use case
       final result = await _loadSpecificForecast(reachId, 'short_range');
 
       if (result.isFailure) {
@@ -227,12 +443,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         return false;
       }
 
-      // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, result.data);
+      clearFlowCachesForReach(reachId);
       sessionCache[reachId] = _currentForecast!;
       updateComputedCaches(reachId);
 
-      // Determine loaded vs empty
       _setSectionState(
         'short_range',
         hasHourlyForecast ? SectionLoadState.loaded : SectionLoadState.empty,
@@ -245,12 +460,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Load daily forecast data specifically (medium-range)
+  /// Load daily forecast (medium-range) — standalone for detail page refresh.
   Future<bool> loadDailyForecast(String reachId) async {
     _setSectionState('medium_range', SectionLoadState.loading);
 
     try {
-      // If we don't have any data yet, load overview first
       if (_currentForecast == null) {
         final overviewSuccess = await loadOverviewData(reachId);
         if (!overviewSuccess) {
@@ -259,7 +473,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         }
       }
 
-      // Load daily data via use case
       final result = await _loadSpecificForecast(reachId, 'medium_range');
 
       if (result.isFailure) {
@@ -271,12 +484,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         return false;
       }
 
-      // Merge with existing data instead of overwriting
       _currentForecast = _mergeForecastData(_currentForecast!, result.data);
+      clearFlowCachesForReach(reachId);
       sessionCache[reachId] = _currentForecast!;
       updateComputedCaches(reachId);
 
-      // Determine loaded vs empty
       _setSectionState(
         'medium_range',
         hasDailyForecast ? SectionLoadState.loaded : SectionLoadState.empty,
@@ -289,12 +501,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Load extended forecast data specifically (long-range)
+  /// Load extended forecast (long-range) — standalone for detail page refresh.
   Future<bool> loadExtendedForecast(String reachId) async {
     _setSectionState('long_range', SectionLoadState.loading);
 
     try {
-      // If we don't have any data yet, load overview first
       if (_currentForecast == null) {
         final overviewSuccess = await loadOverviewData(reachId);
         if (!overviewSuccess) {
@@ -303,7 +514,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         }
       }
 
-      // Load extended data via use case
       final result = await _loadSpecificForecast(reachId, 'long_range');
 
       if (result.isFailure) {
@@ -315,15 +525,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         return false;
       }
 
-      // Merge with existing data instead of overwriting
-      _currentForecast = _mergeForecastData(
-        _currentForecast!,
-        result.data,
-      );
+      _currentForecast = _mergeForecastData(_currentForecast!, result.data);
+      clearFlowCachesForReach(reachId);
       sessionCache[reachId] = _currentForecast!;
       updateComputedCaches(reachId);
 
-      // Determine loaded vs empty
       _setSectionState(
         'long_range',
         hasExtendedForecast ? SectionLoadState.loaded : SectionLoadState.empty,
@@ -336,14 +542,66 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
+  /// Load supplementary data (return periods) — standalone.
+  Future<bool> loadSupplementaryData(String reachId) async {
+    if (_currentForecast == null) {
+      final success = await loadOverviewData(reachId);
+      if (!success) return false;
+    }
+
+    final gen = ++_loadingGeneration;
+    _setLoadingSupplementary(true);
+    _returnPeriodsState = SectionLoadState.loading;
+    _clearError();
+
+    try {
+      final result = await _loadSupplementary(reachId, _currentForecast!);
+      if (gen != _loadingGeneration) return false;
+
+      if (result.isFailure) {
+        _setLoadingSupplementary(false);
+        _returnPeriodsState = SectionLoadState.error;
+        return false;
+      }
+
+      _mergeSupplementaryData(result.data);
+      sessionCache[reachId] = _currentForecast!;
+      updateComputedCaches(reachId);
+
+      _setLoadingSupplementary(false);
+      _returnPeriodsState = hasSupplementaryData
+          ? SectionLoadState.loaded
+          : SectionLoadState.empty;
+      _setLoadingPhase('complete');
+      return true;
+    } catch (e) {
+      if (gen != _loadingGeneration) return false;
+      _setLoadingSupplementary(false);
+      _returnPeriodsState = SectionLoadState.error;
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refresh & utility methods
+  // ---------------------------------------------------------------------------
+
+  /// Comprehensive refresh — clears caches and reloads everything in parallel.
+  Future<bool> comprehensiveRefresh(String reachId) async {
+    sessionCache.remove(reachId);
+    clearComputedCachesForReach(reachId);
+    _forecastService.clearComputedCaches();
+
+    return await loadAllData(reachId);
+  }
+
   // Merge forecast data properly (preserves existing data)
   ForecastResponse _mergeForecastData(
     ForecastResponse existing,
     ForecastResponse newData,
   ) {
     return ForecastResponse(
-      reach: existing.reach, // Keep existing reach data
-      // Merge forecast data - use new data if available, otherwise keep existing
+      reach: existing.reach,
       analysisAssimilation: newData.analysisAssimilation?.isNotEmpty == true
           ? newData.analysisAssimilation
           : existing.analysisAssimilation,
@@ -362,91 +620,7 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     );
   }
 
-  // Comprehensive refresh - loads all forecast categories systematically
-  Future<bool> comprehensiveRefresh(String reachId) async {
-    // Clear caches first
-    sessionCache.remove(reachId);
-    clearComputedCachesForReach(reachId);
-    _forecastService.clearComputedCaches();
-
-    try {
-      // Step 1: Load overview data first
-      final overviewSuccess = await loadOverviewData(reachId);
-      if (!overviewSuccess) {
-        return false;
-      }
-
-      // Step 2: Load all forecast categories progressively
-      // Note: These run sequentially so each one can enhance the previous data
-      await loadHourlyForecast(reachId);
-      await loadDailyForecast(reachId);
-      await loadExtendedForecast(reachId);
-
-      // Step 3: Load supplementary data
-      await loadSupplementaryData(reachId);
-
-      return true;
-    } catch (e) {
-      AppLogger.error('ReachProvider', 'Error in comprehensive refresh', e);
-      _setError(e.toString());
-      return false;
-    }
-  }
-
-  // PHASE 2 - Add supplementary data (return periods + forecast summaries)
-  /// Enhance existing overview data with return periods and forecast summaries
-  /// Call this after overview data is displayed to add functionality progressively
-  Future<bool> loadSupplementaryData(String reachId) async {
-    if (_currentForecast == null) {
-      final success = await loadOverviewData(reachId);
-      if (!success) return false;
-    }
-
-    final gen = ++_loadingGeneration;
-    _setLoadingSupplementary(true);
-    _returnPeriodsState = SectionLoadState.loading;
-    _clearError();
-
-    try {
-      // Enhance existing data with supplementary information via use case
-      final result = await _loadSupplementary(reachId, _currentForecast!);
-
-      if (gen != _loadingGeneration) return false; // Stale — discard
-
-      if (result.isFailure) {
-        // Don't set error - supplementary data is not critical
-        // Keep existing overview data
-        _setLoadingSupplementary(false);
-        _returnPeriodsState = SectionLoadState.error;
-        _setLoadingPhase('overview'); // Still have overview data
-        return false;
-      }
-
-      _currentForecast = result.data;
-      sessionCache[reachId] = result.data; // Update cache
-
-      // Update computed caches
-      updateComputedCaches(reachId);
-
-      _setLoadingSupplementary(false);
-      _returnPeriodsState = hasSupplementaryData
-          ? SectionLoadState.loaded
-          : SectionLoadState.empty;
-      _setLoadingPhase('complete');
-      return true;
-    } catch (e) {
-      // Don't set error - supplementary data is not critical
-      // Keep existing overview data
-      if (gen != _loadingGeneration) return false;
-      _setLoadingSupplementary(false);
-      _returnPeriodsState = SectionLoadState.error;
-      _setLoadingPhase('overview'); // Still have overview data
-      return false; // Indicate supplementary loading failed, but don't break UI
-    }
-  }
-
-  // Keep for backwards compatibility and complete loading
-  /// Load complete reach and forecast data
+  /// Load complete reach and forecast data (backward compat).
   Future<bool> loadReach(String reachId) async {
     final gen = ++_loadingGeneration;
     _setLoading(true);
@@ -454,7 +628,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     _clearError();
 
     try {
-      // Check session cache first
       if (sessionCache.containsKey(reachId)) {
         if (gen != _loadingGeneration) return false;
         _currentForecast = sessionCache[reachId];
@@ -464,10 +637,8 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
         return true;
       }
 
-      // Load from use case (uses disk cache automatically)
       final result = await _loadComplete(reachId);
-
-      if (gen != _loadingGeneration) return false; // Stale — discard
+      if (gen != _loadingGeneration) return false;
 
       if (result.isFailure) {
         _setError(result.errorMessage ?? 'Failed to load forecast data');
@@ -477,7 +648,7 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
       }
 
       _currentForecast = result.data;
-      sessionCache[reachId] = result.data; // Cache for session
+      sessionCache[reachId] = result.data;
       updateComputedCaches(reachId);
 
       _setLoading(false);
@@ -493,8 +664,11 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  /// Load specific forecast type only (faster)
-  Future<bool> loadSpecificForecast(String reachId, String forecastType) async {
+  /// Load specific forecast type only (used by detail page template).
+  Future<bool> loadSpecificForecast(
+    String reachId,
+    String forecastType,
+  ) async {
     _setLoading(true);
     _clearError();
 
@@ -523,17 +697,14 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  /// Force refresh current reach (bypass all caches)
+  /// Force refresh current reach (bypass all caches).
   Future<bool> refreshCurrentReach() async {
     if (_currentForecast == null) return false;
-
     final reachId = _currentForecast!.reach.reachId;
-
-    // Use comprehensive refresh instead of basic loadReach
     return await comprehensiveRefresh(reachId);
   }
 
-  /// Clear current data
+  /// Clear current data.
   void clear() {
     _currentForecast = null;
     sessionCache.clear();
@@ -544,12 +715,15 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     notifyListeners();
   }
 
-  /// Clear error message
+  /// Clear error message.
   void clearError() {
     _clearError();
   }
 
-  // Helper methods
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
   void _setLoading(bool loading) {
     if (_isLoading != loading) {
       _isLoading = loading;
@@ -557,7 +731,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Selective loading state setters
   void _setLoadingOverview(bool loading) {
     if (_isLoadingOverview != loading) {
       _isLoadingOverview = loading;
@@ -572,7 +745,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Per-section state setter — updates the correct field and notifies
   void _setSectionState(String forecastType, SectionLoadState state) {
     switch (forecastType) {
       case 'short_range':
@@ -593,7 +765,6 @@ class ReachDataProvider with ChangeNotifier, ReachDataCacheMixin {
     }
   }
 
-  // Reset all loading states
   void _resetAllLoadingStates() {
     _isLoading = false;
     _isLoadingOverview = false;

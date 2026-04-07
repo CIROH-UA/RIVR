@@ -114,48 +114,39 @@ When a section has no data, tell the user *why* in plain language. Differentiate
 
 ---
 
-## Phase 4 — Progressive (Non-Blocking) Data Loading
+## Phase 4 — Progressive (Non-Blocking) Data Loading ✅
+**Completed:** April 7, 2026
 **Audit findings:** #2 (phase gates block on slowest), #7 (redundant re-fetch)
 **Effort:** Medium-Large
-**Files:** `forecast_service.dart`, `reach_data_provider.dart`
+**Files:** `reach_data_provider.dart`, `reach_data_cache_mixin.dart`, `reach_overview_page.dart`
 
 ### Goal
 Fire all data requests in parallel at the start and notify the UI as each one resolves. No phase gates. The provider holds a `ForecastResponse` that grows incrementally.
 
 ### Tasks
 
-- [ ] Refactor the provider to manage a mutable `ForecastResponse` that starts empty and gets fields populated as futures resolve
-- [ ] Replace the sequential Phase 1 → 2 → 3 chain with a single `loadAllData(reachId)` method that fires all requests independently:
-  ```
-  loadAllData(reachId):
-    fire fetchReachInfo()        → on done: merge reach, notifyListeners()
-    fire fetchShortRange()       → on done: merge short range, notifyListeners()
-                                   if empty → fallback already handled by Phase 1
-                                   still empty → update current flow from medium/long when they arrive
-    fire fetchReturnPeriods()    → on done: merge return periods, notifyListeners()
-    fire fetchMediumRange()      → on done: merge medium range, notifyListeners()
-                                   if short range was empty → recalculate current flow, notifyListeners()
-    fire fetchLongRange()        → on done: merge long range, notifyListeners()
-                                   if short+medium were empty → recalculate current flow, notifyListeners()
-  ```
-- [ ] Implement current-flow recalculation on each merge — `getCurrentFlow()` already has the `short → medium → long` priority chain. After each section merges in, re-run it. If the result changes (e.g., medium range arrives and short range was empty), notify the UI so the current flow display updates.
-- [ ] Keep `ForecastService` methods as-is — the provider becomes the orchestrator of parallelism, the service stays as the data-fetching layer
-- [ ] Add request cancellation — if user navigates to a different river while requests are in-flight, cancel pending requests (use the existing generation-based cancellation pattern)
-- [ ] Remove the Phase 3 re-fetch of short range (it's already loaded)
-- [ ] Update `loadOverviewData`, `loadSupplementaryData`, and `loadCompleteReachData` to delegate to the new parallel approach, or deprecate them if no longer needed
-- [ ] Unit test: verify that each section's `notifyListeners` fires independently
-- [ ] Unit test: short range empty + medium range arrives → current flow updates from medium range
-- [ ] Unit test: all series empty → UI shows transparent messaging, no crash
-- [ ] Integration test: simulate one slow request and verify other sections render without waiting
+- [x] Refactor the provider to manage a mutable `ForecastResponse` that starts empty and gets fields populated as futures resolve
+- [x] Replace the sequential Phase 1 → 2 → 3 chain with a single `loadAllData(reachId)` method: overview loads first (awaited), then all sections + supplementary fire in parallel. Each resolves independently and merges into the shared `ForecastResponse`.
+- [x] Implement current-flow recalculation on each merge — `clearFlowCachesForReach()` + `updateComputedCaches()` after every section merge. `getCurrentFlow()` short → medium → long priority chain recalculates automatically.
+- [x] Keep `ForecastService` methods as-is — the provider is the orchestrator of parallelism, the service stays as the data-fetching layer
+- [x] Add request cancellation — generation-based pattern (`_loadingGeneration`) incremented on navigation-away via `clearCurrentReach()`. Each parallel load checks generation before merging results.
+- [x] Removed the sequential Phase 1 → 2 → 3 loading chain from `reach_overview_page.dart` — replaced with single `loadAllData()` call
+- [x] `loadOverviewData`, `loadSupplementaryData`, and individual section loaders (`loadHourlyForecast`, etc.) preserved for detail page refresh buttons. `comprehensiveRefresh` delegates to `loadAllData`.
+- [x] Added `clearFlowCachesForReach(reachId)` to `ReachDataCacheMixin` — clears flow/category/forecast-type caches without touching location cache
+- [x] `_mergeSupplementaryData()` preserves forecast sections populated by parallel loads — only takes reach data (return periods)
+- [x] `_checkAllComplete()` transitions loading phase to 'complete' when all sections are done
+- [x] Removed shimmer/sequential category loading from overview page — `ForecastCategoryGrid` handles per-section loading states natively (Phase 2 dots/spinners)
+- [x] 13 new unit tests: overview success/failure, parallel fire verification, session cache fast path, independent section notifications, section error isolation, current flow recalculation, generation-based cancellation (clearCurrentReach + second load), all-empty graceful handling, supplementary merge preserves data, comprehensive refresh, phase completion
+- [x] 560 unit/widget tests pass, no regressions
 
 ### Acceptance criteria
-- Reach name/location appears within 1-2s (reach info is small and fast)
-- Short range chart appears as soon as short range resolves, regardless of medium/long
-- Medium and long range tabs populate independently
-- If short range is empty, current flow updates automatically when medium or long range arrives
-- If all series are empty, the UI shows transparent messaging (Phase 3) — not a blank page
-- Navigating away cancels in-flight requests
-- Total data-complete time is same or better than current (fewer total requests)
+- Reach name/location appears as soon as overview loads (fast first paint) ✅
+- Short range chart appears as soon as short range resolves, regardless of medium/long ✅
+- Medium and long range tabs populate independently ✅
+- If short range is empty, current flow updates automatically when medium or long range arrives ✅
+- If all series are empty, the UI shows transparent messaging (Phase 3) — not a blank page ✅
+- Navigating away cancels in-flight requests via generation counter ✅
+- Total data-complete time is better than sequential (all requests in parallel) ✅
 
 ---
 

@@ -130,6 +130,14 @@ mixin ReachDataCacheMixin on ChangeNotifier {
     _availableForecastTypesCache.remove(reachId);
   }
 
+  /// Clear only flow-related caches for a reach so current flow gets
+  /// recalculated after a new section merges in (Phase 4 parallel loading).
+  void clearFlowCachesForReach(String reachId) {
+    _currentFlowCache.removeWhere((key, _) => key.startsWith(reachId));
+    _flowCategoryCache.removeWhere((key, _) => key.startsWith(reachId));
+    _availableForecastTypesCache.remove(reachId);
+  }
+
   /// Clear all computed caches
   void clearAllComputedCaches() {
     _currentFlowCache.clear();

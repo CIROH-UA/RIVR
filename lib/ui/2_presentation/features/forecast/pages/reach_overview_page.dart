@@ -45,7 +45,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     }
   }
 
-  // Progressive loading with immediate state clearing
+  // Parallel loading — overview first, then all sections fire simultaneously
   Future<void> _loadReachData() async {
     if (widget.reachId == null) return;
 
@@ -54,7 +54,7 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
       listen: false,
     );
 
-    // CRITICAL FIX: Immediately clear wrong river data when switching
+    // Immediately clear wrong river data when switching
     if (reachProvider.currentReach?.reachId != widget.reachId) {
       AppLogger.debug('ReachOverviewPage', 'Switching rivers, clearing current display');
       reachProvider.clearCurrentReach();
@@ -72,11 +72,10 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     });
 
     try {
-      // PHASE 1: Load overview data first (fast - shows name, location, current flow)
-      AppLogger.debug('ReachOverviewPage', 'Starting Phase 1 - Overview data');
-      final overviewSuccess = await reachProvider.loadOverviewData(
-        widget.reachId!,
-      );
+      // Phase 4: Single entry point — loads overview, then fires all sections
+      // in parallel. Returns true once overview is available; parallel loads
+      // continue in the background and notify the UI as each resolves.
+      final overviewSuccess = await reachProvider.loadAllData(widget.reachId!);
 
       if (!overviewSuccess) {
         AppLogger.warning('ReachOverviewPage', 'Failed to load overview data');
@@ -89,50 +88,9 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
           _isInitialized = true;
         });
       }
-
-      // PHASE 2: Progressive forecast category loading
-      AppLogger.debug('ReachOverviewPage', 'Starting Phase 2 - Progressive forecast loading');
-      await _loadForecastCategoriesProgressively(widget.reachId!);
-
-      // PHASE 3: Load supplementary data (return periods, enhanced categorization)
-      AppLogger.debug('ReachOverviewPage', 'Starting Phase 3 - Supplementary data');
-      await reachProvider.loadSupplementaryData(widget.reachId!);
-
-      AppLogger.info('ReachOverviewPage', 'All loading phases completed');
     } catch (e) {
       AppLogger.error('ReachOverviewPage', 'Error in loading sequence', e);
     }
-  }
-
-  // Progressive forecast category loading
-  Future<void> _loadForecastCategoriesProgressively(String reachId) async {
-    final reachProvider = Provider.of<ReachDataProvider>(
-      context,
-      listen: false,
-    );
-
-    // Load forecast categories one by one so they appear progressively
-    // This provides better user experience - they see data as it becomes available
-
-    // Load Hourly forecast (short-range) first - usually fastest
-    AppLogger.debug('ReachOverviewPage', 'Loading hourly forecast...');
-    await reachProvider.loadHourlyForecast(reachId);
-
-    // Small delay to allow UI to update and show the hourly category
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Load Daily forecast (medium-range) second
-    AppLogger.debug('ReachOverviewPage', 'Loading daily forecast...');
-    await reachProvider.loadDailyForecast(reachId);
-
-    // Small delay to allow UI to update and show the daily category
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Load Extended forecast (long-range) third
-    AppLogger.debug('ReachOverviewPage', 'Loading extended forecast...');
-    await reachProvider.loadExtendedForecast(reachId);
-
-    AppLogger.info('ReachOverviewPage', 'Progressive forecast loading completed');
   }
 
   // Comprehensive refresh for all forecast categories
@@ -422,58 +380,9 @@ class _ReachOverviewPageState extends State<ReachOverviewPage> {
     );
   }
 
-  // Forecast categories design with loading improvements
+  // Forecast categories — grid handles per-section loading states via dots/spinners
   Widget _buildForecastCategoriesSection(ReachDataProvider reachProvider) {
-    // Check if we should show the shimmer loading or your actual ForecastCategoryGrid
-    if (reachProvider.loadingPhase == 'overview' &&
-        !reachProvider.hasSupplementaryData) {
-      // Show your original loading shimmer for forecast categories during Phase 2
-      return _buildForecastCategoriesShimmer();
-    }
-
-    // Show your original ForecastCategoryGrid design
     return ForecastCategoryGrid(onCategoryTap: _navigateToForecastDetail);
-  }
-
-  // Loading shimmer for forecast categories
-  Widget _buildForecastCategoriesShimmer() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Forecast Categories',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: CupertinoColors.label.resolveFrom(context),
-            ),
-          ),
-          const SizedBox(height: 16),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.5,
-            children: List.generate(4, (index) => _buildCategoryShimmer()),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Category shimmer design
-  Widget _buildCategoryShimmer() {
-    return Container(
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Center(child: CupertinoActivityIndicator(radius: 12)),
-    );
   }
 
   Widget _buildInfoChip({
