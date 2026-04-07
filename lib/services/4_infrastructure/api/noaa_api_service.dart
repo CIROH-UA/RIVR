@@ -17,6 +17,11 @@ class NoaaApiService implements INoaaApiService {
   final http.Client _client;
   final IFlowUnitPreferenceService _unitService;
 
+  /// Short-lived cache for the unfiltered forecast response, shared across
+  /// multiple fallback calls within a single load cycle. Keyed by reachId.
+  final Map<String, _UnfilteredCacheEntry> _unfilteredCache = {};
+  static const _unfilteredCacheTtl = Duration(seconds: 30);
+
   NoaaApiService({
     http.Client? client,
     required IFlowUnitPreferenceService unitService,
@@ -232,10 +237,9 @@ class NoaaApiService implements INoaaApiService {
   }
 
   // Forecast Fetching (OPTIMIZED with priority support + UNIT CONVERSION)
-  /// Fetch streamflow forecast data from NOAA API for a specific series
-  /// Returns data in format expected by ForecastResponse.fromJson()
-  /// Now with priority handling for overview vs detailed loading
-  /// UPDATED: Now includes unit conversion for all forecast data
+  /// Fetch streamflow forecast data from NOAA API for a specific series.
+  /// If the filtered endpoint returns HTTP 200 but empty data for the
+  /// requested section, automatically falls back to the unfiltered endpoint.
   @override
   Future<Map<String, dynamic>> fetchForecast(
     String reachId,
@@ -269,7 +273,16 @@ class NoaaApiService implements INoaaApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
 
-        // NEW: Apply unit conversion to all forecast data before returning
+        // Check if the target section has actual data
+        final sectionKey = _seriesToSectionKey(series);
+        if (sectionKey != null && _isForecastSectionEmpty(data, sectionKey)) {
+          AppLogger.warning(
+            'NoaaApi',
+            '?series=$series returned empty data, falling back to unfiltered endpoint',
+          );
+          return await _fetchWithUnfilteredFallback(reachId, sectionKey);
+        }
+
         final convertedData = _convertForecastResponse(data);
 
         AppLogger.info(
@@ -287,6 +300,101 @@ class NoaaApiService implements INoaaApiService {
     } catch (e) {
       AppLogger.error('NoaaApi', 'Error fetching $series forecast', e);
       throw ServiceException.fromError(e, context: 'fetchForecast');
+    }
+  }
+
+  // ===== UNFILTERED FALLBACK LOGIC =====
+
+  /// Maps a series query param to the JSON response key.
+  static String? _seriesToSectionKey(String series) {
+    switch (series) {
+      case 'short_range':
+        return 'shortRange';
+      case 'medium_range':
+        return 'mediumRange';
+      case 'long_range':
+        return 'longRange';
+      default:
+        return null;
+    }
+  }
+
+  /// Returns `true` when the given section exists but all its data arrays
+  /// are empty or its referenceTime is null — indicating the server returned
+  /// the structure without actual forecast values.
+  bool _isForecastSectionEmpty(Map<String, dynamic> response, String sectionKey) {
+    final section = response[sectionKey];
+    if (section == null || section is! Map<String, dynamic> || section.isEmpty) {
+      return true;
+    }
+
+    // Check every sub-key (series, mean, member1, member2, …)
+    for (final value in section.values) {
+      if (value is Map<String, dynamic>) {
+        final data = value['data'];
+        if (data is List && data.isNotEmpty) {
+          return false; // At least one sub-series has data
+        }
+      }
+    }
+    return true;
+  }
+
+  /// Fetch the unfiltered endpoint (all series in one call) with a short-lived
+  /// in-memory cache so multiple fallbacks in the same load cycle share one
+  /// network request.
+  Future<Map<String, dynamic>> _fetchUnfilteredForecast(String reachId) async {
+    // Check cache
+    final cached = _unfilteredCache[reachId];
+    if (cached != null && !cached.isExpired(_unfilteredCacheTtl)) {
+      AppLogger.debug('NoaaApi', 'Using cached unfiltered response for $reachId');
+      return cached.data;
+    }
+
+    final url = AppConfig.getStreamflowUrl(reachId);
+    AppLogger.debug('NoaaApi', 'Fetching unfiltered forecast: $url');
+
+    final response = await _httpGetWithRetry(url, timeout: _longTimeout);
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final convertedData = _convertForecastResponse(data);
+      _unfilteredCache[reachId] = _UnfilteredCacheEntry(convertedData);
+      AppLogger.info('NoaaApi', 'Unfiltered forecast fetched and cached for $reachId');
+      return convertedData;
+    } else {
+      throw Exception(
+        'Unfiltered forecast API error: ${response.statusCode} - ${response.body}',
+      );
+    }
+  }
+
+  /// Attempt the unfiltered endpoint and return the full response (which
+  /// includes all sections). If the unfiltered response also has empty data
+  /// for the requested section, return it as-is (genuine no-data).
+  Future<Map<String, dynamic>> _fetchWithUnfilteredFallback(
+    String reachId,
+    String sectionKey,
+  ) async {
+    try {
+      final unfilteredData = await _fetchUnfilteredForecast(reachId);
+
+      if (_isForecastSectionEmpty(unfilteredData, sectionKey)) {
+        AppLogger.warning(
+          'NoaaApi',
+          'Unfiltered endpoint also has empty $sectionKey — genuine no-data for this reach',
+        );
+      } else {
+        AppLogger.info(
+          'NoaaApi',
+          'Unfiltered fallback provided $sectionKey data successfully',
+        );
+      }
+
+      return unfilteredData;
+    } catch (e) {
+      AppLogger.error('NoaaApi', 'Unfiltered fallback also failed', e);
+      rethrow;
     }
   }
 
@@ -325,24 +433,40 @@ class NoaaApiService implements INoaaApiService {
     }
   }
 
-  // Complete Forecast Fetching (use longer timeout for complete data)
-  /// Fetch all available forecast types for a reach
-  /// Orchestrates multiple API calls to get complete forecast data
-  /// Returns combined data with all available forecasts
-  /// UPDATED: Now includes unit conversion for all forecast types
+  // Complete Forecast Fetching
+  /// Fetch all available forecast types for a reach using the unfiltered
+  /// endpoint (single request, all sections). Falls back to parallel filtered
+  /// calls if the unfiltered endpoint fails.
   @override
   Future<Map<String, dynamic>> fetchAllForecasts(String reachId) async {
     AppLogger.debug('NoaaApi', 'Fetching all forecasts for reach: $reachId');
 
-    // Initialize combined response structure
+    try {
+      // Primary path: single unfiltered request returns all sections
+      final data = await _fetchUnfilteredForecast(reachId);
+      AppLogger.info(
+        'NoaaApi',
+        'All forecasts loaded via unfiltered endpoint for reach $reachId',
+      );
+      return data;
+    } catch (e) {
+      AppLogger.warning(
+        'NoaaApi',
+        'Unfiltered endpoint failed, falling back to filtered calls: $e',
+      );
+      return await _fetchAllForecastsFiltered(reachId);
+    }
+  }
+
+  /// Fallback: fetch each series individually and merge results.
+  Future<Map<String, dynamic>> _fetchAllForecastsFiltered(String reachId) async {
     Map<String, dynamic>? combinedResponse;
     final forecastTypes = ['short_range', 'medium_range', 'long_range'];
     final results = <String, Map<String, dynamic>?>{};
 
-    // Fetch all forecast types in parallel for better performance
     final futures = forecastTypes.map((forecastType) async {
       try {
-        AppLogger.debug('NoaaApi', 'Attempting to fetch $forecastType...');
+        AppLogger.debug('NoaaApi', 'Attempting filtered fetch $forecastType...');
         final response = await _httpGetWithRetry(
           AppConfig.getForecastUrl(reachId, forecastType),
           timeout: _longTimeout,
@@ -374,7 +498,6 @@ class NoaaApiService implements INoaaApiService {
       }
     }
 
-    // Check if we got at least one forecast
     if (combinedResponse == null) {
       throw const ServiceException.notFound(
         'No forecast data available. All forecast types failed.',
@@ -382,33 +505,24 @@ class NoaaApiService implements INoaaApiService {
       );
     }
 
-    // Merge all successful forecasts into combined response
     final mergedResponse = Map<String, dynamic>.from(combinedResponse);
-
-    // Clear forecast sections and rebuild with all available data
     mergedResponse['analysisAssimilation'] = {};
     mergedResponse['shortRange'] = {};
     mergedResponse['mediumRange'] = {};
     mergedResponse['longRange'] = {};
     mergedResponse['mediumRangeBlend'] = {};
 
-    // Merge forecast data from each successful response
     for (final entry in results.entries) {
-      final forecastType = entry.key;
-      final response = entry.value;
-
-      if (response != null) {
-        // Merge the forecast sections from this response
-        _mergeForecastSections(mergedResponse, response, forecastType);
+      if (entry.value != null) {
+        _mergeForecastSections(mergedResponse, entry.value!, entry.key);
       }
     }
 
     final successCount = results.values.where((r) => r != null).length;
     AppLogger.info(
       'NoaaApi',
-      'Successfully combined $successCount/${forecastTypes.length} forecast types for reach $reachId with unit conversion',
+      'Filtered fallback combined $successCount/${forecastTypes.length} forecast types for reach $reachId',
     );
-
     return mergedResponse;
   }
 
@@ -418,7 +532,6 @@ class NoaaApiService implements INoaaApiService {
     Map<String, dynamic> source,
     String forecastType,
   ) {
-    // Map forecast types to their response sections
     switch (forecastType) {
       case 'short_range':
         if (source['shortRange'] != null) {
@@ -554,6 +667,16 @@ class NoaaApiService implements INoaaApiService {
       return Map<String, dynamic>.from(seriesData);
     }
   }
+}
+
+/// Short-lived cache entry for unfiltered forecast responses.
+class _UnfilteredCacheEntry {
+  final Map<String, dynamic> data;
+  final DateTime cachedAt;
+
+  _UnfilteredCacheEntry(this.data) : cachedAt = DateTime.now();
+
+  bool isExpired(Duration ttl) => DateTime.now().difference(cachedAt) > ttl;
 }
 
 /// Deprecated — use [ServiceException] directly.

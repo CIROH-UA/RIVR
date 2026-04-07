@@ -62,6 +62,10 @@ class AppConfig {
   static String getForecastUrl(String reachId, String series) =>
       '$noaaReachesBaseUrl/reaches/$reachId/streamflow?series=$series';
 
+  /// Unfiltered streamflow URL — returns all forecast sections in one response.
+  static String getStreamflowUrl(String reachId) =>
+      '$noaaReachesBaseUrl/reaches/$reachId/streamflow';
+
   static String getReachUrl(String reachId) =>
       '$noaaReachesBaseUrl/reaches/$reachId';
 

@@ -16,30 +16,26 @@ Five phases to improve perceived performance, API resilience, and data transpare
 
 ---
 
-## Phase 1 — API Fallback for Empty Filtered Responses
+## Phase 1 — API Fallback for Empty Filtered Responses ✅
+**Completed:** April 7, 2026
 **Audit findings:** #1 (broken filter), #6 (no fallback), #7 (short range single point of failure)
 **Effort:** Small-Medium
-**Files:** `noaa_api_service.dart`
+**Files:** `noaa_api_service.dart`, `config.dart`, `config.template.dart`
 
 ### Goal
 When **any** `?series=` filtered request returns 200 but empty data arrays, fall back to the unfiltered endpoint and extract the relevant section. This applies to short range, medium range, and long range equally — any series could be affected.
 
 ### Tasks
 
-- [ ] Add `fetchUnfilteredForecast(reachId)` method to `NoaaApiService` — hits the endpoint without `?series=`, returns the full response. Cache the result briefly (in-memory, for the duration of a single load cycle) so multiple fallbacks don't each trigger a separate unfiltered call.
-- [ ] Add an `_isForecastSectionEmpty(Map<String, dynamic> response, String series)` helper — inspects the relevant section (`shortRange`, `mediumRange`, `longRange`) and returns `true` if all data arrays are empty or `referenceTime` is null.
-- [ ] Update `fetchForecast()` — after parsing a 200 response, run the empty check. If empty:
-  1. Log a warning: `"NOAA_API: ?series=$series returned empty data, falling back to unfiltered endpoint"`
-  2. Call `fetchUnfilteredForecast(reachId)` (or use cached result)
-  3. Extract and return only the relevant section
-  4. If the unfiltered response also has empty data for that section, return the empty result as-is (genuine no-data)
-- [ ] Apply the same fallback to `fetchCurrentFlowOnly()` — short range failure must not silently produce an empty overview
-- [ ] Add unit tests for:
-  - Empty-data detection on each series type (short, medium, long)
-  - Fallback trigger and correct section extraction
-  - Unfiltered response caching (second fallback in same cycle reuses cached response)
-  - Both filtered and unfiltered empty → graceful empty result
-- [ ] Keep existing `?series=` as the primary path — if/when NOAA fixes the filter, we automatically use the faster filtered path again
+- [x] Add `_fetchUnfilteredForecast(reachId)` method — hits endpoint without `?series=`, 30s TTL in-memory cache via `_UnfilteredCacheEntry`
+- [x] Add `_isForecastSectionEmpty()` helper — checks all sub-keys (series, mean, memberN) for empty data arrays
+- [x] Add `_seriesToSectionKey()` — maps `short_range` → `shortRange`, etc.
+- [x] Update `fetchForecast()` — detects empty sections, logs warning, falls back to unfiltered
+- [x] `fetchCurrentFlowOnly()` inherits fallback (delegates to `fetchForecast('short_range')`)
+- [x] `fetchAllForecasts()` now uses unfiltered endpoint as primary, filtered as fallback
+- [x] Added `getStreamflowUrl()` to `config.dart` and `config.template.dart`
+- [x] 7 new unit tests: no-fallback path, medium/short fallback, cache reuse, both-empty graceful, fetchAllForecasts unfiltered primary, fetchAllForecasts filtered fallback
+- [x] Filtered `?series=` remains primary path — auto-uses faster filtered when NOAA fixes the filter
 
 ### Acceptance criteria
 - All three forecast types load reliably regardless of `?series=` filter status

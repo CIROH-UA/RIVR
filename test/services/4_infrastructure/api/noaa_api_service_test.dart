@@ -262,4 +262,263 @@ void main() {
       expect(callCount, 3);
     });
   });
+
+  group('NoaaApiService empty-data fallback', () {
+    late _StubFlowUnitService unitService;
+
+    /// A minimal valid forecast response with actual data in shortRange.
+    Map<String, dynamic> _fullResponse() => {
+          'reach': {'reachId': '12345', 'name': 'Test River'},
+          'shortRange': {
+            'series': {
+              'referenceTime': '2026-04-07T12:00:00Z',
+              'units': 'CFS',
+              'data': [
+                {'validTime': '2026-04-07T13:00:00Z', 'flow': 100.0},
+              ],
+            },
+          },
+          'mediumRange': {
+            'mean': {
+              'referenceTime': '2026-04-07T12:00:00Z',
+              'units': 'CFS',
+              'data': [
+                {'validTime': '2026-04-07T13:00:00Z', 'flow': 120.0},
+              ],
+            },
+          },
+          'longRange': {
+            'mean': {
+              'referenceTime': '2026-04-07T12:00:00Z',
+              'units': 'CFS',
+              'data': [
+                {'validTime': '2026-04-07T13:00:00Z', 'flow': 130.0},
+              ],
+            },
+          },
+          'mediumRangeBlend': {},
+          'analysisAssimilation': {},
+        };
+
+    /// A response where the filtered section has the structure but empty data arrays.
+    Map<String, dynamic> _emptyMediumRangeFilteredResponse() => {
+          'reach': {'reachId': '12345', 'name': 'Test River'},
+          'shortRange': {},
+          'mediumRange': {
+            'mean': {
+              'referenceTime': null,
+              'units': 'CFS',
+              'data': [],
+            },
+            'member1': {
+              'referenceTime': null,
+              'units': 'CFS',
+              'data': [],
+            },
+          },
+          'longRange': {},
+          'mediumRangeBlend': {},
+          'analysisAssimilation': {},
+        };
+
+    Map<String, dynamic> _emptyShortRangeFilteredResponse() => {
+          'reach': {'reachId': '12345', 'name': 'Test River'},
+          'shortRange': {
+            'series': {
+              'referenceTime': null,
+              'units': 'CFS',
+              'data': [],
+            },
+          },
+          'mediumRange': {},
+          'longRange': {},
+          'mediumRangeBlend': {},
+          'analysisAssimilation': {},
+        };
+
+    setUp(() {
+      unitService = _StubFlowUnitService();
+    });
+
+    test('returns filtered data when section has real data (no fallback)', () async {
+      var callCount = 0;
+      final client = MockClient((request) async {
+        callCount++;
+        // Filtered endpoint returns valid data
+        return http.Response(jsonEncode(_fullResponse()), 200);
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      final result = await service.fetchForecast('12345', 'medium_range');
+      expect(result['mediumRange'], isNotNull);
+      // Only the filtered call — no fallback
+      expect(callCount, 1);
+    });
+
+    test('falls back to unfiltered when medium_range has empty data', () async {
+      final requestUrls = <String>[];
+      final client = MockClient((request) async {
+        requestUrls.add(request.url.toString());
+        if (request.url.queryParameters.containsKey('series')) {
+          // Filtered endpoint returns empty data
+          return http.Response(
+            jsonEncode(_emptyMediumRangeFilteredResponse()),
+            200,
+          );
+        } else {
+          // Unfiltered endpoint returns full data
+          return http.Response(jsonEncode(_fullResponse()), 200);
+        }
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      final result = await service.fetchForecast('12345', 'medium_range');
+
+      // Should have called filtered first, then unfiltered
+      expect(requestUrls.length, greaterThanOrEqualTo(2));
+      expect(requestUrls.first, contains('series=medium_range'));
+      expect(requestUrls.last, isNot(contains('series=')));
+
+      // Should have real data from unfiltered fallback
+      final mediumRange = result['mediumRange'] as Map<String, dynamic>;
+      final mean = mediumRange['mean'] as Map<String, dynamic>;
+      final data = mean['data'] as List;
+      expect(data, isNotEmpty);
+    });
+
+    test('falls back to unfiltered when short_range has empty data', () async {
+      final requestUrls = <String>[];
+      final client = MockClient((request) async {
+        requestUrls.add(request.url.toString());
+        if (request.url.queryParameters.containsKey('series')) {
+          return http.Response(
+            jsonEncode(_emptyShortRangeFilteredResponse()),
+            200,
+          );
+        } else {
+          return http.Response(jsonEncode(_fullResponse()), 200);
+        }
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      final result = await service.fetchForecast('12345', 'short_range');
+
+      expect(requestUrls.length, greaterThanOrEqualTo(2));
+      expect(requestUrls.first, contains('series=short_range'));
+
+      final shortRange = result['shortRange'] as Map<String, dynamic>;
+      final series = shortRange['series'] as Map<String, dynamic>;
+      final data = series['data'] as List;
+      expect(data, isNotEmpty);
+    });
+
+    test('unfiltered cache is reused for multiple fallbacks in same cycle', () async {
+      var unfilteredCallCount = 0;
+      final client = MockClient((request) async {
+        if (request.url.queryParameters.containsKey('series')) {
+          // All filtered endpoints return empty data
+          return http.Response(
+            jsonEncode(_emptyMediumRangeFilteredResponse()),
+            200,
+          );
+        } else {
+          unfilteredCallCount++;
+          return http.Response(jsonEncode(_fullResponse()), 200);
+        }
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      // Two fallbacks for the same reach
+      await service.fetchForecast('12345', 'medium_range');
+      await service.fetchForecast('12345', 'long_range');
+
+      // Unfiltered endpoint should only be called once (cached)
+      expect(unfilteredCallCount, 1);
+    });
+
+    test('returns empty result when both filtered and unfiltered have no data', () async {
+      final emptyResponse = {
+        'reach': {'reachId': '12345', 'name': 'Test River'},
+        'shortRange': {},
+        'mediumRange': {
+          'mean': {'referenceTime': null, 'units': 'CFS', 'data': []},
+        },
+        'longRange': {},
+        'mediumRangeBlend': {},
+        'analysisAssimilation': {},
+      };
+
+      final client = MockClient((request) async {
+        return http.Response(jsonEncode(emptyResponse), 200);
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      // Should not throw — returns the empty response gracefully
+      final result = await service.fetchForecast('12345', 'medium_range');
+      expect(result, isNotNull);
+    });
+
+    test('fetchAllForecasts uses unfiltered endpoint primarily', () async {
+      final requestUrls = <String>[];
+      final client = MockClient((request) async {
+        requestUrls.add(request.url.toString());
+        return http.Response(jsonEncode(_fullResponse()), 200);
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      await service.fetchAllForecasts('12345');
+
+      // Should use the unfiltered endpoint (no ?series= param)
+      expect(requestUrls.length, 1);
+      expect(requestUrls.first, isNot(contains('series=')));
+      expect(requestUrls.first, contains('/streamflow'));
+    });
+
+    test('fetchAllForecasts falls back to filtered when unfiltered fails', () async {
+      var callCount = 0;
+      final client = MockClient((request) async {
+        callCount++;
+        if (!request.url.queryParameters.containsKey('series')) {
+          // Unfiltered endpoint fails
+          return http.Response('Service Unavailable', 503);
+        }
+        // Filtered endpoints succeed
+        return http.Response(jsonEncode(_fullResponse()), 200);
+      });
+
+      final service = NoaaApiService(
+        client: client,
+        unitService: unitService,
+      );
+
+      final result = await service.fetchAllForecasts('12345');
+      expect(result, isNotNull);
+      // 3 retries for unfiltered (1 + 2 retries) + 3 filtered calls
+      expect(callCount, greaterThan(3));
+    });
+  });
 }
