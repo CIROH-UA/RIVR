@@ -1,4 +1,4 @@
-// lib/features/settings/data/datasources/settings_firestore_datasource.dart
+// lib/services/3_datasources/features/settings/settings_firestore_datasource.dart
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/user_settings_dto.dart';

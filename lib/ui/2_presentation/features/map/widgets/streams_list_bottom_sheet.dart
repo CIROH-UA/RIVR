@@ -1,4 +1,4 @@
-// lib/features/map/widgets/streams_list_bottom_sheet.dart
+// lib/ui/2_presentation/features/map/widgets/streams_list_bottom_sheet.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';

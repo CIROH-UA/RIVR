@@ -1,4 +1,4 @@
-// lib/features/auth/providers/auth_provider.dart
+// lib/ui/1_state/features/auth/auth_provider.dart
 
 import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';

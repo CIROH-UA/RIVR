@@ -1,4 +1,4 @@
-// lib/core/services/i_favorites_service.dart
+// lib/services/1_contracts/shared/i_favorites_service.dart
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 

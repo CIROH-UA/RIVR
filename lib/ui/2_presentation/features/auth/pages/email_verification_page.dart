@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/pages/email_verification_page.dart
+// lib/ui/2_presentation/features/auth/pages/email_verification_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

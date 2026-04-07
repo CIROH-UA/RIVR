@@ -1,4 +1,4 @@
-// lib/core/services/i_background_image_service.dart
+// lib/services/1_contracts/shared/i_background_image_service.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/media/background_image_service.dart';

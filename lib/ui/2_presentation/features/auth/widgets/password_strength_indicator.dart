@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/widgets/password_strength_indicator.dart
+// lib/ui/2_presentation/features/auth/widgets/password_strength_indicator.dart
 
 import 'package:flutter/cupertino.dart';
 

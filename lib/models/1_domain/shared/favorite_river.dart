@@ -1,4 +1,4 @@
-// lib/core/models/favorite_river.dart
+// lib/models/1_domain/shared/favorite_river.dart
 
 /// Pure domain entity for a user's favorite river.
 ///

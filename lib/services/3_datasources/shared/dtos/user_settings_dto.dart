@@ -1,4 +1,4 @@
-// lib/core/models/dtos/user_settings_dto.dart
+// lib/services/3_datasources/shared/dtos/user_settings_dto.dart
 
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 

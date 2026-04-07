@@ -1,4 +1,4 @@
-// lib/features/map/widgets/map_search_widget.dart
+// lib/ui/2_presentation/features/map/widgets/map_search_widget.dart
 
 import 'package:flutter/cupertino.dart';
 import 'dart:async';

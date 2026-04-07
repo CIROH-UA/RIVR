@@ -1,4 +1,4 @@
-// lib/core/models/map_base_layer.dart
+// lib/models/1_domain/shared/map_base_layer.dart
 //
 // Map base layer enum. Lives in core because it's used by
 // core/services/map_preference_service.dart.

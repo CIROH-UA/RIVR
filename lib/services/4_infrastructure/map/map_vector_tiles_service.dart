@@ -1,4 +1,4 @@
-// lib/features/map/services/map_vector_tiles_service.dart
+// lib/services/4_infrastructure/map/map_vector_tiles_service.dart
 
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/0_config/shared/config.dart';

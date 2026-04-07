@@ -1,4 +1,4 @@
-// lib/features/settings/widgets/notification_frequency_picker.dart
+// lib/ui/2_presentation/features/settings/widgets/notification_frequency_picker.dart
 
 import 'package:flutter/cupertino.dart';
 

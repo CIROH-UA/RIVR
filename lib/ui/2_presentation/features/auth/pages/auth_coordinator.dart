@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/pages/auth_coordinator.dart
+// lib/ui/2_presentation/features/auth/pages/auth_coordinator.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';

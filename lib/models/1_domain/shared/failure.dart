@@ -1,4 +1,4 @@
-// lib/core/domain/failures/failure.dart
+// lib/models/1_domain/shared/failure.dart
 //
 // The original Failure/NetworkFailure/CacheFailure/AuthFailure hierarchy
 // has been replaced by ServiceResult + ServiceException.

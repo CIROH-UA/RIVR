@@ -1,4 +1,4 @@
-// lib/core/config.dart
+// lib/services/0_config/shared/config.template.dart
 //
 // config.dart should be for:
 // * Critical infrastructure that could break the app

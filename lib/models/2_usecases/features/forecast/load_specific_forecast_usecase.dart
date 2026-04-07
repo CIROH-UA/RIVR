@@ -1,4 +1,4 @@
-// lib/features/forecast/domain/usecases/load_specific_forecast_usecase.dart
+// lib/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart
 
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';

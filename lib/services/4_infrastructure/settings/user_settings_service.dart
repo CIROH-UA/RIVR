@@ -1,4 +1,4 @@
-// lib/core/services/user_settings_service.dart
+// lib/services/4_infrastructure/settings/user_settings_service.dart
 
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';

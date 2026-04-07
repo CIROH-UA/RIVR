@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/favorite_river_card.dart
+// lib/ui/2_presentation/features/favorites/widgets/favorite_river_card.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';

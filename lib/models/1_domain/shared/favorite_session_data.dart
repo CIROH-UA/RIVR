@@ -1,4 +1,4 @@
-// lib/core/models/favorite_session_data.dart
+// lib/models/1_domain/shared/favorite_session_data.dart
 
 /// Grouped session data for a single favorite river.
 /// Replaces the 7 parallel maps previously in FavoritesProvider.

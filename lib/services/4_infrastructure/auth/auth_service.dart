@@ -1,4 +1,4 @@
-// lib/core/services/auth_service.dart
+// lib/services/4_infrastructure/auth/auth_service.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

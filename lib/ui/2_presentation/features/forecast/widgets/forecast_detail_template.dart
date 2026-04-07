@@ -1,4 +1,4 @@
-// lib/features/forecast/widgets/forecast_detail_template.dart
+// lib/ui/2_presentation/features/forecast/widgets/forecast_detail_template.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

@@ -1,4 +1,4 @@
-// lib/core/utils/river_image_utility.dart
+// lib/utils/river_image_utility.dart
 
 import 'dart:math';
 

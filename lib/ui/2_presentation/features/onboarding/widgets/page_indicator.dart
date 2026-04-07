@@ -1,4 +1,4 @@
-// lib/features/onboarding/widgets/page_indicator.dart
+// lib/ui/2_presentation/features/onboarding/widgets/page_indicator.dart
 
 import 'package:flutter/cupertino.dart';
 

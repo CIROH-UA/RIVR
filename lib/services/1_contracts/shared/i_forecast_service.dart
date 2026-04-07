@@ -1,4 +1,4 @@
-// lib/core/services/i_forecast_service.dart
+// lib/services/1_contracts/shared/i_forecast_service.dart
 
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';

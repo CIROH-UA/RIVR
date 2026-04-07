@@ -1,4 +1,4 @@
-// lib/core/services/background_image_service.dart
+// lib/services/4_infrastructure/media/background_image_service.dart
 
 import 'dart:io';
 import 'dart:typed_data';

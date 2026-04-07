@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/skeleton_river_card.dart
+// lib/ui/2_presentation/features/favorites/widgets/skeleton_river_card.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:shimmer/shimmer.dart';

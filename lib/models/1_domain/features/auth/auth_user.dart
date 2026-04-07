@@ -1,4 +1,4 @@
-// lib/features/auth/data/models/auth_user.dart
+// lib/models/1_domain/features/auth/auth_user.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 

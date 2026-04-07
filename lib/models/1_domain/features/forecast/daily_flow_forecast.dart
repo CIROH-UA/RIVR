@@ -1,4 +1,4 @@
-// lib/features/forecast/domain/entities/daily_flow_forecast.dart
+// lib/models/1_domain/features/forecast/daily_flow_forecast.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';

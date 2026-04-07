@@ -1,4 +1,4 @@
-// lib/core/models/forecast_chart_data.dart
+// lib/models/1_domain/shared/forecast_chart_data.dart
 
 /// Ensemble statistics at a single time point (min/max/mean across members)
 class EnsembleStatPoint {

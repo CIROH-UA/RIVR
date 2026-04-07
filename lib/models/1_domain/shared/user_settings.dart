@@ -1,4 +1,4 @@
-// lib/core/models/user_settings.dart
+// lib/models/1_domain/shared/user_settings.dart
 
 enum FlowUnit {
   cfs,

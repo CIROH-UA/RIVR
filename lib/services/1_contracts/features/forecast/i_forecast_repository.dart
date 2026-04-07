@@ -1,4 +1,4 @@
-// lib/features/forecast/domain/repositories/i_forecast_repository.dart
+// lib/services/1_contracts/features/forecast/i_forecast_repository.dart
 
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';

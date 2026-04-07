@@ -1,4 +1,4 @@
-// test/features/settings/data/datasources/settings_firestore_datasource_test.dart
+// test/services/3_datasources/features/settings/settings_firestore_datasource_test.dart
 
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';

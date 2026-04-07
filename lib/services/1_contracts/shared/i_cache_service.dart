@@ -1,4 +1,4 @@
-// lib/core/services/i_cache_service.dart
+// lib/services/1_contracts/shared/i_cache_service.dart
 
 /// Interface for cache operations (secure storage + shared preferences)
 abstract class ICacheService {

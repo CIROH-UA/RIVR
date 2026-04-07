@@ -1,4 +1,4 @@
-// test/core/services/fcm_service_test.dart
+// test/services/4_infrastructure/fcm/fcm_service_test.dart
 //
 // Unit tests for FCMService — focused on the Firestore interaction layer
 // (token persistence, atomic writes, FieldValue.delete).

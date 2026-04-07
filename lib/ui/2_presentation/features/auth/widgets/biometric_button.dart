@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/widgets/biometric_button.dart
+// lib/ui/2_presentation/features/auth/widgets/biometric_button.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';

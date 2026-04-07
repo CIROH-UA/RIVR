@@ -1,4 +1,4 @@
-// lib/features/map/models/visible_stream.dart
+// lib/models/1_domain/features/map/visible_stream.dart
 
 /// Simple model for a visible stream in the map list
 /// Contains immediate data extracted from vector tile queries

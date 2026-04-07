@@ -1,4 +1,4 @@
-// lib/features/favorites/services/flood_risk_video_service.dart
+// lib/services/4_infrastructure/favorites/flood_risk_video_service.dart
 
 /// Service for mapping flood risk categories to video background assets
 class FloodRiskVideoService {

@@ -1,4 +1,4 @@
-// lib/core/routing/app_routes.dart
+// lib/ui/2_presentation/routing/app_routes.dart
 
 /// Centralized route name constants.
 /// All route strings live here — no string literals elsewhere.

@@ -1,4 +1,4 @@
-// lib/features/onboarding/pages/onboarding_page.dart
+// lib/ui/2_presentation/features/onboarding/pages/onboarding_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/favorites_page.dart';

@@ -1,4 +1,4 @@
-// lib/features/auth/data/repositories/auth_repository_impl.dart
+// lib/services/2_coordinators/features/auth/auth_repository_impl.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';

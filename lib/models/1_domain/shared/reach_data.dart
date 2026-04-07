@@ -1,4 +1,4 @@
-// lib/core/models/reach_data.dart
+// lib/models/1_domain/shared/reach_data.dart
 
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 

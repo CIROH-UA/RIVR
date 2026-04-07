@@ -1,4 +1,4 @@
-// lib/core/services/i_flow_unit_preference_service.dart
+// lib/services/1_contracts/shared/i_flow_unit_preference_service.dart
 
 /// Interface for flow unit preference management and conversions
 abstract class IFlowUnitPreferenceService {

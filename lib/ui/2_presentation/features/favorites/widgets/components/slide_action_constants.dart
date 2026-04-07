@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/components/slide_action_constants.dart
+// lib/ui/2_presentation/features/favorites/widgets/components/slide_action_constants.dart
 
 class SlideActionConstants {
   // Button dimensions

@@ -1,4 +1,4 @@
-// lib/features/forecast/widgets/daily_expandable_widget/hourly_display/time_slider.dart
+// lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/hourly_display/time_slider.dart
 
 import 'package:flutter/cupertino.dart';
 

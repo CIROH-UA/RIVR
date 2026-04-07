@@ -1,4 +1,4 @@
-// lib/core/widgets/offline_banner.dart
+// lib/ui/2_presentation/shared/widgets/offline_banner.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

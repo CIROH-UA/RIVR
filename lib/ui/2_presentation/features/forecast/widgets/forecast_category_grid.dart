@@ -1,4 +1,4 @@
-// lib/features/forecast/widgets/forecast_category_grid.dart
+// lib/ui/2_presentation/features/forecast/widgets/forecast_category_grid.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

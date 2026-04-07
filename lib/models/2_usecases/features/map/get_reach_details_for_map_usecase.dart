@@ -1,4 +1,4 @@
-// lib/features/map/domain/usecases/get_reach_details_for_map_usecase.dart
+// lib/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart
 
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';

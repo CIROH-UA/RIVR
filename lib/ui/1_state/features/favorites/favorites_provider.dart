@@ -1,4 +1,4 @@
-// lib/core/providers/favorites_provider.dart
+// lib/ui/1_state/features/favorites/favorites_provider.dart
 
 import 'dart:convert';
 

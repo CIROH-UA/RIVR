@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/widgets/auth_error_display.dart
+// lib/ui/2_presentation/features/auth/widgets/auth_error_display.dart
 
 import 'package:flutter/cupertino.dart';
 

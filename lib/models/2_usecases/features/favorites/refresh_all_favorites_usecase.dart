@@ -1,4 +1,4 @@
-// lib/features/favorites/domain/usecases/refresh_all_favorites_usecase.dart
+// lib/models/2_usecases/features/favorites/refresh_all_favorites_usecase.dart
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';

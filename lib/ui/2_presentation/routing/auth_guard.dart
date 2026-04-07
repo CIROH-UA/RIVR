@@ -1,4 +1,4 @@
-// lib/core/routing/auth_guard.dart
+// lib/ui/2_presentation/routing/auth_guard.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

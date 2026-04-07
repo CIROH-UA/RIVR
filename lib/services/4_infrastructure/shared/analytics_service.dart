@@ -1,4 +1,4 @@
-// lib/core/services/analytics_service.dart
+// lib/services/4_infrastructure/shared/analytics_service.dart
 
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';

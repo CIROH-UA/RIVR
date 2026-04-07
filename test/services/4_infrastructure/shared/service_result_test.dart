@@ -1,4 +1,4 @@
-// test/core/services/service_result_test.dart
+// test/services/4_infrastructure/shared/service_result_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';

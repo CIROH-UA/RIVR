@@ -1,4 +1,4 @@
-// lib/core/services/i_noaa_api_service.dart
+// lib/services/1_contracts/shared/i_noaa_api_service.dart
 
 /// Interface for NOAA API data fetching
 abstract class INoaaApiService {

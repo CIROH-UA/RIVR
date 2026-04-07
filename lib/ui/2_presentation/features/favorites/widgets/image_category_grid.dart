@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/image_category_grid.dart
+// lib/ui/2_presentation/features/favorites/widgets/image_category_grid.dart
 
 import 'package:flutter/cupertino.dart';
 

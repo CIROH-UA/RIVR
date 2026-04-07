@@ -1,4 +1,4 @@
-// lib/core/services/geocoding_service.dart
+// lib/services/4_infrastructure/geo/geocoding_service.dart
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';

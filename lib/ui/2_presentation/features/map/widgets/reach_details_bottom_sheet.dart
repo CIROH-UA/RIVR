@@ -1,4 +1,4 @@
-// lib/features/map/widgets/reach_details_bottom_sheet.dart
+// lib/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';

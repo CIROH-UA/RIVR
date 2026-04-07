@@ -1,4 +1,4 @@
-// lib/features/map/services/map_service_factory.dart
+// lib/services/4_infrastructure/map/map_service_factory.dart
 
 import 'package:rivr/services/4_infrastructure/map/map_vector_tiles_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_reach_selection_service.dart';

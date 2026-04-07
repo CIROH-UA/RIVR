@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/components/slide_action_buttons.dart
+// lib/ui/2_presentation/features/favorites/widgets/components/slide_action_buttons.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';

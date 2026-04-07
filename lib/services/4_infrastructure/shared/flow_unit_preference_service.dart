@@ -1,4 +1,4 @@
-// lib/core/services/flow_unit_preference_service.dart
+// lib/services/4_infrastructure/shared/flow_unit_preference_service.dart
 
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';

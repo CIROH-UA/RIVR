@@ -1,4 +1,4 @@
-// lib/core/pages/navigation_error_page.dart
+// lib/ui/2_presentation/shared/pages/navigation_error_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';

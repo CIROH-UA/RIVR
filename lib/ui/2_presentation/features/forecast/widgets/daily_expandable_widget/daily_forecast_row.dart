@@ -1,4 +1,4 @@
-// lib/features/forecast/widgets/daily_expandable_widget/daily_forecast_row.dart
+// lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/daily_forecast_row.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';

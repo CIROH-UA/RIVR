@@ -1,4 +1,4 @@
-// lib/features/map/widgets/map_with_favorites.dart
+// lib/ui/2_presentation/features/map/widgets/map_with_favorites.dart
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';

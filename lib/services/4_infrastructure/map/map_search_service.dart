@@ -1,4 +1,4 @@
-// lib/features/map/services/map_search_service.dart
+// lib/services/4_infrastructure/map/map_search_service.dart
 //
 // Map search service and SearchedPlace model extracted from
 // map_search_widget.dart to break circular dependency between

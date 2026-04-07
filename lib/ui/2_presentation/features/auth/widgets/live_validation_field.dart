@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/widgets/live_validation_field.dart
+// lib/ui/2_presentation/features/auth/widgets/live_validation_field.dart
 
 import 'package:flutter/cupertino.dart';
 import 'dart:async';

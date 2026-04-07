@@ -1,4 +1,4 @@
-// lib/features/favorites/services/coach_mark_targets.dart
+// lib/services/4_infrastructure/favorites/coach_mark_targets.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';

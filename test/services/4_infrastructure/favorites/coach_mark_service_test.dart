@@ -1,4 +1,4 @@
-// test/features/favorites/services/coach_mark_service_test.dart
+// test/services/4_infrastructure/favorites/coach_mark_service_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';

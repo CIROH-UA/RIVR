@@ -1,4 +1,4 @@
-// lib/features/favorites/pages/image_selection_page.dart
+// lib/ui/2_presentation/features/favorites/pages/image_selection_page.dart
 
 import 'dart:io';
 import 'package:flutter/cupertino.dart';

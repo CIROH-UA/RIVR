@@ -1,4 +1,4 @@
-// lib/features/forecast/utils/flow_category_pulse_animator.dart
+// lib/utils/forecast/flow_category_pulse_animator.dart
 
 import 'package:flutter/cupertino.dart';
 

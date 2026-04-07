@@ -1,4 +1,4 @@
-// test/features/auth/data/repositories/auth_repository_impl_test.dart
+// test/services/2_coordinators/features/auth/auth_repository_impl_test.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';

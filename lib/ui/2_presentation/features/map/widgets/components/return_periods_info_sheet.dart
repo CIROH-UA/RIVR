@@ -1,4 +1,4 @@
-// lib/features/map/widgets/components/return_periods_info_sheet.dart
+// lib/ui/2_presentation/features/map/widgets/components/return_periods_info_sheet.dart
 
 import 'package:flutter/cupertino.dart';
 

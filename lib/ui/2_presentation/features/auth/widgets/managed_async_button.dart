@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/widgets/managed_async_button.dart
+// lib/ui/2_presentation/features/auth/widgets/managed_async_button.dart
 
 import 'package:flutter/cupertino.dart';
 

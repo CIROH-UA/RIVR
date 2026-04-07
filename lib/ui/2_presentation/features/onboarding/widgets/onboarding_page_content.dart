@@ -1,4 +1,4 @@
-// lib/features/onboarding/widgets/onboarding_page_content.dart
+// lib/ui/2_presentation/features/onboarding/widgets/onboarding_page_content.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_svg/flutter_svg.dart';

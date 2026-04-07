@@ -1,4 +1,4 @@
-// lib/core/models/dtos/reach_data_dto.dart
+// lib/services/3_datasources/shared/dtos/reach_data_dto.dart
 
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';

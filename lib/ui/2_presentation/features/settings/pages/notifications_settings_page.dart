@@ -1,4 +1,4 @@
-// lib/features/settings/pages/notifications_settings_page.dart
+// lib/ui/2_presentation/features/settings/pages/notifications_settings_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';

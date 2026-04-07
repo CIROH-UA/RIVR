@@ -1,4 +1,4 @@
-// lib/features/auth/utils/email_validator.dart
+// lib/utils/auth/email_validator.dart
 
 /// HTML5-spec email regex with minimum 2-char TLD.
 /// Rejects: spaces, consecutive dots in domain, missing/short TLD,

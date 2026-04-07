@@ -1,4 +1,4 @@
-// lib/features/settings/data/repositories/settings_repository_impl.dart
+// lib/services/2_coordinators/features/settings/settings_repository_impl.dart
 
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';

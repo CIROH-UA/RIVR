@@ -1,4 +1,4 @@
-// test/features/settings/data/repositories/settings_repository_impl_test.dart
+// test/services/2_coordinators/features/settings/settings_repository_impl_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';

@@ -1,4 +1,4 @@
-// lib/features/auth/domain/usecases/sign_in_with_biometrics_usecase.dart
+// lib/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';

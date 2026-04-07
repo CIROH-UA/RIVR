@@ -1,4 +1,4 @@
-// lib/features/auth/presentation/pages/register_page.dart
+// lib/ui/2_presentation/features/auth/pages/register_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';

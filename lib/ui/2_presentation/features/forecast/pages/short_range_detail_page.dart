@@ -1,4 +1,4 @@
-// lib/features/forecast/pages/short_range_detail_page.dart
+// lib/ui/2_presentation/features/forecast/pages/short_range_detail_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';

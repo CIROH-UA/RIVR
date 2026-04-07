@@ -1,4 +1,4 @@
-// lib/core/domain/usecases/base_usecase.dart
+// lib/models/2_usecases/shared/base_usecase.dart
 
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 

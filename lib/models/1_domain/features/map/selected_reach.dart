@@ -1,4 +1,4 @@
-// lib/features/map/models/selected_reach.dart
+// lib/models/1_domain/features/map/selected_reach.dart
 
 /// Lightweight model for river reach selections from vector tiles
 /// Contains immediate data from vector tiles + async-loaded river name

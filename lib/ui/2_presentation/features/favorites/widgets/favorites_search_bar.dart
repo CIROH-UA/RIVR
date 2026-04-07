@@ -1,4 +1,4 @@
-// lib/features/favorites/widgets/favorites_search_bar.dart
+// lib/ui/2_presentation/features/favorites/widgets/favorites_search_bar.dart
 
 import 'package:flutter/cupertino.dart';
 

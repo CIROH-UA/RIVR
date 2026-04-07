@@ -1,4 +1,4 @@
-// lib/core/providers/connectivity_provider.dart
+// lib/ui/1_state/shared/connectivity_provider.dart
 
 import 'dart:async';
 import 'package:flutter/widgets.dart';

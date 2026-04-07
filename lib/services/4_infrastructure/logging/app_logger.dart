@@ -1,4 +1,4 @@
-// lib/core/services/app_logger.dart
+// lib/services/4_infrastructure/logging/app_logger.dart
 //
 // Structured logging utility for RIVR.
 // Replaces raw print() calls with leveled, gated logging.

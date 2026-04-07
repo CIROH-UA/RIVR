@@ -1,4 +1,4 @@
-// test/features/favorites/data/repositories/favorites_repository_impl_test.dart
+// test/services/2_coordinators/features/favorites/favorites_repository_impl_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';

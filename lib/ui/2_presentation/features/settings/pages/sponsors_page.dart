@@ -1,4 +1,4 @@
-// lib/features/settings/pages/sponsors_page.dart
+// lib/ui/2_presentation/features/settings/pages/sponsors_page.dart
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';

@@ -1,4 +1,4 @@
-// lib/features/map/map_page.dart
+// lib/ui/2_presentation/features/map/pages/map_page.dart
 
 import 'package:flutter/cupertino.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';

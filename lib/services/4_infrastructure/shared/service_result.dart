@@ -1,4 +1,4 @@
-// lib/core/services/service_result.dart
+// lib/services/4_infrastructure/shared/service_result.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';

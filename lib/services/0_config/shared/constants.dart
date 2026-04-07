@@ -1,4 +1,4 @@
-// lib/core/constants.dart
+// lib/services/0_config/shared/constants.dart
 //
 // App-wide constants and helper methods that are not sensitive information
 // like API keys and URLs. For sensitive configuration, see config.dart.

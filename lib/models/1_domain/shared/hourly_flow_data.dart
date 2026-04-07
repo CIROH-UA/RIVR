@@ -1,4 +1,4 @@
-// lib/core/models/hourly_flow_data.dart
+// lib/models/1_domain/shared/hourly_flow_data.dart
 //
 // Data models for hourly flow data points.
 // Extracted from horizontal_flow_timeline.dart to break circular

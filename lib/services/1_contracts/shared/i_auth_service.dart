@@ -1,4 +1,4 @@
-// lib/core/services/i_auth_service.dart
+// lib/services/1_contracts/shared/i_auth_service.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
