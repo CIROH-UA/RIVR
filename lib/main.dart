@@ -8,7 +8,7 @@ import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
-import 'package:rivr/services/5_injection/service_locator.dart';
+import 'package:rivr/services/5_injection/dependency_container.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
@@ -55,7 +55,7 @@ Future<void> main() async {
   await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);
 
   // Register all services with dependency injection
-  setupServiceLocator();
+  setupDependencies();
 
   // Catch Flutter framework errors (widget build failures, layout errors, etc.)
   FlutterError.onError = (FlutterErrorDetails details) {

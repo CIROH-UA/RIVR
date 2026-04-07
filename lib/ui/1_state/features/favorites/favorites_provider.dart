@@ -4,7 +4,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
-import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
@@ -14,12 +13,12 @@ import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/remove_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usecase.dart';
+import 'package:rivr/models/2_usecases/features/favorites/get_favorite_flow_usecase.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
@@ -29,13 +28,13 @@ class FavoritesProvider with ChangeNotifier {
   final AddFavoriteUseCase _addFavoriteUseCase;
   final RemoveFavoriteUseCase _removeFavoriteUseCase;
   final ReorderFavoritesUseCase _reorderFavoritesUseCase;
+  final GetFavoriteFlowUseCase _getFavoriteFlowUseCase;
 
-  // Services kept for complex orchestration (refresh, return periods, cache)
+  // Services kept for cross-cutting concerns
   final IFavoritesService _favoritesService;
   final IForecastService _forecastService;
   final IReachCacheService _reachCacheService;
   final IFlowUnitPreferenceService _unitService;
-  final INoaaApiService _apiService;
   final Map<String, Map<int, double>> _sessionReturnPeriods =
       {}; // reachId -> return periods
 
@@ -44,18 +43,17 @@ class FavoritesProvider with ChangeNotifier {
     IForecastService? forecastService,
     IReachCacheService? reachCacheService,
     IFlowUnitPreferenceService? unitService,
-    INoaaApiService? apiService,
     InitializeFavoritesUseCase? initializeFavorites,
     AddFavoriteUseCase? addFavoriteUseCase,
     RemoveFavoriteUseCase? removeFavoriteUseCase,
     ReorderFavoritesUseCase? reorderFavoritesUseCase,
+    GetFavoriteFlowUseCase? getFavoriteFlowUseCase,
   })  : _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
         _forecastService = forecastService ?? GetIt.I<IForecastService>(),
         _reachCacheService =
             reachCacheService ?? GetIt.I<IReachCacheService>(),
         _unitService =
             unitService ?? GetIt.I<IFlowUnitPreferenceService>(),
-        _apiService = apiService ?? GetIt.I<INoaaApiService>(),
         _initializeFavorites =
             initializeFavorites ?? GetIt.I<InitializeFavoritesUseCase>(),
         _addFavoriteUseCase =
@@ -63,7 +61,9 @@ class FavoritesProvider with ChangeNotifier {
         _removeFavoriteUseCase =
             removeFavoriteUseCase ?? GetIt.I<RemoveFavoriteUseCase>(),
         _reorderFavoritesUseCase =
-            reorderFavoritesUseCase ?? GetIt.I<ReorderFavoritesUseCase>();
+            reorderFavoritesUseCase ?? GetIt.I<ReorderFavoritesUseCase>(),
+        _getFavoriteFlowUseCase =
+            getFavoriteFlowUseCase ?? GetIt.I<GetFavoriteFlowUseCase>();
 
   // Current state
   List<FavoriteRiver> _favorites = [];
@@ -551,12 +551,22 @@ class FavoritesProvider with ChangeNotifier {
       _refreshingReachIds.add(reachId);
       notifyListeners();
 
-      // Load efficient data for favorites refresh
-      final forecast = await _forecastService.loadCurrentFlowOnly(reachId);
+      // Load flow data + return periods via use case (repository handles
+      // return period merging, cache fallback, and fresh fetch)
+      final result = await _getFavoriteFlowUseCase(reachId);
 
       // Discard result if a newer refresh for this reach has been started
       if (_refreshGenerations[reachId] != gen) return;
 
+      if (result.isFailure) {
+        AppLogger.error(
+          'FavoritesProvider',
+          'Failed to refresh $reachId: ${result.errorMessage}',
+        );
+        return;
+      }
+
+      final forecast = result.data;
       final currentFlow = _forecastService.getCurrentFlow(forecast);
       final currentUnit = _unitService.currentFlowUnit;
 
@@ -570,13 +580,9 @@ class FavoritesProvider with ChangeNotifier {
         coordinates: (lat: forecast.reach.latitude, lon: forecast.reach.longitude),
       );
 
-      // Use return periods from the forecast response if already loaded
-      // (loadCurrentFlowOnly fetches and caches them on cache miss)
+      // Cache return periods from the forecast response
       if (forecast.reach.hasReturnPeriods) {
         _sessionReturnPeriods[reachId] = forecast.reach.returnPeriods!;
-      } else {
-        // Only fetch separately if not already present
-        await _loadReturnPeriods(reachId);
       }
 
       final session = _sessionData[reachId]!;
@@ -613,41 +619,6 @@ class FavoritesProvider with ChangeNotifier {
   /// Get return periods for a specific favorite
   Map<int, double>? getReturnPeriods(String reachId) {
     return _sessionReturnPeriods[reachId];
-  }
-
-  /// Load return periods for a favorite (with caching)
-  Future<void> _loadReturnPeriods(String reachId) async {
-    try {
-      // Check cache first
-      final cachedReach = await _reachCacheService.get(reachId);
-
-      if (cachedReach?.hasReturnPeriods == true) {
-        _sessionReturnPeriods[reachId] = cachedReach!.returnPeriods!;
-        AppLogger.debug('FavoritesProvider', 'Using cached return periods for $reachId');
-        return;
-      }
-
-      // Fetch fresh return periods
-      final returnPeriods = await _apiService.fetchReturnPeriods(reachId);
-
-      if (returnPeriods.isNotEmpty) {
-        // Parse return periods
-        final returnPeriodData = ReachDataDto.fromReturnPeriodApi(returnPeriods).toEntity();
-        _sessionReturnPeriods[reachId] = returnPeriodData.returnPeriods!;
-
-        // Cache for future use
-        if (cachedReach != null) {
-          final updatedReach = cachedReach.mergeWith(returnPeriodData);
-          await _reachCacheService.store(updatedReach);
-        }
-      }
-    } catch (e) {
-      AppLogger.warning(
-        'FavoritesProvider',
-        'Failed to load return periods for $reachId: $e',
-      );
-      // Continue without return periods
-    }
   }
 
   /// Filter favorites by search query

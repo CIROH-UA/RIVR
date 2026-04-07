@@ -140,15 +140,20 @@ Move files into the `models/` + `services/` + `ui/` layout. Do this as a single 
 
 Split the single DI file into feature-based registration and ensure providers use use cases.
 
-- [ ] Create `services/5_injection/dependency_container.dart` (orchestrator)
-- [ ] Create per-feature DI files: `auth_dependencies.dart`, `favorites_dependencies.dart`, `forecast_dependencies.dart`, `map_dependencies.dart`, `settings_dependencies.dart`
-- [ ] Add guard clauses to prevent double registration
-- [ ] Verify `AuthProvider` calls use cases (not services directly)
-- [ ] Verify `FavoritesProvider` calls use cases (not services directly)
-- [ ] Verify `ReachDataProvider` calls use cases (not services directly)
-- [ ] Remove old `service_locator.dart`
-- [ ] Run full test suite — all pass
-- [ ] Run `flutter analyze` — zero issues
+- [x] Create `services/5_injection/dependency_container.dart` (orchestrator) *(2026-04-06)*
+- [x] Create per-feature DI files: `shared_dependencies.dart`, `auth_dependencies.dart`, `favorites_dependencies.dart`, `forecast_dependencies.dart`, `map_dependencies.dart`, `settings_dependencies.dart` *(2026-04-06)*
+- [x] Add guard clauses to prevent double registration *(2026-04-06)*
+- [x] Rewire `AuthProvider` to use `IAuthRepository` + 8 use cases (removed direct `IAuthService` + `IUserSettingsService` usage) *(2026-04-06)*
+- [x] Rewire `FavoritesProvider` to use `GetFavoriteFlowUseCase` (removed direct `INoaaApiService` + `_loadReturnPeriods()` usage) *(2026-04-06)*
+- [x] `ReachDataProvider` already uses use cases — no changes needed *(2026-04-06)*
+- [x] Add `sendEmailVerification` + `checkEmailVerified` to `IAuthRepository` and `AuthRepositoryImpl` *(2026-04-06)*
+- [x] Create `GetFavoriteFlowUseCase` (delegates to `IFavoritesRepository.getFlowData`) *(2026-04-06)*
+- [x] Remove old `service_locator.dart` *(2026-04-06)*
+- [x] Update `auth_provider_test.dart` to use mock `IAuthRepository` + use cases *(2026-04-06)*
+- [x] Update integration test helpers (`test_app.dart`) for new DI and provider constructors *(2026-04-06)*
+- [x] Add 6 tests for `sendEmailVerification` + `checkEmailVerified` on `AuthRepositoryImpl` *(2026-04-06)*
+- [x] Run full test suite — 509/509 pass *(2026-04-06)*
+- [x] Run `flutter analyze` — zero issues *(2026-04-06)*
 
 ---
 

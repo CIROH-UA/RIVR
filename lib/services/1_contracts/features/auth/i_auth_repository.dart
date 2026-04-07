@@ -31,4 +31,7 @@ abstract class IAuthRepository {
 
   /// Sync user settings after a successful login.
   Future<ServiceResult<UserSettings?>> syncSettingsAfterLogin(String userId);
+
+  Future<ServiceResult<void>> sendEmailVerification();
+  Future<ServiceResult<bool>> checkEmailVerified();
 }

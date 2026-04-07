@@ -3,19 +3,26 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart' show MockUser;
-import 'package:get_it/get_it.dart';
-import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
-import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
+import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
+import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
+import 'package:rivr/services/1_contracts/features/settings/i_settings_repository.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 
 // ---------------------------------------------------------------------------
 // Minimal mocks for AuthProvider unit tests
 // ---------------------------------------------------------------------------
 
-class _MockAuthService implements IAuthService {
+class _MockAuthRepository implements IAuthRepository {
   final StreamController<fb.User?> _authStateController =
       StreamController<fb.User?>.broadcast();
 
@@ -32,24 +39,10 @@ class _MockAuthService implements IAuthService {
     _emailVerified = emailVerified;
   }
 
-  @override
-  fb.User? get currentUser => _signedInUser;
-
-  @override
-  Stream<fb.User?> get authStateChanges => _authStateController.stream;
-
-  @override
-  bool get isSignedIn => _signedInUser != null;
-
-  @override
-  Future<AuthResult> signInWithEmailAndPassword({
-    required String email,
-    required String password,
-  }) async {
+  /// Simulate sign-in (used by the mock use case wrapper)
+  void simulateSignIn(String email) {
     final account = _accounts[email];
-    if (account == null || account['password'] != password) {
-      return AuthResult.failure('Invalid email or password');
-    }
+    if (account == null) return;
     _signedInUser = MockUser(
       uid: 'uid-${email.hashCode}',
       email: email,
@@ -57,18 +50,40 @@ class _MockAuthService implements IAuthService {
       isEmailVerified: _emailVerified,
     );
     _authStateController.add(_signedInUser);
-    return AuthResult.success(_signedInUser);
   }
 
   @override
-  Future<AuthResult> registerWithEmailAndPassword({
+  fb.User? get currentUser => _signedInUser;
+
+  @override
+  Stream<fb.User?> get authStateChanges => _authStateController.stream;
+
+  @override
+  Future<ServiceResult<fb.User?>> signIn({
+    required String email,
+    required String password,
+  }) async {
+    final account = _accounts[email];
+    if (account == null || account['password'] != password) {
+      return ServiceResult.failure(
+        const ServiceException.auth('Invalid email or password'),
+      );
+    }
+    simulateSignIn(email);
+    return ServiceResult.success(_signedInUser);
+  }
+
+  @override
+  Future<ServiceResult<fb.User?>> signUp({
     required String email,
     required String password,
     required String firstName,
     required String lastName,
   }) async {
     if (_accounts.containsKey(email)) {
-      return AuthResult.failure('Email already in use');
+      return ServiceResult.failure(
+        const ServiceException.auth('Email already in use'),
+      );
     }
     _accounts[email] = {'password': password};
     _signedInUser = MockUser(
@@ -78,117 +93,72 @@ class _MockAuthService implements IAuthService {
       isEmailVerified: false,
     );
     _authStateController.add(_signedInUser);
-    return AuthResult.success(_signedInUser);
+    return ServiceResult.success(_signedInUser);
   }
 
   @override
-  Future<AuthResult> sendPasswordResetEmail({required String email}) async =>
-      AuthResult.success(null, message: 'Sent');
-
-  @override
-  Future<AuthResult> signOut() async {
+  Future<ServiceResult<void>> signOut() async {
     _signedInUser = null;
     _authStateController.add(null);
-    return AuthResult.success(null);
+    return ServiceResult.success(null);
   }
+
+  @override
+  Future<ServiceResult<void>> resetPassword({required String email}) async =>
+      ServiceResult.success(null);
 
   @override
   Future<bool> isBiometricAvailable() async => false;
   @override
   Future<bool> isBiometricEnabled() async => false;
+
   @override
-  Future<AuthResult> enableBiometricLogin() async =>
-      AuthResult.failure('N/A');
+  Future<ServiceResult<fb.User?>> signInWithBiometrics() async =>
+      ServiceResult.failure(const ServiceException.auth('N/A'));
+
   @override
-  Future<AuthResult> disableBiometricLogin() async =>
-      AuthResult.failure('N/A');
+  Future<ServiceResult<void>> enableBiometric() async =>
+      ServiceResult.failure(const ServiceException.auth('N/A'));
+
   @override
-  Future<AuthResult> signInWithBiometrics() async =>
-      AuthResult.failure('N/A');
+  Future<ServiceResult<void>> disableBiometric() async =>
+      ServiceResult.failure(const ServiceException.auth('N/A'));
+
   @override
-  Future<AuthResult> updateDisplayName(String displayName) async =>
-      AuthResult.success(_signedInUser);
+  Future<ServiceResult<UserSettings?>> syncSettingsAfterLogin(
+      String userId) async =>
+      ServiceResult.success(null);
+
   @override
-  Future<void> reloadUser() async {}
+  Future<ServiceResult<void>> sendEmailVerification() async =>
+      ServiceResult.success(null);
+
   @override
-  Future<AuthResult> sendEmailVerification() async =>
-      AuthResult.success(_signedInUser);
-  @override
-  Future<bool> checkEmailVerified() async => _emailVerified;
+  Future<ServiceResult<bool>> checkEmailVerified() async =>
+      ServiceResult.success(_emailVerified);
 
   void dispose() => _authStateController.close();
 }
 
-class _MockUserSettingsService implements IUserSettingsService {
+class _MockSettingsRepository implements ISettingsRepository {
   @override
-  Future<UserSettings?> getUserSettings(String userId) async => null;
+  Future<ServiceResult<UserSettings?>> getUserSettings(String userId) async =>
+      ServiceResult.success(null);
   @override
-  Future<void> saveUserSettings(UserSettings settings) async {}
-  @override
-  Future<void> updateUserSettings(
-      String userId, Map<String, dynamic> updates) async {}
-  @override
-  Future<UserSettings?> addCustomBackgroundImage(
-          String userId, String imagePath) async =>
-      null;
-  @override
-  Future<UserSettings?> removeCustomBackgroundImage(
-          String userId, String imagePath) async =>
-      null;
-  @override
-  Future<List<String>> getUserCustomBackgrounds(String userId) async => [];
-  @override
-  Future<UserSettings?> validateCustomBackgrounds(String userId) async => null;
-  @override
-  Future<UserSettings?> clearAllCustomBackgrounds(String userId) async => null;
-  @override
-  Future<UserSettings> createDefaultSettings({
-    required String userId,
-    required String email,
-    required String firstName,
-    required String lastName,
-  }) async =>
-      UserSettings(
-        userId: userId,
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        preferredFlowUnit: FlowUnit.cfs,
-        preferredTimeFormat: TimeFormat.twelveHour,
-        enableNotifications: false,
-        favoriteReachIds: const [],
-        lastLoginDate: DateTime.now(),
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-  @override
-  Future<UserSettings?> syncAfterLogin(String userId) async => null;
-  @override
-  Future<UserSettings?> addFavoriteReach(
-          String userId, String reachId) async =>
-      null;
-  @override
-  Future<UserSettings?> removeFavoriteReach(
-          String userId, String reachId) async =>
-      null;
-  @override
-  Future<UserSettings?> updateFlowUnit(
+  Future<ServiceResult<UserSettings?>> updateFlowUnit(
           String userId, FlowUnit flowUnit) async =>
-      null;
+      ServiceResult.success(null);
   @override
-  Future<UserSettings?> updateNotifications(
+  Future<ServiceResult<UserSettings?>> updateNotifications(
           String userId, bool enableNotifications) async =>
-      null;
+      ServiceResult.success(null);
   @override
-  Future<UserSettings?> updateNotificationFrequency(
+  Future<ServiceResult<UserSettings?>> updateNotificationFrequency(
           String userId, int frequency) async =>
-      null;
+      ServiceResult.success(null);
   @override
-  void clearCache() {}
-  @override
-  Future<bool> userHasSettings(String userId) async => false;
-  @override
-  Future<void> syncFlowUnitPreference(String userId) async {}
+  Future<ServiceResult<UserSettings?>> syncAfterLogin(String userId) async =>
+      ServiceResult.success(null);
 }
 
 class _MockFCMService implements IFCMService {
@@ -217,29 +187,32 @@ class _MockFCMService implements IFCMService {
 }
 
 void main() {
-  late _MockAuthService mockAuth;
-  late _MockUserSettingsService mockSettings;
+  late _MockAuthRepository mockAuthRepo;
+  late _MockSettingsRepository mockSettingsRepo;
+  late _MockFCMService mockFcm;
   late AuthProvider provider;
 
   setUp(() {
-    // Register IFCMService in GetIt (AuthProvider uses it internally)
-    final sl = GetIt.instance;
-    if (!sl.isRegistered<IFCMService>()) {
-      sl.registerLazySingleton<IFCMService>(() => _MockFCMService());
-    }
-
-    mockAuth = _MockAuthService();
-    mockSettings = _MockUserSettingsService();
+    mockAuthRepo = _MockAuthRepository();
+    mockSettingsRepo = _MockSettingsRepository();
+    mockFcm = _MockFCMService();
     provider = AuthProvider(
-      authService: mockAuth,
-      userSettingsService: mockSettings,
+      authRepository: mockAuthRepo,
+      signInUseCase: SignInUseCase(mockAuthRepo),
+      signUpUseCase: SignUpUseCase(mockAuthRepo),
+      signOutUseCase: SignOutUseCase(mockAuthRepo),
+      resetPasswordUseCase: ResetPasswordUseCase(mockAuthRepo),
+      enableBiometricUseCase: EnableBiometricUseCase(mockAuthRepo),
+      disableBiometricUseCase: DisableBiometricUseCase(mockAuthRepo),
+      signInWithBiometricsUseCase: SignInWithBiometricsUseCase(mockAuthRepo),
+      syncSettingsUseCase: SyncSettingsAfterLoginUseCase(mockSettingsRepo),
+      fcmService: mockFcm,
     );
   });
 
   tearDown(() {
     provider.dispose();
-    mockAuth.dispose();
-    GetIt.instance.reset();
+    mockAuthRepo.dispose();
   });
 
   group('AuthProvider', () {
@@ -257,7 +230,7 @@ void main() {
       });
 
       test('clears success message', () async {
-        mockAuth.seedUser(
+        mockAuthRepo.seedUser(
             email: 'test@example.com',
             password: 'pass123',
             emailVerified: true);
@@ -275,7 +248,7 @@ void main() {
 
     group('signIn', () {
       test('does not set success message on successful sign-in', () async {
-        mockAuth.seedUser(
+        mockAuthRepo.seedUser(
             email: 'user@example.com',
             password: 'pass123',
             emailVerified: true);
@@ -289,7 +262,7 @@ void main() {
       });
 
       test('sets error message on failed sign-in', () async {
-        mockAuth.seedUser(
+        mockAuthRepo.seedUser(
             email: 'user@example.com', password: 'correct');
 
         final result =
@@ -327,7 +300,7 @@ void main() {
 
       test('sets error message on failed registration', () async {
         // Seed an existing account so registration fails
-        mockAuth.seedUser(
+        mockAuthRepo.seedUser(
             email: 'taken@example.com', password: 'pass');
 
         final result = await provider.register(

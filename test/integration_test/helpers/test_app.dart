@@ -31,12 +31,25 @@ import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_u
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/remove_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usecase.dart';
+import 'package:rivr/models/2_usecases/features/favorites/get_favorite_flow_usecase.dart';
 import 'package:rivr/services/2_coordinators/features/forecast/forecast_repository_impl.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_forecast_repository.dart';
 import 'package:rivr/models/2_usecases/features/forecast/load_forecast_overview_usecase.dart';
 import 'package:rivr/models/2_usecases/features/forecast/load_forecast_supplementary_usecase.dart';
 import 'package:rivr/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart';
 import 'package:rivr/models/2_usecases/features/forecast/load_complete_forecast_usecase.dart';
+import 'package:rivr/services/2_coordinators/features/auth/auth_repository_impl.dart';
+import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
+import 'package:rivr/services/2_coordinators/features/settings/settings_repository_impl.dart';
+import 'package:rivr/services/1_contracts/features/settings/i_settings_repository.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 
 import 'mock_services.dart';
 
@@ -111,6 +124,26 @@ class TestServices {
     sl.registerFactory(() => AddFavoriteUseCase(favoritesRepo));
     sl.registerFactory(() => RemoveFavoriteUseCase(favoritesRepo));
     sl.registerFactory(() => ReorderFavoritesUseCase(favoritesRepo));
+    sl.registerFactory(() => GetFavoriteFlowUseCase(favoritesRepo));
+
+    // Auth repository + use cases (needed by AuthProvider)
+    final authRepo = AuthRepositoryImpl(
+      authService: auth,
+      settingsService: userSettings,
+    );
+    sl.registerSingleton<IAuthRepository>(authRepo);
+    sl.registerFactory(() => SignInUseCase(authRepo));
+    sl.registerFactory(() => SignUpUseCase(authRepo));
+    sl.registerFactory(() => SignOutUseCase(authRepo));
+    sl.registerFactory(() => ResetPasswordUseCase(authRepo));
+    sl.registerFactory(() => EnableBiometricUseCase(authRepo));
+    sl.registerFactory(() => DisableBiometricUseCase(authRepo));
+    sl.registerFactory(() => SignInWithBiometricsUseCase(authRepo));
+
+    // Settings repository + sync use case (needed by AuthProvider)
+    final settingsRepo = SettingsRepositoryImpl(settingsService: userSettings);
+    sl.registerSingleton<ISettingsRepository>(settingsRepo);
+    sl.registerFactory(() => SyncSettingsAfterLoginUseCase(settingsRepo));
   }
 
   /// Seed a default signed-in user with settings.
@@ -187,21 +220,43 @@ Future<void> resetServiceLocator() async {
 /// Create the providers needed by the app.
 /// Providers are created with injected mock services so they never
 /// fall back to GetIt (though GetIt is also populated as a safety net
-/// for code paths that access it directly like AuthProvider.signOut).
+/// for code paths that access it directly).
 AuthProvider createAuthProvider(TestServices services) {
-  return AuthProvider(
+  final authRepo = AuthRepositoryImpl(
     authService: services.auth,
-    userSettingsService: services.userSettings,
+    settingsService: services.userSettings,
+  );
+  final settingsRepo = SettingsRepositoryImpl(
+    settingsService: services.userSettings,
+  );
+  return AuthProvider(
+    authRepository: authRepo,
+    signInUseCase: SignInUseCase(authRepo),
+    signUpUseCase: SignUpUseCase(authRepo),
+    signOutUseCase: SignOutUseCase(authRepo),
+    resetPasswordUseCase: ResetPasswordUseCase(authRepo),
+    enableBiometricUseCase: EnableBiometricUseCase(authRepo),
+    disableBiometricUseCase: DisableBiometricUseCase(authRepo),
+    signInWithBiometricsUseCase: SignInWithBiometricsUseCase(authRepo),
+    syncSettingsUseCase: SyncSettingsAfterLoginUseCase(settingsRepo),
+    fcmService: services.fcm,
   );
 }
 
 FavoritesProvider createFavoritesProvider(TestServices services) {
+  final favoritesRepo = FavoritesRepositoryImpl(
+    favoritesService: services.favorites,
+    forecastService: services.forecast,
+    cacheService: services.reachCache,
+    unitService: services.flowUnit,
+    apiService: services.noaaApi,
+  );
   return FavoritesProvider(
     favoritesService: services.favorites,
     forecastService: services.forecast,
     reachCacheService: services.reachCache,
     unitService: services.flowUnit,
-    apiService: services.noaaApi,
+    getFavoriteFlowUseCase: GetFavoriteFlowUseCase(favoritesRepo),
   );
 }
 

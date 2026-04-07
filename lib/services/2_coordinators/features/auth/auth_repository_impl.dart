@@ -149,6 +149,30 @@ class AuthRepositoryImpl implements IAuthRepository {
     }
   }
 
+  @override
+  Future<ServiceResult<void>> sendEmailVerification() async {
+    try {
+      final result = await _authService.sendEmailVerification();
+      return _mapAuthResultVoid(result);
+    } catch (e) {
+      return ServiceResult.failure(
+        ServiceException.fromError(e, context: 'sendEmailVerification'),
+      );
+    }
+  }
+
+  @override
+  Future<ServiceResult<bool>> checkEmailVerified() async {
+    try {
+      final verified = await _authService.checkEmailVerified();
+      return ServiceResult.success(verified);
+    } catch (e) {
+      return ServiceResult.failure(
+        ServiceException.fromError(e, context: 'checkEmailVerified'),
+      );
+    }
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   /// Map [AuthResult] to [ServiceResult<User?>] for operations that return a user.

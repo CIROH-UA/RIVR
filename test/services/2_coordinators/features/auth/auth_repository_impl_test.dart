@@ -19,8 +19,10 @@ class _StubAuthService implements IAuthService {
   AuthResult? biometricSignInResult;
   AuthResult? enableBiometricResult;
   AuthResult? disableBiometricResult;
+  AuthResult? sendEmailVerificationResult;
   bool biometricAvailable = false;
   bool biometricEnabled = false;
+  bool emailVerified = true;
   Exception? exceptionToThrow;
 
   final MockUser _mockUser = MockUser(
@@ -105,11 +107,17 @@ class _StubAuthService implements IAuthService {
   Future<void> reloadUser() async {}
 
   @override
-  Future<AuthResult> sendEmailVerification() async =>
-      AuthResult.success(null, message: 'Sent');
+  Future<AuthResult> sendEmailVerification() async {
+    if (exceptionToThrow != null) throw exceptionToThrow!;
+    return sendEmailVerificationResult ??
+        AuthResult.success(null, message: 'Sent');
+  }
 
   @override
-  Future<bool> checkEmailVerified() async => true;
+  Future<bool> checkEmailVerified() async {
+    if (exceptionToThrow != null) throw exceptionToThrow!;
+    return emailVerified;
+  }
 }
 
 class _StubSettingsService implements IUserSettingsService {
@@ -374,6 +382,56 @@ void main() {
 
       final result = await repository.syncSettingsAfterLogin('user1');
       expect(result.isFailure, isTrue);
+    });
+  });
+
+  group('AuthRepositoryImpl — sendEmailVerification', () {
+    test('returns success on successful send', () async {
+      final result = await repository.sendEmailVerification();
+      expect(result.isSuccess, isTrue);
+    });
+
+    test('returns failure when auth service returns failure', () async {
+      stubAuth.sendEmailVerificationResult =
+          AuthResult.failure('Too many requests');
+
+      final result = await repository.sendEmailVerification();
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, 'Too many requests');
+    });
+
+    test('returns failure when service throws', () async {
+      stubAuth.exceptionToThrow = Exception('Network error');
+
+      final result = await repository.sendEmailVerification();
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, isNotEmpty);
+    });
+  });
+
+  group('AuthRepositoryImpl — checkEmailVerified', () {
+    test('returns success with true when email is verified', () async {
+      stubAuth.emailVerified = true;
+
+      final result = await repository.checkEmailVerified();
+      expect(result.isSuccess, isTrue);
+      expect(result.data, isTrue);
+    });
+
+    test('returns success with false when email is not verified', () async {
+      stubAuth.emailVerified = false;
+
+      final result = await repository.checkEmailVerified();
+      expect(result.isSuccess, isTrue);
+      expect(result.data, isFalse);
+    });
+
+    test('returns failure when service throws', () async {
+      stubAuth.exceptionToThrow = Exception('Network error');
+
+      final result = await repository.checkEmailVerified();
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, isNotEmpty);
     });
   });
 

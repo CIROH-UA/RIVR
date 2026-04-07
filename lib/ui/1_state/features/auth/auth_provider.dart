@@ -5,23 +5,58 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/models/1_domain/features/auth/auth_user.dart';
-import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
+import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
-import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
 /// Simple authentication state management for RIVR
 class AuthProvider with ChangeNotifier {
-  final IAuthService _authService;
-  final IUserSettingsService _userSettingsService;
+  final IAuthRepository _authRepository;
+  final SignInUseCase _signInUseCase;
+  final SignUpUseCase _signUpUseCase;
+  final SignOutUseCase _signOutUseCase;
+  final ResetPasswordUseCase _resetPasswordUseCase;
+  final EnableBiometricUseCase _enableBiometricUseCase;
+  final DisableBiometricUseCase _disableBiometricUseCase;
+  final SignInWithBiometricsUseCase _signInWithBiometricsUseCase;
+  final SyncSettingsAfterLoginUseCase _syncSettingsUseCase;
+  final IFCMService _fcmService;
 
   AuthProvider({
-    IAuthService? authService,
-    IUserSettingsService? userSettingsService,
-  })  : _authService = authService ?? GetIt.I<IAuthService>(),
-        _userSettingsService =
-            userSettingsService ?? GetIt.I<IUserSettingsService>();
+    IAuthRepository? authRepository,
+    SignInUseCase? signInUseCase,
+    SignUpUseCase? signUpUseCase,
+    SignOutUseCase? signOutUseCase,
+    ResetPasswordUseCase? resetPasswordUseCase,
+    EnableBiometricUseCase? enableBiometricUseCase,
+    DisableBiometricUseCase? disableBiometricUseCase,
+    SignInWithBiometricsUseCase? signInWithBiometricsUseCase,
+    SyncSettingsAfterLoginUseCase? syncSettingsUseCase,
+    IFCMService? fcmService,
+  })  : _authRepository = authRepository ?? GetIt.I<IAuthRepository>(),
+        _signInUseCase = signInUseCase ?? GetIt.I<SignInUseCase>(),
+        _signUpUseCase = signUpUseCase ?? GetIt.I<SignUpUseCase>(),
+        _signOutUseCase = signOutUseCase ?? GetIt.I<SignOutUseCase>(),
+        _resetPasswordUseCase =
+            resetPasswordUseCase ?? GetIt.I<ResetPasswordUseCase>(),
+        _enableBiometricUseCase =
+            enableBiometricUseCase ?? GetIt.I<EnableBiometricUseCase>(),
+        _disableBiometricUseCase =
+            disableBiometricUseCase ?? GetIt.I<DisableBiometricUseCase>(),
+        _signInWithBiometricsUseCase = signInWithBiometricsUseCase ??
+            GetIt.I<SignInWithBiometricsUseCase>(),
+        _syncSettingsUseCase =
+            syncSettingsUseCase ?? GetIt.I<SyncSettingsAfterLoginUseCase>(),
+        _fcmService = fcmService ?? GetIt.I<IFCMService>();
 
   // State
   AuthUser? _currentUser;
@@ -55,16 +90,19 @@ class AuthProvider with ChangeNotifier {
     AppLogger.info('AuthProvider', 'Initializing...');
 
     // Listen to auth state changes
-    _authStateSubscription = _authService.authStateChanges.listen((firebaseUser) async {
+    _authStateSubscription =
+        _authRepository.authStateChanges.listen((firebaseUser) async {
       if (firebaseUser != null) {
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
-        AppLogger.info('AuthProvider', 'User signed in: ${_currentUser!.uid}');
+        AppLogger.info(
+            'AuthProvider', 'User signed in: ${_currentUser!.uid}');
         FirebaseCrashlytics.instance.setUserIdentifier(firebaseUser.uid);
 
         // Gate on email verification
         if (!firebaseUser.emailVerified) {
           _isAwaitingEmailVerification = true;
-          AppLogger.info('AuthProvider', 'Email not verified, awaiting verification');
+          AppLogger.info(
+              'AuthProvider', 'Email not verified, awaiting verification');
         }
 
         // Fetch user settings
@@ -80,7 +118,7 @@ class AuthProvider with ChangeNotifier {
     });
 
     // Set current user if already signed in
-    final firebaseUser = _authService.currentUser;
+    final firebaseUser = _authRepository.currentUser;
     if (firebaseUser != null) {
       _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
       if (!firebaseUser.emailVerified) {
@@ -94,26 +132,28 @@ class AuthProvider with ChangeNotifier {
     AppLogger.info('AuthProvider', 'Initialization complete');
   }
 
-  /// Load user settings from Firestore
+  /// Load user settings via use case
   Future<void> _loadUserSettings() async {
     if (_currentUser == null) return;
 
-    try {
-      AppLogger.debug('AuthProvider', 'Loading user settings for: ${_currentUser!.uid}');
-      _currentUserSettings = await _userSettingsService.getUserSettings(
-        _currentUser!.uid,
-      );
+    AppLogger.debug(
+        'AuthProvider', 'Loading user settings for: ${_currentUser!.uid}');
+    final result = await _syncSettingsUseCase(_currentUser!.uid);
+
+    if (result.isSuccess) {
+      _currentUserSettings = result.data;
       AppLogger.info('AuthProvider', 'User settings loaded successfully');
 
       // Set up notification listeners and refresh token if notifications are enabled
       if (_currentUserSettings?.enableNotifications == true) {
-        AppLogger.debug('AuthProvider', 'Notifications enabled, setting up listeners');
-        final fcmService = GetIt.I<IFCMService>();
-        fcmService.setupNotificationListeners();
-        await fcmService.refreshTokenIfNeeded(_currentUser!.uid);
+        AppLogger.debug(
+            'AuthProvider', 'Notifications enabled, setting up listeners');
+        _fcmService.setupNotificationListeners();
+        await _fcmService.refreshTokenIfNeeded(_currentUser!.uid);
       }
-    } catch (e) {
-      AppLogger.error('AuthProvider', 'Error loading user settings: $e', e);
+    } else {
+      AppLogger.error(
+          'AuthProvider', 'Error loading user settings: ${result.errorMessage}');
       // Don't throw - user can still use the app without settings
       _currentUserSettings = null;
     }
@@ -137,17 +177,14 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
+    final result = await _signInUseCase(email: email, password: password);
 
     _setLoading(false);
 
     if (result.isSuccess) {
       return true;
     } else {
-      _setError(result.error ?? 'Sign in failed');
+      _setError(result.errorMessage ?? 'Sign in failed');
       return false;
     }
   }
@@ -170,7 +207,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.registerWithEmailAndPassword(
+    final result = await _signUpUseCase(
       email: email,
       password: password,
       firstName: firstName,
@@ -184,7 +221,7 @@ class AuthProvider with ChangeNotifier {
       notifyListeners();
       return true;
     } else {
-      _setError(result.error ?? 'Registration failed');
+      _setError(result.errorMessage ?? 'Registration failed');
       return false;
     }
   }
@@ -199,7 +236,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.sendPasswordResetEmail(email: email);
+    final result = await _resetPasswordUseCase(email: email);
 
     _setLoading(false);
 
@@ -207,7 +244,7 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Password reset email sent');
       return true;
     } else {
-      _setError(result.error ?? 'Failed to send reset email');
+      _setError(result.errorMessage ?? 'Failed to send reset email');
       return false;
     }
   }
@@ -216,7 +253,7 @@ class AuthProvider with ChangeNotifier {
   Future<void> signOut() async {
     _setLoading(true);
 
-    final result = await _authService.signOut();
+    final result = await _signOutUseCase();
 
     _setLoading(false);
 
@@ -225,10 +262,10 @@ class AuthProvider with ChangeNotifier {
       _biometricAvailable = null;
       _biometricEnabled = null;
       _currentUserSettings = null;
-      GetIt.I<IFCMService>().clearCache();
+      _fcmService.clearCache();
       _setSuccess('Signed out successfully');
     } else {
-      _setError(result.error ?? 'Sign out failed');
+      _setError(result.errorMessage ?? 'Sign out failed');
     }
   }
 
@@ -239,7 +276,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.sendEmailVerification();
+    final result = await _authRepository.sendEmailVerification();
 
     _setLoading(false);
 
@@ -247,7 +284,7 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Verification email sent. Check your inbox.');
       return true;
     } else {
-      _setError(result.error ?? 'Failed to send verification email');
+      _setError(result.errorMessage ?? 'Failed to send verification email');
       return false;
     }
   }
@@ -259,9 +296,9 @@ class AuthProvider with ChangeNotifier {
 
     // Retry up to 3 times with increasing delay to handle propagation lag
     for (int attempt = 1; attempt <= 3; attempt++) {
-      final verified = await _authService.checkEmailVerified();
+      final result = await _authRepository.checkEmailVerified();
 
-      if (verified) {
+      if (result.isSuccess && result.data) {
         _setLoading(false);
         _isAwaitingEmailVerification = false;
         _setSuccess('Email verified successfully!');
@@ -287,13 +324,13 @@ class AuthProvider with ChangeNotifier {
 
   /// Check if biometric authentication is available
   Future<bool> get isBiometricAvailable async {
-    _biometricAvailable ??= await _authService.isBiometricAvailable();
+    _biometricAvailable ??= await _authRepository.isBiometricAvailable();
     return _biometricAvailable!;
   }
 
   /// Check if biometric login is enabled
   Future<bool> get isBiometricEnabled async {
-    _biometricEnabled ??= await _authService.isBiometricEnabled();
+    _biometricEnabled ??= await _authRepository.isBiometricEnabled();
     return _biometricEnabled!;
   }
 
@@ -307,7 +344,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.enableBiometricLogin();
+    final result = await _enableBiometricUseCase();
 
     _setLoading(false);
 
@@ -316,7 +353,7 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Biometric login enabled');
       return true;
     } else {
-      _setError(result.error ?? 'Failed to enable biometric login');
+      _setError(result.errorMessage ?? 'Failed to enable biometric login');
       return false;
     }
   }
@@ -326,7 +363,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.disableBiometricLogin();
+    final result = await _disableBiometricUseCase();
 
     _setLoading(false);
 
@@ -335,7 +372,7 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Biometric login disabled');
       return true;
     } else {
-      _setError(result.error ?? 'Failed to disable biometric login');
+      _setError(result.errorMessage ?? 'Failed to disable biometric login');
       return false;
     }
   }
@@ -345,7 +382,7 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _authService.signInWithBiometrics();
+    final result = await _signInWithBiometricsUseCase();
 
     _setLoading(false);
 
@@ -353,7 +390,7 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Biometric sign in successful');
       return true;
     } else {
-      _setError(result.error ?? 'Biometric sign in failed');
+      _setError(result.errorMessage ?? 'Biometric sign in failed');
       return false;
     }
   }
