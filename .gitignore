@@ -63,5 +63,8 @@ ios/Flutter/Secrets.xcconfig
 # Android signing
 android/key.properties
 
+# Developer onboarding secrets zip
+rivr-secrets.zip
+
 # Claude Code local configuration
 .claude/
