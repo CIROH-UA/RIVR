@@ -1,4 +1,4 @@
-# Rivr
+# RIVR
 
 A comprehensive river flow monitoring and flood risk assessment mobile application built with Flutter. Rivr democratizes access to the National Water Model developed by NOAA, providing real-time river flow data, flood risk analysis, and interactive forecasting to help all civilians make informed decisions about water safety and recreational activities.
 
