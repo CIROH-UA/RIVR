@@ -256,50 +256,79 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 |------------------------------------|--------|-------------------------------------------------|---------------------------|
 | Android launcher icons (mipmap)    | Done   | `android/app/src/main/res/mipmap-*/rivr.png`   | All 5 densities present   |
 | Android adaptive icon XML          | Done   | `android/app/src/main/res/mipmap-anydpi-v26/`  | White background + foreground |
-| iOS app icons (all sizes)          | Done   | `ios/Runner/Assets.xcassets/AppIcon.appiconset/`| 15 sizes, 20px to 1024px  |
-| iOS 1024px marketing icon          | Done   | Same as above, `1024.png`                       | Has alpha -- needs fix    |
-| High-res source logo               | Done   | `assets/images/rivr_logo.png`                   | 2048x2048, has alpha      |
+| iOS app icons (all sizes)          | Done   | `ios/Runner/Assets.xcassets/AppIcon.appiconset/`| All sizes, all alpha-free |
+| iOS 1024px marketing icon          | Done   | Same as above, `1024.png`                       | Verified no-alpha 2026-05-05 |
+| App Store 1024 store icon          | Done   | `release-assets/app-store/icon/icon-1024x1024.png` | RGB / no alpha          |
+| Google Play 512 store icon         | Done   | `release-assets/google-play/icon/icon-512x512.png` | RGB / no alpha          |
+| Google Play feature graphic (1024×500) | Done | `release-assets/google-play/feature-graphic-1024x500-draft.png` | Programmatic draft generated 2026-05-05; may be Canva-polished if uplift is needed before submission |
+| iOS LaunchImage.imageset           | Done   | `ios/Runner/Assets.xcassets/LaunchImage.imageset/` | 1x/2x/3x added 2026-05-05 (commit `fb39b60`); cold-launch verified on simulator |
+| iOS Info.plist purpose strings     | Done   | `ios/Runner/Info.plist`                         | Tightened to App Store standard 2026-05-05 (commit `5b5ae5e`); 3 unused permission keys removed |
+| Store-listing template URLs        | Done   | `release-assets/store-listing-template.md`      | All `[TODO: your-domain.com]` placeholders replaced with `hydromap.com` 2026-05-05 (commit `0488fea`) |
+| Privacy policy draft               | Done   | `docs/internal/privacy-policy-draft.md`         | Drafted 2026-05-05; **awaiting attorney review + public hosting** |
+| High-res source logo               | Done   | `assets/images/rivr_logo.png`                   | 2048x2048, RGBA (alpha is fine here — source asset, not store-submitted) |
 | Old logo                           | Done   | `assets/images/rivr_logo-old.png`               | 1024x1024, deprecated     |
 | Onboarding SVGs                    | Done   | `assets/images/onboarding/`                     | 4 illustrations           |
 | River background images            | Done   | `assets/images/rivers/`                         | 24 webp images (4 categories) |
 | Sponsor logos                      | Done   | `assets/images/sponsors/`                       | NOAA, CIROH, BYU, UA, OWP |
 | Risk level videos                  | Done   | `assets/videos/`                                | 6 MP4 risk animations     |
-| Android launch screen              | Partial| `android/app/src/main/res/drawable/`            | Default white, no custom image |
-| iOS launch screen                  | Partial| `ios/Runner/Base.lproj/LaunchScreen.storyboard` | References LaunchImage but no image asset exists |
+| Android launch screen              | Partial| `android/app/src/main/res/drawable/`            | Default white, no custom image (open follow-up — not blocking) |
 
 ### What Is Missing
 
 | Asset                              | Priority | Notes                                        |
 |------------------------------------|----------|----------------------------------------------|
-| Google Play 512x512 icon (no alpha)| High     | Source logo is 2048x2048 with alpha -- must flatten and resize |
-| Google Play feature graphic        | High     | 1024x500, required for Play Store listing    |
-| App Store 1024x1024 icon (no alpha)| High     | Existing 1024.png has alpha -- must flatten   |
-| Phone screenshots (both stores)    | High     | None exist; need minimum 2 for Play, 1+ for App Store |
-| iPhone 6.7" screenshots            | High     | Required for App Store                       |
-| iPhone 6.5" screenshots            | High     | Required for App Store                       |
-| iPhone 5.5" screenshots            | Medium   | Optional but recommended                    |
-| iPad 12.9" screenshots             | Medium   | Required only if iPad is supported           |
-| Tablet screenshots                 | Low      | Optional for Play Store                      |
-| Promotional images                 | Low      | Nice to have for marketing                   |
+| iPhone 6.7" screenshots            | High     | Required for App Store. Jerson capturing on real device + polishing in Canva. |
+| iPhone 6.5" screenshots            | High     | Required for App Store. Same source as 6.7" or down-resized. |
+| Google Play phone screenshots      | High     | Minimum 2 required; same source as iOS or re-exported. |
+| Privacy policy public hosting      | High     | Draft exists; must be hosted at `hydromap.com/privacy` before submission. **Blocked on Cloudflare/GoDaddy creds (Dr. Ames) + attorney review.** |
+| Support page public hosting        | High     | Listed in store-listing-template.md as `hydromap.com/support` — must be a live page at submission. |
+| In-app account-deletion flow       | High     | **Required by App Store Guideline 5.1.1(v).** No code path currently. ~2-3 hr build. Schedule into next week. See `project_account_deletion_blocker.md` memory. |
+| Apple Developer account access     | High     | `admin@hydromap.com` 2FA SMS goes to a dead phone. Recovery requires Dr. Ames (back end of May). See `project_apple_account_lockout.md`. |
+| iPhone 5.5" screenshots            | Medium   | Optional but recommended.                    |
+| iPad 12.9" screenshots             | Medium   | Required only if iPad is declared in build. RIVR's iPad orientations are declared in Info.plist — verify whether iPad is being targeted on submission. |
+| Tablet screenshots                 | Low      | Optional for Play Store.                     |
+| Promotional images                 | Low      | Nice to have for marketing.                  |
 
-### Known Issues
+### Resolved This Week (2026-05-04 → 2026-05-10)
 
-1. **iOS 1024px icon has alpha channel.** Apple will reject this during submission. The icon at `ios/Runner/Assets.xcassets/AppIcon.appiconset/1024.png` must be re-exported without alpha/transparency.
-2. **Android icons have alpha channel.** The mipmap PNGs have alpha. Google Play requires the 512x512 store icon to have no alpha. Generate a flattened version for the store.
-3. **Source logo has alpha.** `assets/images/rivr_logo.png` (2048x2048) has an alpha channel. Use this as the source but flatten onto the app's background color (white or brand color) when generating store icons.
-4. **iOS LaunchScreen references a missing image.** The storyboard references a `LaunchImage` asset, but no `LaunchImage.imageset` exists in `Assets.xcassets`. This means the iOS launch screen shows a blank white view.
+1. ✅ **iOS 1024 icon alpha** — verified already alpha-free (likely flattened in `3bfba5f`).
+2. ✅ **Android 512 store icon** — verified RGB / no alpha at `release-assets/google-play/icon/icon-512x512.png`.
+3. ✅ **Source logo alpha** — non-issue: `rivr_logo.png` is the source, can have alpha; the *exported* store icons are flattened.
+4. ✅ **iOS LaunchScreen missing image** — `LaunchImage.imageset` added at `ios/Runner/Assets.xcassets/` (commit `fb39b60`); cold launch verified on simulator.
+5. ✅ **iOS Info.plist purpose strings** — rewritten to App Store standard, 3 unused permission keys removed (commit `5b5ae5e`).
+6. ✅ **Store-listing URL placeholders** — replaced with `hydromap.com` (commit `0488fea`).
+7. ✅ **Privacy policy** — drafted at `docs/internal/privacy-policy-draft.md` covering Firebase / Mapbox / location / biometrics / FCM / Crashlytics / Analytics + retention + CCPA/CPRA + COPPA. Awaiting attorney review + hosting.
+8. ✅ **Google Play feature graphic** — programmatic draft generated at `release-assets/google-play/feature-graphic-1024x500-draft.png`.
+
+### Known Issues / Open Risks
+
+1. **Apple Developer account lockout.** `admin@hydromap.com` cannot sign in due to 2FA-SMS to a phone number that no longer exists. Recovery deferred to end of May 2026 (requires Dr. Ames, currently in Europe). Until resolved, no TestFlight upload, no certificates, no App Store submission.
+2. **No in-app account deletion.** App Store Guideline 5.1.1(v) blocks iOS submission without it. Estimated 2–3 hr build (Settings UI + reauth + Firebase Auth `delete()` + Firestore cleanup + FCM token cleanup).
+3. **Privacy policy not yet attorney-reviewed.** Draft is accurate to the codebase but the legal language (Sections 5, 7, 9, 10) needs counsel review before public hosting.
+4. **Privacy policy hosting blocked.** Cloudflare + GoDaddy credentials sit with Dr. Ames; cannot publish to `hydromap.com/privacy` until he is back.
+5. **Android launch screen.** Default white, no custom image. Lower priority than iOS but worth a parity pass before submission.
+6. **GitHub Dependabot alerts.** 6 alerts on default branch as of 2026-05-05 (1 critical, 1 high, 3 moderate, 1 low). Triage in next `/plan-week`.
 
 ---
 
 ## Quick-Start Checklist
 
-- [ ] Flatten `assets/images/rivr_logo.png` onto a solid background (remove alpha)
-- [ ] Export 512x512 PNG (no alpha) to `google-play/icon/icon_512x512.png`
-- [ ] Export 1024x1024 PNG (no alpha) to `app-store/icon/icon_1024x1024.png`
-- [ ] Replace `ios/Runner/Assets.xcassets/AppIcon.appiconset/1024.png` with the no-alpha version
-- [ ] Design and export feature graphic (1024x500) to `google-play/feature-graphic/`
-- [ ] Capture phone screenshots on iPhone 15 Pro Max simulator (1290x2796)
-- [ ] Capture phone screenshots on iPhone 14 Plus simulator (1284x2778)
-- [ ] Copy/resize phone screenshots for Google Play (1080x1920 or 1440x2560)
-- [ ] Fill in `store-listing-template.md` with final copy
-- [ ] If supporting iPad, capture iPad Pro 12.9" screenshots (2048x2732)
+- [x] Flatten the source logo and produce alpha-free store icons (verified 2026-05-05)
+- [x] Export 512x512 PNG (no alpha) to `google-play/icon/icon-512x512.png`
+- [x] Export 1024x1024 PNG (no alpha) to `app-store/icon/icon-1024x1024.png`
+- [x] Verify `ios/Runner/Assets.xcassets/AppIcon.appiconset/1024.png` is alpha-free
+- [x] Design / draft feature graphic (1024×500) — see `google-play/feature-graphic-1024x500-draft.png`
+- [x] Add iOS `LaunchImage.imageset` so cold launch shows the brand splash (commit `fb39b60`)
+- [x] Tighten iOS purpose strings to App Store standard (commit `5b5ae5e`)
+- [x] Replace TODO placeholders in `store-listing-template.md` with `hydromap.com` URLs (commit `0488fea`)
+- [x] Draft privacy policy → `docs/internal/privacy-policy-draft.md`
+- [ ] **(Jerson)** Capture phone screenshots on iPhone 15 Pro Max real device or simulator (1290×2796)
+- [ ] **(Jerson)** Capture phone screenshots on iPhone 14 Plus real device or simulator (1284×2778)
+- [ ] **(Jerson)** Polish screenshots in Canva (frames, copy overlays) and export to `app-store/screenshots/iphone-6.7/` and `iphone-6.5/`
+- [ ] **(Jerson)** Re-export phone screenshots for Google Play (1080×1920 or 1440×2560) into `google-play/screenshots/phone/`
+- [ ] **(Next week)** Build in-app account-deletion flow (App Store Guideline 5.1.1(v) blocker)
+- [ ] **(End of May)** Recover Apple Developer account access — Dr. Ames calls Apple
+- [ ] **(End of May)** Send privacy policy draft to attorney for review
+- [ ] **(End of May)** Host `hydromap.com/privacy` and `hydromap.com/support` (Cloudflare/GoDaddy creds)
+- [ ] **(Optional)** If declaring iPad in build, capture iPad Pro 12.9" screenshots (2048×2732)
+- [ ] **(Optional)** Android custom launch-screen drawable for parity with iOS
