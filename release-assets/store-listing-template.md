@@ -155,19 +155,19 @@ We would love to hear your feedback -- contact us at the support link below.
 
 ### Support URL (Required for both stores)
 ```
-https://[TODO: your-domain.com]/support
+https://hydromap.com/support
 ```
 
-**Notes:** Both stores require a support URL. This can be a simple page with an email address and FAQ, a contact form, or a link to a help center. Must be a live, accessible URL at the time of submission.
+**Notes:** Both stores require a support URL. The page must exist and be live at submission time. Action item before submission: publish a support page at `hydromap.com/support` with at minimum a contact email (`admin@hydromap.com`) and a brief FAQ, or redirect this URL to a help-center page hosted elsewhere.
 
 ### Marketing URL (A -- Apple, Optional)
 ```
-https://[TODO: your-domain.com]
+https://hydromap.com
 ```
 
 ### Privacy Policy URL (Required for both stores)
 ```
-https://[TODO: your-domain.com]/privacy
+https://hydromap.com/privacy
 ```
 
 **Notes:**
@@ -176,6 +176,7 @@ https://[TODO: your-domain.com]/privacy
 - Must accurately describe what data the app collects (Firebase Auth account data, favorites stored in Firestore, FCM tokens for push notifications, analytics events).
 - Google Play requires this before you can publish.
 - Apple requires this for apps that use account-based features.
+- Action item before submission: host the policy at `hydromap.com/privacy` (currently in draft at `docs/internal/privacy-policy-draft.md`, awaiting attorney review and hosting setup — see project schedule).
 
 ---
 
@@ -260,7 +261,7 @@ admin@hydromap.com
 
 ### Developer Website (B)
 ```
-https://[TODO: your-domain.com]
+https://hydromap.com
 ```
 
 ### Default Language (B)
