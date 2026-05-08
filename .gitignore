@@ -68,3 +68,6 @@ rivr-secrets.zip
 
 # Claude Code local configuration
 .claude/
+
+# Internal team docs (local-only, never commit)
+docs/internal/
