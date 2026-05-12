@@ -135,6 +135,7 @@ class TestServices {
     final authRepo = AuthRepositoryImpl(
       authService: auth,
       settingsService: userSettings,
+      fcmService: fcm,
     );
     sl.registerSingleton<IAuthRepository>(authRepo);
     sl.registerFactory(() => SignInUseCase(authRepo));
@@ -230,6 +231,7 @@ AuthProvider createAuthProvider(TestServices services) {
   final authRepo = AuthRepositoryImpl(
     authService: services.auth,
     settingsService: services.userSettings,
+    fcmService: services.fcm,
   );
   final settingsRepo = SettingsRepositoryImpl(
     settingsService: services.userSettings,

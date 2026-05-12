@@ -2,10 +2,12 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/2_coordinators/features/auth/auth_repository_impl.dart';
 
@@ -26,7 +28,7 @@ class _StubAuthService implements IAuthService {
   bool biometricEnabled = false;
   bool emailVerified = true;
   Exception? exceptionToThrow;
-  User? overrideCurrentUser;
+  bool nullCurrentUser = false;
   int reauthenticateCallCount = 0;
   int deleteCurrentUserCallCount = 0;
 
@@ -37,7 +39,7 @@ class _StubAuthService implements IAuthService {
   );
 
   @override
-  User? get currentUser => overrideCurrentUser ?? _mockUser;
+  User? get currentUser => nullCurrentUser ? null : _mockUser;
 
   @override
   Stream<User?> get authStateChanges => Stream.value(_mockUser);
@@ -143,11 +145,21 @@ class _StubAuthService implements IAuthService {
 class _StubSettingsService implements IUserSettingsService {
   UserSettings? settingsToReturn;
   Exception? exceptionToThrow;
+  Exception? deleteExceptionToThrow;
+  int deleteUserSettingsCallCount = 0;
+  String? lastDeletedUserId;
 
   @override
   Future<UserSettings?> syncAfterLogin(String userId) async {
     if (exceptionToThrow != null) throw exceptionToThrow!;
     return settingsToReturn;
+  }
+
+  @override
+  Future<void> deleteUserSettings(String userId) async {
+    deleteUserSettingsCallCount++;
+    lastDeletedUserId = userId;
+    if (deleteExceptionToThrow != null) throw deleteExceptionToThrow!;
   }
 
   // ── Unused interface methods ────────────────────────────────────────────
@@ -218,19 +230,56 @@ class _StubSettingsService implements IUserSettingsService {
   Future<void> syncFlowUnitPreference(String userId) async {}
 }
 
+class _StubFcmService implements IFCMService {
+  Exception? disableExceptionToThrow;
+  int disableCallCount = 0;
+  String? lastDisabledUserId;
+
+  @override
+  Future<void> disableNotifications(String userId) async {
+    disableCallCount++;
+    lastDisabledUserId = userId;
+    if (disableExceptionToThrow != null) throw disableExceptionToThrow!;
+  }
+
+  // ── Unused interface methods ──────────────────────────────────────────────
+  @override
+  set navigatorKey(GlobalKey<NavigatorState> key) {}
+  @override
+  Future<bool> initialize() async => false;
+  @override
+  Future<bool> requestPermission() async => false;
+  @override
+  void setupNotificationListeners() {}
+  @override
+  Future<String?> getAndSaveToken(String userId) async => null;
+  @override
+  Future<NotificationPermissionResult> enableNotifications(String userId) async =>
+      NotificationPermissionResult.granted;
+  @override
+  Future<bool> isEnabledForUser(String userId) async => false;
+  @override
+  Future<void> refreshTokenIfNeeded(String userId) async {}
+  @override
+  void clearCache() {}
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 void main() {
   late _StubAuthService stubAuth;
   late _StubSettingsService stubSettings;
+  late _StubFcmService stubFcm;
   late AuthRepositoryImpl repository;
 
   setUp(() {
     stubAuth = _StubAuthService();
     stubSettings = _StubSettingsService();
+    stubFcm = _StubFcmService();
     repository = AuthRepositoryImpl(
       authService: stubAuth,
       settingsService: stubSettings,
+      fcmService: stubFcm,
     );
   });
 
@@ -465,6 +514,94 @@ void main() {
       final user = await repository.authStateChanges.first;
       expect(user, isNotNull);
       expect(user!.email, 'test@example.com');
+    });
+  });
+
+  group('AuthRepositoryImpl — deleteAccount', () {
+    test('happy path: reauths, drops FCM, deletes settings, deletes auth user', () async {
+      final result = await repository.deleteAccount(password: 'correct-pass');
+
+      expect(result.isSuccess, isTrue);
+      expect(stubAuth.reauthenticateCallCount, 1);
+      expect(stubFcm.disableCallCount, 1);
+      expect(stubFcm.lastDisabledUserId, 'user1');
+      expect(stubSettings.deleteUserSettingsCallCount, 1);
+      expect(stubSettings.lastDeletedUserId, 'user1');
+      expect(stubAuth.deleteCurrentUserCallCount, 1);
+    });
+
+    test('fails fast when no user is signed in', () async {
+      stubAuth.nullCurrentUser = true;
+
+      final result = await repository.deleteAccount(password: 'whatever');
+
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, contains('No user signed in'));
+      expect(stubAuth.reauthenticateCallCount, 0);
+      expect(stubFcm.disableCallCount, 0);
+      expect(stubSettings.deleteUserSettingsCallCount, 0);
+      expect(stubAuth.deleteCurrentUserCallCount, 0);
+    });
+
+    test('returns failure when reauthentication fails (wrong password)', () async {
+      stubAuth.reauthenticateResult =
+          AuthResult.failure('Wrong password');
+
+      final result = await repository.deleteAccount(password: 'wrong');
+
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, 'Wrong password');
+      // Critically: no destructive work happens if reauth fails.
+      expect(stubFcm.disableCallCount, 0);
+      expect(stubSettings.deleteUserSettingsCallCount, 0);
+      expect(stubAuth.deleteCurrentUserCallCount, 0);
+    });
+
+    test('returns failure when reauthentication requires recent login', () async {
+      stubAuth.reauthenticateResult = AuthResult.failure(
+        'For security, please sign out and sign back in to continue.',
+      );
+
+      final result = await repository.deleteAccount(password: 'old-pass');
+
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, contains('sign out and sign back in'));
+      expect(stubAuth.deleteCurrentUserCallCount, 0);
+    });
+
+    test('continues to auth deletion even if FCM cleanup throws', () async {
+      stubFcm.disableExceptionToThrow = Exception('FCM unreachable');
+
+      final result = await repository.deleteAccount(password: 'correct-pass');
+
+      expect(result.isSuccess, isTrue);
+      expect(stubFcm.disableCallCount, 1);
+      // Firestore + auth deletion still ran:
+      expect(stubSettings.deleteUserSettingsCallCount, 1);
+      expect(stubAuth.deleteCurrentUserCallCount, 1);
+    });
+
+    test('returns failure when Firestore settings delete throws', () async {
+      stubSettings.deleteExceptionToThrow = Exception('Firestore unreachable');
+
+      final result = await repository.deleteAccount(password: 'correct-pass');
+
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, isNotEmpty);
+      // Firebase Auth deletion must NOT run if Firestore cleanup failed —
+      // otherwise the auth user is gone but the data is orphaned.
+      expect(stubAuth.deleteCurrentUserCallCount, 0);
+    });
+
+    test('returns failure when Firebase Auth deletion itself fails', () async {
+      stubAuth.deleteCurrentUserResult =
+          AuthResult.failure('Network error during delete');
+
+      final result = await repository.deleteAccount(password: 'correct-pass');
+
+      expect(result.isFailure, isTrue);
+      expect(result.errorMessage, 'Network error during delete');
+      expect(stubAuth.deleteCurrentUserCallCount, 1);
     });
   });
 }

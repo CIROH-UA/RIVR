@@ -137,6 +137,25 @@ class _MockAuthRepository implements IAuthRepository {
   Future<ServiceResult<bool>> checkEmailVerified() async =>
       ServiceResult.success(_emailVerified);
 
+  @override
+  Future<ServiceResult<void>> deleteAccount({required String password}) async {
+    if (_signedInUser == null) {
+      return ServiceResult.failure(
+        const ServiceException.auth('No user signed in'),
+      );
+    }
+    final account = _accounts[_signedInUser!.email];
+    if (account == null || account['password'] != password) {
+      return ServiceResult.failure(
+        const ServiceException.auth('Invalid credentials'),
+      );
+    }
+    _accounts.remove(_signedInUser!.email);
+    _signedInUser = null;
+    _authStateController.add(null);
+    return ServiceResult.success(null);
+  }
+
   void dispose() => _authStateController.close();
 }
 

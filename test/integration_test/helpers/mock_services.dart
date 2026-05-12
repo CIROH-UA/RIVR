@@ -939,6 +939,11 @@ class MockUserSettingsService implements IUserSettingsService {
 
   @override
   Future<void> syncFlowUnitPreference(String userId) async {}
+
+  @override
+  Future<void> deleteUserSettings(String userId) async {
+    _settings = null;
+  }
 }
 
 // ---------------------------------------------------------------------------

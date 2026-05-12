@@ -127,6 +127,8 @@ class SpyUserSettingsService implements IUserSettingsService {
   Future<bool> userHasSettings(String u) async => false;
   @override
   Future<void> syncFlowUnitPreference(String u) async {}
+  @override
+  Future<void> deleteUserSettings(String u) async {}
 
   UserSettings _dummySettings(String userId) => UserSettings(
         userId: userId,

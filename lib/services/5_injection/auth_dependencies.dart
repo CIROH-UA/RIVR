@@ -4,6 +4,7 @@ import 'package:rivr/services/3_datasources/features/auth/biometric_datasource.d
 import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
 import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/2_coordinators/features/auth/auth_repository_impl.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
@@ -13,6 +14,7 @@ import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart
 import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/delete_account_usecase.dart';
 
 void setupAuthDependencies() {
   final sl = GetIt.instance;
@@ -39,6 +41,7 @@ void setupAuthDependencies() {
     () => AuthRepositoryImpl(
       authService: sl<IAuthService>(),
       settingsService: sl<IUserSettingsService>(),
+      fcmService: sl<IFCMService>(),
     ),
   );
 
@@ -50,4 +53,5 @@ void setupAuthDependencies() {
   sl.registerFactory(() => SignInWithBiometricsUseCase(sl<IAuthRepository>()));
   sl.registerFactory(() => EnableBiometricUseCase(sl<IAuthRepository>()));
   sl.registerFactory(() => DisableBiometricUseCase(sl<IAuthRepository>()));
+  sl.registerFactory(() => DeleteAccountUseCase(sl<IAuthRepository>()));
 }
