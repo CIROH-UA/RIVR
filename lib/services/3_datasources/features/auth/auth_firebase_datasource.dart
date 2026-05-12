@@ -89,4 +89,38 @@ class AuthFirebaseDatasource {
     await currentUser!.reload();
     return _firebaseAuth.currentUser?.emailVerified ?? false;
   }
+
+  /// Reauthenticate the given user with email/password.
+  /// Required by Firebase before sensitive operations like `delete()`.
+  Future<void> reauthenticateWithPassword({
+    required User user,
+    required String email,
+    required String password,
+  }) async {
+    final credential = EmailAuthProvider.credential(
+      email: email.trim(),
+      password: password,
+    );
+    await user
+        .reauthenticateWithCredential(credential)
+        .timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => throw FirebaseAuthException(
+            code: 'timeout',
+            message: 'Reauthentication request timed out',
+          ),
+        );
+  }
+
+  /// Permanently delete the Firebase Auth account for [user].
+  /// Caller is responsible for any Firestore / messaging cleanup beforehand.
+  Future<void> deleteUser(User user) async {
+    await user.delete().timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => throw FirebaseAuthException(
+            code: 'timeout',
+            message: 'Account deletion request timed out',
+          ),
+        );
+  }
 }

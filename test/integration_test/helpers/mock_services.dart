@@ -163,6 +163,31 @@ class MockAuthService implements IAuthService {
   @override
   Future<bool> checkEmailVerified() async => _emailVerified;
 
+  @override
+  Future<AuthResult> reauthenticateWithPassword({required String password}) async {
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (_signedInUser == null) {
+      return AuthResult.failure('No user signed in');
+    }
+    final account = _registeredAccounts[_signedInUser!.email];
+    if (account == null || account['password'] != password) {
+      return AuthResult.failure('Invalid credentials');
+    }
+    return AuthResult.success(_signedInUser);
+  }
+
+  @override
+  Future<AuthResult> deleteCurrentUser() async {
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (_signedInUser == null) {
+      return AuthResult.failure('No user signed in');
+    }
+    _registeredAccounts.remove(_signedInUser!.email);
+    _signedInUser = null;
+    _authStateController.add(null);
+    return AuthResult.success(null, message: 'Account deleted');
+  }
+
   /// Test helper: simulate the user verifying their email.
   void simulateEmailVerification() {
     _emailVerified = true;

@@ -20,10 +20,15 @@ class _StubAuthService implements IAuthService {
   AuthResult? enableBiometricResult;
   AuthResult? disableBiometricResult;
   AuthResult? sendEmailVerificationResult;
+  AuthResult? reauthenticateResult;
+  AuthResult? deleteCurrentUserResult;
   bool biometricAvailable = false;
   bool biometricEnabled = false;
   bool emailVerified = true;
   Exception? exceptionToThrow;
+  User? overrideCurrentUser;
+  int reauthenticateCallCount = 0;
+  int deleteCurrentUserCallCount = 0;
 
   final MockUser _mockUser = MockUser(
     uid: 'user1',
@@ -32,7 +37,7 @@ class _StubAuthService implements IAuthService {
   );
 
   @override
-  User? get currentUser => _mockUser;
+  User? get currentUser => overrideCurrentUser ?? _mockUser;
 
   @override
   Stream<User?> get authStateChanges => Stream.value(_mockUser);
@@ -117,6 +122,21 @@ class _StubAuthService implements IAuthService {
   Future<bool> checkEmailVerified() async {
     if (exceptionToThrow != null) throw exceptionToThrow!;
     return emailVerified;
+  }
+
+  @override
+  Future<AuthResult> reauthenticateWithPassword({required String password}) async {
+    reauthenticateCallCount++;
+    if (exceptionToThrow != null) throw exceptionToThrow!;
+    return reauthenticateResult ?? AuthResult.success(_mockUser);
+  }
+
+  @override
+  Future<AuthResult> deleteCurrentUser() async {
+    deleteCurrentUserCallCount++;
+    if (exceptionToThrow != null) throw exceptionToThrow!;
+    return deleteCurrentUserResult ??
+        AuthResult.success(null, message: 'Account deleted');
   }
 }
 
