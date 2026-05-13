@@ -1,6 +1,7 @@
 // lib/ui/2_presentation/features/favorites/pages/favorites_page.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -1041,6 +1042,57 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 ),
               ),
             ),
+
+            // DEBUG-DELETE-ACCOUNT BEGIN — temporary, smoke-tests the
+            // account-deletion backend ahead of the Cupertino Settings UI
+            // landing on Sat 2026-05-16 (task #10). Strip this whole block
+            // when the production UI ships. Compiled out of release builds
+            // by kDebugMode.
+            if (kDebugMode)
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: authProvider.isLoading
+                    ? null
+                    : () async {
+                        Navigator.pop(context); // Close menu first
+                        await _handleDebugDeleteAccount(authProvider);
+                      },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.only(
+                    top: 4,
+                    bottom: 12,
+                    left: 16,
+                    right: 16,
+                  ),
+                  child: Row(
+                    children: [
+                      const Spacer(),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: Text(
+                          '[DEBUG] Delete Account',
+                          style: TextStyle(
+                            color: authProvider.isLoading
+                                ? CupertinoColors.systemGrey
+                                : CupertinoColors.systemOrange,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        CupertinoIcons.trash,
+                        color: authProvider.isLoading
+                            ? CupertinoColors.systemGrey
+                            : CupertinoColors.systemOrange,
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            // DEBUG-DELETE-ACCOUNT END
           ],
         );
       },
@@ -1223,4 +1275,75 @@ class _FavoritesPageState extends State<FavoritesPage> {
     }
   }
 
+  // DEBUG-DELETE-ACCOUNT BEGIN — temporary smoke-test entry point for the
+  // account-deletion backend. Replaced by the Cupertino Settings UI on Sat
+  // 2026-05-16. See task #10 in docs/internal/task-schedules/2026-05-11_week.md.
+  Future<void> _handleDebugDeleteAccount(AuthProvider authProvider) async {
+    final passwordController = TextEditingController();
+    final password = await showCupertinoDialog<String>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('[DEBUG] Delete Account'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Column(
+            children: [
+              const Text(
+                'This will permanently delete the signed-in account, its '
+                "Firestore settings, and FCM tokens. There's no undo. "
+                'Use only on a throwaway test account.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              CupertinoTextField(
+                controller: passwordController,
+                placeholder: 'Current password',
+                obscureText: true,
+                autofocus: true,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(dialogContext, null),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: const Text('Delete'),
+            onPressed: () =>
+                Navigator.pop(dialogContext, passwordController.text),
+          ),
+        ],
+      ),
+    );
+    passwordController.dispose();
+
+    if (password == null || !mounted) return;
+
+    final ok = await authProvider.deleteAccount(password);
+
+    if (!mounted) return;
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(ok ? 'Account Deleted' : 'Deletion Failed'),
+        content: Text(
+          ok
+              ? 'Account, settings, and FCM tokens removed. Signed out.'
+              : (authProvider.errorMessage.isNotEmpty
+                  ? authProvider.errorMessage
+                  : 'Unknown error'),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('OK'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+  // DEBUG-DELETE-ACCOUNT END
 }

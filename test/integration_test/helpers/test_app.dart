@@ -50,6 +50,7 @@ import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/delete_account_usecase.dart';
 import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 
 import 'mock_services.dart';
@@ -246,6 +247,7 @@ AuthProvider createAuthProvider(TestServices services) {
     disableBiometricUseCase: DisableBiometricUseCase(authRepo),
     signInWithBiometricsUseCase: SignInWithBiometricsUseCase(authRepo),
     syncSettingsUseCase: SyncSettingsAfterLoginUseCase(settingsRepo),
+    deleteAccountUseCase: DeleteAccountUseCase(authRepo),
     fcmService: services.fcm,
   );
 }

@@ -14,6 +14,7 @@ import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/delete_account_usecase.dart';
 import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 import 'package:rivr/services/1_contracts/features/settings/i_settings_repository.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
@@ -225,6 +226,7 @@ void main() {
       disableBiometricUseCase: DisableBiometricUseCase(mockAuthRepo),
       signInWithBiometricsUseCase: SignInWithBiometricsUseCase(mockAuthRepo),
       syncSettingsUseCase: SyncSettingsAfterLoginUseCase(mockSettingsRepo),
+      deleteAccountUseCase: DeleteAccountUseCase(mockAuthRepo),
       fcmService: mockFcm,
     );
   });
@@ -356,6 +358,47 @@ void main() {
         expect(result, isTrue);
         expect(provider.successMessage, 'Password reset email sent');
         expect(provider.errorMessage, isEmpty);
+      });
+    });
+
+    group('deleteAccount', () {
+      test('returns true and sets success message on correct password',
+          () async {
+        mockAuthRepo.seedUser(
+          email: 'doomed@example.com',
+          password: 'correct-pass',
+        );
+        mockAuthRepo.simulateSignIn('doomed@example.com');
+
+        final result = await provider.deleteAccount('correct-pass');
+
+        expect(result, isTrue);
+        expect(provider.successMessage, 'Account deleted');
+        expect(provider.errorMessage, isEmpty);
+      });
+
+      test('returns false and sets error message on wrong password',
+          () async {
+        mockAuthRepo.seedUser(
+          email: 'doomed@example.com',
+          password: 'correct-pass',
+        );
+        mockAuthRepo.simulateSignIn('doomed@example.com');
+
+        final result = await provider.deleteAccount('wrong-pass');
+
+        expect(result, isFalse);
+        expect(provider.errorMessage, 'Invalid credentials');
+        expect(provider.successMessage, isEmpty);
+      });
+
+      test('fails fast on empty password without hitting the repository',
+          () async {
+        final result = await provider.deleteAccount('');
+
+        expect(result, isFalse);
+        expect(provider.errorMessage,
+            'Please enter your password to confirm account deletion');
       });
     });
   });
