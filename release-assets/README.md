@@ -282,14 +282,20 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 | Google Play phone screenshots      | High     | Minimum 2 required; same source as iOS or re-exported. |
 | Privacy policy public hosting      | High     | Draft exists; must be hosted at `hydromap.com/privacy` before submission. **Blocked on Cloudflare/GoDaddy creds (Dr. Ames) + attorney review.** |
 | Support page public hosting        | High     | Listed in store-listing-template.md as `hydromap.com/support` — must be a live page at submission. |
-| In-app account-deletion flow       | High     | **Required by App Store Guideline 5.1.1(v).** No code path currently. ~2-3 hr build. Schedule into next week. See `project_account_deletion_blocker.md` memory. |
+| In-app account-deletion flow       | High     | **Backend complete** on `feature/account-deletion-backend` (3 commits, ~1.75 hr through Wed 5/13). Cupertino Settings UI lands Sat 5/16 as task #10 of `2026-05-11_week.md`. See `docs/internal/privacy-policy-draft.md` §9.1 for the user-facing description. |
 | Apple Developer account access     | High     | `admin@hydromap.com` 2FA SMS goes to a dead phone. Recovery requires Dr. Ames (back end of May). See `project_apple_account_lockout.md`. |
 | iPhone 5.5" screenshots            | Medium   | Optional but recommended.                    |
 | iPad 12.9" screenshots             | Medium   | Required only if iPad is declared in build. RIVR's iPad orientations are declared in Info.plist — verify whether iPad is being targeted on submission. |
 | Tablet screenshots                 | Low      | Optional for Play Store.                     |
 | Promotional images                 | Low      | Nice to have for marketing.                  |
 
-### Resolved This Week (2026-05-04 → 2026-05-10)
+### Resolved This Week (2026-05-11 → 2026-05-16)
+
+1. ✅ **Account-deletion backend (App Store 5.1.1(v))** — `AuthRepositoryImpl.deleteAccount()` orchestrates reauth → FCM token cleanup → Firestore `users/{uid}` delete → Firebase Auth user delete → biometric creds clear. Commits `56cbfe1`, `e9a43ab`, `a93d57a` on branch `feature/account-deletion-backend` (10 new unit tests). UI ships Sat as task #10; a `kDebugMode`-gated `[DEBUG] Delete Account` button in the favorites settings menu drives the backend for real-device smoke until then.
+2. ✅ **Privacy policy Section 9 aligned to shipped flow** — `docs/internal/privacy-policy-draft.md` Section 9.1 now lists the in-app 5-step deletion path, reauth requirement, and explicit list of what gets deleted. Section 7 retention clarified: immediate primary delete + up to 30-day Firebase backup retention.
+3. ✅ **Android ↔ iOS permission parity audited** — full audit at `docs/internal/android-ios-permission-parity.md`. Every iOS `Info.plist` purpose string maps to a declared Android Manifest permission or to an intentional gap (background location, external storage, photo-library write — all deliberately absent on both platforms). No fixes required for submission.
+
+### Resolved Last Week (2026-05-04 → 2026-05-10)
 
 1. ✅ **iOS 1024 icon alpha** — verified already alpha-free (likely flattened in `3bfba5f`).
 2. ✅ **Android 512 store icon** — verified RGB / no alpha at `release-assets/google-play/icon/icon-512x512.png`.
