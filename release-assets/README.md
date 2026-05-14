@@ -307,7 +307,7 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 3. **Privacy policy not yet attorney-reviewed.** Draft is accurate to the codebase but the legal language (Sections 5, 7, 9, 10) needs counsel review before public hosting.
 4. **Privacy policy hosting blocked.** Cloudflare + GoDaddy credentials sit with Dr. Ames; cannot publish to `hydromap.com/privacy` until he is back.
 5. **Android launch screen.** Default white, no custom image. Lower priority than iOS but worth a parity pass before submission.
-6. **GitHub Dependabot alerts.** 6 alerts on default branch as of 2026-05-05 (1 critical, 1 high, 3 moderate, 1 low). Triage in next `/plan-week`.
+6. **GitHub Dependabot alerts.** Triaged 2026-05-14. `functions/package-lock.json` bumped via `npm audit fix`: **1 critical + 6 high + 6 medium closed** (protobufjs 7.5.4 → 7.5.8, lodash 4.17.23 → 4.18.1, fast-xml-builder/parser, others). **9 low-severity transitive alerts remain** — all in the `teeny-request → retry-request → google-gax → @google-cloud/firestore → firebase-admin → firebase-functions` chain, blocked on an upstream Firebase Admin SDK release that drops the legacy HTTP client. Not a launch blocker; revisit when Firebase Admin v13+ ships. No `package.json` changes; Functions `tsc build` + ESLint + Flutter analyze + Flutter unit/widget tests all clean.
 
 ---
 
