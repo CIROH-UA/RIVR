@@ -125,10 +125,20 @@ Widget _wrap(AuthProvider provider) => ChangeNotifierProvider<AuthProvider>.valu
     );
 
 void main() {
+  // Render the full page on a tall surface (no lazy ListView culling) so
+  // off-screen rows like the bottom Delete Account are always in the tree.
+  // The deliberate gap + DANGER ZONE header push it well past a default
+  // 800x600 viewport.
+  Future<void> pumpAccount(WidgetTester tester, _StubAuthRepository repo) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_wrap(_buildProvider(repo)));
+  }
+
   testWidgets('renders the core sections including Delete Account at the end',
       (tester) async {
     final repo = _StubAuthRepository();
-    await tester.pumpWidget(_wrap(_buildProvider(repo)));
+    await pumpAccount(tester, repo);
 
     expect(find.text('Account'), findsWidgets); // nav bar title
     expect(find.text('PREFERENCES'), findsOneWidget);
@@ -141,7 +151,7 @@ void main() {
 
   testWidgets('Delete Account is the last actionable row', (tester) async {
     final repo = _StubAuthRepository();
-    await tester.pumpWidget(_wrap(_buildProvider(repo)));
+    await pumpAccount(tester, repo);
 
     final signOutY = tester.getCenter(find.text('Sign Out')).dy;
     final deleteY = tester.getCenter(find.text('Delete Account')).dy;
@@ -151,11 +161,8 @@ void main() {
 
   testWidgets('tapping Delete Account opens a password confirmation dialog',
       (tester) async {
-    await tester.binding.setSurfaceSize(const Size(800, 1400));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
     final repo = _StubAuthRepository();
-    await tester.pumpWidget(_wrap(_buildProvider(repo)));
+    await pumpAccount(tester, repo);
 
     await tester.tap(find.text('Delete Account'));
     await tester.pumpAndSettle();
@@ -169,11 +176,8 @@ void main() {
 
   testWidgets('confirming with a password forwards it to the use case',
       (tester) async {
-    await tester.binding.setSurfaceSize(const Size(800, 1400));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
     final repo = _StubAuthRepository();
-    await tester.pumpWidget(_wrap(_buildProvider(repo)));
+    await pumpAccount(tester, repo);
 
     await tester.tap(find.text('Delete Account'));
     await tester.pumpAndSettle();

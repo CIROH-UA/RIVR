@@ -34,6 +34,9 @@ class AccountPage extends StatelessWidget {
                 _PreferencesSection(auth: auth),
                 _NotificationsSection(),
                 _SignOutSection(auth: auth),
+                // Deliberate large gap: Sign Out (reversible) must not be
+                // mistaken for Delete Account (permanent). See _DangerZone.
+                const SizedBox(height: 44),
                 _DangerZone(auth: auth),
                 const SizedBox(height: 24),
               ],
@@ -248,6 +251,8 @@ class _SignOutSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Neutral styling on purpose. Sign Out is reversible — reserving red
+    // for Delete Account (permanent) is what stops users mixing them up.
     return CupertinoListSection.insetGrouped(
       children: [
         CupertinoListTile(
@@ -256,13 +261,14 @@ class _SignOutSection extends StatelessWidget {
             style: TextStyle(
               color: auth.isLoading
                   ? CupertinoColors.systemGrey
-                  : CupertinoColors.systemRed,
+                  : CupertinoColors.label,
             ),
           ),
           leading: const Icon(
             CupertinoIcons.square_arrow_right,
-            color: CupertinoColors.systemRed,
+            color: CupertinoColors.systemGrey,
           ),
+          trailing: const CupertinoListTileChevron(),
           onTap: auth.isLoading ? null : () => _confirmSignOut(context),
         ),
       ],
@@ -356,8 +362,16 @@ class _DangerZone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CupertinoListSection.insetGrouped(
+      header: const Text(
+        'DANGER ZONE',
+        style: TextStyle(
+          color: CupertinoColors.systemRed,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       footer: const Text(
-        'Deleting your account is permanent and removes all your data.',
+        'Deleting your account is permanent and cannot be undone. All your '
+        'data — saved rivers, preferences, and notifications — is removed.',
       ),
       children: [
         CupertinoListTile(
