@@ -429,6 +429,28 @@ void main() {
       verify(mockMessaging.deleteToken()).called(1);
     });
 
+    test(
+        'still disables notifications when deleteToken throws '
+        '(e.g. apns-token-not-set on simulator) and does not rethrow',
+        () async {
+      stubMessagingGranted(mockMessaging, token: testToken);
+      await service.enableNotifications(userId); // prime cached token
+      spySettings.updateCallCount = 0;
+      spySettings.allUpdateCalls.clear();
+
+      when(mockMessaging.deleteToken())
+          .thenThrow(Exception('apns-token-not-set'));
+
+      // Must not throw — token deletion is best-effort cleanup.
+      await service.disableNotifications(userId);
+
+      // The important invariant still holds: settings updated to remove the
+      // token and turn notifications off.
+      expect(spySettings.updateCallCount, 1);
+      expect(spySettings.lastUpdateData!['enableNotifications'], false);
+      expect(spySettings.lastUpdateData!['fcmTokens'], isA<FieldValue>());
+    });
+
     test('clears cached token so next enable fetches fresh', () async {
       stubMessagingGranted(mockMessaging, token: testToken);
 

@@ -303,9 +303,19 @@ class FCMService implements IFCMService {
       await _userSettingsService.updateUserSettings(userId, updates);
       AppLogger.info('FcmService', 'Token removed and notifications disabled');
 
-      // Delete token from Firebase (prevents old tokens from being used)
-      await _messaging.deleteToken();
-      AppLogger.info('FcmService', 'Token deleted from Firebase');
+      // Delete token from Firebase (prevents old tokens from being used).
+      // Best-effort: if there's no APNS token (iOS simulator, push not
+      // provisioned, or token not yet delivered) there's nothing to delete —
+      // that's a benign no-op, not a crash worth reporting to Crashlytics.
+      try {
+        await _messaging.deleteToken();
+        AppLogger.info('FcmService', 'Token deleted from Firebase');
+      } catch (e) {
+        AppLogger.debug(
+          'FcmService',
+          'Skipped token deletion (no token to delete): $e',
+        );
+      }
       AnalyticsService.instance.logNotificationsDisabled();
     } catch (e) {
       AppLogger.error('FcmService', 'Error disabling notifications: $e', e);
