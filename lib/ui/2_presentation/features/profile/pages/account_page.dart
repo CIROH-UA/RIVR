@@ -3,16 +3,14 @@
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
-import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
-/// Account / profile screen.
+/// Account screen.
 ///
-/// v1 (2026-05-16) is intentionally lean — see docs/internal/profile-page-plan.md:
-/// identity header, read-only preferences, notifications shortcut, Sign Out,
-/// and Delete Account at the very bottom (App Store Guideline 5.1.1(v)).
-/// Editable preferences, account editing, activity stats, and the about
-/// section are Week-3 enrichments.
+/// Intentionally narrow: identity (initials avatar, name, email, member-since)
+/// plus the two account actions — Sign Out and Delete Account (App Store
+/// Guideline 5.1.1(v)). Preferences and notifications deliberately live in the
+/// three-dots menu and are NOT duplicated here.
 class AccountPage extends StatelessWidget {
   const AccountPage({super.key});
 
@@ -28,16 +26,11 @@ class AccountPage extends StatelessWidget {
           builder: (context, auth, _) {
             return ListView(
               children: [
-                const SizedBox(height: 16),
+                const SizedBox(height: 24),
                 _IdentityHeader(auth: auth),
-                const SizedBox(height: 8),
-                _PreferencesSection(auth: auth),
-                _NotificationsSection(),
+                const SizedBox(height: 24),
                 _SignOutSection(auth: auth),
-                // Deliberate large gap: Sign Out (reversible) must not be
-                // mistaken for Delete Account (permanent). See _DangerZone.
-                const SizedBox(height: 44),
-                _DangerZone(auth: auth),
+                _DeleteAccountSection(auth: auth),
                 const SizedBox(height: 24),
               ],
             );
@@ -154,69 +147,6 @@ class _IdentityHeader extends StatelessWidget {
   }
 }
 
-// ── Preferences (read-only in v1) ────────────────────────────────────────────
-
-class _PreferencesSection extends StatelessWidget {
-  const _PreferencesSection({required this.auth});
-  final AuthProvider auth;
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = auth.currentUserSettings;
-    final flowUnit = settings?.preferredFlowUnit.displayLabel ?? '—';
-    final timeFormat = settings == null
-        ? '—'
-        : (settings.preferredTimeFormat.value == 'twentyFourHour'
-            ? '24-hour'
-            : '12-hour');
-
-    return CupertinoListSection.insetGrouped(
-      header: const Text('PREFERENCES'),
-      footer: const Text(
-        'Change your flow unit from the river list menu. Inline editing is '
-        'coming in a future update.',
-      ),
-      children: [
-        CupertinoListTile(
-          title: const Text('Flow unit'),
-          trailing: Text(
-            flowUnit,
-            style: const TextStyle(color: CupertinoColors.systemGrey),
-          ),
-        ),
-        CupertinoListTile(
-          title: const Text('Time format'),
-          trailing: Text(
-            timeFormat,
-            style: const TextStyle(color: CupertinoColors.systemGrey),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Notifications shortcut ───────────────────────────────────────────────────
-
-class _NotificationsSection extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoListSection.insetGrouped(
-      children: [
-        CupertinoListTile(
-          title: const Text('Notifications'),
-          leading: const Icon(
-            CupertinoIcons.bell_fill,
-            color: CupertinoColors.systemBlue,
-          ),
-          trailing: const CupertinoListTileChevron(),
-          onTap: () => AppRouter.pushNotificationsSettings(context),
-        ),
-      ],
-    );
-  }
-}
-
 // ── Sign out ─────────────────────────────────────────────────────────────────
 
 class _SignOutSection extends StatelessWidget {
@@ -251,8 +181,6 @@ class _SignOutSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Neutral styling on purpose. Sign Out is reversible — reserving red
-    // for Delete Account (permanent) is what stops users mixing them up.
     return CupertinoListSection.insetGrouped(
       children: [
         CupertinoListTile(
@@ -268,7 +196,6 @@ class _SignOutSection extends StatelessWidget {
             CupertinoIcons.square_arrow_right,
             color: CupertinoColors.systemGrey,
           ),
-          trailing: const CupertinoListTileChevron(),
           onTap: auth.isLoading ? null : () => _confirmSignOut(context),
         ),
       ],
@@ -276,10 +203,10 @@ class _SignOutSection extends StatelessWidget {
   }
 }
 
-// ── Danger zone — Delete Account (very bottom) ───────────────────────────────
+// ── Delete account ───────────────────────────────────────────────────────────
 
-class _DangerZone extends StatelessWidget {
-  const _DangerZone({required this.auth});
+class _DeleteAccountSection extends StatelessWidget {
+  const _DeleteAccountSection({required this.auth});
   final AuthProvider auth;
 
   Future<void> _handleDeleteAccount(BuildContext context) async {
@@ -331,8 +258,7 @@ class _DangerZone extends StatelessWidget {
 
     if (ok) {
       // Auth-state stream drops the user; AuthCoordinator routes back to
-      // sign-in automatically. Pop the Account page so we don't sit on a
-      // dead route mid-transition.
+      // sign-in automatically. Pop so we don't sit on a dead route.
       Navigator.of(context).pop();
     } else {
       AppLogger.warning(
@@ -361,15 +287,10 @@ class _DangerZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Explanation goes BEFORE the button (section header), not after.
+    // No red text, no "danger zone" — only the trash icon is red.
     return CupertinoListSection.insetGrouped(
       header: const Text(
-        'DANGER ZONE',
-        style: TextStyle(
-          color: CupertinoColors.systemRed,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      footer: const Text(
         'Deleting your account is permanent and cannot be undone. All your '
         'data — saved rivers, preferences, and notifications — is removed.',
       ),
@@ -380,8 +301,7 @@ class _DangerZone extends StatelessWidget {
             style: TextStyle(
               color: auth.isLoading
                   ? CupertinoColors.systemGrey
-                  : CupertinoColors.systemRed,
-              fontWeight: FontWeight.w600,
+                  : CupertinoColors.label,
             ),
           ),
           leading: const Icon(
