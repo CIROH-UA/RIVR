@@ -29,4 +29,13 @@ abstract class IAuthService {
   Future<void> reloadUser();
   Future<AuthResult> sendEmailVerification();
   Future<bool> checkEmailVerified();
+
+  /// Reauthenticate the current user with their password.
+  /// Required by Firebase before sensitive actions like account deletion.
+  Future<AuthResult> reauthenticateWithPassword({required String password});
+
+  /// Permanently delete the current Firebase Auth user and clear any local
+  /// biometric credentials. Firestore + FCM cleanup must run *before* this
+  /// call while the user is still authenticated.
+  Future<AuthResult> deleteCurrentUser();
 }

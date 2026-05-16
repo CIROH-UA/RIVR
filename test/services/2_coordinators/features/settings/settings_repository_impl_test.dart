@@ -98,6 +98,8 @@ class _StubSettingsService implements IUserSettingsService {
   Future<bool> userHasSettings(String userId) async => false;
   @override
   Future<void> syncFlowUnitPreference(String userId) async {}
+  @override
+  Future<void> deleteUserSettings(String userId) async {}
 }
 
 UserSettings _createSettings({

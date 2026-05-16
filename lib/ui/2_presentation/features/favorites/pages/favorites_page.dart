@@ -898,6 +898,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _buildMenuOption('Account', CupertinoIcons.person_crop_circle,
+                      () {
+                    Navigator.pop(context);
+                    AppRouter.pushAccount(context);
+                  }),
+                  _buildMenuDivider(),
                   _buildMenuOption('Notifications', CupertinoIcons.bell, () {
                     Navigator.pop(context);
                     AppRouter.pushNotificationsSettings(context);

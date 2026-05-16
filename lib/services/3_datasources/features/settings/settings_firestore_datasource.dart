@@ -61,4 +61,13 @@ class SettingsFirestoreDatasource {
         .timeout(const Duration(seconds: 5));
     return doc.exists;
   }
+
+  /// Permanently delete the user's settings document.
+  /// No-op if the document does not exist.
+  Future<void> deleteSettings(String userId) async {
+    await _usersCollection
+        .doc(userId)
+        .delete()
+        .timeout(const Duration(seconds: 10));
+  }
 }

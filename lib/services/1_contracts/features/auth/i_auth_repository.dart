@@ -34,4 +34,12 @@ abstract class IAuthRepository {
 
   Future<ServiceResult<void>> sendEmailVerification();
   Future<ServiceResult<bool>> checkEmailVerified();
+
+  /// Permanently delete the currently signed-in account.
+  ///
+  /// Required by App Store Review Guideline 5.1.1(v). Reauthenticates with
+  /// [password], removes FCM token registration, deletes the user's Firestore
+  /// settings document, then deletes the Firebase Auth user (which also
+  /// clears any local biometric credentials).
+  Future<ServiceResult<void>> deleteAccount({required String password});
 }
