@@ -173,7 +173,12 @@ class _SignOutSection extends StatelessWidget {
 
     if (shouldSignOut == true) {
       await auth.signOut();
-      // AuthCoordinator handles navigation back to the auth flow.
+      // AuthCoordinator (the root route) rebuilds to show the login flow,
+      // but this pushed Account route still sits on top of it. Pop back to
+      // the root so the login screen is actually visible.
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     }
   }
 
@@ -255,9 +260,10 @@ class _DeleteAccountSection extends StatelessWidget {
     if (!context.mounted) return;
 
     if (ok) {
-      // Auth-state stream drops the user; AuthCoordinator routes back to
-      // sign-in automatically. Pop so we don't sit on a dead route.
-      Navigator.of(context).pop();
+      // Auth-state stream drops the user; the root AuthCoordinator rebuilds
+      // to the login flow. Pop back to root so this pushed route isn't left
+      // covering it.
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } else {
       AppLogger.warning(
         'AccountPage',

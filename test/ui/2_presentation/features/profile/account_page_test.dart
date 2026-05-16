@@ -124,11 +124,34 @@ Widget _wrap(AuthProvider provider) => ChangeNotifierProvider<AuthProvider>.valu
       child: const CupertinoApp(home: AccountPage()),
     );
 
+/// Wraps AccountPage as a *pushed* route on top of a root, mirroring how it
+/// is presented in the app (Navigator.pushNamed from the three-dots menu on
+/// top of the root AuthCoordinator). Needed to exercise post-sign-out
+/// navigation, which pops back to the root.
+Widget _wrapPushed(AuthProvider provider) =>
+    ChangeNotifierProvider<AuthProvider>.value(
+      value: provider,
+      child: CupertinoApp(
+        home: Builder(
+          builder: (rootContext) => CupertinoPageScaffold(
+            child: Center(
+              child: CupertinoButton(
+                child: const Text('ROOT'),
+                onPressed: () => Navigator.of(rootContext).push(
+                  CupertinoPageRoute<void>(
+                    builder: (_) => const AccountPage(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
 void main() {
   // Render the full page on a tall surface (no lazy ListView culling) so
   // off-screen rows like the bottom Delete Account are always in the tree.
-  // The deliberate gap + DANGER ZONE header push it well past a default
-  // 800x600 viewport.
   Future<void> pumpAccount(WidgetTester tester, _StubAuthRepository repo) async {
     await tester.binding.setSurfaceSize(const Size(800, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -189,5 +212,52 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.capturedDeletePassword, 'hunter2');
+  });
+
+  testWidgets('signing out pops the pushed Account route back to root',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final repo = _StubAuthRepository();
+    await tester.pumpWidget(_wrapPushed(_buildProvider(repo)));
+
+    // Push the Account page on top of the root.
+    await tester.tap(find.text('ROOT'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign Out'), findsOneWidget);
+    expect(find.text('ROOT'), findsNothing); // Account now covers root
+
+    // Sign out → confirm.
+    await tester.tap(find.text('Sign Out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CupertinoDialogAction, 'Sign Out'));
+    await tester.pumpAndSettle();
+
+    // Regression: the pushed Account route must be popped so the (now
+    // logged-out) root is visible again — not left covering it.
+    expect(find.text('Sign Out'), findsNothing);
+    expect(find.text('ROOT'), findsOneWidget);
+  });
+
+  testWidgets('successful delete pops the pushed Account route back to root',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final repo = _StubAuthRepository()..deleteShouldSucceed = true;
+    await tester.pumpWidget(_wrapPushed(_buildProvider(repo)));
+
+    await tester.tap(find.text('ROOT'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Delete Account'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(CupertinoTextField), 'pw');
+    await tester.tap(find.widgetWithText(CupertinoDialogAction, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete Account'), findsNothing);
+    expect(find.text('ROOT'), findsOneWidget);
   });
 }
