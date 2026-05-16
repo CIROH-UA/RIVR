@@ -17,6 +17,7 @@ class AppRoutes {
   static const imageSelection = '/image-selection';
   static const notificationsSettings = '/notifications-settings';
   static const sponsors = '/sponsors';
+  static const account = '/account';
 
   /// Map forecast type string to the corresponding detail route.
   static String detailRouteForForecastType(String forecastType) {

@@ -11,6 +11,7 @@ import 'package:rivr/ui/2_presentation/features/forecast/pages/hydrograph_page.d
 import 'package:rivr/ui/2_presentation/features/favorites/pages/image_selection_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/notifications_settings_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/sponsors_page.dart';
+import 'package:rivr/ui/2_presentation/features/profile/pages/account_page.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_with_favorites.dart';
 import 'package:rivr/ui/2_presentation/routing/app_routes.dart';
 import 'package:rivr/ui/2_presentation/routing/route_args.dart';
@@ -40,6 +41,7 @@ class AppRouter {
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
     AppRoutes.sponsors: (context) => const SponsorsPage(),
+    AppRoutes.account: (context) => const AccountPage(),
   };
 
   // ---------------------------------------------------------------------------
@@ -169,6 +171,10 @@ class AppRouter {
 
   static Future<T?> pushSponsors<T>(BuildContext context) {
     return Navigator.pushNamed<T>(context, AppRoutes.sponsors);
+  }
+
+  static Future<T?> pushAccount<T>(BuildContext context) {
+    return Navigator.pushNamed<T>(context, AppRoutes.account);
   }
 
   static void pushFavoritesAndClear(BuildContext context) {
