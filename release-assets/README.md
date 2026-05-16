@@ -282,7 +282,7 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 | Google Play phone screenshots      | High     | Minimum 2 required; same source as iOS or re-exported. |
 | Privacy policy public hosting      | High     | Draft exists; must be hosted at `hydromap.com/privacy` before submission. **Blocked on Cloudflare/GoDaddy creds (Dr. Ames) + attorney review.** |
 | Support page public hosting        | High     | Listed in store-listing-template.md as `hydromap.com/support` — must be a live page at submission. |
-| In-app account-deletion flow       | High     | **Backend complete** on `feature/account-deletion-backend` (3 commits, ~1.75 hr through Wed 5/13). Cupertino Settings UI lands Sat 5/16 as task #10 of `2026-05-11_week.md`. See `docs/internal/privacy-policy-draft.md` §9.1 for the user-facing description. |
+| ~~In-app account-deletion flow~~   | ✅ DONE  | **Shipped** in `1.1.0+7` (merged to `development` `e438854`, 2026-05-16). Account page reachable from the three-dots menu with Delete Account at the bottom; reauth + Firestore + FCM + biometric cleanup. 17 tests. Pending: Jerson's real-device smoke. |
 | Apple Developer account access     | High     | `admin@hydromap.com` 2FA SMS goes to a dead phone. Recovery requires Dr. Ames (back end of May). See `project_apple_account_lockout.md`. |
 | iPhone 5.5" screenshots            | Medium   | Optional but recommended.                    |
 | iPad 12.9" screenshots             | Medium   | Required only if iPad is declared in build. RIVR's iPad orientations are declared in Info.plist — verify whether iPad is being targeted on submission. |
@@ -309,9 +309,10 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 ### Known Issues / Open Risks
 
 1. **Apple Developer account lockout.** `admin@hydromap.com` cannot sign in due to 2FA-SMS to a phone number that no longer exists. Recovery deferred to end of May 2026 (requires Dr. Ames, currently in Europe). Until resolved, no TestFlight upload, no certificates, no App Store submission.
-2. **No in-app account deletion.** App Store Guideline 5.1.1(v) blocks iOS submission without it. Estimated 2–3 hr build (Settings UI + reauth + Firebase Auth `delete()` + Firestore cleanup + FCM token cleanup).
-3. **Privacy policy not yet attorney-reviewed.** Draft is accurate to the codebase but the legal language (Sections 5, 7, 9, 10) needs counsel review before public hosting.
+2. ✅ **RESOLVED — in-app account deletion** shipped in `1.1.0+7` (2026-05-16). Was an App Store 5.1.1(v) hard blocker. Account page + Delete Account at the bottom; full reauth/Firestore/FCM/biometric cleanup; 17 tests. Only Jerson's real-device smoke remains.
+3. **Privacy policy not yet attorney-reviewed.** Draft is accurate to the codebase but the legal language (Sections 5, 7, 9, 10) needs counsel review before public hosting. Prep packet ready at `docs/internal/privacy-attorney-review-packet.md` — kick off when Dr. Ames is back.
 4. **Privacy policy hosting blocked.** Cloudflare + GoDaddy credentials sit with Dr. Ames; cannot publish to `hydromap.com/privacy` until he is back.
+5. **Apple recovery prep ready.** Step-by-step packet for Dr. Ames at `docs/internal/apple-recovery-packet.md` (pre-checks + support-call checklist + post-recovery hardening).
 5. **Android launch screen.** Default white, no custom image. Lower priority than iOS but worth a parity pass before submission.
 6. **GitHub Dependabot alerts.** Triaged 2026-05-14. `functions/package-lock.json` bumped via `npm audit fix`: **1 critical + 6 high + 6 medium closed** (protobufjs 7.5.4 → 7.5.8, lodash 4.17.23 → 4.18.1, fast-xml-builder/parser, others). **9 low-severity transitive alerts remain** — all in the `teeny-request → retry-request → google-gax → @google-cloud/firestore → firebase-admin → firebase-functions` chain, blocked on an upstream Firebase Admin SDK release that drops the legacy HTTP client. Not a launch blocker; revisit when Firebase Admin v13+ ships. No `package.json` changes; Functions `tsc build` + ESLint + Flutter analyze + Flutter unit/widget tests all clean.
 
@@ -332,7 +333,7 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 - [ ] **(Jerson)** Capture phone screenshots on iPhone 14 Plus real device or simulator (1284×2778)
 - [ ] **(Jerson)** Polish screenshots in Canva (frames, copy overlays) and export to `app-store/screenshots/iphone-6.7/` and `iphone-6.5/`
 - [ ] **(Jerson)** Re-export phone screenshots for Google Play (1080×1920 or 1440×2560) into `google-play/screenshots/phone/`
-- [ ] **(Next week)** Build in-app account-deletion flow (App Store Guideline 5.1.1(v) blocker)
+- [x] Build in-app account-deletion flow (App Store Guideline 5.1.1(v) blocker) — shipped `1.1.0+7` 2026-05-16
 - [ ] **(End of May)** Recover Apple Developer account access — Dr. Ames calls Apple
 - [ ] **(End of May)** Send privacy policy draft to attorney for review
 - [ ] **(End of May)** Host `hydromap.com/privacy` and `hydromap.com/support` (Cloudflare/GoDaddy creds)
