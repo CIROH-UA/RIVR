@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Launch / splash background. White to match the iOS LaunchScreen
+         storyboard (which is white in both light and dark mode). -->
+    <color name="launch_background">#FFFFFF</color>
 </resources>
