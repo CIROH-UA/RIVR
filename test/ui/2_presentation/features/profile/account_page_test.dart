@@ -135,18 +135,20 @@ void main() {
     await tester.pumpWidget(_wrap(_buildProvider(repo)));
   }
 
-  testWidgets('renders the core sections including Delete Account at the end',
-      (tester) async {
+  testWidgets('shows only identity + the two account actions', (tester) async {
     final repo = _StubAuthRepository();
     await pumpAccount(tester, repo);
 
     expect(find.text('Account'), findsWidgets); // nav bar title
-    expect(find.text('PREFERENCES'), findsOneWidget);
-    expect(find.text('Flow unit'), findsOneWidget);
-    expect(find.text('Time format'), findsOneWidget);
-    expect(find.text('Notifications'), findsOneWidget);
     expect(find.text('Sign Out'), findsOneWidget);
     expect(find.text('Delete Account'), findsOneWidget);
+
+    // Preferences / notifications must NOT be duplicated here — they live
+    // in the three-dots menu.
+    expect(find.text('PREFERENCES'), findsNothing);
+    expect(find.text('Flow unit'), findsNothing);
+    expect(find.text('Notifications'), findsNothing);
+    expect(find.text('DANGER ZONE'), findsNothing);
   });
 
   testWidgets('Delete Account is the last actionable row', (tester) async {
