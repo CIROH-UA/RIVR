@@ -291,6 +291,11 @@ class _DeleteAccountSection extends StatelessWidget {
       header: const Text(
         'Deleting your account is permanent and cannot be undone. All your '
         'data — saved rivers, preferences, and notifications — is removed.',
+        style: TextStyle(
+          fontWeight: FontWeight.normal,
+          fontSize: 13,
+          color: CupertinoColors.secondaryLabel,
+        ),
       ),
       children: [
         CupertinoListTile(
