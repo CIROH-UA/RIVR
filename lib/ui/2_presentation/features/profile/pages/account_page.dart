@@ -90,7 +90,6 @@ class _IdentityHeader extends StatelessWidget {
               style: const TextStyle(
                 color: CupertinoColors.white,
                 fontSize: 34,
-                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -99,7 +98,6 @@ class _IdentityHeader extends StatelessWidget {
             auth.userFullName,
             style: const TextStyle(
               fontSize: 22,
-              fontWeight: FontWeight.w600,
             ),
             textAlign: TextAlign.center,
           ),
