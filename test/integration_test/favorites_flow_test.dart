@@ -228,20 +228,27 @@ void main() {
 
       await openSettingsMenu(tester);
 
-      // Menu options visible
+      // Menu options visible (current shape, post-2026-05-16 refactor:
+      // Account at top, Sign Out moved to the Account page, user-info
+      // row removed).
+      expect(find.text('Account'), findsOneWidget);
       expect(find.text('Notifications'), findsOneWidget);
       expect(find.text('Sponsors'), findsOneWidget);
-      expect(find.text('Sign Out'), findsOneWidget);
 
       // Flow unit toggle visible
       expect(find.text('ft³/s'), findsOneWidget);
       expect(find.text('m³/s'), findsOneWidget);
 
-      // User name displayed
-      expect(find.text('Test User'), findsOneWidget);
+      // Sign Out + standalone user-name row are intentionally NOT in the
+      // dropdown anymore — they live on the Account page.
+      expect(find.text('Sign Out'), findsNothing);
     });
 
-    testWidgets('sign out shows confirmation dialog', (tester) async {
+    // Sign-out's confirmation dialog is now covered by widget tests in
+    // test/ui/2_presentation/features/profile/account_page_test.dart — it
+    // lives on the Account page, not the three-dots menu. Replaced the
+    // old dropdown-Sign-Out test with the navigation entry that now matters.
+    testWidgets('Account row navigates to the Account page', (tester) async {
       services.seedFavorites([
         createTestFavorite(reachId: '1001', riverName: 'Test River'),
       ]);
@@ -257,31 +264,20 @@ void main() {
 
       await openSettingsMenu(tester);
 
-      // Invoke sign out directly — the dialog barrier absorbs pointer events
-      // in the test binding, so tester.tap() can't reach the text widget.
-      final signOutButton = tester.widget<CupertinoButton>(
+      // Tap the Account row directly — dialog barriers can absorb pointer
+      // events in the test binding, so invoke the button's onPressed.
+      final accountButton = tester.widget<CupertinoButton>(
         find.ancestor(
-          of: find.text('Sign Out'),
+          of: find.text('Account'),
           matching: find.byType(CupertinoButton),
         ),
       );
-      signOutButton.onPressed!();
-      await tester.pump(const Duration(milliseconds: 300));
+      accountButton.onPressed!();
+      await tester.pumpAndSettle();
 
-      // Confirmation dialog should appear
-      expect(
-        find.text('Are you sure you want to sign out of RIVR?'),
-        findsOneWidget,
-      );
-      expect(find.text('Cancel'), findsOneWidget);
-
-      // Cancel dismisses the dialog — warnIfMissed false because the
-      // dialog barrier absorbs pointer events in the test binding.
-      await tester.tap(find.text('Cancel'), warnIfMissed: false);
-      await tester.pump(const Duration(milliseconds: 300));
-
-      // Favorites page should still be showing
-      expect(find.byType(FavoritesPage), findsOneWidget);
+      // The Account page should now be on top — nav-bar title is 'Account'
+      // and Delete Account is its hallmark action.
+      expect(find.text('Delete Account'), findsOneWidget);
     });
   });
 
