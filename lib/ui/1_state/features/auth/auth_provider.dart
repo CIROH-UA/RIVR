@@ -101,7 +101,7 @@ class AuthProvider with ChangeNotifier {
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
         AppLogger.info(
             'AuthProvider', 'User signed in: ${_currentUser!.uid}');
-        FirebaseCrashlytics.instance.setUserIdentifier(firebaseUser.uid);
+        _setCrashlyticsUserSafe(firebaseUser.uid);
 
         // Gate on email verification
         if (!firebaseUser.emailVerified) {
@@ -117,7 +117,7 @@ class AuthProvider with ChangeNotifier {
         _currentUserSettings = null;
         _isAwaitingEmailVerification = false;
         AppLogger.info('AuthProvider', 'User signed out');
-        FirebaseCrashlytics.instance.setUserIdentifier('');
+        _setCrashlyticsUserSafe('');
       }
       notifyListeners();
     });
@@ -487,6 +487,21 @@ class AuthProvider with ChangeNotifier {
     if (_isLoading != loading) {
       _isLoading = loading;
       notifyListeners();
+    }
+  }
+
+  /// Set the Crashlytics user identifier, swallowing any failure (e.g.
+  /// `[core/no-app]` when Firebase isn't initialized — happens in
+  /// integration tests and would otherwise crash the auth-state stream).
+  /// Observability must never break core auth flow.
+  void _setCrashlyticsUserSafe(String uid) {
+    try {
+      FirebaseCrashlytics.instance.setUserIdentifier(uid);
+    } catch (e) {
+      AppLogger.debug(
+        'AuthProvider',
+        'Skipped Crashlytics.setUserIdentifier (not initialized): $e',
+      );
     }
   }
 
