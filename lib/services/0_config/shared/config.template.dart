@@ -31,8 +31,17 @@ class AppConfig {
   static const String vectorSourceLayer = 'channels';
   static const String vectorLayerId = 'streams2-layer';
 
+  // GEOGLOWS stream tileset (global, non-US). NOTE: currently the Rhône TEST
+  // tileset — swap for the production global (VPU-bundled) tileset when ready.
+  // Layer ids must keep the `geoglows` prefix so tap source-routing works.
+  static const String geoglowsTilesetId =
+      'byu-hydroinformatics.geoglows-rhone-test';
+  static const String geoglowsSourceId = 'geoglows-source';
+  static const String geoglowsSourceLayer = 'channels';
+
   // Helper methods for Vector Tiles Infrastructure
   static String getVectorTileSourceUrl() => 'mapbox://$vectorTilesetId';
+  static String getGeoglowsTileSourceUrl() => 'mapbox://$geoglowsTilesetId';
 
   // Default Settings
   static const String defaultDisplayUnit = 'cfs';

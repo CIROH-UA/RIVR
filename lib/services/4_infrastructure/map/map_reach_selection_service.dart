@@ -61,9 +61,12 @@ class MapReachSelectionService {
     AppLogger.debug('MapReachSelectionService', 'Querying visible streams...');
 
     final streams2LayerIds = [
-      'streams2-order-1-2', // Small streams
-      'streams2-order-3-4', // Medium streams
-      'streams2-order-5-plus', // Large rivers
+      'streams2-order-1-2', // Small streams (NWM)
+      'streams2-order-3-4', // Medium streams (NWM)
+      'streams2-order-5-plus', // Large rivers (NWM)
+      'geoglows-order-1-2', // GEOGLOWS (global)
+      'geoglows-order-3-4',
+      'geoglows-order-5-plus',
     ];
 
     final width = screenWidth;
@@ -385,6 +388,9 @@ class MapReachSelectionService {
         'streams2-order-1-2',
         'streams2-order-3-4',
         'streams2-order-5-plus',
+        'geoglows-order-1-2',
+        'geoglows-order-3-4',
+        'geoglows-order-5-plus',
       ];
 
       final List<QueriedRenderedFeature?> queryResult = await _mapboxMap!
@@ -442,11 +448,13 @@ class MapReachSelectionService {
         return null;
       }
 
-      // Determine the data source from which tile layer the tap matched
-      // (GEOGLOWS layers are prefixed `geoglows`; everything else is NWM).
-      final source = ForecastSource.fromLayerIds(
-        queriedRenderedFeature.layers,
-      );
+      // Determine the data source from the tapped feature's tile source +
+      // layers (GEOGLOWS source/layers are prefixed `geoglows`; else NWM).
+      // `source` is always populated; `layers` can be empty, so check both.
+      final source = ForecastSource.fromLayerIds([
+        queriedRenderedFeature.queriedFeature.source,
+        ...queriedRenderedFeature.layers,
+      ]);
 
       return SelectedReach.fromVectorTile(
         properties: properties,

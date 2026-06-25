@@ -10,7 +10,16 @@ class MapVectorTilesService {
   MapboxMap? _mapboxMap;
   bool _isLoaded = false;
 
-  static const int _streamColor = 0xFF191970; // Midnight blue
+  static const int _streamColor = 0xFF191970; // Midnight blue (NWM)
+  static const int _geoglowsColor = 0xFF1E88A8; // Brand teal (GEOGLOWS)
+
+  /// GEOGLOWS layer ids — must keep the `geoglows` prefix so tap-selection can
+  /// resolve the source (see ForecastSource.fromLayerIds).
+  static const List<String> _geoglowsLayerIds = [
+    'geoglows-order-1-2',
+    'geoglows-order-3-4',
+    'geoglows-order-5-plus',
+  ];
 
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
@@ -41,6 +50,9 @@ class MapVectorTilesService {
       // Add the CORRECT styled layers (multiple layers like working code)
       await _addStyledLayers();
 
+      // Add GEOGLOWS streams (global, non-US) as their own source + layers.
+      await _addGeoglowsSourceAndLayers();
+
       _isLoaded = true;
       AppLogger.info('MapVectorTilesService', 'River reaches vector tiles loaded successfully');
     } catch (e) {
@@ -59,6 +71,7 @@ class MapVectorTilesService {
         'streams2-order-1-2',
         'streams2-order-3-4',
         'streams2-order-5-plus',
+        ..._geoglowsLayerIds,
       ];
 
       for (final layerId in layerIds) {
@@ -176,6 +189,62 @@ class MapVectorTilesService {
     }
   }
 
+  /// Add the GEOGLOWS vector source + stream-order layers (global rivers).
+  /// Mirrors the NWM layer styling but with the brand-teal color and
+  /// `geoglows-*` layer ids that drive source-routing on tap.
+  Future<void> _addGeoglowsSourceAndLayers() async {
+    try {
+      await _mapboxMap!.style.addSource(
+        VectorSource(
+          id: AppConfig.geoglowsSourceId,
+          url: AppConfig.getGeoglowsTileSourceUrl(),
+        ),
+      );
+
+      await _mapboxMap!.style.addLayer(
+        LineLayer(
+          id: 'geoglows-order-1-2',
+          sourceId: AppConfig.geoglowsSourceId,
+          sourceLayer: AppConfig.geoglowsSourceLayer,
+          lineColor: _geoglowsColor,
+          lineWidth: 1.0,
+          lineOpacity: 0.8,
+          filter: ["<=", ["get", "streamOrder"], 2],
+        ),
+      );
+      await _mapboxMap!.style.addLayer(
+        LineLayer(
+          id: 'geoglows-order-3-4',
+          sourceId: AppConfig.geoglowsSourceId,
+          sourceLayer: AppConfig.geoglowsSourceLayer,
+          lineColor: _geoglowsColor,
+          lineWidth: 2.0,
+          lineOpacity: 0.8,
+          filter: [
+            "all",
+            [">=", ["get", "streamOrder"], 3],
+            ["<=", ["get", "streamOrder"], 4],
+          ],
+        ),
+      );
+      await _mapboxMap!.style.addLayer(
+        LineLayer(
+          id: 'geoglows-order-5-plus',
+          sourceId: AppConfig.geoglowsSourceId,
+          sourceLayer: AppConfig.geoglowsSourceLayer,
+          lineColor: _geoglowsColor,
+          lineWidth: 3.5,
+          lineOpacity: 0.9,
+          filter: [">=", ["get", "streamOrder"], 5],
+        ),
+      );
+      AppLogger.info('MapVectorTilesService', 'Added GEOGLOWS layers');
+    } catch (e) {
+      AppLogger.error('MapVectorTilesService', 'Failed to add GEOGLOWS layers', e);
+      // Non-fatal: NWM streams still render if GEOGLOWS fails.
+    }
+  }
+
   /// Remove existing vector source and layers to avoid conflicts
   Future<void> _removeExistingLayers() async {
     try {
@@ -186,6 +255,7 @@ class MapVectorTilesService {
         'streams2-order-3-4',
         'streams2-order-5-plus',
         AppConfig.vectorLayerId, // Also remove the old generic layer
+        ..._geoglowsLayerIds,
       ];
 
       // Try to remove layers first
@@ -197,11 +267,16 @@ class MapVectorTilesService {
         }
       }
 
-      // Then remove source
-      try {
-        await _mapboxMap!.style.removeStyleSource(AppConfig.vectorSourceId);
-      } catch (e) {
-        // Source might not exist, that's fine
+      // Then remove sources
+      for (final sourceId in [
+        AppConfig.vectorSourceId,
+        AppConfig.geoglowsSourceId,
+      ]) {
+        try {
+          await _mapboxMap!.style.removeStyleSource(sourceId);
+        } catch (e) {
+          // Source might not exist, that's fine
+        }
       }
 
       AppLogger.debug('MapVectorTilesService', 'Cleaned up existing layers/sources');
@@ -227,6 +302,7 @@ class MapVectorTilesService {
         'streams2-order-1-2',
         'streams2-order-3-4',
         'streams2-order-5-plus',
+        ..._geoglowsLayerIds,
       ];
 
       for (final layerId in layerIds) {
