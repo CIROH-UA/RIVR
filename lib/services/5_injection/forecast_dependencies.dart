@@ -1,6 +1,8 @@
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/4_infrastructure/api/noaa_api_service.dart';
+import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
+import 'package:rivr/services/4_infrastructure/api/geoglows_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/forecast/forecast_service.dart';
@@ -23,6 +25,12 @@ void setupForecastDependencies() {
   // Services
   sl.registerLazySingleton<INoaaApiService>(
     () => NoaaApiService(unitService: sl<IFlowUnitPreferenceService>()),
+  );
+
+  // GEOGLOWS forecast client (global, non-US rivers). Not yet consumed by the
+  // forecast flow — source-routing (NWM vs GEOGLOWS) is the next step.
+  sl.registerLazySingleton<IGeoglowsApiService>(
+    () => GeoglowsApiService(unitService: sl<IFlowUnitPreferenceService>()),
   );
 
   sl.registerLazySingleton<IForecastService>(

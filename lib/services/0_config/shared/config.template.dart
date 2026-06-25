@@ -16,6 +16,9 @@ class AppConfig {
       'https://nwm-api.ciroh.org//return-period';
   static const String nwmApiKey = 'INSERT-THE-KEY';
 
+  // GEOGLOWS v2 API (global river forecasts outside the US, native m³/s)
+  static const String geoglowsBaseUrl = 'https://geoglows.ecmwf.int/api/v2';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =
@@ -71,6 +74,21 @@ class AppConfig {
 
   static String getReturnPeriodUrl(String reachId) =>
       '$nwmReturnPeriodUrl?comids=$reachId&key=$nwmApiKey';
+
+  // GEOGLOWS API URLs (riverId = LINKNO from the GEOGLOWS stream network)
+  /// 15-day deterministic forecast: median + uncertainty band (3-hourly).
+  static String getGeoglowsForecastUrl(String riverId) =>
+      '$geoglowsBaseUrl/forecast/$riverId?format=json';
+
+  /// Ensemble statistics: min/25p/median/75p/max/avg + high-res member.
+  static String getGeoglowsForecastStatsUrl(String riverId) =>
+      '$geoglowsBaseUrl/forecaststats/$riverId?format=json';
+
+  /// Return periods (gumbel). NOTE: the REST endpoint currently defaults to a
+  /// `logpearson3` variable that is missing from the dataset; needs the
+  /// distribution passed explicitly (or a CF-proxy fallback) before it works.
+  static String getGeoglowsReturnPeriodsUrl(String riverId) =>
+      '$geoglowsBaseUrl/returnperiods/$riverId?format=json';
 
   /// Check if stream order should be visible at zoom level (performance optimization)
   static bool shouldShowStreamOrder(int streamOrder, double zoom) {
