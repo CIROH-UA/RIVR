@@ -4,6 +4,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/models/1_domain/features/map/visible_stream.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 
 /// Service for handling river reach selection from vector tiles
 /// Optimized for research teams to find streams by station ID
@@ -441,10 +442,17 @@ class MapReachSelectionService {
         return null;
       }
 
+      // Determine the data source from which tile layer the tap matched
+      // (GEOGLOWS layers are prefixed `geoglows`; everything else is NWM).
+      final source = ForecastSource.fromLayerIds(
+        queriedRenderedFeature.layers,
+      );
+
       return SelectedReach.fromVectorTile(
         properties: properties,
         latitude: tapPoint.coordinates.lat.toDouble(),
         longitude: tapPoint.coordinates.lng.toDouble(),
+        source: source,
       );
     } catch (e) {
       AppLogger.error('MapReachSelectionService', 'Error creating SelectedReach', e);

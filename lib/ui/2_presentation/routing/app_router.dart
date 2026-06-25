@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/2_presentation/shared/pages/navigation_error_page.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/favorites_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_overview_page.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_overview_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/short_range_detail_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/medium_range_detail_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/long_range_detail_page.dart';
@@ -15,6 +16,7 @@ import 'package:rivr/ui/2_presentation/features/profile/pages/account_page.dart'
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_with_favorites.dart';
 import 'package:rivr/ui/2_presentation/routing/app_routes.dart';
 import 'package:rivr/ui/2_presentation/routing/route_args.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 
 /// Centralized router — owns all route→page mapping and typed navigation.
 class AppRouter {
@@ -31,10 +33,16 @@ class AppRouter {
       final reachId = args is ReachArgs
           ? args.reachId
           : args as String?;
+      final source = args is ReachArgs ? args.source : ForecastSource.nwm;
       if (reachId == null) {
         return const NavigationErrorPage.missingArguments(
           routeName: 'forecast',
         );
+      }
+      // GEOGLOWS reaches use a dedicated forecast path (different data shape);
+      // NWM reaches keep the existing overview page unchanged.
+      if (source.isGeoglows) {
+        return GeoglowsOverviewPage(reachId: reachId);
       }
       return ReachOverviewPage(reachId: reachId);
     },
@@ -112,11 +120,12 @@ class AppRouter {
   static Future<T?> pushForecast<T>(
     BuildContext context, {
     required String reachId,
+    ForecastSource source = ForecastSource.nwm,
   }) {
     return Navigator.pushNamed<T>(
       context,
       AppRoutes.forecast,
-      arguments: reachId,
+      arguments: ReachArgs(reachId: reachId, source: source),
     );
   }
 

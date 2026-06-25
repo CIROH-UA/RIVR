@@ -442,8 +442,12 @@ class MapPageState extends State<MapPage> {
   void _navigateToForecast(SelectedReach selectedReach) {
     Navigator.of(context).pop(); // Close bottom sheet
 
-    // Navigate to forecast page with reachId
-    AppRouter.pushForecast(context, reachId: selectedReach.reachId);
+    // Navigate to forecast page with reachId + source (NWM vs GEOGLOWS).
+    AppRouter.pushForecast(
+      context,
+      reachId: selectedReach.reachId,
+      source: selectedReach.source,
+    );
   }
 
   void _retryMapLoad() {
