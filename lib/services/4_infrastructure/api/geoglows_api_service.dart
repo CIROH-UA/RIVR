@@ -36,16 +36,17 @@ class GeoglowsApiService implements IGeoglowsApiService {
 
   @override
   Future<GeoglowsForecast> fetchForecast(String riverId) async {
-    final url = AppConfig.getGeoglowsForecastUrl(riverId);
+    final url = AppConfig.getGeoglowsProxyUrl(riverId);
     AppLogger.debug('GEOGLOWS_API', 'Fetching forecast for river $riverId');
 
     try {
       final data = await _getJson(url, riverId);
+      final fc = (data['forecast'] as Map?) ?? const {};
 
-      final times = _asList(data['datetime']);
-      final median = _asList(data['flow_median']);
-      final lower = _asList(data['flow_uncertainty_lower']);
-      final upper = _asList(data['flow_uncertainty_upper']);
+      final times = _asList(fc['datetime']);
+      final median = _asList(fc['flow_median']);
+      final lower = _asList(fc['flow_uncertainty_lower']);
+      final upper = _asList(fc['flow_uncertainty_upper']);
 
       if (times.isEmpty || median.isEmpty) {
         throw ServiceException.notFound(
@@ -88,19 +89,20 @@ class GeoglowsApiService implements IGeoglowsApiService {
 
   @override
   Future<GeoglowsEnsembleForecast> fetchEnsembleStats(String riverId) async {
-    final url = AppConfig.getGeoglowsForecastStatsUrl(riverId);
+    final url = AppConfig.getGeoglowsProxyUrl(riverId);
     AppLogger.debug('GEOGLOWS_API', 'Fetching ensemble stats for river $riverId');
 
     try {
       final data = await _getJson(url, riverId);
+      final es = (data['ensemble'] as Map?) ?? const {};
 
-      final times = _asList(data['datetime']);
-      final min = _asList(data['flow_min']);
-      final p25 = _asList(data['flow_25p']);
-      final med = _asList(data['flow_med']);
-      final p75 = _asList(data['flow_75p']);
-      final max = _asList(data['flow_max']);
-      final avg = _asList(data['flow_avg']);
+      final times = _asList(es['datetime']);
+      final min = _asList(es['flow_min']);
+      final p25 = _asList(es['flow_25p']);
+      final med = _asList(es['flow_med']);
+      final p75 = _asList(es['flow_75p']);
+      final max = _asList(es['flow_max']);
+      final avg = _asList(es['flow_avg']);
 
       if (times.isEmpty || med.isEmpty) {
         throw ServiceException.notFound(
@@ -201,13 +203,23 @@ class GeoglowsApiService implements IGeoglowsApiService {
   }
 
   DateTime _generatedAt(Map<String, dynamic> data) {
+    // Proxy shape: forecast_date is YYYYMMDD (the daily UTC model run).
+    final fd = data['forecast_date'];
+    if (fd is String && fd.length == 8) {
+      final y = int.tryParse(fd.substring(0, 4));
+      final mo = int.tryParse(fd.substring(4, 6));
+      final d = int.tryParse(fd.substring(6, 8));
+      if (y != null && mo != null && d != null) return DateTime.utc(y, mo, d);
+    }
+    // REST shape fallback: metadata.gen_date.
     final meta = data['metadata'];
     if (meta is Map && meta['gen_date'] is String) {
       final parsed = DateTime.tryParse(meta['gen_date'] as String);
       if (parsed != null) return parsed;
     }
-    // Fall back to the first valid time if no gen_date is present.
-    final first = _parseTime(_at(_asList(data['datetime']), 0));
+    // Last resort: the first forecast timestamp.
+    final fc = (data['forecast'] as Map?) ?? data;
+    final first = _parseTime(_at(_asList(fc['datetime']), 0));
     return first ?? DateTime.now().toUtc();
   }
 }

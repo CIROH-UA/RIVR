@@ -46,6 +46,16 @@
         "npm --prefix \"$RESOURCE_DIR\" run lint",
         "npm --prefix \"$RESOURCE_DIR\" run build"
       ]
+    },
+    {
+      "source": "functions_geoglows",
+      "codebase": "geoglows",
+      "ignore": [
+        "venv",
+        "__pycache__",
+        ".git",
+        "*.local"
+      ]
     }
   ]
 }

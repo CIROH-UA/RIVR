@@ -19,6 +19,15 @@ class AppConfig {
   // GEOGLOWS v2 API (global river forecasts outside the US, native m³/s)
   static const String geoglowsBaseUrl = 'https://geoglows.ecmwf.int/api/v2';
 
+  // GEOGLOWS forecast proxy — deployed Firebase Cloud Function (v2, python313,
+  // us-west1) that reads GEOGLOWS S3 via the geoglows Python module and returns
+  // slim per-river JSON. Code: functions_geoglows/. (Local dev: swap to
+  // 'http://localhost:8088' and run functions-framework.)
+  static const String geoglowsProxyUrl =
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_forecast';
+  static String getGeoglowsProxyUrl(String riverId) =>
+      '$geoglowsProxyUrl?river_id=$riverId';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =
