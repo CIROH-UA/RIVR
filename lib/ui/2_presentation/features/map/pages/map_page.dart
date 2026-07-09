@@ -9,8 +9,10 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/map_search_widget.da
 // NEW IMPORTS
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_control_buttons.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/base_layer_modal.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/stream_source_modal.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/streams_list_bottom_sheet.dart'; // NEW: Import streams list
 import 'package:rivr/services/4_infrastructure/map/map_controls_service.dart';
+import 'package:rivr/services/4_infrastructure/map/map_preference_service.dart';
 // EXISTING IMPORTS
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_cache_service.dart';
@@ -44,6 +46,9 @@ class MapPageState extends State<MapPage> {
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
 
+  // Which stream networks are drawn (persisted; Auto default until loaded).
+  StreamLayerVisibility _streamLayers = StreamLayerVisibility.defaults;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +60,14 @@ class MapPageState extends State<MapPage> {
     _setupSelectionCallbacks();
     _initializeCacheService();
     _loadSavedCamera();
+    _loadStreamLayerPrefs();
+  }
+
+  /// Load the persisted stream-network toggles for the modal's initial state.
+  /// The authoritative apply-to-map happens in [_loadLayersAfterStyleReady].
+  Future<void> _loadStreamLayerPrefs() async {
+    final layers = await MapPreferenceService.loadStreamLayers();
+    if (mounted) setState(() => _streamLayers = layers);
   }
 
   /// Load last camera position from storage before first build
@@ -136,6 +149,7 @@ class MapPageState extends State<MapPage> {
               margin: const EdgeInsets.only(top: 8, right: 16),
               child: MapControlButtons(
                 onLayersPressed: _showLayersModal,
+                onSourcesPressed: _showStreamSourceModal,
                 onStreamsPressed: _showStreamsModal,
                 onRecenterPressed: _recenterToLocation,
                 on3DTogglePressed: _toggle3DTerrain,
@@ -299,6 +313,15 @@ class MapPageState extends State<MapPage> {
       // Load vector tiles
       await _vectorTilesService.loadRiverReaches();
 
+      // Restore the saved stream-network toggles onto the freshly loaded layers.
+      final streamLayers = await MapPreferenceService.loadStreamLayers();
+      if (mounted) setState(() => _streamLayers = streamLayers);
+      await _vectorTilesService.applyStreamVisibility(
+        nwm: streamLayers.nwm,
+        geoglowsWorld: streamLayers.geoglowsWorld,
+        geoglowsUs: streamLayers.geoglowsUs,
+      );
+
       // Initialize markers on top of vector tiles (correct z-ordering)
       await _markerService.initializeMarkers(_mapboxMap!);
 
@@ -352,6 +375,29 @@ class MapPageState extends State<MapPage> {
         await _controlsService.changeBaseLayer(layer);
         setState(() {}); // Refresh UI to update 3D button state
         AppLogger.debug('MapPage', 'Layer changed to: ${layer.displayName}');
+      },
+    );
+  }
+
+  // Show the stream-source (NWM / GEOGLOWS) toggle modal.
+  void _showStreamSourceModal() {
+    showStreamSourceModal(
+      context,
+      initial: _streamLayers,
+      onChanged: (layers) async {
+        setState(() => _streamLayers = layers);
+        await _vectorTilesService.applyStreamVisibility(
+          nwm: layers.nwm,
+          geoglowsWorld: layers.geoglowsWorld,
+          geoglowsUs: layers.geoglowsUs,
+        );
+        await MapPreferenceService.saveStreamLayers(layers);
+        AppLogger.debug(
+          'MapPage',
+          'Stream layers: NWM=${layers.nwm} '
+              'GEOGLOWS_world=${layers.geoglowsWorld} '
+              'GEOGLOWS_us=${layers.geoglowsUs}',
+        );
       },
     );
   }

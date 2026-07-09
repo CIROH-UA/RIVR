@@ -9,11 +9,45 @@ enum MapPreferenceOption {
   manual, // User manually selected a specific map style
 }
 
+/// Which stream networks are drawn on the map. Auto default = NWM (US) +
+/// GEOGLOWS outside the US; GEOGLOWS inside the US is off (it overlaps NWM and
+/// is meant for Compare/Global use).
+class StreamLayerVisibility {
+  final bool nwm;
+  final bool geoglowsWorld; // GEOGLOWS outside the US
+  final bool geoglowsUs; // GEOGLOWS inside the US
+
+  const StreamLayerVisibility({
+    required this.nwm,
+    required this.geoglowsWorld,
+    required this.geoglowsUs,
+  });
+
+  static const StreamLayerVisibility defaults = StreamLayerVisibility(
+    nwm: true,
+    geoglowsWorld: true,
+    geoglowsUs: false,
+  );
+
+  StreamLayerVisibility copyWith({
+    bool? nwm,
+    bool? geoglowsWorld,
+    bool? geoglowsUs,
+  }) => StreamLayerVisibility(
+    nwm: nwm ?? this.nwm,
+    geoglowsWorld: geoglowsWorld ?? this.geoglowsWorld,
+    geoglowsUs: geoglowsUs ?? this.geoglowsUs,
+  );
+}
+
 /// Service for managing map base layer preferences
 /// Manages map base layer preferences
 class MapPreferenceService {
   static const String _mapPreferenceKey = 'map_preference_option';
   static const String _mapBaseLayerKey = 'map_base_layer';
+  static const String _nwmVisibleKey = 'stream_layer_nwm';
+  static const String _geoglowsWorldVisibleKey = 'stream_layer_geoglows_world';
+  static const String _geoglowsUsVisibleKey = 'stream_layer_geoglows_us';
 
   /// Load map preference from storage
   static Future<MapPreferenceOption> loadMapPreference() async {
@@ -91,10 +125,35 @@ class MapPreferenceService {
     return preference == MapPreferenceOption.auto;
   }
 
+  /// Load which stream networks should be drawn (defaults if never set).
+  static Future<StreamLayerVisibility> loadStreamLayers() async {
+    final prefs = await SharedPreferences.getInstance();
+    return StreamLayerVisibility(
+      nwm: prefs.getBool(_nwmVisibleKey) ?? StreamLayerVisibility.defaults.nwm,
+      geoglowsWorld:
+          prefs.getBool(_geoglowsWorldVisibleKey) ??
+          StreamLayerVisibility.defaults.geoglowsWorld,
+      geoglowsUs:
+          prefs.getBool(_geoglowsUsVisibleKey) ??
+          StreamLayerVisibility.defaults.geoglowsUs,
+    );
+  }
+
+  /// Persist which stream networks should be drawn.
+  static Future<void> saveStreamLayers(StreamLayerVisibility layers) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_nwmVisibleKey, layers.nwm);
+    await prefs.setBool(_geoglowsWorldVisibleKey, layers.geoglowsWorld);
+    await prefs.setBool(_geoglowsUsVisibleKey, layers.geoglowsUs);
+  }
+
   /// Reset all map preferences to defaults
   static Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_mapPreferenceKey);
     await prefs.remove(_mapBaseLayerKey);
+    await prefs.remove(_nwmVisibleKey);
+    await prefs.remove(_geoglowsWorldVisibleKey);
+    await prefs.remove(_geoglowsUsVisibleKey);
   }
 }
