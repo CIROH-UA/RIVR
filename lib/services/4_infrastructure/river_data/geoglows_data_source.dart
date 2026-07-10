@@ -1,6 +1,5 @@
 // lib/services/4_infrastructure/river_data/geoglows_data_source.dart
 
-import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/publish_schedule.dart';
@@ -8,6 +7,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 
 /// [IRiverDataSource] for GEOGLOWS (global, non-US rivers). A thin adapter over
 /// the existing [IGeoglowsApiService] proxy client. GEOGLOWS publishes once a
@@ -50,7 +50,7 @@ class GeoglowsDataSource implements IRiverDataSource {
       case ForecastProduct.geoglowsForecast:
         final forecast = await _api.fetchForecast(key.reachId);
         return SourceFetchResult(
-          payload: _forecastToJson(forecast),
+          payload: GeoglowsForecastPayload.encode(forecast),
           // The API converted to the current unit; tag with the canonical token
           // (CFS/CMS) so read-time conversion knows what it holds.
           unit: _unitService.currentFlowUnit,
@@ -59,18 +59,4 @@ class GeoglowsDataSource implements IRiverDataSource {
         throw ArgumentError('GEOGLOWS does not support ${key.product}');
     }
   }
-
-  Map<String, dynamic> _forecastToJson(GeoglowsForecast fc) => {
-    'riverId': fc.riverId,
-    'generatedAt': fc.generatedAt.toIso8601String(),
-    'points': [
-      for (final p in fc.points)
-        {
-          't': p.validTime.toIso8601String(),
-          'median': p.median,
-          'lower': p.lower,
-          'upper': p.upper,
-        },
-    ],
-  };
 }

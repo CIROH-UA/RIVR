@@ -4,7 +4,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
-import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/ui/1_state/features/forecast/geoglows_forecast_provider.dart';
 
 /// Minimal forecast page for GEOGLOWS (global, non-US) rivers.
@@ -21,8 +22,10 @@ class GeoglowsOverviewPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<GeoglowsForecastProvider>(
       create: (_) =>
-          GeoglowsForecastProvider(GetIt.instance<IGeoglowsApiService>())
-            ..load(reachId),
+          GeoglowsForecastProvider(
+            GetIt.instance<IRiverDataRepository>(),
+            GetIt.instance<IFlowUnitPreferenceService>(),
+          )..load(reachId),
       child: CupertinoPageScaffold(
         navigationBar: const CupertinoNavigationBar(
           middle: Text('Forecast'),

@@ -4,7 +4,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
@@ -537,9 +541,21 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// `Stream <id>`. Flood classification for GEOGLOWS is not wired yet.
   Future<void> _loadGeoglowsDetails() async {
     try {
-      final forecast = await GetIt.I<IGeoglowsApiService>()
-          .fetchForecast(widget.selectedReach.reachId);
+      final entry = await GetIt.I<IRiverDataRepository>().read(
+        RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: widget.selectedReach.reachId,
+          product: ForecastProduct.geoglowsForecast,
+        ),
+      );
       if (_isCancelled || !mounted) return;
+      if (entry == null) {
+        throw Exception('No GEOGLOWS forecast available for this river.');
+      }
+      final forecast = GeoglowsForecastPayload.decode(
+        entry,
+        GetIt.I<IFlowUnitPreferenceService>(),
+      );
       setState(() {
         _riverName = null;
         _formattedLocation = '';
