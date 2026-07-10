@@ -109,6 +109,9 @@ def _resolve(river_id: int) -> str:
     region="us-west1",  # next to the GEOGLOWS S3 buckets (us-west-2) to cut read latency
     memory=options.MemoryOption.GB_1,
     timeout_sec=120,
+    # min_instances=0 (scale to zero) — no idle cost. First tap after the
+    # function sleeps eats a ~10-30s cold start (heavy geoglows/xarray/zarr
+    # imports); the app-side timeout is set generously to absorb it.
 )
 def geoglows_forecast(req: https_fn.Request) -> https_fn.Response:
     rid = req.args.get("river_id")

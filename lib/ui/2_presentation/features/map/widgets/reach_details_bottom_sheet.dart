@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
@@ -489,6 +490,13 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       'Loading details for: ${widget.selectedReach.reachId}',
     );
 
+    // GEOGLOWS reaches are not on the NOAA/NWM API — load their current flow
+    // from the GEOGLOWS proxy instead of hitting NOAA (which 500s on a LINKNO).
+    if (widget.selectedReach.source.isGeoglows) {
+      await _loadGeoglowsDetails();
+      return;
+    }
+
     final result = await _getReachDetails(widget.selectedReach.reachId);
 
     if (_isCancelled || !mounted) return;
@@ -522,6 +530,39 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       'ReachDetailsSheet',
       'Details loaded, flow: $_currentFlow, category: $_flowCategory',
     );
+  }
+
+  /// GEOGLOWS reach preview: current flow from the proxy (median of the latest
+  /// forecast). GEOGLOWS streams are unnamed, so displayName falls back to
+  /// `Stream <id>`. Flood classification for GEOGLOWS is not wired yet.
+  Future<void> _loadGeoglowsDetails() async {
+    try {
+      final forecast = await GetIt.I<IGeoglowsApiService>()
+          .fetchForecast(widget.selectedReach.reachId);
+      if (_isCancelled || !mounted) return;
+      setState(() {
+        _riverName = null;
+        _formattedLocation = '';
+        _currentFlow = forecast.currentMedian;
+        _flowCategory = 'Normal';
+        _latitude = widget.selectedReach.latitude;
+        _longitude = widget.selectedReach.longitude;
+        _isLoadingFlow = false;
+        _isLoadingClassification = false;
+      });
+      AppLogger.info(
+        'ReachDetailsSheet',
+        'GEOGLOWS details loaded, flow: $_currentFlow',
+      );
+    } catch (e) {
+      if (_isCancelled || !mounted) return;
+      AppLogger.error('ReachDetailsSheet', 'Error loading GEOGLOWS details', e);
+      setState(() {
+        _errorMessage = 'Could not load GEOGLOWS forecast for this river.';
+        _isLoadingFlow = false;
+        _isLoadingClassification = false;
+      });
+    }
   }
 
   Color _getFlowCategoryColor() {

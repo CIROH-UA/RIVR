@@ -25,7 +25,10 @@ class GeoglowsApiService implements IGeoglowsApiService {
   })  : _client = client ?? http.Client(),
         _unitService = unitService;
 
-  static const Duration _timeout = Duration(seconds: 30);
+  // Generous: the GEOGLOWS proxy scales to zero, so the first tap after it
+  // sleeps eats a ~10-30s cold start on top of the ~16s S3 read. Cached/warm
+  // taps return in ~2-3s. Proxy's own timeout_sec is 120.
+  static const Duration _timeout = Duration(seconds: 90);
   static const _headers = {
     'Content-Type': 'application/json',
     'User-Agent': 'RIVR/1.0',
