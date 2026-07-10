@@ -14,6 +14,12 @@ class ReachDetailsData {
   final double? longitude;
   final bool isClassificationAvailable;
 
+  /// Raw return-period thresholds (return year -> flow, in native units), when
+  /// available. The map bottom sheet uses the pre-computed [flowCategory]; the
+  /// favorites cards need these raw thresholds to compute their own flood
+  /// category + risk video.
+  final Map<int, double>? returnPeriods;
+
   const ReachDetailsData({
     this.riverName,
     this.formattedLocation,
@@ -22,6 +28,7 @@ class ReachDetailsData {
     this.latitude,
     this.longitude,
     this.isClassificationAvailable = false,
+    this.returnPeriods,
   });
 }
 

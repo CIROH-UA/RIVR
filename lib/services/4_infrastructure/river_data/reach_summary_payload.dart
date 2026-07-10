@@ -23,6 +23,9 @@ class ReachSummaryPayload {
     'latitude': d.latitude,
     'longitude': d.longitude,
     'isClassificationAvailable': d.isClassificationAvailable,
+    // Return-period years -> flow; keys as strings for JSON. Stored raw (native
+    // units) — consumers convert them themselves alongside the flow.
+    'returnPeriods': d.returnPeriods?.map((k, v) => MapEntry(k.toString(), v)),
   };
 
   static ReachDetailsData decode(
@@ -39,6 +42,14 @@ class ReachSummaryPayload {
             unitService.currentFlowUnit,
           );
 
+    final rawPeriods = payload['returnPeriods'] as Map?;
+    final returnPeriods = rawPeriods == null
+        ? null
+        : {
+            for (final entry in rawPeriods.entries)
+              int.parse(entry.key as String): (entry.value as num).toDouble(),
+          };
+
     return ReachDetailsData(
       riverName: payload['riverName'] as String?,
       formattedLocation: payload['formattedLocation'] as String?,
@@ -48,6 +59,7 @@ class ReachSummaryPayload {
       longitude: (payload['longitude'] as num?)?.toDouble(),
       isClassificationAvailable:
           payload['isClassificationAvailable'] as bool? ?? false,
+      returnPeriods: returnPeriods,
     );
   }
 }

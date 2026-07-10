@@ -46,6 +46,7 @@ void main() {
     latitude: 40.29,
     longitude: -111.82,
     isClassificationAvailable: true,
+    returnPeriods: {2: 1000.0, 5: 2000.0, 10: 3000.0},
   );
 
   test('encode then decode round-trips with an identity conversion', () {
@@ -60,6 +61,8 @@ void main() {
     expect(decoded.flowCategory, 'Normal');
     expect(decoded.latitude, 40.29);
     expect(decoded.isClassificationAvailable, isTrue);
+    // Return periods round-trip (int keys) and are NOT unit-converted here.
+    expect(decoded.returnPeriods, {2: 1000.0, 5: 2000.0, 10: 3000.0});
   });
 
   test('decode converts current flow from the stored unit to the current unit',

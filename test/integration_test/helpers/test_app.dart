@@ -26,7 +26,12 @@ import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
+import 'dart:io';
 import 'package:rivr/services/2_coordinators/features/favorites/favorites_repository_impl.dart';
+import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
+import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
 import 'package:rivr/services/1_contracts/features/favorites/i_favorites_repository.dart';
 import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
@@ -253,19 +258,24 @@ AuthProvider createAuthProvider(TestServices services) {
 }
 
 FavoritesProvider createFavoritesProvider(TestServices services) {
-  final favoritesRepo = FavoritesRepositoryImpl(
-    favoritesService: services.favorites,
-    forecastService: services.forecast,
-    cacheService: services.reachCache,
-    unitService: services.flowUnit,
-    apiService: services.noaaApi,
+  final repository = RiverDataRepository(
+    cache: RiverDataCache(
+      cacheDirProvider: () => Directory.systemTemp.createTemp('rivr_it_cache'),
+    ),
+    registry: SourceRegistry([
+      NwmDataSource(
+        api: services.noaaApi,
+        forecastService: services.forecast,
+        unitService: services.flowUnit,
+      ),
+    ]),
   );
   return FavoritesProvider(
     favoritesService: services.favorites,
     forecastService: services.forecast,
     reachCacheService: services.reachCache,
     unitService: services.flowUnit,
-    getFavoriteFlowUseCase: GetFavoriteFlowUseCase(favoritesRepo),
+    repository: repository,
   );
 }
 
