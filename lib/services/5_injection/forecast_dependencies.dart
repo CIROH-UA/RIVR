@@ -17,6 +17,9 @@ import 'package:rivr/models/2_usecases/features/forecast/refresh_forecast_usecas
 import 'package:rivr/models/2_usecases/features/forecast/get_reach_details_usecase.dart';
 import 'package:rivr/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart';
 import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
 
 void setupForecastDependencies() {
   final sl = GetIt.instance;
@@ -45,6 +48,22 @@ void setupForecastDependencies() {
   // Repository
   sl.registerLazySingleton<IForecastRepository>(
     () => ForecastRepositoryImpl(forecastService: sl<IForecastService>()),
+  );
+
+  // Pluggable data sources behind one registry (ADR 0001). Adding a source =
+  // one entry here + an IRiverDataSource impl. Consumed by the RiverDataRepository
+  // (next step); not yet wired to the UI.
+  sl.registerLazySingleton<SourceRegistry>(
+    () => SourceRegistry([
+      NwmDataSource(
+        api: sl<INoaaApiService>(),
+        unitService: sl<IFlowUnitPreferenceService>(),
+      ),
+      GeoglowsDataSource(
+        api: sl<IGeoglowsApiService>(),
+        unitService: sl<IFlowUnitPreferenceService>(),
+      ),
+    ]),
   );
 
   // Forecast use cases

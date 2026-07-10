@@ -20,18 +20,19 @@ void main() {
         fetchedAt: DateTime.utc(2026, 7, 10, 0, 30),
         validUntil: DateTime.utc(2026, 7, 11, 0, 0),
       ),
+      unit: 'CMS',
       payload: const {
         'flow_median': [1.2, 3.4],
-        'unit': 'CMS',
       },
     );
 
-    test('round-trips through JSON preserving key, window, and payload', () {
+    test('round-trips through JSON preserving key, window, unit, and payload',
+        () {
       final restored = RiverDataEntry.fromJson(entry.toJson());
       expect(restored.key, key);
       expect(restored.window.fetchedAt, entry.window.fetchedAt);
       expect(restored.window.validUntil, entry.window.validUntil);
-      expect(restored.payload['unit'], 'CMS');
+      expect(restored.unit, 'CMS');
       expect(restored.payload['flow_median'], [1.2, 3.4]);
     });
 

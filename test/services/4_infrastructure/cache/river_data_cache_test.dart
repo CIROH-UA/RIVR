@@ -25,7 +25,8 @@ void main() {
       fetchedAt: DateTime.utc(2026, 7, 10, 12, 0),
       validUntil: DateTime.utc(2026, 7, 10, 13, 0),
     ),
-    payload: {'currentFlow': value, 'unit': 'CMS'},
+    unit: 'CMS',
+    payload: {'currentFlow': value},
   );
 
   RiverDataCache newCache() =>
