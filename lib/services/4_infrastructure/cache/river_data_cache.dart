@@ -29,13 +29,18 @@ class RiverDataCache implements IRiverDataCache {
   final Map<String, RiverDataEntry> _memory = {};
   final Map<String, ValueNotifier<RiverDataEntry?>> _notifiers = {};
 
+  /// Cached so init runs at most once even under concurrent first calls.
+  Future<void>? _initFuture;
+
   static Future<Directory> _defaultCacheDir() async {
     final base = await getApplicationCacheDirectory();
     return Directory('${base.path}/$_cacheDirName');
   }
 
   @override
-  Future<void> initialize() async {
+  Future<void> initialize() => _initFuture ??= _init();
+
+  Future<void> _init() async {
     try {
       final dir = await _cacheDirProvider();
       if (!await dir.exists()) {
@@ -44,12 +49,15 @@ class RiverDataCache implements IRiverDataCache {
       _dir = dir;
       AppLogger.info(_tag, 'Initialized at ${dir.path}');
     } catch (e) {
+      // Disk unavailable (e.g. in tests) — the cache still works in memory.
       AppLogger.error(_tag, 'Error initializing', e);
     }
   }
 
   @override
   bool get isReady => _dir != null;
+
+  Future<void> _ensureInitialized() => initialize();
 
   File _fileFor(RiverDataKey key) =>
       File('${_dir!.path}/${key.storageKey}.json');
@@ -59,6 +67,7 @@ class RiverDataCache implements IRiverDataCache {
     final cached = _memory[key.storageKey];
     if (cached != null) return cached;
 
+    await _ensureInitialized();
     if (_dir == null) return null;
     try {
       final file = _fileFor(key);
@@ -79,6 +88,7 @@ class RiverDataCache implements IRiverDataCache {
     _memory[entry.key.storageKey] = entry;
     _notifierFor(entry.key).value = entry;
 
+    await _ensureInitialized();
     if (_dir == null) return; // memory still holds it; disk is best-effort
     try {
       await _fileFor(entry.key).writeAsString(jsonEncode(entry.toJson()));
@@ -102,6 +112,7 @@ class RiverDataCache implements IRiverDataCache {
     _memory.remove(key.storageKey);
     _notifiers[key.storageKey]?.value = null;
 
+    await _ensureInitialized();
     if (_dir == null) return;
     try {
       final file = _fileFor(key);
@@ -118,6 +129,7 @@ class RiverDataCache implements IRiverDataCache {
       notifier.value = null;
     }
 
+    await _ensureInitialized();
     if (_dir == null) return;
     try {
       if (await _dir!.exists()) {

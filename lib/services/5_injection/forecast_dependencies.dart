@@ -20,6 +20,10 @@ import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_us
 import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
+import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
 
 void setupForecastDependencies() {
   final sl = GetIt.instance;
@@ -64,6 +68,17 @@ void setupForecastDependencies() {
         unitService: sl<IFlowUnitPreferenceService>(),
       ),
     ]),
+  );
+
+  // Shared cache + single-source-of-truth repository (ADR 0001). Self-initializes
+  // its disk store on first use. Not yet consumed by the UI (step 5 migrates
+  // surfaces onto it).
+  sl.registerLazySingleton<IRiverDataCache>(() => RiverDataCache());
+  sl.registerLazySingleton<IRiverDataRepository>(
+    () => RiverDataRepository(
+      cache: sl<IRiverDataCache>(),
+      registry: sl<SourceRegistry>(),
+    ),
   );
 
   // Forecast use cases
