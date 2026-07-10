@@ -64,9 +64,12 @@ class MapReachSelectionService {
       'streams2-order-1-2', // Small streams (NWM)
       'streams2-order-3-4', // Medium streams (NWM)
       'streams2-order-5-plus', // Large rivers (NWM)
-      'geoglows-order-1-2', // GEOGLOWS (global)
+      'geoglows-order-1-2', // GEOGLOWS outside the US
       'geoglows-order-3-4',
       'geoglows-order-5-plus',
+      'geoglows-us-order-1-2', // GEOGLOWS inside the US (Compare/Global modes)
+      'geoglows-us-order-3-4',
+      'geoglows-us-order-5-plus',
     ];
 
     final width = screenWidth;
@@ -391,6 +394,9 @@ class MapReachSelectionService {
         'geoglows-order-1-2',
         'geoglows-order-3-4',
         'geoglows-order-5-plus',
+        'geoglows-us-order-1-2',
+        'geoglows-us-order-3-4',
+        'geoglows-us-order-5-plus',
       ];
 
       final List<QueriedRenderedFeature?> queryResult = await _mapboxMap!
