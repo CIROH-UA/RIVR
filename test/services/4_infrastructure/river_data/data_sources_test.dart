@@ -7,6 +7,7 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
@@ -34,6 +35,27 @@ class _FakeNoaa implements INoaaApiService {
   Future<List<dynamic>> fetchReturnPeriods(String reachId) async {
     calls.add('rp:$reachId');
     return [2, 5, 10];
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeForecast implements IForecastService {
+  int detailCalls = 0;
+
+  @override
+  Future<ReachDetailsData> loadReachDetailsData(String reachId) async {
+    detailCalls++;
+    return const ReachDetailsData(
+      riverName: 'Test River',
+      formattedLocation: 'Somewhere, UT',
+      currentFlow: 100.0,
+      flowCategory: 'Normal',
+      latitude: 40.0,
+      longitude: -111.0,
+      isClassificationAvailable: true,
+    );
   }
 
   @override
@@ -83,11 +105,17 @@ class _FakeUnit implements IFlowUnitPreferenceService {
 void main() {
   group('NwmDataSource', () {
     late _FakeNoaa api;
+    late _FakeForecast forecast;
     late NwmDataSource nwm;
 
     setUp(() {
       api = _FakeNoaa();
-      nwm = NwmDataSource(api: api, unitService: _FakeUnit('CFS'));
+      forecast = _FakeForecast();
+      nwm = NwmDataSource(
+        api: api,
+        forecastService: forecast,
+        unitService: _FakeUnit('CFS'),
+      );
     });
 
     test('identifies as NWM and supports the NWM products', () {
@@ -159,6 +187,20 @@ void main() {
         product: ForecastProduct.returnPeriods,
       ));
       expect(rp.payload['returnPeriods'], [2, 5, 10]);
+    });
+
+    test('reachSummary delegates to ForecastService and tags the unit',
+        () async {
+      final result = await nwm.fetch(const RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '23021904',
+        product: ForecastProduct.reachSummary,
+      ));
+      expect(forecast.detailCalls, 1);
+      expect(result.unit, 'CFS');
+      expect(result.payload['riverName'], 'Test River');
+      expect(result.payload['currentFlow'], 100.0);
+      expect(result.payload['flowCategory'], 'Normal');
     });
 
     test('fetch throws for an unsupported product', () {

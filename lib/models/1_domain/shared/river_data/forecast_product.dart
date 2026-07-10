@@ -16,6 +16,11 @@ enum ForecastProduct {
   /// NWM analysis-assimilation — current conditions, hourly.
   analysisAssimilation,
 
+  /// NWM map/preview summary: current flow + reach name + flood category, as
+  /// shown in the map bottom sheet and favorites cards. Assembled by
+  /// ForecastService; refreshes hourly with the current flow.
+  reachSummary,
+
   /// NWM short-range forecast (~18 h, hourly).
   shortRange,
 

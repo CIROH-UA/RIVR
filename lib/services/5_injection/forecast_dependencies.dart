@@ -61,6 +61,7 @@ void setupForecastDependencies() {
     () => SourceRegistry([
       NwmDataSource(
         api: sl<INoaaApiService>(),
+        forecastService: sl<IForecastService>(),
         unitService: sl<IFlowUnitPreferenceService>(),
       ),
       GeoglowsDataSource(

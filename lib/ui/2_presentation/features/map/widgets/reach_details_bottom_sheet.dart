@@ -10,7 +10,8 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
-import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart';
+import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_action_buttons.dart';
 
@@ -36,8 +37,6 @@ class ReachDetailsBottomSheet extends StatefulWidget {
 }
 
 class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
-  final GetReachDetailsForMapUseCase _getReachDetails =
-      GetIt.I<GetReachDetailsForMapUseCase>();
 
   // Progressive loading states
   bool _isLoadingFlow = false;
@@ -501,24 +500,34 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       return;
     }
 
-    final result = await _getReachDetails(widget.selectedReach.reachId);
-
-    if (_isCancelled || !mounted) return;
-
-    if (result.isFailure) {
-      AppLogger.error(
-        'ReachDetailsSheet',
-        'Error loading details: ${result.exception?.technicalDetail}',
+    ReachDetailsData details;
+    try {
+      final entry = await GetIt.I<IRiverDataRepository>().read(
+        RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: widget.selectedReach.reachId,
+          product: ForecastProduct.reachSummary,
+        ),
       );
+      if (_isCancelled || !mounted) return;
+      if (entry == null) {
+        throw Exception('No reach details available.');
+      }
+      details = ReachSummaryPayload.decode(
+        entry,
+        GetIt.I<IFlowUnitPreferenceService>(),
+      );
+    } catch (e) {
+      if (_isCancelled || !mounted) return;
+      AppLogger.error('ReachDetailsSheet', 'Error loading details', e);
       setState(() {
-        _errorMessage = result.errorMessage ?? 'Failed to load reach details';
+        _errorMessage = 'Failed to load reach details';
         _isLoadingFlow = false;
         _isLoadingClassification = false;
       });
       return;
     }
 
-    final details = result.data;
     setState(() {
       _riverName = details.riverName;
       _formattedLocation = details.formattedLocation;

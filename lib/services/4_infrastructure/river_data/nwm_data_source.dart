@@ -5,21 +5,28 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/publish_schedule.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 
 /// [IRiverDataSource] for the NOAA National Water Model (US). A thin adapter
-/// over the existing [INoaaApiService]: it maps [ForecastProduct]s to NWM API
-/// calls and declares NWM's publish cadence. Payloads are tagged with the unit
-/// they were fetched in (the repository converts at read).
+/// over the existing NWM stack: raw forecast products map to [INoaaApiService]
+/// calls, while the composite `reachSummary` (current flow + name + category)
+/// delegates to [IForecastService] to reuse its phased loading + classification
+/// rather than re-deriving it. Payloads are tagged with the unit they were
+/// fetched in (the repository converts at read).
 class NwmDataSource implements IRiverDataSource {
   NwmDataSource({
     required INoaaApiService api,
+    required IForecastService forecastService,
     required IFlowUnitPreferenceService unitService,
   }) : _api = api,
+       _forecastService = forecastService,
        _unitService = unitService;
 
   final INoaaApiService _api;
+  final IForecastService _forecastService;
   final IFlowUnitPreferenceService _unitService;
 
   /// Small slack so we don't invalidate the instant a cycle rolls over and
@@ -32,6 +39,7 @@ class NwmDataSource implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => const {
     ForecastProduct.analysisAssimilation,
+    ForecastProduct.reachSummary,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
     ForecastProduct.longRange,
@@ -42,8 +50,9 @@ class NwmDataSource implements IRiverDataSource {
   DateTime validUntil(ForecastProduct product, DateTime now) {
     switch (product) {
       case ForecastProduct.analysisAssimilation:
+      case ForecastProduct.reachSummary:
       case ForecastProduct.shortRange:
-        // Hourly.
+        // Hourly (driven by current flow).
         return PublishSchedule.nextTopOfHour(now).add(_skew);
       case ForecastProduct.mediumRange:
       case ForecastProduct.longRange:
@@ -63,6 +72,15 @@ class NwmDataSource implements IRiverDataSource {
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     final unit = _unitService.currentFlowUnit;
     switch (key.product) {
+      case ForecastProduct.reachSummary:
+        // Reuse ForecastService's phased load + classification.
+        final details = await _forecastService.loadReachDetailsData(
+          key.reachId,
+        );
+        return SourceFetchResult(
+          payload: ReachSummaryPayload.encode(details),
+          unit: unit,
+        );
       case ForecastProduct.analysisAssimilation:
         return SourceFetchResult(
           payload: await _api.fetchCurrentFlowOnly(key.reachId),
