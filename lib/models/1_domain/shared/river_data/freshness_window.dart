@@ -1,4 +1,4 @@
-// lib/models/1_domain/shared/river_data/cache_freshness.dart
+// lib/models/1_domain/shared/river_data/freshness_window.dart
 
 /// The freshness window of a cached river-data entry (ADR 0001, decision D3:
 /// publish-aligned TTL + stale-while-revalidate).
@@ -15,11 +15,15 @@
 ///
 /// Times are stored and compared in UTC to stay correct across the GEOGLOWS
 /// 00Z boundary and NWM's server timezone / DST.
-class CacheFreshness {
+///
+/// Named [FreshnessWindow] (not `CacheFreshness`) to avoid clashing with the
+/// existing `enum CacheFreshness { fresh, stale }` in the cache contracts,
+/// which is the *result* of a check; this is the *window* that decides it.
+class FreshnessWindow {
   final DateTime fetchedAt;
   final DateTime validUntil;
 
-  CacheFreshness({required DateTime fetchedAt, required DateTime validUntil})
+  FreshnessWindow({required DateTime fetchedAt, required DateTime validUntil})
     : fetchedAt = fetchedAt.toUtc(),
       validUntil = validUntil.toUtc();
 
@@ -37,13 +41,13 @@ class CacheFreshness {
     'validUntil': validUntil.toIso8601String(),
   };
 
-  factory CacheFreshness.fromJson(Map<String, dynamic> json) => CacheFreshness(
+  factory FreshnessWindow.fromJson(Map<String, dynamic> json) => FreshnessWindow(
     fetchedAt: DateTime.parse(json['fetchedAt'] as String),
     validUntil: DateTime.parse(json['validUntil'] as String),
   );
 
   @override
   String toString() =>
-      'CacheFreshness(fetchedAt: ${fetchedAt.toIso8601String()}, '
+      'FreshnessWindow(fetchedAt: ${fetchedAt.toIso8601String()}, '
       'validUntil: ${validUntil.toIso8601String()})';
 }
