@@ -33,7 +33,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       await Firebase.initializeApp();
     } else {
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
     }
   }
 
@@ -60,11 +62,15 @@ Future<void> main() async {
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     await Firebase.initializeApp();
   } else {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
   }
 
   // Disable Crashlytics data collection in debug to avoid polluting the dashboard
-  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);
+  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+    !kDebugMode,
+  );
 
   // Register all services with dependency injection
   setupDependencies();

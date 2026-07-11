@@ -26,7 +26,18 @@ import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
+import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:rivr/ui/1_state/shared/connectivity_provider.dart';
+// ignore: depend_on_referenced_packages — transitive via connectivity_plus, test-only.
+import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
+// ignore: depend_on_referenced_packages — transitive, test-only.
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:rivr/services/2_coordinators/features/favorites/favorites_repository_impl.dart';
+import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
+import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
 import 'package:rivr/services/1_contracts/features/favorites/i_favorites_repository.dart';
 import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
@@ -92,7 +103,11 @@ class TestServices {
         userSettings = userSettings ?? MockUserSettingsService(),
         backgroundImage = backgroundImage ?? MockBackgroundImageService(),
         flowUnit = flowUnit ?? MockFlowUnitPreferenceService(),
-        forecastCache = forecastCache ?? MockForecastCacheService();
+        forecastCache = forecastCache ?? MockForecastCacheService() {
+    // Let the FCM mock persist the notifications flag to user settings on
+    // enable/disable, mirroring the real service's Firestore write.
+    this.fcm.userSettings = this.userSettings;
+  }
 
   /// Register all mocks in the GetIt service locator.
   void registerAll() {
@@ -253,19 +268,24 @@ AuthProvider createAuthProvider(TestServices services) {
 }
 
 FavoritesProvider createFavoritesProvider(TestServices services) {
-  final favoritesRepo = FavoritesRepositoryImpl(
-    favoritesService: services.favorites,
-    forecastService: services.forecast,
-    cacheService: services.reachCache,
-    unitService: services.flowUnit,
-    apiService: services.noaaApi,
+  final repository = RiverDataRepository(
+    cache: RiverDataCache(
+      cacheDirProvider: () => Directory.systemTemp.createTemp('rivr_it_cache'),
+    ),
+    registry: SourceRegistry([
+      NwmDataSource(
+        api: services.noaaApi,
+        forecastService: services.forecast,
+        unitService: services.flowUnit,
+      ),
+    ]),
   );
   return FavoritesProvider(
     favoritesService: services.favorites,
     forecastService: services.forecast,
     reachCacheService: services.reachCache,
     unitService: services.flowUnit,
-    getFavoriteFlowUseCase: GetFavoriteFlowUseCase(favoritesRepo),
+    repository: repository,
   );
 }
 
@@ -278,6 +298,19 @@ ReachDataProvider createReachDataProvider(TestServices services) {
 /// [home] is the initial widget to display.
 /// [services] provides the mock instances; call [TestServices.registerAll]
 /// before building the app.
+/// Fake connectivity_plus platform that always reports "online", so tests don't
+/// hit the real platform channel (MissingPluginException under the test harness).
+class _FakeConnectivityPlatform extends ConnectivityPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<List<ConnectivityResult>> checkConnectivity() async =>
+      [ConnectivityResult.wifi];
+
+  @override
+  Stream<List<ConnectivityResult>> get onConnectivityChanged =>
+      Stream.value([ConnectivityResult.wifi]);
+}
+
 Widget buildTestApp({
   required Widget home,
   required TestServices services,
@@ -285,6 +318,19 @@ Widget buildTestApp({
   FavoritesProvider? favoritesProvider,
   ReachDataProvider? reachDataProvider,
 }) {
+  // ConnectivityProvider (below) drives connectivity_plus, whose platform
+  // channel isn't available under the test harness. Swap in a fake platform
+  // that always reports "online" so it doesn't throw MissingPluginException.
+  ConnectivityPlatform.instance = _FakeConnectivityPlatform();
+
+  // Mark the coach-mark tours as already seen. Otherwise FavoritesPage attaches
+  // its tour GlobalKeys to widgets AND the coach-mark overlay reuses the same
+  // keys -> "Multiple widgets used the same GlobalKey" during navigation.
+  SharedPreferences.setMockInitialValues({
+    'has_seen_favorites_tour': true,
+    'has_seen_search_tip': true,
+  });
+
   final auth = authProvider ?? createAuthProvider(services);
   final favs = favoritesProvider ?? createFavoritesProvider(services);
   final reach = reachDataProvider ?? createReachDataProvider(services);
@@ -294,10 +340,17 @@ Widget buildTestApp({
       ChangeNotifierProvider<AuthProvider>.value(value: auth),
       ChangeNotifierProvider<FavoritesProvider>.value(value: favs),
       ChangeNotifierProvider<ReachDataProvider>.value(value: reach),
+      // The widget tree consumes ConnectivityProvider (as main.dart provides
+      // it); without this the flows throw ProviderNotFoundException.
+      ChangeNotifierProvider<ConnectivityProvider>(
+        create: (_) => ConnectivityProvider(),
+      ),
     ],
     child: CupertinoApp(
       debugShowCheckedModeBanner: false,
+      routes: AppRouter.namedRoutes,
       onGenerateRoute: AppRouter.onGenerateRoute,
+      onUnknownRoute: AppRouter.onUnknownRoute,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

@@ -16,6 +16,18 @@ class AppConfig {
       'https://nwm-api.ciroh.org//return-period';
   static const String nwmApiKey = 'INSERT-THE-KEY';
 
+  // GEOGLOWS v2 API (global river forecasts outside the US, native m³/s)
+  static const String geoglowsBaseUrl = 'https://geoglows.ecmwf.int/api/v2';
+
+  // GEOGLOWS forecast proxy — deployed Firebase Cloud Function (v2, python313,
+  // us-west1) that reads GEOGLOWS S3 via the geoglows Python module and returns
+  // slim per-river JSON. Code: functions_geoglows/. (Local dev: swap to
+  // 'http://localhost:8088' and run functions-framework.)
+  static const String geoglowsProxyUrl =
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_forecast';
+  static String getGeoglowsProxyUrl(String riverId) =>
+      '$geoglowsProxyUrl?river_id=$riverId';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =
@@ -28,8 +40,17 @@ class AppConfig {
   static const String vectorSourceLayer = 'channels';
   static const String vectorLayerId = 'streams2-layer';
 
+  // GEOGLOWS stream tileset (global, non-US). NOTE: currently the Rhône TEST
+  // tileset — swap for the production global (VPU-bundled) tileset when ready.
+  // Layer ids must keep the `geoglows` prefix so tap source-routing works.
+  static const String geoglowsTilesetId =
+      'byu-hydroinformatics.geoglows-rhone-test';
+  static const String geoglowsSourceId = 'geoglows-source';
+  static const String geoglowsSourceLayer = 'channels';
+
   // Helper methods for Vector Tiles Infrastructure
   static String getVectorTileSourceUrl() => 'mapbox://$vectorTilesetId';
+  static String getGeoglowsTileSourceUrl() => 'mapbox://$geoglowsTilesetId';
 
   // Default Settings
   static const String defaultDisplayUnit = 'cfs';
@@ -71,6 +92,21 @@ class AppConfig {
 
   static String getReturnPeriodUrl(String reachId) =>
       '$nwmReturnPeriodUrl?comids=$reachId&key=$nwmApiKey';
+
+  // GEOGLOWS API URLs (riverId = LINKNO from the GEOGLOWS stream network)
+  /// 15-day deterministic forecast: median + uncertainty band (3-hourly).
+  static String getGeoglowsForecastUrl(String riverId) =>
+      '$geoglowsBaseUrl/forecast/$riverId?format=json';
+
+  /// Ensemble statistics: min/25p/median/75p/max/avg + high-res member.
+  static String getGeoglowsForecastStatsUrl(String riverId) =>
+      '$geoglowsBaseUrl/forecaststats/$riverId?format=json';
+
+  /// Return periods (gumbel). NOTE: the REST endpoint currently defaults to a
+  /// `logpearson3` variable that is missing from the dataset; needs the
+  /// distribution passed explicitly (or a CF-proxy fallback) before it works.
+  static String getGeoglowsReturnPeriodsUrl(String riverId) =>
+      '$geoglowsBaseUrl/returnperiods/$riverId?format=json';
 
   /// Check if stream order should be visible at zoom level (performance optimization)
   static bool shouldShowStreamOrder(int streamOrder, double zoom) {

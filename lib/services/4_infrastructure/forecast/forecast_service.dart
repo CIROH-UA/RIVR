@@ -983,26 +983,29 @@ class ForecastService implements IForecastService {
     final overview = await loadOverviewData(reachId);
     final currentFlow = getCurrentFlow(overview);
 
-    String? flowCategory;
-    bool classificationAvailable = false;
-
-    // Step 2: If we already have return periods, classify immediately
-    if (overview.reach.hasReturnPeriods && currentFlow != null) {
-      final currentUnit = _unitService.currentFlowUnit;
-      flowCategory = overview.reach.getFlowCategory(currentFlow, currentUnit, _unitService);
-      classificationAvailable = true;
-    } else if (currentFlow != null) {
-      // Step 3: Load supplementary data for return periods
+    // Step 2: Ensure we have return periods (needed for classification and for
+    // the favorites cards' own flood-risk computation). Load supplementary data
+    // only if the overview didn't already carry them.
+    var reachWithPeriods = overview.reach;
+    if (!reachWithPeriods.hasReturnPeriods) {
       try {
         final enhanced = await loadSupplementaryData(reachId, overview);
-        if (enhanced.reach.hasReturnPeriods) {
-          final currentUnit = _unitService.currentFlowUnit;
-          flowCategory = enhanced.reach.getFlowCategory(currentFlow, currentUnit, _unitService);
-          classificationAvailable = true;
-        }
+        reachWithPeriods = enhanced.reach;
       } catch (e) {
         AppLogger.warning('ForecastService', 'Return periods failed in details load: $e');
       }
+    }
+
+    String? flowCategory;
+    bool classificationAvailable = false;
+    if (reachWithPeriods.hasReturnPeriods && currentFlow != null) {
+      final currentUnit = _unitService.currentFlowUnit;
+      flowCategory = reachWithPeriods.getFlowCategory(
+        currentFlow,
+        currentUnit,
+        _unitService,
+      );
+      classificationAvailable = true;
     }
 
     return ReachDetailsData(
@@ -1013,6 +1016,9 @@ class ForecastService implements IForecastService {
       latitude: overview.reach.latitude,
       longitude: overview.reach.longitude,
       isClassificationAvailable: classificationAvailable,
+      returnPeriods: reachWithPeriods.hasReturnPeriods
+          ? reachWithPeriods.returnPeriods
+          : null,
     );
   }
 }
