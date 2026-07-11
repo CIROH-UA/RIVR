@@ -1,6 +1,6 @@
 # ADR 0001 — River data layer: single source of truth, per‑source caching, and push‑driven freshness
 
-- **Status:** Accepted (2026-07-10)
+- **Status:** Accepted — delivered through Step 5 (2026-07-10); Steps 6–7 parked (see Outcome)
 - **Date:** 2026-07-10
 - **Deciders:** Jerson Garcia (lead)
 - **Supersedes / relates to:** `docs/geoglows-data-architecture.md`, `docs/internal/forecast-latency-plan.md`
@@ -93,6 +93,14 @@ UI (widgets/providers)  ──observe──►  RiverDataRepository  ── SSOT
 FCM data push ("new publish" / "threshold crossed on reach X, flow=Y")
         └─► background handler ─► repository.ingest(payload) ─► cache write ─► notify listeners
 ```
+
+## Outcome (2026-07-10)
+
+**Delivered Steps 1–5** — a single-source-of-truth `RiverDataRepository` (shared cache keyed by `(source, reachId, product)`, per-source registry, publish-aligned TTL + SWR, in-flight dedup, observable fan-out), with the map bottom sheet (NWM + GEOGLOWS), the GEOGLOWS forecast page, and the favorites cards all reading through it. The tap→"See forecast" double-fetch is fixed; unit flips no longer clear caches; a new source is a registry entry. Each step is analyze-clean, unit-tested, and sim-verified. This is a complete, shippable unit.
+
+**Step 6 (push→cache) parked (Jerson, 2026-07-10).** Investigation showed its real value — data staying fresh while the app is *closed* — requires a **home-screen widget (WidgetKit)**, which doesn't exist, and the server's alert payload carries the *max-forecast* flow, not current flow. Since favorites already refresh on open (publish-aligned TTL) and notification-tap navigates to a fresh fetch, wiring push→cache now would only help the rare app-open-during-alert case. Revisit when/if a home-screen widget is planned — that's what unlocks the value. The `ingest()` hook is already built for it.
+
+**Step 7 (unified domain model)** remains future work: retire the `ForecastResponse`/`GeoglowsForecast` fork so the NWM forecast *detail* pages (short/medium/long via `ReachDataProvider`/`ForecastService`) also move onto the repository. Not required for the Step 1–5 win.
 
 ## Development plan (logical, dependency‑ordered)
 
