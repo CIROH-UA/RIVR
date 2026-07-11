@@ -18,7 +18,11 @@ import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_u
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/remove_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usecase.dart';
-import 'package:rivr/models/2_usecases/features/favorites/get_favorite_flow_usecase.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
@@ -28,7 +32,7 @@ class FavoritesProvider with ChangeNotifier {
   final AddFavoriteUseCase _addFavoriteUseCase;
   final RemoveFavoriteUseCase _removeFavoriteUseCase;
   final ReorderFavoritesUseCase _reorderFavoritesUseCase;
-  final GetFavoriteFlowUseCase _getFavoriteFlowUseCase;
+  final IRiverDataRepository _repository;
 
   // Services kept for cross-cutting concerns
   final IFavoritesService _favoritesService;
@@ -47,7 +51,7 @@ class FavoritesProvider with ChangeNotifier {
     AddFavoriteUseCase? addFavoriteUseCase,
     RemoveFavoriteUseCase? removeFavoriteUseCase,
     ReorderFavoritesUseCase? reorderFavoritesUseCase,
-    GetFavoriteFlowUseCase? getFavoriteFlowUseCase,
+    IRiverDataRepository? repository,
   })  : _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
         _forecastService = forecastService ?? GetIt.I<IForecastService>(),
         _reachCacheService =
@@ -62,8 +66,7 @@ class FavoritesProvider with ChangeNotifier {
             removeFavoriteUseCase ?? GetIt.I<RemoveFavoriteUseCase>(),
         _reorderFavoritesUseCase =
             reorderFavoritesUseCase ?? GetIt.I<ReorderFavoritesUseCase>(),
-        _getFavoriteFlowUseCase =
-            getFavoriteFlowUseCase ?? GetIt.I<GetFavoriteFlowUseCase>();
+        _repository = repository ?? GetIt.I<IRiverDataRepository>();
 
   // Current state
   List<FavoriteRiver> _favorites = [];
@@ -551,43 +554,50 @@ class FavoritesProvider with ChangeNotifier {
       _refreshingReachIds.add(reachId);
       notifyListeners();
 
-      // Load flow data + return periods via use case (repository handles
-      // return period merging, cache fallback, and fresh fetch)
-      final result = await _getFavoriteFlowUseCase(reachId);
+      // Read the shared reach summary (current flow + name + return periods)
+      // through the single-source-of-truth repository. Favorites are NWM reaches.
+      final entry = await _repository.read(
+        RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: reachId,
+          product: ForecastProduct.reachSummary,
+        ),
+      );
 
       // Discard result if a newer refresh for this reach has been started
       if (_refreshGenerations[reachId] != gen) return;
 
-      if (result.isFailure) {
+      if (entry == null) {
         AppLogger.error(
           'FavoritesProvider',
-          'Failed to refresh $reachId: ${result.errorMessage}',
+          'Failed to refresh $reachId: no reach summary',
         );
         return;
       }
 
-      final forecast = result.data;
-      final currentFlow = _forecastService.getCurrentFlow(forecast);
+      final details = ReachSummaryPayload.decode(entry, _unitService);
       final currentUnit = _unitService.currentFlowUnit;
 
       // Store all data in session storage (preserves custom name/image)
       final existing = _sessionData[reachId] ?? FavoriteSessionData.empty;
       _sessionData[reachId] = existing.copyWith(
-        riverName: forecast.reach.riverName,
-        lastKnownFlow: currentFlow,
+        riverName: details.riverName,
+        lastKnownFlow: details.currentFlow,
         flowUnit: currentUnit,
         lastUpdated: DateTime.now(),
-        coordinates: (lat: forecast.reach.latitude, lon: forecast.reach.longitude),
+        coordinates: (details.latitude != null && details.longitude != null)
+            ? (lat: details.latitude!, lon: details.longitude!)
+            : existing.coordinates,
       );
 
-      // Cache return periods from the forecast response
-      if (forecast.reach.hasReturnPeriods) {
-        _sessionReturnPeriods[reachId] = forecast.reach.returnPeriods!;
+      // Cache raw return periods for the card's own flood-risk computation.
+      final returnPeriods = details.returnPeriods;
+      if (returnPeriods != null && returnPeriods.isNotEmpty) {
+        _sessionReturnPeriods[reachId] = returnPeriods;
       }
 
       final session = _sessionData[reachId]!;
       final riverName = session.riverName ?? 'Unknown';
-      final returnPeriods = _sessionReturnPeriods[reachId];
 
       AppLogger.debug(
         'FavoritesProvider',

@@ -39,4 +39,9 @@ abstract class IUserSettingsService {
   void clearCache();
   Future<bool> userHasSettings(String userId);
   Future<void> syncFlowUnitPreference(String userId);
+
+  /// Permanently delete the user's settings document and drop any cached
+  /// copy. Caller is responsible for orchestrating the broader account-
+  /// deletion flow (auth, FCM, biometric).
+  Future<void> deleteUserSettings(String userId);
 }

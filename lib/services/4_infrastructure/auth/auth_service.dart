@@ -385,6 +385,65 @@ class AuthService implements IAuthService {
       return false;
     }
   }
+
+  // MARK: - Account Deletion
+
+  /// Reauthenticate the current user with their password.
+  /// Returns failure with a stable code-derived message when Firebase rejects
+  /// the credential (wrong password, requires-recent-login expired, etc.).
+  @override
+  Future<AuthResult> reauthenticateWithPassword({required String password}) async {
+    final user = currentUser;
+    if (user == null) {
+      return AuthResult.failure('No user signed in');
+    }
+    final email = user.email;
+    if (email == null || email.isEmpty) {
+      return AuthResult.failure('Current user has no email on file');
+    }
+
+    try {
+      AppLogger.debug('AuthService', 'Reauthenticating user: ${user.uid}');
+      await _authDatasource.reauthenticateWithPassword(
+        user: user,
+        email: email,
+        password: password,
+      );
+      AppLogger.info('AuthService', 'Reauthentication successful');
+      return AuthResult.success(user);
+    } on FirebaseAuthException catch (e) {
+      AppLogger.error('AuthService', 'Reauthentication FirebaseAuthException: ${e.code} - ${e.message}', e);
+      return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
+    } catch (e) {
+      AppLogger.error('AuthService', 'Unexpected reauthentication error: $e', e);
+      return AuthResult.failure('Reauthentication failed: ${e.toString()}');
+    }
+  }
+
+  /// Permanently delete the current Firebase Auth user and clear any local
+  /// biometric credentials. Callers must perform Firestore + FCM cleanup
+  /// while the user is still authenticated, then call this last.
+  @override
+  Future<AuthResult> deleteCurrentUser() async {
+    final user = currentUser;
+    if (user == null) {
+      return AuthResult.failure('No user signed in');
+    }
+
+    try {
+      AppLogger.debug('AuthService', 'Deleting Firebase Auth user: ${user.uid}');
+      await _authDatasource.deleteUser(user);
+      await _biometricDatasource.clearCredentials();
+      AppLogger.info('AuthService', 'Account deletion successful');
+      return AuthResult.success(null, message: 'Account deleted');
+    } on FirebaseAuthException catch (e) {
+      AppLogger.error('AuthService', 'Account deletion FirebaseAuthException: ${e.code} - ${e.message}', e);
+      return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
+    } catch (e) {
+      AppLogger.error('AuthService', 'Unexpected account deletion error: $e', e);
+      return AuthResult.failure('Account deletion failed: ${e.toString()}');
+    }
+  }
 }
 
 /// Authentication result wrapper

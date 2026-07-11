@@ -15,6 +15,7 @@ import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/delete_account_usecase.dart';
 import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
@@ -29,6 +30,7 @@ class AuthProvider with ChangeNotifier {
   final DisableBiometricUseCase _disableBiometricUseCase;
   final SignInWithBiometricsUseCase _signInWithBiometricsUseCase;
   final SyncSettingsAfterLoginUseCase _syncSettingsUseCase;
+  final DeleteAccountUseCase _deleteAccountUseCase;
   final IFCMService _fcmService;
 
   AuthProvider({
@@ -41,6 +43,7 @@ class AuthProvider with ChangeNotifier {
     DisableBiometricUseCase? disableBiometricUseCase,
     SignInWithBiometricsUseCase? signInWithBiometricsUseCase,
     SyncSettingsAfterLoginUseCase? syncSettingsUseCase,
+    DeleteAccountUseCase? deleteAccountUseCase,
     IFCMService? fcmService,
   })  : _authRepository = authRepository ?? GetIt.I<IAuthRepository>(),
         _signInUseCase = signInUseCase ?? GetIt.I<SignInUseCase>(),
@@ -56,6 +59,8 @@ class AuthProvider with ChangeNotifier {
             GetIt.I<SignInWithBiometricsUseCase>(),
         _syncSettingsUseCase =
             syncSettingsUseCase ?? GetIt.I<SyncSettingsAfterLoginUseCase>(),
+        _deleteAccountUseCase =
+            deleteAccountUseCase ?? GetIt.I<DeleteAccountUseCase>(),
         _fcmService = fcmService ?? GetIt.I<IFCMService>();
 
   // State
@@ -96,7 +101,7 @@ class AuthProvider with ChangeNotifier {
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
         AppLogger.info(
             'AuthProvider', 'User signed in: ${_currentUser!.uid}');
-        FirebaseCrashlytics.instance.setUserIdentifier(firebaseUser.uid);
+        _setCrashlyticsUserSafe(firebaseUser.uid);
 
         // Gate on email verification
         if (!firebaseUser.emailVerified) {
@@ -112,7 +117,7 @@ class AuthProvider with ChangeNotifier {
         _currentUserSettings = null;
         _isAwaitingEmailVerification = false;
         AppLogger.info('AuthProvider', 'User signed out');
-        FirebaseCrashlytics.instance.setUserIdentifier('');
+        _setCrashlyticsUserSafe('');
       }
       notifyListeners();
     });
@@ -266,6 +271,39 @@ class AuthProvider with ChangeNotifier {
       _setSuccess('Signed out successfully');
     } else {
       _setError(result.errorMessage ?? 'Sign out failed');
+    }
+  }
+
+  /// Permanently delete the currently signed-in account.
+  ///
+  /// Required by App Store Review Guideline 5.1.1(v). Returns `true` on
+  /// success; on failure, sets [errorMessage] and returns `false`. The
+  /// repository handles reauth + Firestore/FCM/Auth cleanup atomically.
+  Future<bool> deleteAccount(String password) async {
+    if (password.isEmpty) {
+      _setError('Please enter your password to confirm account deletion');
+      return false;
+    }
+
+    _setLoading(true);
+    _clearMessages();
+
+    final result = await _deleteAccountUseCase(password: password);
+
+    _setLoading(false);
+
+    if (result.isSuccess) {
+      // Mirror signOut's cleanup — auth-state stream will drop _currentUser
+      // automatically, but local caches still need clearing.
+      _biometricAvailable = null;
+      _biometricEnabled = null;
+      _currentUserSettings = null;
+      _fcmService.clearCache();
+      _setSuccess('Account deleted');
+      return true;
+    } else {
+      _setError(result.errorMessage ?? 'Account deletion failed');
+      return false;
     }
   }
 
@@ -449,6 +487,21 @@ class AuthProvider with ChangeNotifier {
     if (_isLoading != loading) {
       _isLoading = loading;
       notifyListeners();
+    }
+  }
+
+  /// Set the Crashlytics user identifier, swallowing any failure (e.g.
+  /// `[core/no-app]` when Firebase isn't initialized — happens in
+  /// integration tests and would otherwise crash the auth-state stream).
+  /// Observability must never break core auth flow.
+  void _setCrashlyticsUserSafe(String uid) {
+    try {
+      FirebaseCrashlytics.instance.setUserIdentifier(uid);
+    } catch (e) {
+      AppLogger.debug(
+        'AuthProvider',
+        'Skipped Crashlytics.setUserIdentifier (not initialized): $e',
+      );
     }
   }
 

@@ -163,6 +163,31 @@ class MockAuthService implements IAuthService {
   @override
   Future<bool> checkEmailVerified() async => _emailVerified;
 
+  @override
+  Future<AuthResult> reauthenticateWithPassword({required String password}) async {
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (_signedInUser == null) {
+      return AuthResult.failure('No user signed in');
+    }
+    final account = _registeredAccounts[_signedInUser!.email];
+    if (account == null || account['password'] != password) {
+      return AuthResult.failure('Invalid credentials');
+    }
+    return AuthResult.success(_signedInUser);
+  }
+
+  @override
+  Future<AuthResult> deleteCurrentUser() async {
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (_signedInUser == null) {
+      return AuthResult.failure('No user signed in');
+    }
+    _registeredAccounts.remove(_signedInUser!.email);
+    _signedInUser = null;
+    _authStateController.add(null);
+    return AuthResult.success(null, message: 'Account deleted');
+  }
+
   /// Test helper: simulate the user verifying their email.
   void simulateEmailVerification() {
     _emailVerified = true;
@@ -590,6 +615,11 @@ class MockFCMService implements IFCMService {
   NotificationPermissionResult permissionResult =
       NotificationPermissionResult.granted;
 
+  /// When wired, enable/disable persist the flag to user settings —
+  /// mirroring the real FCMService, which writes `enableNotifications`
+  /// to Firestore so a subsequent getUserSettings() reflects the change.
+  MockUserSettingsService? userSettings;
+
   @override
   set navigatorKey(GlobalKey<NavigatorState> key) {}
 
@@ -608,11 +638,16 @@ class MockFCMService implements IFCMService {
   @override
   Future<NotificationPermissionResult> enableNotifications(
       String userId) async {
+    if (permissionResult == NotificationPermissionResult.granted) {
+      await userSettings?.updateNotifications(userId, true);
+    }
     return permissionResult;
   }
 
   @override
-  Future<void> disableNotifications(String userId) async {}
+  Future<void> disableNotifications(String userId) async {
+    await userSettings?.updateNotifications(userId, false);
+  }
 
   @override
   Future<bool> isEnabledForUser(String userId) async => false;
@@ -914,6 +949,11 @@ class MockUserSettingsService implements IUserSettingsService {
 
   @override
   Future<void> syncFlowUnitPreference(String userId) async {}
+
+  @override
+  Future<void> deleteUserSettings(String userId) async {
+    _settings = null;
+  }
 }
 
 // ---------------------------------------------------------------------------

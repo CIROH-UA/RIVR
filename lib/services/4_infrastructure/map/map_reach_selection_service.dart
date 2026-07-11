@@ -4,6 +4,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/models/1_domain/features/map/visible_stream.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 
 /// Service for handling river reach selection from vector tiles
 /// Optimized for research teams to find streams by station ID
@@ -60,9 +61,15 @@ class MapReachSelectionService {
     AppLogger.debug('MapReachSelectionService', 'Querying visible streams...');
 
     final streams2LayerIds = [
-      'streams2-order-1-2', // Small streams
-      'streams2-order-3-4', // Medium streams
-      'streams2-order-5-plus', // Large rivers
+      'streams2-order-1-2', // Small streams (NWM)
+      'streams2-order-3-4', // Medium streams (NWM)
+      'streams2-order-5-plus', // Large rivers (NWM)
+      'geoglows-order-1-2', // GEOGLOWS outside the US
+      'geoglows-order-3-4',
+      'geoglows-order-5-plus',
+      'geoglows-us-order-1-2', // GEOGLOWS inside the US (Compare/Global modes)
+      'geoglows-us-order-3-4',
+      'geoglows-us-order-5-plus',
     ];
 
     final width = screenWidth;
@@ -384,6 +391,12 @@ class MapReachSelectionService {
         'streams2-order-1-2',
         'streams2-order-3-4',
         'streams2-order-5-plus',
+        'geoglows-order-1-2',
+        'geoglows-order-3-4',
+        'geoglows-order-5-plus',
+        'geoglows-us-order-1-2',
+        'geoglows-us-order-3-4',
+        'geoglows-us-order-5-plus',
       ];
 
       final List<QueriedRenderedFeature?> queryResult = await _mapboxMap!
@@ -441,10 +454,19 @@ class MapReachSelectionService {
         return null;
       }
 
+      // Determine the data source from the tapped feature's tile source +
+      // layers (GEOGLOWS source/layers are prefixed `geoglows`; else NWM).
+      // `source` is always populated; `layers` can be empty, so check both.
+      final source = ForecastSource.fromLayerIds([
+        queriedRenderedFeature.queriedFeature.source,
+        ...queriedRenderedFeature.layers,
+      ]);
+
       return SelectedReach.fromVectorTile(
         properties: properties,
         latitude: tapPoint.coordinates.lat.toDouble(),
         longitude: tapPoint.coordinates.lng.toDouble(),
+        source: source,
       );
     } catch (e) {
       AppLogger.error('MapReachSelectionService', 'Error creating SelectedReach', e);

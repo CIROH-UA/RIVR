@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 
 class MapControlButtons extends StatelessWidget {
   final VoidCallback onLayersPressed;
+  final VoidCallback onSourcesPressed;
   final VoidCallback onRecenterPressed;
   final VoidCallback onStreamsPressed;
   final VoidCallback on3DTogglePressed;
@@ -13,6 +14,7 @@ class MapControlButtons extends StatelessWidget {
   const MapControlButtons({
     super.key,
     required this.onLayersPressed,
+    required this.onSourcesPressed,
     required this.onRecenterPressed,
     required this.onStreamsPressed,
     required this.on3DTogglePressed,
@@ -32,11 +34,18 @@ class MapControlButtons extends StatelessWidget {
           tooltip: 'Visible Streams',
         ),
         const SizedBox(height: 8),
-        // Layers button
+        // Layers button (base map style)
         _buildControlButton(
           icon: CupertinoIcons.layers_alt,
           onPressed: onLayersPressed,
           tooltip: 'Map Layers',
+        ),
+        const SizedBox(height: 8),
+        // Stream data sources button (NWM / GEOGLOWS toggles)
+        _buildControlButton(
+          icon: CupertinoIcons.drop,
+          onPressed: onSourcesPressed,
+          tooltip: 'Stream Data',
         ),
         const SizedBox(height: 8),
         // Recenter button

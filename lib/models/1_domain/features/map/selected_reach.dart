@@ -1,5 +1,7 @@
 // lib/models/1_domain/features/map/selected_reach.dart
 
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+
 /// Lightweight model for river reach selections from vector tiles
 /// Contains immediate data from vector tiles + async-loaded river name
 class SelectedReach {
@@ -8,6 +10,10 @@ class SelectedReach {
   final int streamOrder; // from streamOrder property
   final double latitude; // from tap location
   final double longitude; // from tap location
+
+  // Which data source this reach belongs to (NWM vs GEOGLOWS), determined from
+  // the tapped tile layer. Drives which forecast API the load flow calls.
+  final ForecastSource source;
 
   // Async-loaded data from NOAA API
   final String? riverName; // loaded from NOAA reaches API
@@ -22,6 +28,7 @@ class SelectedReach {
     required this.streamOrder,
     required this.latitude,
     required this.longitude,
+    this.source = ForecastSource.nwm,
     this.riverName,
     this.city,
     this.state,
@@ -33,12 +40,14 @@ class SelectedReach {
     required Map<String, dynamic> properties,
     required double latitude,
     required double longitude,
+    ForecastSource source = ForecastSource.nwm,
   }) {
     return SelectedReach(
       reachId: properties['station_id'].toString(),
       streamOrder: properties['streamOrder'] as int,
       latitude: latitude,
       longitude: longitude,
+      source: source,
       selectedAt: DateTime.now(),
     );
   }
@@ -50,6 +59,7 @@ class SelectedReach {
       streamOrder: streamOrder,
       latitude: latitude,
       longitude: longitude,
+      source: source,
       riverName: riverName,
       city: city,
       state: state,
@@ -64,6 +74,7 @@ class SelectedReach {
       streamOrder: streamOrder,
       latitude: latitude,
       longitude: longitude,
+      source: source,
       riverName: riverName,
       city: city ?? this.city,
       state: state ?? this.state,

@@ -36,19 +36,13 @@
 	<key>MBXAccessToken</key>
 	<string>$(MAPBOX_ACCESS_TOKEN)</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>RIVR uses Face ID to quickly and securely sign you in.</string>
+	<string>RIVR uses Face ID so you can unlock the app and view your saved rivers without re-entering your password — for example, opening the app to check this morning's flow on your local stream.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>This app needs camera access to take photos for custom backgrounds.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>This app needs access to your location to show your position on the map and help you navigate to nearby streams.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs access to your location to show your position on the map.</string>
+	<string>RIVR uses the camera so you can take a photo to use as a custom background on a river's overview card — for example, snapping a picture of your local stream and seeing it behind that river's flow data.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs access to your location to show your position on the map and help you navigate to nearby streams.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>This app saves exported forecast charts to your photo library.</string>
+	<string>RIVR uses your location only while the app is open to show your position on the map and surface nearby river-flow gauges — for example, finding the closest National Water Model reach to where you are right now.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>This app needs access to photo library to save exported charts.</string>
+	<string>RIVR uses your photo library so you can pick an existing photo as a custom background on a river's overview card — for example, choosing an earlier picture of your local stream to display behind its flow data.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIApplicationSceneManifest</key>

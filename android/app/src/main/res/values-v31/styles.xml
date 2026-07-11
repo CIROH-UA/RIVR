@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+) uses the platform SplashScreen API instead of
+         a themed windowBackground. This keeps the launch experience on par
+         with the iOS LaunchScreen: white background, RIVR logo centered.
+
+         windowSplashScreenAnimatedIcon points at drawable-v31/launch_logo.png
+         (1152x1152, logo ~700px centered) so the logo sits comfortably inside
+         the system's circular icon mask without clipping.
+
+         Only LaunchTheme is overridden here; NormalTheme resolves from
+         values/styles.xml (style resources resolve per-name by qualifier). -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">@color/launch_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/launch_logo</item>
+        <!-- Flutter draws its first frame into NormalTheme; the OS removes
+             the splash automatically once that happens. -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+</resources>

@@ -55,6 +55,7 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
                 AppRouter.pushForecast(
                   context,
                   reachId: widget.selectedReach.reachId,
+                  source: widget.selectedReach.source,
                 );
               },
               child: const Text('View Forecast'),

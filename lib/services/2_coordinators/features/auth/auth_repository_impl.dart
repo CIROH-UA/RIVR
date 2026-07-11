@@ -3,7 +3,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
+import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
@@ -16,12 +18,15 @@ import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 class AuthRepositoryImpl implements IAuthRepository {
   final IAuthService _authService;
   final IUserSettingsService _settingsService;
+  final IFCMService _fcmService;
 
   const AuthRepositoryImpl({
     required IAuthService authService,
     required IUserSettingsService settingsService,
+    required IFCMService fcmService,
   })  : _authService = authService,
-        _settingsService = settingsService;
+        _settingsService = settingsService,
+        _fcmService = fcmService;
 
   @override
   User? get currentUser => _authService.currentUser;
@@ -169,6 +174,60 @@ class AuthRepositoryImpl implements IAuthRepository {
     } catch (e) {
       return ServiceResult.failure(
         ServiceException.fromError(e, context: 'checkEmailVerified'),
+      );
+    }
+  }
+
+  @override
+  Future<ServiceResult<void>> deleteAccount({required String password}) async {
+    // Snapshot the uid *before* anything destructive — once auth/Firestore
+    // calls run, currentUser may flip to null mid-flow.
+    final uid = _authService.currentUser?.uid;
+    if (uid == null) {
+      return ServiceResult.failure(
+        const ServiceException.auth('No user signed in'),
+      );
+    }
+
+    try {
+      // Step 1: Reauthenticate. Firebase requires a recent sign-in for delete().
+      final reauthResult = await _authService.reauthenticateWithPassword(
+        password: password,
+      );
+      if (!reauthResult.isSuccess) {
+        return ServiceResult.failure(
+          ServiceException.auth(reauthResult.error ?? 'Reauthentication failed'),
+        );
+      }
+
+      // Step 2: Drop FCM token registration. Best-effort — a failure here does
+      // not block deletion; the token simply expires server-side eventually.
+      try {
+        await _fcmService.disableNotifications(uid);
+      } catch (e) {
+        AppLogger.warning(
+          'AuthRepositoryImpl',
+          'FCM cleanup failed during account deletion (continuing): $e',
+        );
+      }
+
+      // Step 3: Delete the user's Firestore settings document. Must happen
+      // while the user is still authenticated — Firestore rules typically
+      // gate writes on request.auth.uid.
+      await _settingsService.deleteUserSettings(uid);
+
+      // Step 4: Delete the Firebase Auth user (also clears biometric creds).
+      final deleteResult = await _authService.deleteCurrentUser();
+      if (!deleteResult.isSuccess) {
+        return ServiceResult.failure(
+          ServiceException.auth(deleteResult.error ?? 'Account deletion failed'),
+        );
+      }
+
+      return ServiceResult.success(null);
+    } catch (e) {
+      return ServiceResult.failure(
+        ServiceException.fromError(e, context: 'deleteAccount'),
       );
     }
   }

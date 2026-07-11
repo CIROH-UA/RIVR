@@ -477,4 +477,22 @@ class UserSettingsService implements IUserSettingsService {
       AppLogger.error('UserSettingsService', 'Error syncing flow unit preference: $e', e);
     }
   }
+
+  /// Permanently delete the user's settings document.
+  /// Also drops the cached copy so a follow-up read does not resurrect stale state.
+  @override
+  Future<void> deleteUserSettings(String userId) async {
+    try {
+      AppLogger.debug('UserSettingsService', 'Deleting settings for user: $userId');
+      await _datasource.deleteSettings(userId);
+      if (_cachedUserId == userId) {
+        _cachedSettings = null;
+        _cachedUserId = null;
+      }
+      AppLogger.info('UserSettingsService', 'Settings deleted successfully');
+    } catch (e) {
+      AppLogger.error('UserSettingsService', 'Error deleting user settings: $e', e);
+      throw Exception(ErrorService.handleError(e, context: 'deleteUserSettings'));
+    }
+  }
 }

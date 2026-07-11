@@ -898,6 +898,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  _buildMenuOption('Account', CupertinoIcons.person_crop_circle,
+                      () {
+                    Navigator.pop(context);
+                    AppRouter.pushAccount(context);
+                  }),
+                  _buildMenuDivider(),
                   _buildMenuOption('Notifications', CupertinoIcons.bell, () {
                     Navigator.pop(context);
                     AppRouter.pushNotificationsSettings(context);
@@ -909,8 +915,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     Navigator.pop(context);
                     AppRouter.pushSponsors(context);
                   }),
-                  _buildMenuDivider(color: CupertinoColors.systemGrey),
-                  _buildSignOutOption(),
                 ],
               ),
             ),
@@ -955,95 +959,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
           Icon(CupertinoIcons.drop, color: CupertinoColors.white, size: 22),
         ],
       ),
-    );
-  }
-
-  Widget _buildSignOutOption() {
-    return Consumer<AuthProvider>(
-      builder: (context, authProvider, child) {
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // User info section
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                children: [
-                  // User icon
-                  Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: CupertinoColors.systemBrown,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.person_fill,
-                      color: CupertinoColors.systemBackground,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  // User name
-                  Expanded(
-                    child: Text(
-                      authProvider.userDisplayName,
-                      style: const TextStyle(
-                        color: CupertinoColors.systemGrey,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Sign out button
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              onPressed: () async {
-                Navigator.pop(context); // Close menu first
-                await _handleSignOut(authProvider);
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.only(bottom: 10, left: 16, right: 16),
-                child: Row(
-                  children: [
-                    const Spacer(),
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: Text(
-                        'Sign Out',
-                        style: TextStyle(
-                          color: authProvider.isLoading
-                              ? CupertinoColors.systemGrey
-                              : CupertinoColors.systemRed,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ),
-
-                    authProvider.isLoading
-                        ? const CupertinoActivityIndicator(
-                            radius: 8,
-                            color: CupertinoColors.systemGrey,
-                          )
-                        : const Icon(
-                            CupertinoIcons.square_arrow_right,
-                            color: CupertinoColors.systemRed,
-                            size: 22,
-                          ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 
@@ -1172,55 +1087,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _handleSignOut(AuthProvider authProvider) async {
-    // Show confirmation dialog
-    final shouldSignOut = await showCupertinoDialog<bool>(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out of RIVR?'),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.pop(context, false),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            child: const Text('Sign Out'),
-            onPressed: () => Navigator.pop(context, true),
-          ),
-        ],
-      ),
-    );
-
-    // If user confirmed, proceed with sign out
-    if (shouldSignOut == true) {
-      try {
-        await authProvider.signOut();
-        // AuthCoordinator will automatically handle navigation back to auth
-      } catch (e) {
-        AppLogger.error('FavoritesPage', 'Error signing out', e);
-
-        // Show error dialog
-        if (mounted) {
-          showCupertinoDialog(
-            context: context,
-            builder: (context) => CupertinoAlertDialog(
-              title: const Text('Sign Out Error'),
-              content: const Text('Unable to sign out. Please try again.'),
-              actions: [
-                CupertinoDialogAction(
-                  child: const Text('OK'),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-          );
-        }
-      }
-    }
   }
 
 }
