@@ -27,6 +27,7 @@ import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rivr/ui/1_state/shared/connectivity_provider.dart';
 // ignore: depend_on_referenced_packages — transitive via connectivity_plus, test-only.
 import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
@@ -318,6 +319,14 @@ Widget buildTestApp({
   // that always reports "online" so it doesn't throw MissingPluginException.
   ConnectivityPlatform.instance = _FakeConnectivityPlatform();
 
+  // Mark the coach-mark tours as already seen. Otherwise FavoritesPage attaches
+  // its tour GlobalKeys to widgets AND the coach-mark overlay reuses the same
+  // keys -> "Multiple widgets used the same GlobalKey" during navigation.
+  SharedPreferences.setMockInitialValues({
+    'has_seen_favorites_tour': true,
+    'has_seen_search_tip': true,
+  });
+
   final auth = authProvider ?? createAuthProvider(services);
   final favs = favoritesProvider ?? createFavoritesProvider(services);
   final reach = reachDataProvider ?? createReachDataProvider(services);
@@ -335,7 +344,9 @@ Widget buildTestApp({
     ],
     child: CupertinoApp(
       debugShowCheckedModeBanner: false,
+      routes: AppRouter.namedRoutes,
       onGenerateRoute: AppRouter.onGenerateRoute,
+      onUnknownRoute: AppRouter.onUnknownRoute,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
