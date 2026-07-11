@@ -615,6 +615,11 @@ class MockFCMService implements IFCMService {
   NotificationPermissionResult permissionResult =
       NotificationPermissionResult.granted;
 
+  /// When wired, enable/disable persist the flag to user settings —
+  /// mirroring the real FCMService, which writes `enableNotifications`
+  /// to Firestore so a subsequent getUserSettings() reflects the change.
+  MockUserSettingsService? userSettings;
+
   @override
   set navigatorKey(GlobalKey<NavigatorState> key) {}
 
@@ -633,11 +638,16 @@ class MockFCMService implements IFCMService {
   @override
   Future<NotificationPermissionResult> enableNotifications(
       String userId) async {
+    if (permissionResult == NotificationPermissionResult.granted) {
+      await userSettings?.updateNotifications(userId, true);
+    }
     return permissionResult;
   }
 
   @override
-  Future<void> disableNotifications(String userId) async {}
+  Future<void> disableNotifications(String userId) async {
+    await userSettings?.updateNotifications(userId, false);
+  }
 
   @override
   Future<bool> isEnabledForUser(String userId) async => false;
