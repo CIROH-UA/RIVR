@@ -30,7 +30,10 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze
+        # CI tracks a newer Flutter stable than local dev, which surfaces
+        # forward-looking deprecation lints (info level). Keep warnings and
+        # errors fatal, but don't fail the build on infos.
+        run: flutter analyze --no-fatal-infos
 
       - name: Test (unit & widget only)
         run: flutter test test/models test/services test/ui test/utils test/helpers
