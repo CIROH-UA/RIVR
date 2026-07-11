@@ -103,7 +103,11 @@ class TestServices {
         userSettings = userSettings ?? MockUserSettingsService(),
         backgroundImage = backgroundImage ?? MockBackgroundImageService(),
         flowUnit = flowUnit ?? MockFlowUnitPreferenceService(),
-        forecastCache = forecastCache ?? MockForecastCacheService();
+        forecastCache = forecastCache ?? MockForecastCacheService() {
+    // Let the FCM mock persist the notifications flag to user settings on
+    // enable/disable, mirroring the real service's Firestore write.
+    this.fcm.userSettings = this.userSettings;
+  }
 
   /// Register all mocks in the GetIt service locator.
   void registerAll() {

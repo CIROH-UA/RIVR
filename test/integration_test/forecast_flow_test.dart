@@ -11,6 +11,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_overview_page.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 
@@ -65,8 +66,9 @@ void main() {
       // Second pump - loading should now be visible
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('Loading river overview...'), findsOneWidget);
-      expect(find.byType(CupertinoActivityIndicator), findsAtLeast(1));
+      // The initial loading state is a shimmer skeleton placeholder
+      // (replaced the old spinner + "Loading river overview..." text).
+      expect(find.byType(Shimmer), findsOneWidget);
     });
 
     testWidgets('displays river name and location after loading',
