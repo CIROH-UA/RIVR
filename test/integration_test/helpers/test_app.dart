@@ -27,6 +27,11 @@ import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'dart:io';
+import 'package:rivr/ui/1_state/shared/connectivity_provider.dart';
+// ignore: depend_on_referenced_packages — transitive via connectivity_plus, test-only.
+import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
+// ignore: depend_on_referenced_packages — transitive, test-only.
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:rivr/services/2_coordinators/features/favorites/favorites_repository_impl.dart';
 import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
 import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
@@ -288,6 +293,19 @@ ReachDataProvider createReachDataProvider(TestServices services) {
 /// [home] is the initial widget to display.
 /// [services] provides the mock instances; call [TestServices.registerAll]
 /// before building the app.
+/// Fake connectivity_plus platform that always reports "online", so tests don't
+/// hit the real platform channel (MissingPluginException under the test harness).
+class _FakeConnectivityPlatform extends ConnectivityPlatform
+    with MockPlatformInterfaceMixin {
+  @override
+  Future<List<ConnectivityResult>> checkConnectivity() async =>
+      [ConnectivityResult.wifi];
+
+  @override
+  Stream<List<ConnectivityResult>> get onConnectivityChanged =>
+      Stream.value([ConnectivityResult.wifi]);
+}
+
 Widget buildTestApp({
   required Widget home,
   required TestServices services,
@@ -295,6 +313,11 @@ Widget buildTestApp({
   FavoritesProvider? favoritesProvider,
   ReachDataProvider? reachDataProvider,
 }) {
+  // ConnectivityProvider (below) drives connectivity_plus, whose platform
+  // channel isn't available under the test harness. Swap in a fake platform
+  // that always reports "online" so it doesn't throw MissingPluginException.
+  ConnectivityPlatform.instance = _FakeConnectivityPlatform();
+
   final auth = authProvider ?? createAuthProvider(services);
   final favs = favoritesProvider ?? createFavoritesProvider(services);
   final reach = reachDataProvider ?? createReachDataProvider(services);
@@ -304,6 +327,11 @@ Widget buildTestApp({
       ChangeNotifierProvider<AuthProvider>.value(value: auth),
       ChangeNotifierProvider<FavoritesProvider>.value(value: favs),
       ChangeNotifierProvider<ReachDataProvider>.value(value: reach),
+      // The widget tree consumes ConnectivityProvider (as main.dart provides
+      // it); without this the flows throw ProviderNotFoundException.
+      ChangeNotifierProvider<ConnectivityProvider>(
+        create: (_) => ConnectivityProvider(),
+      ),
     ],
     child: CupertinoApp(
       debugShowCheckedModeBanner: false,
