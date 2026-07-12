@@ -3,11 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/2_presentation/shared/pages/navigation_error_page.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/favorites_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_overview_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_overview_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/short_range_detail_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/medium_range_detail_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/long_range_detail_page.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/hydrograph_page.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/image_selection_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/notifications_settings_page.dart';
@@ -34,17 +30,21 @@ class AppRouter {
           ? args.reachId
           : args as String?;
       final source = args is ReachArgs ? args.source : ForecastSource.nwm;
+      final lat = args is ReachArgs ? args.lat : null;
+      final lon = args is ReachArgs ? args.lon : null;
       if (reachId == null) {
         return const NavigationErrorPage.missingArguments(
           routeName: 'forecast',
         );
       }
-      // GEOGLOWS reaches use a dedicated forecast path (different data shape);
-      // NWM reaches keep the existing overview page unchanged.
-      if (source.isGeoglows) {
-        return GeoglowsOverviewPage(reachId: reachId);
-      }
-      return ReachOverviewPage(reachId: reachId);
+      // Consolidated forecast page (NWM + GEOGLOWS) — the redesign target
+      // that replaces the separate overview + detail pages.
+      return ReachForecastPage(
+        reachId: reachId,
+        source: source,
+        lat: lat,
+        lon: lon,
+      );
     },
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
@@ -57,34 +57,6 @@ class AppRouter {
   // ---------------------------------------------------------------------------
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
-      case AppRoutes.reachOverview:
-        return _buildReachRoute(
-          settings,
-          routeLabel: 'reach overview',
-          builder: (reachId) => ReachOverviewPage(reachId: reachId),
-        );
-
-      case AppRoutes.shortRangeDetail:
-        return _buildReachRoute(
-          settings,
-          routeLabel: 'short range detail',
-          builder: (reachId) => ShortRangeDetailPage(reachId: reachId),
-        );
-
-      case AppRoutes.mediumRangeDetail:
-        return _buildReachRoute(
-          settings,
-          routeLabel: 'medium range detail',
-          builder: (reachId) => MediumRangeDetailPage(reachId: reachId),
-        );
-
-      case AppRoutes.longRangeDetail:
-        return _buildReachRoute(
-          settings,
-          routeLabel: 'long range detail',
-          builder: (reachId) => LongRangeDetailPage(reachId: reachId),
-        );
-
       case AppRoutes.hydrograph:
         return _buildHydrographRoute(settings);
 
@@ -121,24 +93,13 @@ class AppRouter {
     BuildContext context, {
     required String reachId,
     ForecastSource source = ForecastSource.nwm,
+    double? lat,
+    double? lon,
   }) {
     return Navigator.pushNamed<T>(
       context,
       AppRoutes.forecast,
-      arguments: ReachArgs(reachId: reachId, source: source),
-    );
-  }
-
-  static Future<T?> pushForecastDetail<T>(
-    BuildContext context, {
-    required String reachId,
-    required String forecastType,
-  }) {
-    final route = AppRoutes.detailRouteForForecastType(forecastType);
-    return Navigator.pushNamed<T>(
-      context,
-      route,
-      arguments: ReachArgs(reachId: reachId),
+      arguments: ReachArgs(reachId: reachId, source: source, lat: lat, lon: lon),
     );
   }
 
@@ -196,39 +157,6 @@ class AppRouter {
   // ---------------------------------------------------------------------------
   // Private route builders
   // ---------------------------------------------------------------------------
-
-  /// Build a CupertinoPageRoute for routes that only need a reachId.
-  /// Accepts either [ReachArgs], [Map<String, dynamic>], or plain [String].
-  static CupertinoPageRoute _buildReachRoute(
-    RouteSettings settings, {
-    required String routeLabel,
-    required Widget Function(String reachId) builder,
-  }) {
-    final args = settings.arguments;
-    String? reachId;
-
-    if (args is ReachArgs) {
-      reachId = args.reachId;
-    } else if (args is Map<String, dynamic>) {
-      reachId = args['reachId'] as String?;
-    } else if (args is String) {
-      reachId = args;
-    }
-
-    if (reachId == null) {
-      return CupertinoPageRoute(
-        builder: (context) => NavigationErrorPage.missingArguments(
-          routeName: routeLabel,
-        ),
-        settings: settings,
-      );
-    }
-
-    return CupertinoPageRoute(
-      builder: (context) => builder(reachId!),
-      settings: settings,
-    );
-  }
 
   /// Build a CupertinoPageRoute for the hydrograph route.
   /// Accepts either [HydrographArgs] or [Map<String, dynamic>].

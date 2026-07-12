@@ -46,11 +46,16 @@ class GeoglowsForecast {
   /// Ordered forecast steps (earliest first).
   final List<GeoglowsForecastPoint> points;
 
+  /// Return-period thresholds (recurrence year -> flow) in the same unit as
+  /// [points], when the proxy returns them (Gumbel-derived). Null otherwise.
+  final Map<int, double>? returnPeriods;
+
   const GeoglowsForecast({
     required this.riverId,
     required this.unit,
     required this.generatedAt,
     required this.points,
+    this.returnPeriods,
   });
 
   DateTime? get start => points.isEmpty ? null : points.first.validTime;

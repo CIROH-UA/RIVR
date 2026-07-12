@@ -11,7 +11,18 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 class ReachArgs {
   final String reachId;
   final ForecastSource source;
-  const ReachArgs({required this.reachId, this.source = ForecastSource.nwm});
+
+  /// Tap coordinate, when navigating from the map. Used to reverse-geocode a
+  /// location for GEOGLOWS reaches (which have no name/location of their own).
+  final double? lat;
+  final double? lon;
+
+  const ReachArgs({
+    required this.reachId,
+    this.source = ForecastSource.nwm,
+    this.lat,
+    this.lon,
+  });
 }
 
 /// Typed argument for the hydrograph route.

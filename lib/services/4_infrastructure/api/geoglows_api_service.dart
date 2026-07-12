@@ -73,6 +73,16 @@ class GeoglowsApiService implements IGeoglowsApiService {
         );
       }
 
+      // Return periods (Gumbel-derived) come from the proxy in native m³/s,
+      // keyed by recurrence year; convert to the user's unit like the flow.
+      final rpRaw = (data['return_periods'] as Map?) ?? const {};
+      final returnPeriods = <int, double>{};
+      rpRaw.forEach((k, v) {
+        final year = int.tryParse(k.toString());
+        final flow = _parseFlow(v);
+        if (year != null && flow != null) returnPeriods[year] = flow;
+      });
+
       AppLogger.info(
         'GEOGLOWS_API',
         'Forecast for $riverId: ${points.length} points -> ${_unitService.currentFlowUnit}',
@@ -83,6 +93,7 @@ class GeoglowsApiService implements IGeoglowsApiService {
         unit: _unitService.getDisplayUnit(),
         generatedAt: _generatedAt(data),
         points: points,
+        returnPeriods: returnPeriods.isEmpty ? null : returnPeriods,
       );
     } catch (e) {
       AppLogger.error('GEOGLOWS_API', 'Error fetching forecast for $riverId', e);
