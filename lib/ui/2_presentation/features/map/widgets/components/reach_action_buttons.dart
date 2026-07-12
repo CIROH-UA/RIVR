@@ -56,6 +56,8 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
                   context,
                   reachId: widget.selectedReach.reachId,
                   source: widget.selectedReach.source,
+                  lat: widget.selectedReach.latitude,
+                  lon: widget.selectedReach.longitude,
                 );
               },
               child: const Text('View Forecast'),

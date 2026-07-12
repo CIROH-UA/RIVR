@@ -34,6 +34,8 @@ class AppRouter {
           ? args.reachId
           : args as String?;
       final source = args is ReachArgs ? args.source : ForecastSource.nwm;
+      final lat = args is ReachArgs ? args.lat : null;
+      final lon = args is ReachArgs ? args.lon : null;
       if (reachId == null) {
         return const NavigationErrorPage.missingArguments(
           routeName: 'forecast',
@@ -41,7 +43,12 @@ class AppRouter {
       }
       // Consolidated forecast page (NWM + GEOGLOWS) — the redesign target
       // that replaces the separate overview + detail pages.
-      return ReachForecastPage(reachId: reachId, source: source);
+      return ReachForecastPage(
+        reachId: reachId,
+        source: source,
+        lat: lat,
+        lon: lon,
+      );
     },
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
@@ -118,11 +125,13 @@ class AppRouter {
     BuildContext context, {
     required String reachId,
     ForecastSource source = ForecastSource.nwm,
+    double? lat,
+    double? lon,
   }) {
     return Navigator.pushNamed<T>(
       context,
       AppRoutes.forecast,
-      arguments: ReachArgs(reachId: reachId, source: source),
+      arguments: ReachArgs(reachId: reachId, source: source, lat: lat, lon: lon),
     );
   }
 

@@ -24,6 +24,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
@@ -90,10 +91,17 @@ class ReachForecastPage extends StatefulWidget {
     super.key,
     required this.reachId,
     this.source = ForecastSource.nwm,
+    this.lat,
+    this.lon,
   });
 
   final String reachId;
   final ForecastSource source;
+
+  /// Tap coordinate (from the map). Used to reverse-geocode a location for
+  /// GEOGLOWS reaches, which have no name/location of their own.
+  final double? lat;
+  final double? lon;
 
   @override
   State<ReachForecastPage> createState() => _ReachForecastPageState();
@@ -202,9 +210,29 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         throw Exception('No GEOGLOWS forecast available.');
       }
       final fc = GeoglowsForecastPayload.decode(entry, unitService);
+
+      // GEOGLOWS reaches have no name — reverse-geocode the tap coordinate to
+      // a place so the header reads "Stream near {city}" instead of a raw id.
+      var riverName = 'Stream ${widget.reachId}';
+      if (widget.lat != null && widget.lon != null) {
+        try {
+          final geo = await GeocodingService.reverseGeocode(
+              widget.lat!, widget.lon!);
+          // 'state'/region is unreliable internationally (Mapbox returns codes
+          // like '13' for French departments), so name from the city only.
+          final city = geo['city'];
+          if (city != null && city.isNotEmpty) {
+            riverName = 'Stream near $city';
+          }
+        } catch (_) {
+          // Keep the id fallback if geocoding fails.
+        }
+        if (!mounted) return;
+      }
+
       setState(() {
         _details = ReachDetailsData(
-          riverName: 'Stream ${widget.reachId}',
+          riverName: riverName,
           formattedLocation: '',
           currentFlow: fc.currentMedian,
           returnPeriods: fc.returnPeriods,

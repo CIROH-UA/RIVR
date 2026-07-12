@@ -493,6 +493,8 @@ class MapPageState extends State<MapPage> {
       context,
       reachId: selectedReach.reachId,
       source: selectedReach.source,
+      lat: selectedReach.latitude,
+      lon: selectedReach.longitude,
     );
   }
 
