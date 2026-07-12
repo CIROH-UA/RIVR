@@ -73,9 +73,23 @@ class _GeoglowsHydrographPageState extends State<GeoglowsHydrographPage> {
   Widget build(BuildContext context) {
     final pts = widget.points;
     final maxUpper = pts.map((p) => p.upper).fold<double>(0, math.max);
+    final minLower =
+        pts.map((p) => p.lower).fold<double>(maxUpper, math.min);
+
+    // Data-focused axis: rivers often sit far below their flood thresholds, so
+    // scaling to the 25-yr level would squash the forecast into a sliver. Frame
+    // the data (with padding); category bands still render where they fall in
+    // view, and any band above the data is simply clipped by the axis.
+    final span = (maxUpper - minLower).abs();
+    final pad = span < 1e-6 ? maxUpper * 0.15 + 1 : span * 0.4;
+    final ymin = math.max(0.0, minLower - pad);
+    final ymax = maxUpper + pad * 1.2;
+
+    // The category bands are drawn up to a ceiling above the top threshold so
+    // the extreme band is well-formed even when it's clipped off-screen.
     final t25 = widget.returnPeriods?[25];
-    var ymax = maxUpper * 1.15;
-    if (t25 != null) ymax = math.max(ymax, t25 * 1.15);
+    final bandTop = t25 != null ? t25 * 1.3 : ymax;
+
     final nowX = pts.isNotEmpty ? pts.first.validTime.toLocal() : null;
 
     return CupertinoPageScaffold(
@@ -118,7 +132,7 @@ class _GeoglowsHydrographPageState extends State<GeoglowsHydrographPage> {
                         : const [],
                   ),
                   primaryYAxis: NumericAxis(
-                    minimum: 0,
+                    minimum: ymin,
                     maximum: ymax,
                     title: AxisTitle(
                       text: 'Flow (${widget.unit})',
@@ -128,7 +142,7 @@ class _GeoglowsHydrographPageState extends State<GeoglowsHydrographPage> {
                             CupertinoColors.secondaryLabel.resolveFrom(context),
                       ),
                     ),
-                    plotBands: _showBands ? _bands(ymax) : const [],
+                    plotBands: _showBands ? _bands(bandTop) : const [],
                   ),
                   trackballBehavior: _trackball,
                   series: <CartesianSeries<GeoglowsForecastPoint, DateTime>>[
