@@ -87,4 +87,37 @@ void main() {
     expect(decoded.points.first.median, closeTo(353.147, 0.01));
     expect(decoded.unit, 'ft³/s');
   });
+
+  test('return periods round-trip and convert with the flow', () {
+    final withRp = GeoglowsForecast(
+      riverId: '210230337',
+      unit: 'm³/s',
+      generatedAt: DateTime.utc(2026, 7, 10, 0, 0),
+      points: forecast.points,
+      returnPeriods: const {2: 100, 5: 200, 10: 300, 25: 400},
+    );
+
+    // Identity conversion preserves the thresholds and their int keys.
+    final same = GeoglowsForecastPayload.decode(
+      _entryFor(withRp, 'CMS'),
+      _StubUnit(current: 'CMS', display: 'm³/s'),
+    );
+    expect(same.returnPeriods, {2: 100, 5: 200, 10: 300, 25: 400});
+
+    // CMS -> CFS converts each threshold alongside the flow.
+    final converted = GeoglowsForecastPayload.decode(
+      _entryFor(withRp, 'CMS'),
+      _StubUnit(current: 'CFS', display: 'ft³/s', factor: 35.3147),
+    );
+    expect(converted.returnPeriods![2], closeTo(3531.47, 0.1));
+    expect(converted.returnPeriods![25], closeTo(14125.88, 0.1));
+  });
+
+  test('missing return periods decode to null', () {
+    final decoded = GeoglowsForecastPayload.decode(
+      _entryFor(forecast, 'CMS'),
+      _StubUnit(current: 'CMS', display: 'm³/s'),
+    );
+    expect(decoded.returnPeriods, isNull);
+  });
 }

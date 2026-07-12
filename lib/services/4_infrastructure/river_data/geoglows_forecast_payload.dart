@@ -24,6 +24,8 @@ class GeoglowsForecastPayload {
           'upper': p.upper,
         },
     ],
+    // Recurrence year -> flow (stored in the fetch-time unit); keys as strings.
+    'returnPeriods': fc.returnPeriods?.map((k, v) => MapEntry(k.toString(), v)),
   };
 
   static GeoglowsForecast decode(
@@ -46,11 +48,20 @@ class GeoglowsForecastPayload {
         ),
     ];
 
+    final rawRp = entry.payload['returnPeriods'] as Map?;
+    final returnPeriods = rawRp == null
+        ? null
+        : {
+            for (final e in rawRp.entries)
+              int.parse(e.key as String): conv(e.value),
+          };
+
     return GeoglowsForecast(
       riverId: entry.payload['riverId'] as String,
       unit: unitService.getDisplayUnit(),
       generatedAt: DateTime.parse(entry.payload['generatedAt'] as String),
       points: points,
+      returnPeriods: returnPeriods,
     );
   }
 }

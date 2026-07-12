@@ -18,6 +18,7 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
 
@@ -63,9 +64,8 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   }
 
   Future<void> _load() async {
-    // GEOGLOWS wiring lands in step 3; for now only NWM is backed by data.
     if (widget.source.isGeoglows) {
-      setState(() => _loading = false);
+      await _loadGeoglows();
       return;
     }
 
@@ -105,6 +105,44 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
       setState(() {
         _error = 'Failed to load reach details';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadGeoglows() async {
+    final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    try {
+      final entry = await GetIt.I<IRiverDataRepository>().read(
+        RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: widget.reachId,
+          product: ForecastProduct.geoglowsForecast,
+        ),
+      );
+      if (!mounted) return;
+      if (entry == null) {
+        throw Exception('No GEOGLOWS forecast available.');
+      }
+      final fc = GeoglowsForecastPayload.decode(entry, unitService);
+      setState(() {
+        _details = ReachDetailsData(
+          riverName: 'Stream ${widget.reachId}',
+          formattedLocation: '',
+          currentFlow: fc.currentMedian,
+          returnPeriods: fc.returnPeriods,
+        );
+        // GEOGLOWS return periods are already in the user's unit (converted at
+        // fetch/decode), so unlike NWM they need no CMS reconciliation here.
+        _returnPeriods = fc.returnPeriods;
+        _unit = unitService.getDisplayUnit();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      AppLogger.error('ReachForecastPage', 'Error loading GEOGLOWS forecast', e);
+      setState(() {
+        _error = 'Failed to load forecast';
         _loading = false;
       });
     }
