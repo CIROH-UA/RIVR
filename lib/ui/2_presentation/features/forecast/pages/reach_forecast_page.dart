@@ -5,15 +5,23 @@
 // pages: one scrolling surface with a flood-category gauge hero, a range
 // selector, and range-swappable detail widgets.
 //
-// STEP 1 (scaffold): gauge hero on static sample data + watered category
-// background. Real data wiring, range selector, detail widgets, and the
+// STEP 2: gauge hero wired to real NWM data through the SSOT repository
+// (reachSummary product). Range selector, detail widgets, GEOGLOWS, and the
 // interactive chart land in later steps.
 
 import 'package:flutter/cupertino.dart';
+import 'package:get_it/get_it.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
 
-class ReachForecastPage extends StatelessWidget {
+class ReachForecastPage extends StatefulWidget {
   const ReachForecastPage({
     super.key,
     required this.reachId,
@@ -23,18 +31,11 @@ class ReachForecastPage extends StatelessWidget {
   final String reachId;
   final ForecastSource source;
 
-  // ---- STEP 1 placeholder data (Step 2 replaces with repository reads) ----
-  double get _currentFlow => 640;
-  Map<int, double> get _returnPeriods => const {
-        2: 1200,
-        5: 2400,
-        10: 3600,
-        25: 5800,
-      };
-  String get _unit => 'ft³/s';
-  String get _riverName => 'Provo River';
-  String get _location => 'Provo, Utah';
+  @override
+  State<ReachForecastPage> createState() => _ReachForecastPageState();
+}
 
+class _ReachForecastPageState extends State<ReachForecastPage> {
   /// Watered-down category tints (from the app's return-period palette),
   /// keyed by category index; a soft blue stands in for Normal.
   static const List<Color> _tints = [
@@ -44,10 +45,75 @@ class ReachForecastPage extends StatelessWidget {
     Color(0xFFFFCDD2), // Major
     Color(0xFFE1BEE7), // Extreme
   ];
+  static const Color _neutralTint = Color(0xFFEFF3F7);
+
+  bool _loading = true;
+  String? _error;
+  ReachDetailsData? _details;
+
+  /// Return periods converted from native CMS to the user's current unit,
+  /// so the gauge can compare them against the (already-converted) flow.
+  Map<int, double>? _returnPeriods;
+  String _unit = 'ft³/s';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    // GEOGLOWS wiring lands in step 3; for now only NWM is backed by data.
+    if (widget.source.isGeoglows) {
+      setState(() => _loading = false);
+      return;
+    }
+
+    final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    try {
+      final entry = await GetIt.I<IRiverDataRepository>().read(
+        RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: widget.reachId,
+          product: ForecastProduct.reachSummary,
+        ),
+      );
+      if (!mounted) return;
+      if (entry == null) {
+        throw Exception('No reach details available.');
+      }
+      final details = ReachSummaryPayload.decode(entry, unitService);
+
+      // Return periods are stored in CMS; convert to the user's current unit
+      // so they line up with the decoded flow value.
+      final currentUnit = unitService.currentFlowUnit;
+      final converted = details.returnPeriods?.map(
+        (year, flow) => MapEntry(
+          year,
+          unitService.convertFlow(flow, 'CMS', currentUnit),
+        ),
+      );
+
+      setState(() {
+        _details = details;
+        _returnPeriods = converted;
+        _unit = unitService.getDisplayUnit();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
+      setState(() {
+        _error = 'Failed to load reach details';
+        _loading = false;
+      });
+    }
+  }
 
   int _categoryIndex() {
-    final f = _currentFlow;
+    final f = _details?.currentFlow;
     final rp = _returnPeriods;
+    if (f == null || rp == null) return -1;
     final t = [rp[2], rp[5], rp[10], rp[25]];
     if (t.any((v) => v == null)) return -1;
     final tt = t.cast<double>();
@@ -58,10 +124,14 @@ class ReachForecastPage extends StatelessWidget {
     return 4;
   }
 
+  String get _river =>
+      _details?.riverName ?? (_loading ? '' : 'Stream ${widget.reachId}');
+  String get _location => _details?.formattedLocation ?? '';
+
   @override
   Widget build(BuildContext context) {
     final i = _categoryIndex();
-    final tint = i >= 0 ? _tints[i] : const Color(0xFFEFF3F7);
+    final tint = i >= 0 ? _tints[i] : _neutralTint;
 
     return CupertinoPageScaffold(
       child: DecoratedBox(
@@ -69,8 +139,11 @@ class ReachForecastPage extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [tint, Color.lerp(tint, CupertinoColors.white, 0.55)!,
-                CupertinoColors.white],
+            colors: [
+              tint,
+              Color.lerp(tint, CupertinoColors.white, 0.55)!,
+              CupertinoColors.white,
+            ],
             stops: const [0.0, 0.55, 1.0],
           ),
         ),
@@ -79,20 +152,13 @@ class ReachForecastPage extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Header(river: _riverName, location: _location),
+              _Header(river: _river, location: _location),
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
                     children: [
                       const SizedBox(height: 12),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: FlowGauge(
-                          currentFlow: _currentFlow,
-                          returnPeriods: _returnPeriods,
-                          unit: _unit,
-                        ),
-                      ),
+                      _buildHero(),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -101,6 +167,41 @@ class ReachForecastPage extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHero() {
+    if (_loading) {
+      return const SizedBox(
+        height: 210,
+        child: Center(child: CupertinoActivityIndicator(radius: 14)),
+      );
+    }
+    if (_error != null) {
+      return SizedBox(
+        height: 210,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 15,
+                color: CupertinoColors.secondaryLabel.resolveFrom(context),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: FlowGauge(
+        currentFlow: _details?.currentFlow,
+        returnPeriods: _returnPeriods,
+        unit: _unit,
       ),
     );
   }
@@ -135,15 +236,17 @@ class _Header extends StatelessWidget {
                     letterSpacing: -0.2,
                   ),
                 ),
-                Text(
-                  location,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                if (location.isNotEmpty)
+                  Text(
+                    location,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color:
+                          CupertinoColors.secondaryLabel.resolveFrom(context),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
