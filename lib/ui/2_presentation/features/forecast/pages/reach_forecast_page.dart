@@ -408,8 +408,17 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       );
     }
 
-    final nwm =
-        _isGeoglows ? null : context.watch<ReachDataProvider>().currentForecast;
+    // The ReachDataProvider is a shared singleton, so guard against a stale
+    // reach: only use its forecast when it's actually for THIS reach. While it
+    // loads the new reach, the peaks/detail show their loading states instead
+    // of the previous reach's numbers.
+    ForecastResponse? nwm;
+    if (!_isGeoglows) {
+      final provider = context.watch<ReachDataProvider>();
+      if (provider.currentReach?.reachId == widget.reachId) {
+        nwm = provider.currentForecast;
+      }
+    }
     // Labels reflect the actual data: medium/long return a variable number of
     // days per reach (e.g. 9 vs 10), so the selector shows 9D/10D dynamically.
     final labels = <ForecastRange, String>{
@@ -506,11 +515,13 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   }
 
   Widget _buildDetail(ForecastResponse? nwm) {
+    // nwm is null until the shared provider holds THIS reach (see _buildScroll);
+    // the hourly/calendar widgets read that same provider, so gate them too.
+    if (nwm == null) return const _DetailLoading();
     switch (_range) {
       case ForecastRange.today:
         return HorizontalFlowTimeline(reachId: widget.reachId);
       case ForecastRange.tenDay:
-        if (nwm == null) return const _DetailLoading();
         return DailyFlowForecastWidget(
           forecastResponse: nwm,
           forecastType: 'medium_range',

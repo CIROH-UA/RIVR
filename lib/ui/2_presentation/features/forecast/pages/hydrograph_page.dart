@@ -73,7 +73,10 @@ class _HydrographPageState extends State<HydrographPage> {
         _loadData();
       });
     } else {
-      _loadData();
+      // Defer to post-frame: _loadData may call the provider's loadReach, which
+      // notifies listeners — doing that synchronously in initState throws
+      // "setState() called during build".
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
     }
   }
 
