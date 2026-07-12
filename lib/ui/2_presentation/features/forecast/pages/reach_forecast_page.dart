@@ -28,6 +28,7 @@ import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payl
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_hydrograph_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/horizontal_flow_timeline.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/long_range_calendar.dart';
@@ -451,6 +452,21 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
   }
 
+  void _openGeoglowsChart() {
+    final pts = _geoPoints;
+    if (pts == null || pts.isEmpty) return;
+    Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (_) => GeoglowsHydrographPage(
+          points: pts,
+          returnPeriods: _returnPeriods,
+          unit: _unit,
+          title: _river,
+        ),
+      ),
+    );
+  }
+
   List<Widget> _geoglowsBodySlivers() {
     final pts = _geoPoints;
     final flows = pts?.map((p) => p.median).toList();
@@ -462,8 +478,12 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
-          child:
-              _OutlookSection(title: '15-day trend', flows: flows, color: color),
+          child: _OutlookSection(
+            title: '15-day trend',
+            flows: flows,
+            color: color,
+            onExpand: (pts != null && pts.isNotEmpty) ? _openGeoglowsChart : null,
+          ),
         ),
       ),
       SliverToBoxAdapter(
