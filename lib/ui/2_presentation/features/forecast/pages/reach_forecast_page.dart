@@ -15,6 +15,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
@@ -327,7 +328,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
 
   Widget _buildScroll() {
     if (_loading) {
-      return const Center(child: CupertinoActivityIndicator(radius: 14));
+      return const _ForecastSkeleton();
     }
     if (_error != null) {
       return Center(
@@ -512,12 +513,28 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       peakSub = '';
     }
 
+    // Trend follows time-to-peak: a peak that's essentially now means the flow
+    // is at its high and receding; a peak hours/days out means it's still rising.
+    final etaHours =
+        peak == null ? 0 : peak.time.difference(DateTime.now()).inHours;
+    final etaSub = peak == null ? '' : (etaHours >= 3 ? 'rising' : 'receding');
+    final rpSub = switch (_categoryFor(_details?.currentFlow, _returnPeriods)) {
+      0 => 'below flood',
+      1 => 'action stage',
+      2 => 'moderate',
+      3 => 'major',
+      4 => 'extreme',
+      _ => '',
+    };
+
     return _StatCard(
       peakValue: peakValue,
       peakSub: peakSub,
       peakColor: peakColor,
       etaValue: peak != null ? _formatEta(peak.time) : '—',
+      etaSub: etaSub,
       rpValue: _returnPeriodBand(),
+      rpSub: rpSub,
     );
   }
 }
@@ -668,14 +685,18 @@ class _StatCard extends StatelessWidget {
     required this.peakSub,
     required this.peakColor,
     required this.etaValue,
+    required this.etaSub,
     required this.rpValue,
+    required this.rpSub,
   });
 
   final String peakValue;
   final String peakSub;
   final Color? peakColor;
   final String etaValue;
+  final String etaSub;
   final String rpValue;
+  final String rpSub;
 
   @override
   Widget build(BuildContext context) {
@@ -705,15 +726,11 @@ class _StatCard extends StatelessWidget {
           ),
           _divider(context),
           Expanded(
-            child: _Stat(label: 'Time to peak', value: etaValue, sub: 'rising'),
+            child: _Stat(label: 'Time to peak', value: etaValue, sub: etaSub),
           ),
           _divider(context),
           Expanded(
-            child: _Stat(
-              label: 'Return period',
-              value: rpValue,
-              sub: 'current',
-            ),
+            child: _Stat(label: 'Return period', value: rpValue, sub: rpSub),
           ),
         ],
       ),
@@ -920,10 +937,56 @@ class _DetailLoading extends StatelessWidget {
   const _DetailLoading();
 
   @override
-  Widget build(BuildContext context) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 44),
-        child: Center(child: CupertinoActivityIndicator()),
-      );
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: CupertinoColors.systemGrey5.resolveFrom(context),
+      highlightColor: CupertinoColors.systemGrey6.resolveFrom(context),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 18),
+        height: 130,
+        decoration: BoxDecoration(
+          color: CupertinoColors.white,
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
+}
+
+/// Skeleton shown while the gauge's reachSummary loads.
+class _ForecastSkeleton extends StatelessWidget {
+  const _ForecastSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget bar(double h, {double? w, double r = 16, EdgeInsets? m}) => Container(
+          margin: m ?? const EdgeInsets.symmetric(horizontal: 20),
+          height: h,
+          width: w,
+          decoration: BoxDecoration(
+            color: CupertinoColors.white,
+            borderRadius: BorderRadius.circular(r),
+          ),
+        );
+
+    return Shimmer.fromColors(
+      baseColor: CupertinoColors.systemGrey5.resolveFrom(context),
+      highlightColor: CupertinoColors.systemGrey6.resolveFrom(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(height: 16),
+          bar(52, w: 210, r: 13),
+          const SizedBox(height: 26),
+          bar(150, r: 24),
+          const SizedBox(height: 26),
+          bar(92, r: 22),
+          const SizedBox(height: 24),
+          bar(88, r: 14),
+        ],
+      ),
+    );
+  }
 }
 
 // ── GEOGLOWS 15-day chart (median + uncertainty band) ────────────────────────
@@ -1096,7 +1159,9 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          _CircleButton(icon: CupertinoIcons.ellipsis, onPressed: () {}),
+          // Balances the back button so the title stays centred. A real
+          // overflow menu (share / favourite / units) can slot in here later.
+          const SizedBox(width: 40),
         ],
       ),
     );
