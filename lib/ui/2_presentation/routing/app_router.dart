@@ -4,7 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/ui/2_presentation/shared/pages/navigation_error_page.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/favorites_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_overview_page.dart';
-import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_overview_page.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/short_range_detail_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/medium_range_detail_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/long_range_detail_page.dart';
@@ -39,12 +39,9 @@ class AppRouter {
           routeName: 'forecast',
         );
       }
-      // GEOGLOWS reaches use a dedicated forecast path (different data shape);
-      // NWM reaches keep the existing overview page unchanged.
-      if (source.isGeoglows) {
-        return GeoglowsOverviewPage(reachId: reachId);
-      }
-      return ReachOverviewPage(reachId: reachId);
+      // Consolidated forecast page (NWM + GEOGLOWS) — the redesign target
+      // that replaces the separate overview + detail pages.
+      return ReachForecastPage(reachId: reachId, source: source);
     },
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
