@@ -14,6 +14,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
+import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
@@ -25,7 +26,11 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_reposit
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
+import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/widgets/horizontal_flow_timeline.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/widgets/long_range_calendar.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/daily_flow_forecast_widget.dart';
 
 /// The forecast horizons the range selector offers.
 enum ForecastRange { today, tenDay, thirtyDay, fifteenDay }
@@ -110,9 +115,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
 
   late ForecastRange _range;
 
-  // Forecast series used for per-range peaks (loaded after the gauge).
-  ForecastResponse? _forecast; // NWM
-  List<GeoglowsForecastPoint>? _geoPoints; // GEOGLOWS
+  // GEOGLOWS 15-day median points (peak source). NWM peaks come from the
+  // ReachDataProvider's currentForecast (loaded below, read in build).
+  List<GeoglowsForecastPoint>? _geoPoints;
 
   bool get _isGeoglows => widget.source.isGeoglows;
 
@@ -121,6 +126,17 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     super.initState();
     _range = _isGeoglows ? ForecastRange.fifteenDay : ForecastRange.tenDay;
     _load();
+    if (!_isGeoglows) {
+      // Load the NWM forecast series into the shared provider (powers the
+      // stat-card peaks + the embedded hourly/daily/calendar widgets).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final provider = context.read<ReachDataProvider>();
+        if (provider.currentReach?.reachId != widget.reachId) {
+          provider.loadAllData(widget.reachId);
+        }
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -155,7 +171,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _unit = unitService.getDisplayUnit();
         _loading = false;
       });
-      _loadNwmForecast();
     } catch (e) {
       if (!mounted) return;
       AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
@@ -204,22 +219,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
   }
 
-  /// Loads the full NWM forecast (short/medium/long) so the stat card can show
-  /// per-range peaks. Non-fatal: on failure the peaks simply stay blank.
-  Future<void> _loadNwmForecast() async {
-    try {
-      final forecast = await GetIt.I<IForecastService>()
-          .loadCompleteReachData(widget.reachId);
-      if (!mounted) return;
-      setState(() => _forecast = forecast);
-    } catch (e) {
-      AppLogger.warning(
-        'ReachForecastPage',
-        'Forecast series unavailable for peaks: $e',
-      );
-    }
-  }
-
   int get _categoryIndex => _categoryFor(_details?.currentFlow, _returnPeriods);
 
   String get _river =>
@@ -227,8 +226,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   String get _location => _details?.formattedLocation ?? '';
 
   /// The representative series for a NWM range (ensemble mean when present).
-  ForecastSeries? _nwmSeries(ForecastRange r) {
-    final f = _forecast;
+  ForecastSeries? _nwmSeries(ForecastResponse? f, ForecastRange r) {
     if (f == null) return null;
     switch (r) {
       case ForecastRange.today:
@@ -245,14 +243,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   }
 
   /// Peak (flow, time) within the selected range, or null while loading.
-  ({double flow, DateTime time})? _peak() {
+  ({double flow, DateTime time})? _peak(ForecastResponse? nwm) {
     Iterable<({double flow, DateTime time})> pts;
     if (_isGeoglows) {
       final g = _geoPoints;
       if (g == null || g.isEmpty) return null;
       pts = g.map((p) => (flow: p.median, time: p.validTime));
     } else {
-      final s = _nwmSeries(_range);
+      final s = _nwmSeries(nwm, _range);
       if (s == null || s.data.isEmpty) return null;
       pts = s.data.map((p) => (flow: p.flow, time: p.validTime));
     }
@@ -342,6 +340,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       );
     }
 
+    final nwm =
+        _isGeoglows ? null : context.watch<ReachDataProvider>().currentForecast;
+
     return CustomScrollView(
       slivers: [
         SliverPersistentHeader(
@@ -365,16 +366,67 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 0),
-            child: _buildStatCard(),
+            child: _buildStatCard(nwm),
           ),
         ),
+        // NWM outlook trend + range-swappable detail widget (GEOGLOWS: step 5b).
+        if (!_isGeoglows) ..._nwmBodySlivers(nwm),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );
   }
 
-  Widget _buildStatCard() {
-    final peak = _peak();
+  String _trendTitle() => switch (_range) {
+        ForecastRange.today => "Today's trend",
+        ForecastRange.tenDay => '10-day trend',
+        ForecastRange.thirtyDay => '30-day trend',
+        ForecastRange.fifteenDay => '15-day trend',
+      };
+
+  List<Widget> _nwmBodySlivers(ForecastResponse? nwm) {
+    final series = _nwmSeries(nwm, _range);
+    final flows = series?.data.map((p) => p.flow).toList();
+    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
+    final color = catI >= 0
+        ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
+        : CupertinoColors.systemBlue.resolveFrom(context);
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
+          child: _OutlookSection(title: _trendTitle(), flows: flows, color: color),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 22),
+          child: _buildDetail(nwm),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildDetail(ForecastResponse? nwm) {
+    switch (_range) {
+      case ForecastRange.today:
+        return HorizontalFlowTimeline(reachId: widget.reachId);
+      case ForecastRange.tenDay:
+        if (nwm == null) return const _DetailLoading();
+        return DailyFlowForecastWidget(
+          forecastResponse: nwm,
+          forecastType: 'medium_range',
+          allowMultipleExpanded: false,
+          maxHeight: 620,
+        );
+      case ForecastRange.thirtyDay:
+        return LongRangeCalendar(reachId: widget.reachId);
+      case ForecastRange.fifteenDay:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildStatCard(ForecastResponse? nwm) {
+    final peak = _peak(nwm);
     final unit = _unit;
 
     String peakValue;
@@ -666,6 +718,111 @@ class _Stat extends StatelessWidget {
       ],
     );
   }
+}
+
+// ── Outlook trend ────────────────────────────────────────────────────────────
+
+class _OutlookSection extends StatelessWidget {
+  const _OutlookSection({
+    required this.title,
+    required this.flows,
+    required this.color,
+  });
+
+  final String title;
+  final List<double>? flows;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = flows;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 80,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: CupertinoColors.white.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: (f == null || f.length < 2)
+              ? const Center(child: CupertinoActivityIndicator())
+              : CustomPaint(
+                  size: Size.infinite,
+                  painter: _SparkPainter(f, color),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SparkPainter extends CustomPainter {
+  _SparkPainter(this.flows, this.color);
+
+  final List<double> flows;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (flows.length < 2) return;
+    final maxV = flows.reduce((a, b) => a > b ? a : b);
+    final minV = flows.reduce((a, b) => a < b ? a : b);
+    final range = (maxV - minV).abs() < 1e-6 ? 1.0 : (maxV - minV);
+
+    Offset pt(int i) {
+      final x = i / (flows.length - 1) * size.width;
+      final norm = (flows[i] - minV) / range;
+      final y = size.height - 6 - norm * (size.height - 14);
+      return Offset(x, y);
+    }
+
+    final line = Path();
+    final area = Path()..moveTo(0, size.height);
+    for (var i = 0; i < flows.length; i++) {
+      final p = pt(i);
+      if (i == 0) {
+        line.moveTo(p.dx, p.dy);
+      } else {
+        line.lineTo(p.dx, p.dy);
+      }
+      area.lineTo(p.dx, p.dy);
+    }
+    area
+      ..lineTo(size.width, size.height)
+      ..close();
+
+    canvas.drawPath(area, Paint()..color = color.withValues(alpha: 0.14));
+    canvas.drawPath(
+      line,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SparkPainter old) =>
+      old.color != color || old.flows != flows;
+}
+
+class _DetailLoading extends StatelessWidget {
+  const _DetailLoading();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 44),
+        child: Center(child: CupertinoActivityIndicator()),
+      );
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
