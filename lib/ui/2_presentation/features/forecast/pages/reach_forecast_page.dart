@@ -27,6 +27,7 @@ import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
+import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/horizontal_flow_timeline.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/long_range_calendar.dart';
@@ -133,7 +134,10 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         if (!mounted) return;
         final provider = context.read<ReachDataProvider>();
         if (provider.currentReach?.reachId != widget.reachId) {
-          provider.loadAllData(widget.reachId);
+          // loadReach (complete load) computes the ensemble 'mean' member and
+          // warms the session cache, so the embedded widgets AND the reused
+          // HydrographPage chart get a full ForecastResponse for every range.
+          provider.loadReach(widget.reachId);
         }
       });
     }
@@ -384,6 +388,22 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         ForecastRange.fifteenDay => '15-day trend',
       };
 
+  String _rangeForecastType() => switch (_range) {
+        ForecastRange.today => 'short_range',
+        ForecastRange.tenDay => 'medium_range',
+        ForecastRange.thirtyDay => 'long_range',
+        ForecastRange.fifteenDay => 'medium_range',
+      };
+
+  /// Opens the full interactive hydrograph (Syncfusion) for the current range.
+  void _openChart() {
+    AppRouter.pushHydrograph(
+      context,
+      reachId: widget.reachId,
+      forecastType: _rangeForecastType(),
+    );
+  }
+
   List<Widget> _nwmBodySlivers(ForecastResponse? nwm) {
     final series = _nwmSeries(nwm, _range);
     final flows = series?.data.map((p) => p.flow).toList();
@@ -395,7 +415,12 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
-          child: _OutlookSection(title: _trendTitle(), flows: flows, color: color),
+          child: _OutlookSection(
+            title: _trendTitle(),
+            flows: flows,
+            color: color,
+            onExpand: _openChart,
+          ),
         ),
       ),
       SliverToBoxAdapter(
@@ -758,36 +783,71 @@ class _OutlookSection extends StatelessWidget {
     required this.title,
     required this.flows,
     required this.color,
+    this.onExpand,
   });
 
   final String title;
   final List<double>? flows;
   final Color color;
 
+  /// When set, an Expand affordance opens the full interactive chart.
+  final VoidCallback? onExpand;
+
   @override
   Widget build(BuildContext context) {
     final f = flows;
+    final accent = CupertinoColors.activeBlue.resolveFrom(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            if (onExpand != null)
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 0),
+                onPressed: onExpand,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(CupertinoIcons.arrow_up_left_arrow_down_right,
+                        size: 13, color: accent),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Expand',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: accent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 8),
-        Container(
-          height: 80,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: CupertinoColors.white.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(14),
+        GestureDetector(
+          onTap: onExpand,
+          child: Container(
+            height: 80,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: CupertinoColors.white.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: (f == null || f.length < 2)
+                ? const Center(child: CupertinoActivityIndicator())
+                : CustomPaint(
+                    size: Size.infinite,
+                    painter: _SparkPainter(f, color),
+                  ),
           ),
-          child: (f == null || f.length < 2)
-              ? const Center(child: CupertinoActivityIndicator())
-              : CustomPaint(
-                  size: Size.infinite,
-                  painter: _SparkPainter(f, color),
-                ),
         ),
       ],
     );
