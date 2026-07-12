@@ -369,8 +369,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
             child: _buildStatCard(nwm),
           ),
         ),
-        // NWM outlook trend + range-swappable detail widget (GEOGLOWS: step 5b).
+        // Outlook trend + detail: NWM range widgets, or the GEOGLOWS 15-day list.
         if (!_isGeoglows) ..._nwmBodySlivers(nwm),
+        if (_isGeoglows) ..._geoglowsBodySlivers(),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );
@@ -423,6 +424,36 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       case ForecastRange.fifteenDay:
         return const SizedBox.shrink();
     }
+  }
+
+  List<Widget> _geoglowsBodySlivers() {
+    final pts = _geoPoints;
+    final flows = pts?.map((p) => p.median).toList();
+    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
+    final color = catI >= 0
+        ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
+        : CupertinoColors.systemBlue.resolveFrom(context);
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
+          child:
+              _OutlookSection(title: '15-day trend', flows: flows, color: color),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
+          child: (pts == null || pts.isEmpty)
+              ? const _DetailLoading()
+              : _GeoglowsDailyList(
+                  points: pts,
+                  unit: _unit,
+                  returnPeriods: _returnPeriods,
+                ),
+        ),
+      ),
+    ];
   }
 
   Widget _buildStatCard(ForecastResponse? nwm) {
@@ -823,6 +854,206 @@ class _DetailLoading extends StatelessWidget {
         padding: EdgeInsets.symmetric(vertical: 44),
         child: Center(child: CupertinoActivityIndicator()),
       );
+}
+
+// ── GEOGLOWS 15-day daily list ───────────────────────────────────────────────
+
+typedef _GeoDay = ({DateTime date, double min, double median, double max});
+
+const List<String> _weekdayAbbr = [
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+  'Sun',
+];
+
+/// Collapse the 3-hourly GEOGLOWS points into one row per local calendar day:
+/// median of the day's medians, min of lowers, max of uppers.
+List<_GeoDay> _aggregateGeoDaily(List<GeoglowsForecastPoint> points) {
+  final result = <_GeoDay>[];
+  DateTime? day;
+  final medians = <double>[];
+  double mn = 0, mx = 0;
+
+  void flush() {
+    if (day != null && medians.isNotEmpty) {
+      medians.sort();
+      result.add((
+        date: day,
+        min: mn,
+        median: medians[medians.length ~/ 2],
+        max: mx,
+      ));
+    }
+  }
+
+  for (final p in points) {
+    final ld = p.validTime.toLocal();
+    final d = DateTime(ld.year, ld.month, ld.day);
+    if (day == null || d != day) {
+      flush();
+      day = d;
+      medians.clear();
+      mn = p.lower;
+      mx = p.upper;
+    }
+    medians.add(p.median);
+    if (p.lower < mn) mn = p.lower;
+    if (p.upper > mx) mx = p.upper;
+  }
+  flush();
+  return result;
+}
+
+class _GeoglowsDailyList extends StatelessWidget {
+  const _GeoglowsDailyList({
+    required this.points,
+    required this.unit,
+    required this.returnPeriods,
+  });
+
+  final List<GeoglowsForecastPoint> points;
+  final String unit;
+  final Map<int, double>? returnPeriods;
+
+  @override
+  Widget build(BuildContext context) {
+    final days = _aggregateGeoDaily(points);
+    if (days.isEmpty) return const SizedBox.shrink();
+    final scale =
+        days.map((d) => d.max).reduce((a, b) => a > b ? a : b) * 1.05;
+
+    return Column(
+      children: [
+        for (final d in days) _row(context, d, scale),
+      ],
+    );
+  }
+
+  Widget _row(BuildContext context, _GeoDay day, double scale) {
+    final ci = _categoryFor(day.median, returnPeriods);
+    final color = ci >= 0
+        ? CupertinoDynamicColor.resolve(_zoneColors[ci], context)
+        : CupertinoColors.systemBlue.resolveFrom(context);
+    final left = (day.min / scale).clamp(0.0, 1.0);
+    final width = ((day.max - day.min) / scale).clamp(0.0, 1.0);
+    final dot = (day.median / scale).clamp(0.0, 1.0);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.white.withValues(alpha: 0.66),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: CupertinoColors.white.withValues(alpha: 0.82)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 44,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _weekdayAbbr[(day.date.weekday - 1) % 7],
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color:
+                        CupertinoColors.secondaryLabel.resolveFrom(context),
+                  ),
+                ),
+                Text(
+                  '${day.date.day}',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, con) {
+                final w = con.maxWidth;
+                return SizedBox(
+                  height: 12,
+                  child: Stack(
+                    children: [
+                      Align(
+                        alignment: Alignment.center,
+                        child: Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: CupertinoColors.systemGrey5
+                                .resolveFrom(context),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: left * w,
+                        top: 3,
+                        child: Container(
+                          width: (width * w).clamp(4.0, w),
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: (dot * w - 5).clamp(0.0, w - 10),
+                        top: 1,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: CupertinoColors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: color, width: 2),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _formatFlow(day.max),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                unit,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  color: CupertinoColors.tertiaryLabel.resolveFrom(context),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
