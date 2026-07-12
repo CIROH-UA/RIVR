@@ -13,6 +13,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
@@ -259,6 +260,39 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       _details?.riverName ?? (_loading ? '' : 'Stream ${widget.reachId}');
   String get _location => _details?.formattedLocation ?? '';
 
+  /// Number of distinct local calendar days covered by a series.
+  int? _daySpan(ForecastSeries? s) {
+    if (s == null || s.data.isEmpty) return null;
+    return s.data
+        .map((p) {
+          final d = p.validTime.toLocal();
+          return DateTime(d.year, d.month, d.day);
+        })
+        .toSet()
+        .length;
+  }
+
+  /// Dynamic label for a NWM range ("9D"/"10D"/"30D"); nominal while loading.
+  String _rangeLabel(ForecastRange r, ForecastResponse? nwm) {
+    if (r == ForecastRange.today) return 'Today';
+    final n = _daySpan(_nwmSeries(nwm, r));
+    return n == null ? r.label : '${n}D';
+  }
+
+  /// Dynamic label for the GEOGLOWS forecast ("15-day forecast" etc.).
+  String _geoLabel() {
+    final pts = _geoPoints;
+    if (pts == null || pts.isEmpty) return ForecastRange.fifteenDay.label;
+    final n = pts
+        .map((p) {
+          final d = p.validTime.toLocal();
+          return DateTime(d.year, d.month, d.day);
+        })
+        .toSet()
+        .length;
+    return '$n-day forecast';
+  }
+
   /// The representative series for a NWM range (ensemble mean when present).
   ForecastSeries? _nwmSeries(ForecastResponse? f, ForecastRange r) {
     if (f == null) return null;
@@ -376,6 +410,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
 
     final nwm =
         _isGeoglows ? null : context.watch<ReachDataProvider>().currentForecast;
+    // Labels reflect the actual data: medium/long return a variable number of
+    // days per reach (e.g. 9 vs 10), so the selector shows 9D/10D dynamically.
+    final labels = <ForecastRange, String>{
+      ForecastRange.today: 'Today',
+      ForecastRange.tenDay: _rangeLabel(ForecastRange.tenDay, nwm),
+      ForecastRange.thirtyDay: _rangeLabel(ForecastRange.thirtyDay, nwm),
+      ForecastRange.fifteenDay: _geoLabel(),
+    };
 
     return CustomScrollView(
       slivers: [
@@ -385,6 +427,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
             isGeoglows: _isGeoglows,
             selected: _range,
             onChanged: (r) => setState(() => _range = r),
+            labels: labels,
           ),
         ),
         SliverToBoxAdapter(
@@ -574,11 +617,13 @@ class _RangeHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.isGeoglows,
     required this.selected,
     required this.onChanged,
+    required this.labels,
   });
 
   final bool isGeoglows;
   final ForecastRange selected;
   final ValueChanged<ForecastRange> onChanged;
+  final Map<ForecastRange, String> labels;
 
   static const double _height = 60;
 
@@ -596,6 +641,7 @@ class _RangeHeaderDelegate extends SliverPersistentHeaderDelegate {
           isGeoglows: isGeoglows,
           selected: selected,
           onChanged: onChanged,
+          labels: labels,
         ),
       ),
     );
@@ -603,7 +649,9 @@ class _RangeHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(_RangeHeaderDelegate old) =>
-      old.selected != selected || old.isGeoglows != isGeoglows;
+      old.selected != selected ||
+      old.isGeoglows != isGeoglows ||
+      !mapEquals(old.labels, labels);
 }
 
 class _RangeSelector extends StatelessWidget {
@@ -611,11 +659,13 @@ class _RangeSelector extends StatelessWidget {
     required this.isGeoglows,
     required this.selected,
     required this.onChanged,
+    required this.labels,
   });
 
   final bool isGeoglows;
   final ForecastRange selected;
   final ValueChanged<ForecastRange> onChanged;
+  final Map<ForecastRange, String> labels;
 
   static const List<ForecastRange> _nwmRanges = [
     ForecastRange.today,
@@ -625,21 +675,31 @@ class _RangeSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Frosted floating pill (no full-width bar; content scrolls behind it).
+    // Frosted floating pill: BackdropFilter blurs whatever scrolls behind it,
+    // and a top-lit gradient + white edge give it a glass sheen even at rest.
     return ClipRRect(
       borderRadius: BorderRadius.circular(13),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
           decoration: BoxDecoration(
-            color: CupertinoColors.systemGrey.withValues(alpha: 0.22),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                CupertinoColors.systemGrey2.withValues(alpha: 0.34),
+                CupertinoColors.systemGrey.withValues(alpha: 0.20),
+              ],
+            ),
             borderRadius: BorderRadius.circular(13),
-            border:
-                Border.all(color: CupertinoColors.white.withValues(alpha: 0.5)),
+            border: Border.all(
+              color: CupertinoColors.white.withValues(alpha: 0.6),
+              width: 0.8,
+            ),
             boxShadow: [
               BoxShadow(
-                color: CupertinoColors.systemGrey.withValues(alpha: 0.35),
-                blurRadius: 18,
+                color: CupertinoColors.systemGrey.withValues(alpha: 0.32),
+                blurRadius: 20,
                 offset: const Offset(0, 6),
               ),
             ],
@@ -650,7 +710,8 @@ class _RangeSelector extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 15, vertical: 7),
                   child: Text(
-                    ForecastRange.fifteenDay.label,
+                    labels[ForecastRange.fifteenDay] ??
+                        ForecastRange.fifteenDay.label,
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
@@ -691,7 +752,7 @@ class _RangeSelector extends StatelessWidget {
               : null,
         ),
         child: Text(
-          r.label,
+          labels[r] ?? r.label,
           style: TextStyle(
             fontSize: 13.5,
             fontWeight: FontWeight.w600,
