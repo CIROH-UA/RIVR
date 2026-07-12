@@ -683,24 +683,27 @@ class _RangeSelector extends StatelessWidget {
         filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
           decoration: BoxDecoration(
+            // Light frosted-white glass (not grey): the selected segment still
+            // reads because it's opaque white with a shadow over this translucent
+            // track, and the blur frosts whatever scrolls behind.
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                CupertinoColors.systemGrey2.withValues(alpha: 0.34),
-                CupertinoColors.systemGrey.withValues(alpha: 0.20),
+                CupertinoColors.white.withValues(alpha: 0.42),
+                CupertinoColors.white.withValues(alpha: 0.20),
               ],
             ),
             borderRadius: BorderRadius.circular(13),
             border: Border.all(
-              color: CupertinoColors.white.withValues(alpha: 0.6),
+              color: CupertinoColors.white.withValues(alpha: 0.7),
               width: 0.8,
             ),
             boxShadow: [
               BoxShadow(
-                color: CupertinoColors.systemGrey.withValues(alpha: 0.32),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
+                color: CupertinoColors.systemGrey.withValues(alpha: 0.22),
+                blurRadius: 16,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
