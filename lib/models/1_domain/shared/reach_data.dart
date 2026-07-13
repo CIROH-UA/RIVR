@@ -1,5 +1,6 @@
 // lib/models/1_domain/shared/reach_data.dart
 
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 
 class ReachData {
@@ -146,16 +147,8 @@ class ReachData {
     final periods = getReturnPeriodsInUnit(flowUnit, converter);
     if (periods == null) return 'Unknown';
 
-    final threshold2yr = periods[2];
-    final threshold5yr = periods[5];
-    final threshold10yr = periods[10];
-    final threshold25yr = periods[25];
-
-    if (threshold2yr != null && flowValue < threshold2yr) return 'Normal';
-    if (threshold5yr != null && flowValue < threshold5yr) return 'Action';
-    if (threshold10yr != null && flowValue < threshold10yr) return 'Moderate';
-    if (threshold25yr != null && flowValue < threshold25yr) return 'Major';
-    return 'Extreme';
+    // Single source of the ladder — see FlowClassification.
+    return FlowClassification.category(flowValue, periods);
   }
 
   /// Get next return period threshold above the given flow value.

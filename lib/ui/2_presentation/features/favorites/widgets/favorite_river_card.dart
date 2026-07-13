@@ -8,6 +8,7 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/services/4_infrastructure/favorites/flood_risk_video_service.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/components/slide_action_buttons.dart';
@@ -238,41 +239,21 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     final flowUnitService = GetIt.I<IFlowUnitPreferenceService>();
     final currentUnit = flowUnitService.currentFlowUnit;
 
-    // Convert the flow value to current unit before comparison
-    final currentFlow = flowUnitService.convertFlow(
-      rawFlow,
-      'CFS', // lastKnownFlow is stored in CFS
-      currentUnit, // Convert to current unit
-    );
+    // lastKnownFlow is stored in whatever unit was current when it was cached
+    // (storedFlowUnit) — NOT always CFS. Convert from that to the current unit.
+    final storedUnit = widget.favorite.storedFlowUnit ?? currentUnit;
+    final currentFlow =
+        flowUnitService.convertFlow(rawFlow, storedUnit, currentUnit);
 
-    // Convert return periods to current unit (they're stored in CMS)
-    final convertedReturnPeriods = <int, double>{};
-    for (final entry in returnPeriods.entries) {
-      convertedReturnPeriods[entry.key] = flowUnitService.convertFlow(
-        entry.value,
-        'CMS',
-        currentUnit,
-      );
-    }
+    // Return periods are stored natively in CMS.
+    final convertedReturnPeriods = <int, double>{
+      for (final entry in returnPeriods.entries)
+        entry.key: flowUnitService.convertFlow(entry.value, 'CMS', currentUnit),
+    };
 
-    // Use same logic as ReachData.getFlowCategory()
-    final threshold2yr = convertedReturnPeriods[2];
-    final threshold5yr = convertedReturnPeriods[5];
-    final threshold10yr = convertedReturnPeriods[10];
-    final threshold25yr = convertedReturnPeriods[25];
-
-    String category;
-    if (threshold2yr != null && currentFlow < threshold2yr) {
-      category = 'Normal';
-    } else if (threshold5yr != null && currentFlow < threshold5yr) {
-      category = 'Action';
-    } else if (threshold10yr != null && currentFlow < threshold10yr) {
-      category = 'Moderate';
-    } else if (threshold25yr != null && currentFlow < threshold25yr) {
-      category = 'Major';
-    } else {
-      category = 'Extreme';
-    }
+    // Single app-wide classifier — never reimplement the ladder.
+    final category =
+        FlowClassification.category(currentFlow, convertedReturnPeriods);
 
     AppLogger.debug(
       'FavoriteRiverCard',

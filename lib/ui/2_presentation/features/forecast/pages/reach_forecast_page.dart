@@ -18,6 +18,7 @@ import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -56,14 +57,6 @@ const List<Color> _zoneColors = [
   CupertinoColors.systemRed,
   CupertinoColors.systemPurple,
 ];
-const List<String> _zoneNames = [
-  'Normal',
-  'Action',
-  'Moderate',
-  'Major',
-  'Extreme',
-];
-
 String _formatFlow(double v) {
   final s = v.round().toString();
   final buf = StringBuffer();
@@ -74,18 +67,9 @@ String _formatFlow(double v) {
   return buf.toString();
 }
 
-/// Category index 0..4 for [flow] against [rp] (needs 2/5/10/25), or -1.
-int _categoryFor(double? flow, Map<int, double>? rp) {
-  if (flow == null || rp == null) return -1;
-  final t = [rp[2], rp[5], rp[10], rp[25]];
-  if (t.any((v) => v == null)) return -1;
-  final tt = t.cast<double>();
-  if (flow < tt[0]) return 0;
-  if (flow < tt[1]) return 1;
-  if (flow < tt[2]) return 2;
-  if (flow < tt[3]) return 3;
-  return 4;
-}
+/// Category index 0..4 (or -1) via the single app-wide classifier.
+int _categoryFor(double? flow, Map<int, double>? rp) =>
+    FlowClassification.indexFor(flow, rp);
 
 class ReachForecastPage extends StatefulWidget {
   const ReachForecastPage({
@@ -585,7 +569,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       peakValue = _formatFlow(peak.flow);
       final ci = _categoryFor(peak.flow, _returnPeriods);
       if (ci >= 0) {
-        peakSub = _zoneNames[ci];
+        peakSub = kFloodCategories[ci];
         peakColor = CupertinoDynamicColor.resolve(_zoneColors[ci], context);
       } else {
         peakSub = unit;

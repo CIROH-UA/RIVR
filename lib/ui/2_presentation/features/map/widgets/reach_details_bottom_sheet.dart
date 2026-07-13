@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
@@ -569,7 +570,13 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _riverName = null;
         _formattedLocation = '';
         _currentFlow = forecast.currentMedian;
-        _flowCategory = 'Normal';
+        // GEOGLOWS return periods (Gumbel) come in the model's unit, same as
+        // currentMedian — classify through the one app-wide ladder instead of
+        // hardcoding 'Normal'.
+        _flowCategory = FlowClassification.category(
+          forecast.currentMedian,
+          forecast.returnPeriods,
+        );
         _latitude = widget.selectedReach.latitude;
         _longitude = widget.selectedReach.longitude;
         _isLoadingFlow = false;

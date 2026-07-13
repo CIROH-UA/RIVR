@@ -12,6 +12,7 @@
 
 import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 
 class FlowGauge extends StatelessWidget {
   const FlowGauge({
@@ -31,14 +32,6 @@ class FlowGauge extends StatelessWidget {
   /// Display unit, e.g. "ft³/s" or "m³/s".
   final String unit;
 
-  static const List<String> _names = [
-    'Normal',
-    'Action',
-    'Moderate',
-    'Major',
-    'Extreme',
-  ];
-
   static const List<Color> _dynZoneColors = [
     CupertinoColors.systemBlue,
     CupertinoColors.systemYellow,
@@ -56,17 +49,10 @@ class FlowGauge extends StatelessWidget {
     return t.cast<double>();
   }
 
-  /// Category index 0..4, or -1 when it can't be determined.
-  int get _categoryIndex {
-    final f = currentFlow;
-    final t = _thresholds;
-    if (f == null || t == null) return -1;
-    if (f < t[0]) return 0;
-    if (f < t[1]) return 1;
-    if (f < t[2]) return 2;
-    if (f < t[3]) return 3;
-    return 4;
-  }
+  /// Category index 0..4, or -1 when it can't be determined. Uses the single
+  /// app-wide classifier — never reimplement the ladder here.
+  int get _categoryIndex =>
+      FlowClassification.indexFor(currentFlow, returnPeriods);
 
   /// Marker position along the arc, 0 (left) .. 1 (right); -1 when unknown.
   double get _position {
@@ -153,7 +139,9 @@ class FlowGauge extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  hasCategory ? _names[i].toUpperCase() : 'NO FLOOD DATA',
+                  hasCategory
+                      ? kFloodCategories[i].toUpperCase()
+                      : 'NO FLOOD DATA',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,

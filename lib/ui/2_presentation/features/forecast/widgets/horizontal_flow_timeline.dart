@@ -3,6 +3,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:get_it/get_it.dart';
@@ -288,34 +290,13 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
       return 'Unknown';
     }
 
-    final periods = convertedReturnPeriods.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-
-    for (final period in periods) {
-      if (flow < period.value) {
-        if (period.key == 2) return 'Normal';
-        if (period.key <= 5) return 'Elevated';
-        return 'High';
-      }
-    }
-
-    return 'Flood Risk';
+    // Single app-wide classifier + colour map — was a divergent 4-bucket ladder
+    // ('Elevated'/'High'/'Flood Risk') that disagreed with the gauge's 5 zones.
+    return FlowClassification.category(flow, convertedReturnPeriods);
   }
 
-  Color _getCategoryColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getCategoryColor(String category) =>
+      AppConstants.getFlowCategoryColor(category);
 
   bool _isCurrentOrNearCurrentHour(DateTime dataTime) {
     final now = DateTime.now();
