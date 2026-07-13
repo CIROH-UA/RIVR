@@ -673,6 +673,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         returnPeriods: rp,
         unit: _unit,
         riverName: _river,
+        sourceNote: _isGeoglows
+            ? 'Gumbel-derived · GEOGLOWS'
+            : 'NWM return periods · CIROH',
       ),
     );
   }
