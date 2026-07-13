@@ -43,6 +43,12 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
 
+  // True when the map is zoomed out past the point where stream geometry is
+  // usable (below AppConfig.minZoomForVectorTiles). Below this the tileset
+  // serves over-simplified geometry that renders as dots and can't be reliably
+  // tapped, so we hide the streams and show a "zoom in" hint instead.
+  bool _showZoomHint = false;
+
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
 
@@ -160,8 +166,67 @@ class MapPageState extends State<MapPage> {
           ),
         ),
 
+        // "Zoom in" hint shown while the map is too far out to see/tap streams.
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            bottom: false,
+            child: _buildZoomHint(),
+          ),
+        ),
+
         if (_isLoading) _buildLoadingOverlay(),
       ],
+    );
+  }
+
+  /// Non-blocking pill that fades in when zoomed out past the usable stream
+  /// range, telling the user to zoom in to see and tap rivers.
+  Widget _buildZoomHint() {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: _showZoomHint ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 250),
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            margin: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemBackground.withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: CupertinoColors.black.withValues(alpha: 0.15),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  CupertinoIcons.zoom_in,
+                  size: 18,
+                  color: CupertinoColors.systemBlue,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  'Zoom in to see and tap rivers',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: CupertinoColors.label,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -192,9 +257,26 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Save camera position when the map stops moving
+  /// Save camera position when the map stops moving, and reconcile the
+  /// zoom-dependent stream visibility + "zoom in" hint.
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
+    _reconcileZoomState();
+  }
+
+  /// Hide streams (and surface the hint) when zoomed out past the usable range;
+  /// restore them when zoomed back in. Driven off map-idle so it tracks pans
+  /// and zooms without a continuous camera listener.
+  Future<void> _reconcileZoomState() async {
+    final zoom = await _vectorTilesService.getCurrentZoom();
+    if (zoom == null || !mounted) return;
+
+    await _vectorTilesService.updateVisibilityForZoom(zoom);
+
+    final tooFarOut = zoom < AppConfig.minZoomForVectorTiles;
+    if (tooFarOut != _showZoomHint) {
+      setState(() => _showZoomHint = tooFarOut);
+    }
   }
 
   Widget _buildLoadingOverlay() {
@@ -465,6 +547,15 @@ class MapPageState extends State<MapPage> {
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {
+    // Streams aren't rendered or reliably tappable below the usable zoom, so
+    // don't run a query that would silently miss — the hint tells the user to
+    // zoom in.
+    final zoom = await _vectorTilesService.getCurrentZoom();
+    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) {
+      if (mounted && !_showZoomHint) setState(() => _showZoomHint = true);
+      return;
+    }
+
     // Handle normal reach selection
     await _reachSelectionService.handleMapTap(context);
   }

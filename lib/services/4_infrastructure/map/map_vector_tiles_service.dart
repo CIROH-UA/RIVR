@@ -440,12 +440,12 @@ class MapVectorTilesService {
     if (!_isLoaded || _mapboxMap == null) return;
 
     try {
-      // Simple visibility toggle based on zoom thresholds. Effective visibility
-      // is (in zoom range) AND (network enabled), so zoom gating never turns a
-      // user-disabled network back on.
-      final shouldShow =
-          zoom >= AppConfig.minZoomForVectorTiles &&
-          zoom <= AppConfig.maxZoomForVectorTiles;
+      // Hide streams only when zoomed out past the point where the tileset's
+      // geometry is usable (renders as dots and can't be tapped). We gate the
+      // low end only — zooming in never hides streams. Effective visibility is
+      // (zoomed in enough) AND (user hasn't disabled the layer), so zoom gating
+      // never turns a user-disabled layer back on.
+      final shouldShow = zoom >= AppConfig.minZoomForVectorTiles;
 
       await _setLayerGroupVisibility(_nwmLayerIds, shouldShow && _nwmVisible);
       await _setLayerGroupVisibility(
