@@ -8,6 +8,14 @@
         { "fieldPath": "reachId", "order": "ASCENDING" },
         { "fieldPath": "sentAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "enableNotifications", "order": "ASCENDING" },
+        { "fieldPath": "notificationFrequency", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

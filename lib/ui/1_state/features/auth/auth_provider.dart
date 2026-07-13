@@ -258,6 +258,15 @@ class AuthProvider with ChangeNotifier {
   Future<void> signOut() async {
     _setLoading(true);
 
+    // Unregister this device's push token from the user's doc BEFORE signing
+    // out — Firestore rules require the user still be authed. Otherwise the
+    // token lingers in this account and gets re-added to the next account that
+    // logs in on this device, leaking one user's flood alerts to another.
+    final signingOutUid = _currentUser?.uid;
+    if (signingOutUid != null) {
+      await _fcmService.unregisterDeviceToken(signingOutUid);
+    }
+
     final result = await _signOutUseCase();
 
     _setLoading(false);

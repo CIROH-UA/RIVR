@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:rivr/ui/2_presentation/routing/app_routes.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
@@ -29,6 +30,20 @@ class FCMService implements IFCMService {
   StreamSubscription<String>? _tokenRefreshSubscription;
   GlobalKey<NavigatorState>? _navigatorKey;
 
+  // Local-notifications plugin, used to DISPLAY pushes while the app is in the
+  // foreground on Android (FCM does not auto-display notification payloads then;
+  // iOS is covered by setForegroundNotificationPresentationOptions). Reuses the
+  // same `river_alerts` channel the server targets so behavior is consistent.
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+  bool _localNotificationsReady = false;
+
+  // Matches AndroidManifest's default_notification_channel_id + server channelId.
+  static const _androidChannelId = 'river_alerts';
+  static const _androidChannelName = 'River Alerts';
+  static const _androidChannelDescription =
+      'Flood alerts for your favorite rivers';
+
   @override
   set navigatorKey(GlobalKey<NavigatorState> key) => _navigatorKey = key;
 
@@ -42,6 +57,10 @@ class FCMService implements IFCMService {
     _listenersRegistered = true;
 
     AppLogger.debug('FcmService', 'Setting up notification listeners');
+
+    // Prepare local notifications so foreground pushes can be displayed on
+    // Android (fire-and-forget; ready well before the first alert arrives).
+    _initLocalNotifications();
 
     // Foreground messages
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
@@ -121,6 +140,29 @@ class FCMService implements IFCMService {
     }
   }
 
+  /// On iOS the APNS token must be available before FCM will hand out a token.
+  /// Polls for it (3 × 2s). Returns true once ready, false if it never arrives
+  /// (simulator or a provisioning issue). No-op / true on Android.
+  Future<bool> _ensureApnsReady() async {
+    if (!Platform.isIOS) return true;
+    AppLogger.debug('FcmService', 'Waiting for APNS token (iOS requirement)');
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final apnsToken = await _messaging.getAPNSToken();
+        if (apnsToken != null) {
+          AppLogger.debug('FcmService', 'APNS token obtained on attempt ${attempt + 1}');
+          return true;
+        }
+      } catch (_) {
+        // Ignore errors, just retry
+      }
+      AppLogger.debug('FcmService', 'APNS token not ready, waiting... (attempt ${attempt + 1}/3)');
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    AppLogger.warning('FcmService', 'APNS token not available (simulator or provisioning issue)');
+    return false;
+  }
+
   /// Retrieve the FCM token without saving it.
   /// Returns the token string, 'pending' for iOS simulator, or null on failure.
   Future<String?> _getToken() async {
@@ -131,26 +173,8 @@ class FCMService implements IFCMService {
     }
 
     // iOS: Wait for APNS token (required before FCM token)
-    if (Platform.isIOS) {
-      AppLogger.debug('FcmService', 'Waiting for APNS token (iOS requirement)');
-      String? apnsToken;
-      for (int attempt = 0; attempt < 3; attempt++) {
-        try {
-          apnsToken = await _messaging.getAPNSToken();
-        } catch (_) {
-          // Ignore errors, just retry
-        }
-        if (apnsToken != null) {
-          AppLogger.debug('FcmService', 'APNS token obtained on attempt ${attempt + 1}');
-          break;
-        }
-        AppLogger.debug('FcmService', 'APNS token not ready, waiting... (attempt ${attempt + 1}/3)');
-        await Future.delayed(const Duration(seconds: 2));
-      }
-      if (apnsToken == null) {
-        AppLogger.warning('FcmService', 'APNS token not available (simulator or provisioning issue)');
-        return 'pending';
-      }
+    if (!await _ensureApnsReady()) {
+      return 'pending';
     }
 
     // Get fresh FCM token
@@ -163,6 +187,22 @@ class FCMService implements IFCMService {
     AppLogger.debug('FcmService', 'Got FCM token: ${token.substring(0, 20)}...');
     _cachedToken = token;
     return token;
+  }
+
+  /// The current device's FCM token for *removal* purposes (logout / disable).
+  /// Uses the cached token when present, otherwise fetches it — waiting for the
+  /// APNS token on iOS — so we can prune it from Firestore even on a fresh
+  /// launch where nothing has populated the cache yet. Returns null if the
+  /// device has no deliverable token (simulator / not provisioned).
+  Future<String?> _currentDeviceToken() async {
+    if (_cachedToken != null && _cachedToken != 'pending') return _cachedToken;
+    try {
+      if (!await _ensureApnsReady()) return null;
+      return await _messaging.getToken();
+    } catch (e) {
+      AppLogger.debug('FcmService', 'Could not resolve current device token: $e');
+      return null;
+    }
   }
 
   /// Get FCM token and save to user settings
@@ -198,16 +238,79 @@ class FCMService implements IFCMService {
     }
   }
 
-  /// Handle foreground messages (when app is open)
-  void _handleForegroundMessage(RemoteMessage message) {
-    AppLogger.debug('FcmService', 'Received foreground message: ${message.messageId}');
-    AppLogger.debug('FcmService', 'Title: ${message.notification?.title}');
-    AppLogger.debug('FcmService', 'Body: ${message.notification?.body}');
+  /// Initialize the local-notifications plugin and (Android) create the alert
+  /// channel. iOS permissions are owned by FCM, so we request none here and only
+  /// ever display foreground notifications on Android.
+  Future<void> _initLocalNotifications() async {
+    if (_localNotificationsReady) return;
+    try {
+      const androidInit = AndroidInitializationSettings('ic_notification');
+      const iosInit = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      await _localNotifications.initialize(
+        const InitializationSettings(android: androidInit, iOS: iosInit),
+        onDidReceiveNotificationResponse: _onLocalNotificationTap,
+      );
 
-    // Foreground notifications are displayed by the OS on both platforms
-    // (iOS via AppDelegate willPresent, Android via FCM notification channel).
-    // No in-app action needed here — the user can tap the system notification
-    // and _handleNotificationTap will fire.
+      // Ensure the channel exists (Android 8+). Matches the server's channelId.
+      const channel = AndroidNotificationChannel(
+        _androidChannelId,
+        _androidChannelName,
+        description: _androidChannelDescription,
+        importance: Importance.high,
+      );
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+
+      _localNotificationsReady = true;
+      AppLogger.debug('FcmService', 'Local notifications ready');
+    } catch (e) {
+      AppLogger.error('FcmService', 'Local notifications init failed: $e', e);
+    }
+  }
+
+  /// Tap on a locally-displayed (foreground) notification → route to the reach.
+  void _onLocalNotificationTap(NotificationResponse response) {
+    final reachId = response.payload;
+    if (reachId != null && reachId.isNotEmpty) {
+      _navigateToReach(reachId);
+    }
+  }
+
+  /// Handle foreground messages (when app is open).
+  ///
+  /// iOS displays them itself via setForegroundNotificationPresentationOptions.
+  /// Android does NOT auto-display FCM notification payloads while foregrounded,
+  /// so we render one ourselves through flutter_local_notifications, carrying
+  /// the reachId as the payload so a tap routes to the forecast.
+  void _handleForegroundMessage(RemoteMessage message) {
+    final notification = message.notification;
+    AppLogger.debug('FcmService', 'Received foreground message: ${message.messageId}');
+
+    if (notification == null || !Platform.isAndroid) return;
+
+    _localNotifications.show(
+      notification.hashCode,
+      notification.title,
+      notification.body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _androidChannelId,
+          _androidChannelName,
+          channelDescription: _androidChannelDescription,
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: 'ic_notification',
+          color: Color(0xFFFF6B35),
+        ),
+      ),
+      payload: message.data['reachId'] as String?,
+    );
   }
 
   /// Handle notification tap (when user taps notification from background or cold start)
@@ -290,14 +393,15 @@ class FCMService implements IFCMService {
     try {
       AppLogger.debug('FcmService', 'Disabling notifications for user: $userId');
 
-      // Remove this device's token from the array
-      final tokenToRemove = _cachedToken;
+      // Remove this device's token from the array. Resolve it even on a fresh
+      // launch (cache empty) so we don't leave an orphaned token behind.
+      final tokenToRemove = await _currentDeviceToken();
       _cachedToken = null;
 
       final updates = <String, dynamic>{
         'enableNotifications': false,
       };
-      if (tokenToRemove != null) {
+      if (tokenToRemove != null && tokenToRemove != 'pending') {
         updates['fcmTokens'] = FieldValue.arrayRemove([tokenToRemove]);
       }
       await _userSettingsService.updateUserSettings(userId, updates);
@@ -343,6 +447,13 @@ class FCMService implements IFCMService {
     try {
       AppLogger.debug('FcmService', 'Refreshing FCM token for user: $userId');
 
+      // iOS: FCM won't return a token until APNS is ready. Skipping this wait is
+      // a race that can leave a returning iOS user unregistered for the session.
+      if (!await _ensureApnsReady()) {
+        AppLogger.warning('FcmService', 'APNS not ready; deferring token refresh');
+        return;
+      }
+
       // Get the current token from Firebase
       final freshToken = await _messaging.getToken();
       if (freshToken == null) {
@@ -383,6 +494,35 @@ class FCMService implements IFCMService {
     } catch (e) {
       AppLogger.error('FcmService', 'Error refreshing token: $e', e);
       ErrorService.logError('FCMService.refreshTokenIfNeeded', e);
+    }
+  }
+
+  /// Unregister THIS device's token from the given user's Firestore doc on
+  /// logout, without touching `enableNotifications` (their other devices should
+  /// keep working). Prevents the token from lingering in the previous account
+  /// and being re-added to the next account on this device — which would leak
+  /// one user's alerts to another. Call this while [userId] is still authed,
+  /// before [clearCache].
+  @override
+  Future<void> unregisterDeviceToken(String userId) async {
+    try {
+      final token = await _currentDeviceToken();
+      if (token != null && token != 'pending') {
+        await _userSettingsService.updateUserSettings(userId, {
+          'fcmTokens': FieldValue.arrayRemove([token]),
+        });
+        AppLogger.info('FcmService', 'Unregistered device token on logout');
+      }
+      // Invalidate the token on this device so a new install/account gets a
+      // fresh one. Best-effort — a missing token is a benign no-op.
+      try {
+        await _messaging.deleteToken();
+      } catch (e) {
+        AppLogger.debug('FcmService', 'Skipped token deletion on logout: $e');
+      }
+    } catch (e) {
+      AppLogger.error('FcmService', 'Error unregistering device token: $e', e);
+      ErrorService.logError('FCMService.unregisterDeviceToken', e);
     }
   }
 

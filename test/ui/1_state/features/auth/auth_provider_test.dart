@@ -203,6 +203,8 @@ class _MockFCMService implements IFCMService {
   @override
   Future<void> refreshTokenIfNeeded(String userId) async {}
   @override
+  Future<void> unregisterDeviceToken(String userId) async {}
+  @override
   void clearCache() {}
 }
 

@@ -34,5 +34,11 @@ abstract class IFCMService {
   Future<void> disableNotifications(String userId);
   Future<bool> isEnabledForUser(String userId);
   Future<void> refreshTokenIfNeeded(String userId);
+
+  /// Remove this device's token from [userId]'s Firestore doc on logout, without
+  /// disabling notifications account-wide. Call while [userId] is still authed,
+  /// before [clearCache], to avoid leaking one account's alerts to the next.
+  Future<void> unregisterDeviceToken(String userId);
+
   void clearCache();
 }
