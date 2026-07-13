@@ -216,7 +216,19 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         );
         // Already in the user's unit (converted at decode) — no reconciliation.
         _returnPeriods = fc.returnPeriods;
-        _geoPoints = fc.points;
+        // Forecast, not retrospective: keep only from the current reading
+        // onward. GEOGLOWS series start at the model-init time (often earlier
+        // today); showing that recent past muddies "peak"/trend and the chart.
+        // Trimming here makes everything downstream (chart, weekly split, peak,
+        // day count) forward-looking from a single source.
+        final fwd = ForecastPeak.upcomingPoints(
+            fc.points.map((p) => (flow: p.median, time: p.validTime)));
+        final firstUpcoming = fwd.isEmpty ? null : fwd.first.time;
+        _geoPoints = firstUpcoming == null
+            ? fc.points
+            : fc.points
+                .where((p) => !p.validTime.isBefore(firstUpcoming))
+                .toList();
         _unit = unitService.getDisplayUnit();
         _loading = false;
       });
@@ -286,21 +298,31 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
   }
 
-  /// The peak within the selected range, or null while loading. "Peak" always
-  /// means the highest *upcoming* flow (from the current reading onward), never
-  /// a crest that already passed — see [ForecastPeak].
-  ({double flow, DateTime time})? _peak(ForecastResponse? nwm) {
+  /// The upcoming (flow, time) points for the selected source/range — from the
+  /// current reading onward (see [ForecastPeak]). This forecast page is
+  /// forward-looking, so both the peak and the trend derive from this.
+  List<({double flow, DateTime time})> _upcoming(ForecastResponse? nwm) {
     Iterable<({double flow, DateTime time})> pts;
     if (_isGeoglows) {
-      final g = _geoPoints;
-      if (g == null || g.isEmpty) return null;
+      final g = _geoPoints; // already trimmed to forward-only at load
+      if (g == null || g.isEmpty) return const [];
       pts = g.map((p) => (flow: p.median, time: p.validTime));
     } else {
       final s = _nwmSeries(nwm, _range);
-      if (s == null || s.data.isEmpty) return null;
+      if (s == null || s.data.isEmpty) return const [];
       pts = s.data.map((p) => (flow: p.flow, time: p.validTime));
     }
-    return ForecastPeak.upcoming(pts);
+    return ForecastPeak.upcomingPoints(pts);
+  }
+
+  /// The highest *upcoming* flow, or null while loading — never a crest that
+  /// already passed. See [ForecastPeak].
+  ({double flow, DateTime time})? _peak(ForecastResponse? nwm) {
+    ({double flow, DateTime time})? best;
+    for (final p in _upcoming(nwm)) {
+      if (best == null || p.flow > best.flow) best = p;
+    }
+    return best;
   }
 
   String _formatEta(DateTime t) {
@@ -585,11 +607,32 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       peakSub = '';
     }
 
-    // Trend follows time-to-peak: a peak that's essentially now means the flow
-    // is at its high and receding; a peak hours/days out means it's still rising.
-    final etaHours =
-        peak == null ? 0 : peak.time.difference(DateTime.now()).inHours;
-    final etaSub = peak == null ? '' : (etaHours >= 3 ? 'rising' : 'receding');
+    // Forward-looking trend from the current reading onward. This app forecasts,
+    // so the middle stat says where the flow is *heading* — not a "time to peak"
+    // that degenerates to a confusing "now / receding" once the river is already
+    // at its high. "Rising" surfaces a genuine upcoming crest (with its ETA);
+    // otherwise we describe the direction from now on.
+    final up = _upcoming(nwm);
+    String trendValue;
+    String trendSub;
+    if (up.isEmpty || peak == null) {
+      trendValue = '—';
+      trendSub = '';
+    } else {
+      final cur = up.first.flow;
+      final last = up.last.flow;
+      if (peak.flow > cur * 1.05) {
+        trendValue = 'Rising';
+        trendSub = 'peaks ${_formatEta(peak.time)}';
+      } else if (last < cur * 0.95) {
+        trendValue = 'Falling';
+        trendSub = 'easing';
+      } else {
+        trendValue = 'Steady';
+        trendSub = 'holding';
+      }
+    }
+
     final rpSub = switch (_categoryFor(_details?.currentFlow, _returnPeriods)) {
       0 => 'below flood',
       1 => 'action stage',
@@ -603,8 +646,8 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       peakValue: peakValue,
       peakSub: peakSub,
       peakColor: peakColor,
-      etaValue: peak != null ? _formatEta(peak.time) : '—',
-      etaSub: etaSub,
+      trendValue: trendValue,
+      trendSub: trendSub,
       rpValue: _returnPeriodBand(),
       rpSub: rpSub,
     );
@@ -777,8 +820,8 @@ class _StatCard extends StatelessWidget {
     required this.peakValue,
     required this.peakSub,
     required this.peakColor,
-    required this.etaValue,
-    required this.etaSub,
+    required this.trendValue,
+    required this.trendSub,
     required this.rpValue,
     required this.rpSub,
   });
@@ -786,8 +829,8 @@ class _StatCard extends StatelessWidget {
   final String peakValue;
   final String peakSub;
   final Color? peakColor;
-  final String etaValue;
-  final String etaSub;
+  final String trendValue;
+  final String trendSub;
   final String rpValue;
   final String rpSub;
 
@@ -819,7 +862,7 @@ class _StatCard extends StatelessWidget {
           ),
           _divider(context),
           Expanded(
-            child: _Stat(label: 'Time to peak', value: etaValue, sub: etaSub),
+            child: _Stat(label: 'Trend', value: trendValue, sub: trendSub),
           ),
           _divider(context),
           Expanded(
@@ -1200,6 +1243,25 @@ class _HydrographPainter extends CustomPainter {
     final lo = points.map((p) => p.lower).toList();
     final hi = points.map((p) => p.upper).toList();
 
+    // Peak = highest flow in the (forward-only) series. Points before "now" are
+    // trimmed upstream, so the max is by definition still upcoming.
+    var peakI = 0;
+    for (var i = 1; i < n; i++) {
+      if (med[i] > med[peakI]) peakI = i;
+    }
+
+    // Build the peak callout up front so we can reserve headroom for it above
+    // the peak — it then sits in clear space instead of on top of the line.
+    final pd = points[peakI].validTime.toLocal();
+    final tpTop = _tp('PEAK · ${_wd[pd.weekday - 1]} ${pd.day}',
+        calloutFg.withValues(alpha: 0.72), 8.5, FontWeight.w700);
+    final tpBot = _tp('${FlowFormat.grouped(med[peakI])} $unit', calloutFg, 11.5,
+        FontWeight.w800);
+    const cPadX = 10.0, cPadY = 6.0, cGap = 2.0;
+    final calloutW =
+        (tpTop.width > tpBot.width ? tpTop.width : tpBot.width) + cPadX * 2;
+    final calloutH = cPadY * 2 + tpTop.height + cGap + tpBot.height;
+
     var minV = lo.reduce((a, b) => a < b ? a : b);
     var maxV = hi.reduce((a, b) => a > b ? a : b);
     final span0 = (maxV - minV).abs();
@@ -1208,7 +1270,7 @@ class _HydrographPainter extends CustomPainter {
     maxV += pad;
     final range = maxV - minV;
 
-    const padTop = 26.0; // callout headroom
+    final padTop = calloutH + 12; // reserved headroom for the peak callout
     const padBottom = 16.0; // x labels
     final plotTop = padTop;
     final plotBottom = size.height - padBottom;
@@ -1274,15 +1336,8 @@ class _HydrographPainter extends CustomPainter {
           size: 9.5, weight: FontWeight.w600, center: true);
     }
 
-    // Peak dot + callout. "Peak" is the highest *upcoming* median (from the
-    // current reading onward), never a crest that already passed — the same
-    // rule the stat card uses. See [ForecastPeak].
-    final peak = ForecastPeak.upcoming(
-        [for (final p in points) (flow: p.median, time: p.validTime)]);
-    var peakI = peak == null
-        ? 0
-        : points.indexWhere((p) => p.validTime == peak.time);
-    if (peakI < 0) peakI = 0;
+    // Peak dot + callout, placed above the peak in the reserved headroom so it
+    // never sits over the plotted line.
     final pc = _cat(med[peakI]);
     final dotColor = pc >= 0 ? catColors[pc] : accent;
     final px = x(peakI);
@@ -1290,9 +1345,16 @@ class _HydrographPainter extends CustomPainter {
     canvas.drawCircle(Offset(px, py), 5.5, Paint()..color = calloutFg);
     canvas.drawCircle(Offset(px, py), 4, Paint()..color = dotColor);
 
-    final d = points[peakI].validTime.toLocal();
-    _callout(canvas, size, 'PEAK · ${_wd[d.weekday - 1]} ${d.day}',
-        '${FlowFormat.grouped(med[peakI])} $unit', px, py);
+    var bx = px - calloutW / 2;
+    if (bx < left) bx = left;
+    if (bx + calloutW > right) bx = right - calloutW;
+    final by = py - 10 - calloutH;
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(bx, by, calloutW, calloutH), const Radius.circular(8)),
+        Paint()..color = calloutBg);
+    tpTop.paint(canvas, Offset(bx + cPadX, by + cPadY));
+    tpBot.paint(canvas, Offset(bx + cPadX, by + cPadY + tpTop.height + cGap));
   }
 
   void _dashedH(Canvas c, double yy, double x0, double x1, Paint p) {
@@ -1322,38 +1384,13 @@ class _HydrographPainter extends CustomPainter {
     tp.paint(c, Offset(dx, o.dy));
   }
 
-  void _callout(
-      Canvas c, Size size, String top, String bottom, double px, double py) {
-    final tpTop = TextPainter(
-      text: TextSpan(
-          text: top,
-          style: TextStyle(
-              color: calloutFg.withValues(alpha: 0.72),
-              fontSize: 8.5,
-              fontWeight: FontWeight.w700)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final tpBot = TextPainter(
-      text: TextSpan(
-          text: bottom,
-          style: TextStyle(
-              color: calloutFg, fontSize: 11.5, fontWeight: FontWeight.w800)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final w = (tpTop.width > tpBot.width ? tpTop.width : tpBot.width) + 16;
-    const h = 28.0;
-    var bx = px - w / 2;
-    if (bx < 0) bx = 0;
-    if (bx + w > size.width) bx = size.width - w;
-    var by = py - h - 8;
-    if (by < 0) by = py + 8;
-    c.drawRRect(
-        RRect.fromRectAndRadius(
-            Rect.fromLTWH(bx, by, w, h), const Radius.circular(7)),
-        Paint()..color = calloutBg);
-    tpTop.paint(c, Offset(bx + 8, by + 5));
-    tpBot.paint(c, Offset(bx + 8, by + 14));
-  }
+  TextPainter _tp(String s, Color color, double size, FontWeight weight) =>
+      TextPainter(
+        text: TextSpan(
+            text: s,
+            style: TextStyle(color: color, fontSize: size, fontWeight: weight)),
+        textDirection: TextDirection.ltr,
+      )..layout();
 
   @override
   bool shouldRepaint(_HydrographPainter old) =>
