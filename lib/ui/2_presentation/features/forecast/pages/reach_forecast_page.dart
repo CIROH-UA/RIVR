@@ -1393,30 +1393,6 @@ class _GeoglowsWeeklySplit extends StatelessWidget {
         points.where((p) => !_day(p.validTime).isBefore(boundary)).toList();
     if (wk1.isEmpty || wk2.isEmpty) return const SizedBox.shrink();
 
-    // Shared scale so both cards are directly comparable.
-    final rp = returnPeriods;
-    final t2 = rp?[2], t5 = rp?[5], t10 = rp?[10], t25 = rp?[25];
-    final full = t2 != null && t5 != null && t10 != null && t25 != null;
-    final dataMax =
-        points.map((p) => p.median).reduce((a, b) => a > b ? a : b);
-    final scaleMax = full
-        ? (t25 * 1.15 > dataMax * 1.05 ? t25 * 1.15 : dataMax * 1.05)
-        : dataMax * 1.15;
-
-    List<Color>? gColors;
-    List<double>? gStops;
-    if (full) {
-      double f(double t) => (t / scaleMax).clamp(0.0, 1.0);
-      gColors = [
-        catColors[0], catColors[0],
-        catColors[1], catColors[1],
-        catColors[2], catColors[2],
-        catColors[3], catColors[3],
-        catColors[4], catColors[4],
-      ];
-      gStops = [0, f(t2), f(t2), f(t5), f(t5), f(t10), f(t10), f(t25), f(t25), 1];
-    }
-
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1427,9 +1403,6 @@ class _GeoglowsWeeklySplit extends StatelessWidget {
             returnPeriods: returnPeriods,
             unit: unit,
             catColors: catColors,
-            scaleMax: scaleMax,
-            gradientColors: gColors,
-            gradientStops: gStops,
           ),
         ),
         const SizedBox(width: 12),
@@ -1440,9 +1413,6 @@ class _GeoglowsWeeklySplit extends StatelessWidget {
             returnPeriods: returnPeriods,
             unit: unit,
             catColors: catColors,
-            scaleMax: scaleMax,
-            gradientColors: gColors,
-            gradientStops: gStops,
           ),
         ),
       ],
@@ -1457,9 +1427,6 @@ class _WeekCard extends StatelessWidget {
     required this.returnPeriods,
     required this.unit,
     required this.catColors,
-    required this.scaleMax,
-    required this.gradientColors,
-    required this.gradientStops,
   });
 
   final String title;
@@ -1467,9 +1434,6 @@ class _WeekCard extends StatelessWidget {
   final Map<int, double>? returnPeriods;
   final String unit;
   final List<Color> catColors;
-  final double scaleMax;
-  final List<Color>? gradientColors;
-  final List<double>? gradientStops;
 
   static const _mo = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -1490,14 +1454,6 @@ class _WeekCard extends StatelessWidget {
     final sub = CupertinoColors.secondaryLabel.resolveFrom(context);
     final faint = CupertinoColors.tertiaryLabel.resolveFrom(context);
     final catColor = cat >= 0 ? catColors[cat] : sub;
-
-    // The scale shows the full flood ladder as a dimmed reference; it's vivid
-    // only up to this week's peak (the zones it actually reaches), with a
-    // pointer at the peak. Flex weights place the pointer without a LayoutBuilder
-    // (which would break intrinsic sizing inside the two-card Row).
-    final peakFrac = (maxMed / scaleMax).clamp(0.0, 1.0);
-    final peakFlex = (peakFrac * 1000).round();
-    final restFlex = ((1 - peakFrac) * 1000).round();
 
     String range() {
       final sameMonth = start.month == end.month;
@@ -1561,62 +1517,29 @@ class _WeekCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 11),
-          // Full flood-category scale as a dimmed reference, vivid only up to
-          // this week's peak, with a pointer at the peak. Flex spacers (not a
-          // LayoutBuilder) keep the card intrinsic-sizeable.
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              height: 12,
-              child: Stack(
-                children: [
-                  // Dimmed reference: the whole ladder, so the higher zones stay
-                  // visible but clearly read as "not reached".
-                  Positioned.fill(
-                    child: Opacity(
-                      opacity: 0.28,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: gradientColors != null
-                              ? LinearGradient(
-                                  colors: gradientColors!, stops: gradientStops)
-                              : null,
-                          color: gradientColors == null
-                              ? catColors[0].withValues(alpha: 0.25)
-                              : null,
-                        ),
-                      ),
+          // Category ladder with only the week's peak category highlighted
+          // (longer, full colour, outlined). The full scale already lives in the
+          // gauge arc above, so here we just show which category the week hits.
+          Row(
+            children: [
+              for (var i = 0; i < 5; i++) ...[
+                if (i > 0) const SizedBox(width: 3),
+                Expanded(
+                  flex: i == cat ? 26 : 10,
+                  child: Container(
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: i == cat
+                          ? catColors[i]
+                          : catColors[i].withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(4),
+                      border:
+                          i == cat ? Border.all(color: label, width: 1.5) : null,
                     ),
                   ),
-                  // Vivid up to the peak: the categories this week actually spans.
-                  Positioned.fill(
-                    child: ClipRect(
-                      clipper: _FractionClipper(peakFrac),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: gradientColors != null
-                              ? LinearGradient(
-                                  colors: gradientColors!, stops: gradientStops)
-                              : null,
-                          color: gradientColors == null ? catColors[0] : null,
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Peak pointer.
-                  Positioned.fill(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (peakFlex > 0) Spacer(flex: peakFlex),
-                        Container(width: 2.5, color: label),
-                        if (restFlex > 0) Spacer(flex: restFlex),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 6),
           Text('range ${FlowFormat.compact(minMed)}–${FlowFormat.compact(maxMed)}',
@@ -1626,20 +1549,6 @@ class _WeekCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Clips its child to the left [frac] of the available width — used to reveal
-/// the flood scale vividly only up to a week's peak.
-class _FractionClipper extends CustomClipper<Rect> {
-  const _FractionClipper(this.frac);
-
-  final double frac;
-
-  @override
-  Rect getClip(Size size) => Rect.fromLTWH(0, 0, size.width * frac, size.height);
-
-  @override
-  bool shouldReclip(_FractionClipper oldClipper) => oldClipper.frac != frac;
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
