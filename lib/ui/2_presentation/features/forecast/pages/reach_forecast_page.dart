@@ -20,6 +20,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/utils/flow_format.dart';
+import 'package:rivr/utils/forecast_peak.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -285,7 +286,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
   }
 
-  /// Peak (flow, time) within the selected range, or null while loading.
+  /// The peak within the selected range, or null while loading. "Peak" always
+  /// means the highest *upcoming* flow (from the current reading onward), never
+  /// a crest that already passed — see [ForecastPeak].
   ({double flow, DateTime time})? _peak(ForecastResponse? nwm) {
     Iterable<({double flow, DateTime time})> pts;
     if (_isGeoglows) {
@@ -297,11 +300,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       if (s == null || s.data.isEmpty) return null;
       pts = s.data.map((p) => (flow: p.flow, time: p.validTime));
     }
-    ({double flow, DateTime time})? best;
-    for (final p in pts) {
-      if (best == null || p.flow > best.flow) best = p;
-    }
-    return best;
+    return ForecastPeak.upcoming(pts);
   }
 
   String _formatEta(DateTime t) {
@@ -1275,11 +1274,15 @@ class _HydrographPainter extends CustomPainter {
           size: 9.5, weight: FontWeight.w600, center: true);
     }
 
-    // Peak dot + callout.
-    var peakI = 0;
-    for (var i = 1; i < n; i++) {
-      if (med[i] > med[peakI]) peakI = i;
-    }
+    // Peak dot + callout. "Peak" is the highest *upcoming* median (from the
+    // current reading onward), never a crest that already passed — the same
+    // rule the stat card uses. See [ForecastPeak].
+    final peak = ForecastPeak.upcoming(
+        [for (final p in points) (flow: p.median, time: p.validTime)]);
+    var peakI = peak == null
+        ? 0
+        : points.indexWhere((p) => p.validTime == peak.time);
+    if (peakI < 0) peakI = 0;
     final pc = _cat(med[peakI]);
     final dotColor = pc >= 0 ? catColors[pc] : accent;
     final px = x(peakI);
@@ -1442,7 +1445,13 @@ class _WeekCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final meds = pts.map((p) => p.median).toList();
+    // Summaries reflect the *upcoming* part of the week (from the current
+    // reading onward), so a week's "peak" is never a crest that already passed
+    // — consistent with the stat card and chart. See [ForecastPeak].
+    final upcoming = ForecastPeak.upcomingPoints(
+        [for (final p in pts) (flow: p.median, time: p.validTime)]);
+    final meds = (upcoming.isEmpty ? pts.map((p) => p.median) : upcoming.map((p) => p.flow))
+        .toList();
     final minMed = meds.reduce((a, b) => a < b ? a : b);
     final maxMed = meds.reduce((a, b) => a > b ? a : b);
     final cat = FlowClassification.indexFor(maxMed, returnPeriods);
