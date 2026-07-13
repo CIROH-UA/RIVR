@@ -227,7 +227,7 @@ class _ReturnPeriodsSheetState extends State<ReturnPeriodsSheet> {
             width: yearW,
             child: Text('$year-year',
                 style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w700, color: label)),
+                    fontSize: 15, fontWeight: FontWeight.w600, color: label)),
           ),
           const SizedBox(width: 10),
           Container(
@@ -248,7 +248,7 @@ class _ReturnPeriodsSheetState extends State<ReturnPeriodsSheet> {
             '${FlowFormat.grouped(widget.returnPeriods[year]!)} ${widget.unit}',
             style: TextStyle(
               fontSize: 15.5,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               color: label,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
