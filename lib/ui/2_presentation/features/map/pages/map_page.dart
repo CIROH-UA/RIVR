@@ -552,13 +552,57 @@ class MapPageState extends State<MapPage> {
 
   // UPDATED: Call bottom sheet directly without helper function
   void _onReachSelected(SelectedReach selectedReach) {
+    // Highlight the tapped stream and lift it into view above the sheet.
+    _reachSelectionService.highlightSelectedReach();
+    _focusCameraOnReach(selectedReach);
+
     showCupertinoModalPopup(
       context: context,
       builder: (context) => ReachDetailsBottomSheet(
         selectedReach: selectedReach,
         onViewForecast: () => _navigateToForecast(selectedReach),
       ),
-    );
+    ).then((_) async {
+      // Sheet dismissed: drop the highlight and restore the camera padding.
+      await _reachSelectionService.clearLineHighlight();
+      await _resetCameraPadding();
+    });
+  }
+
+  /// Slide the map so the tapped stream sits in the strip above the details
+  /// sheet, keeping the user's current zoom. Bottom padding equal to the sheet's
+  /// height shifts the reach up into the visible area.
+  Future<void> _focusCameraOnReach(SelectedReach reach) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    try {
+      final cam = await map.getCameraState();
+      if (!mounted) return;
+      final sheetPad = MediaQuery.of(context).size.height * 0.52;
+      await map.flyTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(reach.longitude, reach.latitude),
+          ),
+          zoom: cam.zoom,
+          padding: MbxEdgeInsets(top: 0, left: 0, bottom: sheetPad, right: 0),
+        ),
+        MapAnimationOptions(duration: 700, startDelay: 0),
+      );
+    } catch (e) {
+      AppLogger.error('MapPage', 'Error focusing camera on reach', e);
+    }
+  }
+
+  /// Clear the bottom camera padding applied while the sheet was open.
+  Future<void> _resetCameraPadding() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    try {
+      await map.setCamera(
+        CameraOptions(padding: MbxEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)),
+      );
+    } catch (_) {}
   }
 
   void _onEmptyTap(Point point) {

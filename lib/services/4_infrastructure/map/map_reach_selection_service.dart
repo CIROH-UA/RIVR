@@ -1,5 +1,7 @@
 // lib/services/4_infrastructure/map/map_reach_selection_service.dart
 
+import 'dart:convert';
+
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
@@ -11,6 +13,20 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 class MapReachSelectionService {
   MapboxMap? _mapboxMap;
   String? _currentHighlightLayerId;
+
+  // Line-highlight of the tapped reach (glow + white casing + colored core over
+  // a GeoJSON source). Kept separate from the legacy point highlight above.
+  static const _hlSource = 'tap-highlight-source';
+  static const _hlGlow = 'tap-highlight-glow';
+  static const _hlCasing = 'tap-highlight-casing';
+  static const _hlCore = 'tap-highlight-core';
+  // Gold reads as "selected" against both blue water and green land.
+  static const _selectionColor = 0xFFFFC400;
+  bool _lineHighlightAdded = false;
+
+  // Geometry of the most recently tapped reach, captured from the tile feature
+  // so the line highlight can trace the actual stream (not just a point).
+  Map<String, dynamic>? _lastTappedGeometry;
 
   // Callbacks for selection events
   Function(SelectedReach)? onReachSelected;
@@ -29,6 +45,9 @@ class MapReachSelectionService {
     try {
       final tapPoint = context.point;
       final touchPosition = context.touchPosition;
+
+      // Reset stale geometry so an empty tap can't reuse the previous reach's.
+      _lastTappedGeometry = null;
 
       AppLogger.debug(
         'MapReachSelectionService',
@@ -366,6 +385,94 @@ class MapReachSelectionService {
     }
   }
 
+  /// Highlight the most recently tapped reach as a bright line following the
+  /// stream geometry (soft glow + white casing + colored core), so it's obvious
+  /// which stream the details sheet refers to. Reuses the same source/layers on
+  /// repeat taps, just swapping the geometry. No-op if no line was captured.
+  Future<void> highlightSelectedReach() async {
+    final map = _mapboxMap;
+    final geom = _lastTappedGeometry;
+    if (map == null || geom == null) return;
+
+    final featureCollection = jsonEncode({
+      'type': 'FeatureCollection',
+      'features': [
+        {'type': 'Feature', 'properties': const {}, 'geometry': geom},
+      ],
+    });
+
+    try {
+      if (_lineHighlightAdded) {
+        await map.style.setStyleSourceProperty(_hlSource, 'data', featureCollection);
+        return;
+      }
+
+      await map.style.addSource(GeoJsonSource(
+        id: _hlSource,
+        data: featureCollection,
+        lineMetrics: true,
+      ));
+
+      // Soft colored glow so the reach reads as "lit up".
+      await map.style.addLayer(LineLayer(
+        id: _hlGlow,
+        sourceId: _hlSource,
+        lineColor: _selectionColor,
+        lineOpacity: 0.30,
+        lineWidth: 16.0,
+        lineBlur: 8.0,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      // White casing separates the core from the water/land beneath.
+      await map.style.addLayer(LineLayer(
+        id: _hlCasing,
+        sourceId: _hlSource,
+        lineColor: 0xFFFFFFFF,
+        lineOpacity: 0.95,
+        lineWidth: 9.0,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      // The selection-colored core.
+      await map.style.addLayer(LineLayer(
+        id: _hlCore,
+        sourceId: _hlSource,
+        lineColor: _selectionColor,
+        lineWidth: 4.5,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      _lineHighlightAdded = true;
+    } catch (e) {
+      AppLogger.error('MapReachSelectionService', 'Error highlighting reach line', e);
+    }
+  }
+
+  /// Remove the tapped-reach line highlight (call when the details sheet closes).
+  Future<void> clearLineHighlight() async {
+    final map = _mapboxMap;
+    if (map == null || !_lineHighlightAdded) return;
+    try {
+      for (final id in [_hlCore, _hlCasing, _hlGlow]) {
+        try {
+          await map.style.removeStyleLayer(id);
+        } catch (_) {}
+      }
+      try {
+        await map.style.removeStyleSource(_hlSource);
+      } catch (_) {}
+    } finally {
+      _lineHighlightAdded = false;
+    }
+  }
+
   /// Query vector tile features at specific point (working functionality)
   Future<SelectedReach?> _queryReachAtPoint(
     Point tapPoint,
@@ -454,6 +561,17 @@ class MapReachSelectionService {
         return null;
       }
 
+      // Capture the tapped reach's line geometry so it can be highlighted. The
+      // rendered feature carries the (tile-clipped) LineString/MultiLineString.
+      final rawGeometry = feature['geometry'];
+      if (rawGeometry is Map) {
+        final geom = Map<String, dynamic>.from(rawGeometry);
+        final type = geom['type'];
+        if (type == 'LineString' || type == 'MultiLineString') {
+          _lastTappedGeometry = geom;
+        }
+      }
+
       // Determine the data source from the tapped feature's tile source +
       // layers (GEOGLOWS source/layers are prefixed `geoglows`; else NWM).
       // `source` is always populated; `layers` can be empty, so check both.
@@ -477,6 +595,7 @@ class MapReachSelectionService {
   /// Dispose resources
   void dispose() {
     clearHighlight();
+    clearLineHighlight();
     _mapboxMap = null;
     onReachSelected = null;
     onEmptyTap = null;
