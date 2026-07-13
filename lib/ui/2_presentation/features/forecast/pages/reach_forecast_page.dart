@@ -1491,16 +1491,13 @@ class _WeekCard extends StatelessWidget {
     final faint = CupertinoColors.tertiaryLabel.resolveFrom(context);
     final catColor = cat >= 0 ? catColors[cat] : sub;
 
-    final leftFrac = (minMed / scaleMax).clamp(0.0, 1.0);
-    final rightFrac = (maxMed / scaleMax).clamp(0.0, 1.0);
-    var widthFrac = rightFrac - leftFrac;
-    if (widthFrac < 0.04) widthFrac = 0.04;
-    // Flex weights place the range overlay without a LayoutBuilder (which would
-    // break intrinsic sizing inside the two-card Row).
-    final leftFlex = (leftFrac * 1000).round();
-    final rightFlex = ((1 - leftFrac - widthFrac).clamp(0.0, 1.0) * 1000).round();
-    var widthFlex = (widthFrac * 1000).round();
-    if (widthFlex < 1) widthFlex = 1;
+    // The scale shows the full flood ladder as a dimmed reference; it's vivid
+    // only up to this week's peak (the zones it actually reaches), with a
+    // pointer at the peak. Flex weights place the pointer without a LayoutBuilder
+    // (which would break intrinsic sizing inside the two-card Row).
+    final peakFrac = (maxMed / scaleMax).clamp(0.0, 1.0);
+    final peakFlex = (peakFrac * 1000).round();
+    final restFlex = ((1 - peakFrac) * 1000).round();
 
     String range() {
       final sameMonth = start.month == end.month;
@@ -1564,47 +1561,61 @@ class _WeekCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 11),
-          // Flood-category scale with this week's range overlaid. Flex spacers
-          // (not a LayoutBuilder) so the card stays intrinsic-sizeable.
-          SizedBox(
-            height: 12,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(6),
-                      gradient: gradientColors != null
-                          ? LinearGradient(
-                              colors: gradientColors!, stops: gradientStops)
-                          : null,
-                      color: gradientColors == null
-                          ? catColors[0].withValues(alpha: 0.25)
-                          : null,
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: Row(
-                    children: [
-                      if (leftFlex > 0) Spacer(flex: leftFlex),
-                      Expanded(
-                        flex: widthFlex,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: CupertinoColors.systemBackground
-                                .resolveFrom(context)
-                                .withValues(alpha: 0.4),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: label, width: 1.5),
-                          ),
+          // Full flood-category scale as a dimmed reference, vivid only up to
+          // this week's peak, with a pointer at the peak. Flex spacers (not a
+          // LayoutBuilder) keep the card intrinsic-sizeable.
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: 12,
+              child: Stack(
+                children: [
+                  // Dimmed reference: the whole ladder, so the higher zones stay
+                  // visible but clearly read as "not reached".
+                  Positioned.fill(
+                    child: Opacity(
+                      opacity: 0.28,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: gradientColors != null
+                              ? LinearGradient(
+                                  colors: gradientColors!, stops: gradientStops)
+                              : null,
+                          color: gradientColors == null
+                              ? catColors[0].withValues(alpha: 0.25)
+                              : null,
                         ),
                       ),
-                      if (rightFlex > 0) Spacer(flex: rightFlex),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                  // Vivid up to the peak: the categories this week actually spans.
+                  Positioned.fill(
+                    child: ClipRect(
+                      clipper: _FractionClipper(peakFrac),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: gradientColors != null
+                              ? LinearGradient(
+                                  colors: gradientColors!, stops: gradientStops)
+                              : null,
+                          color: gradientColors == null ? catColors[0] : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Peak pointer.
+                  Positioned.fill(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (peakFlex > 0) Spacer(flex: peakFlex),
+                        Container(width: 2.5, color: label),
+                        if (restFlex > 0) Spacer(flex: restFlex),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 6),
@@ -1615,6 +1626,20 @@ class _WeekCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Clips its child to the left [frac] of the available width — used to reveal
+/// the flood scale vividly only up to a week's peak.
+class _FractionClipper extends CustomClipper<Rect> {
+  const _FractionClipper(this.frac);
+
+  final double frac;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTWH(0, 0, size.width * frac, size.height);
+
+  @override
+  bool shouldReclip(_FractionClipper oldClipper) => oldClipper.frac != frac;
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
