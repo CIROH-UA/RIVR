@@ -393,12 +393,13 @@ class UserSettingsService implements IUserSettingsService {
       final settings = await getUserSettings(userId);
       if (settings == null) return null;
 
-      final updatedSettings = settings.copyWith(
-        enableNotifications: enableNotifications,
-      );
-      await saveUserSettings(updatedSettings);
+      // Partial (merge) update — a full-doc save here can clobber fcmTokens if a
+      // token refresh (arrayUnion/arrayRemove) races between the read and write.
+      await updateUserSettings(userId, {
+        'enableNotifications': enableNotifications,
+      });
 
-      return updatedSettings;
+      return settings.copyWith(enableNotifications: enableNotifications);
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error updating notifications: $e', e);
       throw Exception('Failed to update notifications: ${e.toString()}');
@@ -415,12 +416,13 @@ class UserSettingsService implements IUserSettingsService {
       final settings = await getUserSettings(userId);
       if (settings == null) return null;
 
-      final updatedSettings = settings.copyWith(
-        notificationFrequency: frequency,
-      );
-      await saveUserSettings(updatedSettings);
+      // Partial (merge) update — see updateNotifications: avoids clobbering
+      // fcmTokens when a token refresh races this write.
+      await updateUserSettings(userId, {
+        'notificationFrequency': frequency,
+      });
 
-      return updatedSettings;
+      return settings.copyWith(notificationFrequency: frequency);
     } catch (e) {
       AppLogger.error('UserSettingsService', 'Error updating notification frequency: $e', e);
       throw Exception(
