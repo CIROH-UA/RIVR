@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
+import 'package:rivr/utils/flow_format.dart';
 import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:get_it/get_it.dart';
@@ -187,7 +188,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
 
             // FIXED: Flow value (already converted)
             Text(
-              _formatFlow(dataPoint.flow),
+              FlowFormat.compact(dataPoint.flow),
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -335,17 +336,6 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     return dataPoint.trendPercentage;
   }
 
-  String _formatFlow(double flow) {
-    if (flow >= 1000000) {
-      return '${(flow / 1000000).toStringAsFixed(1)}M';
-    } else if (flow >= 1000) {
-      return '${(flow / 1000).toStringAsFixed(1)}K';
-    } else if (flow >= 100) {
-      return flow.toStringAsFixed(0);
-    } else {
-      return flow.toStringAsFixed(1);
-    }
-  }
 
   IconData _getTrendIcon(FlowTrend trend) {
     switch (trend) {

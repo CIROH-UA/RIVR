@@ -13,6 +13,7 @@
 import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
+import 'package:rivr/utils/flow_format.dart';
 
 class FlowGauge extends StatelessWidget {
   const FlowGauge({
@@ -67,16 +68,6 @@ class FlowGauge extends StatelessWidget {
     return (i + frac) / 5.0;
   }
 
-  String _formatFlow(double v) {
-    final s = v.round().toString();
-    final buf = StringBuffer();
-    for (var k = 0; k < s.length; k++) {
-      if (k > 0 && (s.length - k) % 3 == 0) buf.write(',');
-      buf.write(s[k]);
-    }
-    return buf.toString();
-  }
-
   @override
   Widget build(BuildContext context) {
     final i = _categoryIndex;
@@ -116,7 +107,7 @@ class FlowGauge extends StatelessWidget {
                     children: [
                       TextSpan(
                         text: currentFlow != null
-                            ? _formatFlow(currentFlow!)
+                            ? FlowFormat.grouped(currentFlow!)
                             : '—',
                         style: TextStyle(
                           fontSize: 54,

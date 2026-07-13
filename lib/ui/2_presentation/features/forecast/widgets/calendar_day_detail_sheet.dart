@@ -5,6 +5,7 @@ import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/models/1_domain/features/forecast/daily_flow_forecast.dart';
+import 'package:rivr/utils/flow_format.dart';
 
 /// Modal bottom sheet that displays detailed flow information for a selected calendar day
 ///
@@ -297,7 +298,7 @@ class _CalendarDayDetailSheetState extends State<CalendarDayDetailSheet> {
 
           // Flow value
           Text(
-            _formatFlow(flow),
+            FlowFormat.compact(flow),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
@@ -408,19 +409,6 @@ class _CalendarDayDetailSheetState extends State<CalendarDayDetailSheet> {
     final period = hour >= 12 ? 'PM' : 'AM';
     final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
     return '$displayHour$period';
-  }
-
-  /// Format flow value for display
-  String _formatFlow(double flow) {
-    if (flow >= 1000000) {
-      return '${(flow / 1000000).toStringAsFixed(1)}M';
-    } else if (flow >= 1000) {
-      return '${(flow / 1000).toStringAsFixed(1)}K';
-    } else if (flow >= 100) {
-      return flow.toStringAsFixed(0);
-    } else {
-      return flow.toStringAsFixed(1);
-    }
   }
 }
 

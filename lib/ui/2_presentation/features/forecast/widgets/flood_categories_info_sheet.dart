@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/utils/flow_format.dart';
 
 /// Educational bottom sheet that explains flood risk categories based on return periods
 class FloodCategoriesInfoSheet extends StatelessWidget {
@@ -220,7 +221,7 @@ class FloodCategoriesInfoSheet extends StatelessWidget {
                     if (thresholdFlow != null) ...[
                       const Spacer(),
                       Text(
-                        '${_formatFlowValue(thresholdFlow)} $currentUnit',
+                        '${FlowFormat.compact(thresholdFlow)} $currentUnit',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -295,15 +296,4 @@ class FloodCategoriesInfoSheet extends StatelessWidget {
     );
   }
 
-  String _formatFlowValue(double value) {
-    if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(1)}M';
-    } else if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(1)}K';
-    } else if (value >= 100) {
-      return value.toStringAsFixed(0);
-    } else {
-      return value.toStringAsFixed(1);
-    }
-  }
 }

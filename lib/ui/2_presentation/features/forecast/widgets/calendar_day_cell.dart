@@ -3,6 +3,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/1_domain/features/forecast/daily_flow_forecast.dart';
+import 'package:rivr/utils/flow_format.dart';
 
 /// Individual calendar day cell that displays date and flow information
 ///
@@ -46,7 +47,7 @@ class _CalendarDayCellState extends State<CalendarDayCell> {
       widget.forecast.flowCategory,
     );
     final dayNumber = widget.forecast.date.day;
-    final formattedFlow = _formatFlow(widget.forecast.maxFlow);
+    final formattedFlow = FlowFormat.compact(widget.forecast.maxFlow);
 
     return GestureDetector(
       onTapDown: (_) => setState(() => _isPressed = true),
@@ -208,19 +209,6 @@ class _CalendarDayCellState extends State<CalendarDayCell> {
       return CupertinoColors.label.resolveFrom(context);
     } else {
       return CupertinoColors.white;
-    }
-  }
-
-  /// Format flow value for display in the small cell
-  String _formatFlow(double flow) {
-    if (flow >= 1000000) {
-      return '${(flow / 1000000).toStringAsFixed(1)}M';
-    } else if (flow >= 1000) {
-      return '${(flow / 1000).toStringAsFixed(1)}K';
-    } else if (flow >= 100) {
-      return flow.toStringAsFixed(0);
-    } else {
-      return flow.toStringAsFixed(1);
     }
   }
 }

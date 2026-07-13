@@ -9,6 +9,7 @@ import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/utils/flow_format.dart';
 
 // Simple controller for chart interactions
 class ChartController {
@@ -828,7 +829,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
               ),
               axisLabelFormatter: (AxisLabelRenderDetails details) {
                 return ChartAxisLabel(
-                  _formatFlowValue(details.value.toDouble()),
+                  FlowFormat.compact(details.value.toDouble()),
                   TextStyle(
                     fontSize: 11,
                     color: CupertinoColors.secondaryLabel.resolveFrom(context),
@@ -862,7 +863,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
               final time = args.chartPointInfo.chartPoint?.x;
               if (flow != null && time != null) {
                 args.chartPointInfo.label =
-                    '${_formatFlowValue(flow.toDouble())} $currentUnit\n${_formatTimeValue(time)}'; // Dynamic unit display
+                    '${FlowFormat.compact(flow.toDouble())} $currentUnit\n${_formatTimeValue(time)}'; // Dynamic unit display
               }
             },
 
@@ -872,7 +873,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
                 args.text = _formatTimeValue(args.value);
               } else {
                 args.text =
-                    '${_formatFlowValue(args.value)} $currentUnit'; // Dynamic unit display
+                    '${FlowFormat.compact(args.value)} $currentUnit'; // Dynamic unit display
               }
             },
 
@@ -935,17 +936,6 @@ class _InteractiveChartState extends State<InteractiveChart> {
     );
   }
 
-  String _formatFlowValue(double value) {
-    if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(1)}M';
-    } else if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(1)}K';
-    } else if (value >= 100) {
-      return value.toStringAsFixed(0);
-    } else {
-      return value.toStringAsFixed(1);
-    }
-  }
 
   String _formatTimeValue(double hoursSinceStart) {
     // For short_range, we MUST have forecast data to show correct times
