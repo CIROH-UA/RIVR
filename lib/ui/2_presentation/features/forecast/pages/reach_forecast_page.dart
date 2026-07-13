@@ -21,6 +21,7 @@ import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/utils/flow_format.dart';
 import 'package:rivr/utils/forecast_peak.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/widgets/return_periods_sheet.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -642,6 +643,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       _ => '',
     };
 
+    final rp = _returnPeriods;
     return _StatCard(
       peakValue: peakValue,
       peakSub: peakSub,
@@ -650,6 +652,22 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       trendSub: trendSub,
       rpValue: _returnPeriodBand(),
       rpSub: rpSub,
+      // Tapping the return period opens the full threshold list (with copy).
+      onReturnPeriodTap:
+          (rp != null && rp.isNotEmpty) ? _showReturnPeriodsSheet : null,
+    );
+  }
+
+  void _showReturnPeriodsSheet() {
+    final rp = _returnPeriods;
+    if (rp == null || rp.isEmpty) return;
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (_) => ReturnPeriodsSheet(
+        returnPeriods: rp,
+        unit: _unit,
+        riverName: _river,
+      ),
     );
   }
 }
@@ -824,6 +842,7 @@ class _StatCard extends StatelessWidget {
     required this.trendSub,
     required this.rpValue,
     required this.rpSub,
+    this.onReturnPeriodTap,
   });
 
   final String peakValue;
@@ -833,6 +852,7 @@ class _StatCard extends StatelessWidget {
   final String trendSub;
   final String rpValue;
   final String rpSub;
+  final VoidCallback? onReturnPeriodTap;
 
   @override
   Widget build(BuildContext context) {
@@ -866,7 +886,12 @@ class _StatCard extends StatelessWidget {
           ),
           _divider(context),
           Expanded(
-            child: _Stat(label: 'Return period', value: rpValue, sub: rpSub),
+            child: _Stat(
+              label: 'Return period',
+              value: rpValue,
+              sub: rpSub,
+              onTap: onReturnPeriodTap,
+            ),
           ),
         ],
       ),
@@ -886,16 +911,18 @@ class _Stat extends StatelessWidget {
     required this.value,
     required this.sub,
     this.subColor,
+    this.onTap,
   });
 
   final String label;
   final String value;
   final String sub;
   final Color? subColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final column = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
@@ -909,16 +936,32 @@ class _Stat extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 5),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
-            fontFeatures: [FontFeature.tabularFigures()],
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 3),
+              Icon(
+                CupertinoIcons.chevron_right,
+                size: 12,
+                color: CupertinoColors.tertiaryLabel.resolveFrom(context),
+              ),
+            ],
+          ],
         ),
         if (sub.isNotEmpty) ...[
           const SizedBox(height: 4),
@@ -935,6 +978,12 @@ class _Stat extends StatelessWidget {
           ),
         ],
       ],
+    );
+    if (onTap == null) return column;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: column,
     );
   }
 }
