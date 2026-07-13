@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
+import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
@@ -33,7 +34,8 @@ class FavoritesPage extends StatefulWidget {
   State<FavoritesPage> createState() => _FavoritesPageState();
 }
 
-class _FavoritesPageState extends State<FavoritesPage> {
+class _FavoritesPageState extends State<FavoritesPage>
+    with WidgetsBindingObserver, RouteAware {
   String _searchQuery = '';
   bool _isRefreshing = false;
   bool _showSearch = false; // New state for search visibility
@@ -56,6 +58,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Initialize favorites when page loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeFavorites();
@@ -63,6 +66,47 @@ class _FavoritesPageState extends State<FavoritesPage> {
       _loadBannerDismissalState();
       _checkAndShowCoachMarks();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route changes so we revalidate when this list becomes
+    // visible again (e.g. after popping the forecast page).
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Called when a route pushed on top of the favorites list is popped —
+  /// i.e. the user returned to the list (e.g. from the forecast page).
+  @override
+  void didPopNext() => _revalidateOnView();
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _revalidateOnView();
+  }
+
+  /// Silently re-read every favorite through the repository so the cards
+  /// reflect the freshest run whenever the list becomes visible. The cards
+  /// otherwise show a persisted snapshot that can lag the forecast page's live
+  /// value; revalidating on view keeps the home number in step with what a tap
+  /// opens. Cheap: the repository serves fresh-cached entries without a network
+  /// call and only revalidates stale ones.
+  void _revalidateOnView() {
+    if (!mounted) return;
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.isAuthenticated) return;
+    context.read<FavoritesProvider>().refreshAllFavorites();
   }
 
   Future<void> _loadBannerDismissalState() async {
