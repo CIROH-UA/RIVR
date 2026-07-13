@@ -15,6 +15,7 @@ void main() {
     bool enableNotifications = true,
     int notificationFrequency = 1,
     List<String> favoriteReachIds = const [],
+    Map<String, String> favoriteSources = const {},
     List<String> fcmTokens = const [],
     List<String> customBackgroundImagePaths = const [],
     DateTime? lastLoginDate,
@@ -31,6 +32,7 @@ void main() {
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
       favoriteReachIds: favoriteReachIds,
+      favoriteSources: favoriteSources,
       fcmTokens: fcmTokens,
       customBackgroundImagePaths: customBackgroundImagePaths,
       lastLoginDate: lastLoginDate ?? now,
@@ -52,6 +54,7 @@ void main() {
           enableNotifications: false,
           notificationFrequency: 3,
           favoriteReachIds: ['123', '456'],
+          favoriteSources: {'456': 'geoglows'},
           fcmTokens: ['token_abc'],
           customBackgroundImagePaths: ['/path/to/img.jpg'],
           lastLoginDate: now.toIso8601String(),
@@ -71,6 +74,7 @@ void main() {
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
         expect(restored.favoriteReachIds, ['123', '456']);
+        expect(restored.favoriteSources, {'456': 'geoglows'});
         expect(restored.fcmTokens, ['token_abc']);
         expect(restored.customBackgroundImagePaths, ['/path/to/img.jpg']);
         expect(restored.lastLoginDate, now.toIso8601String());
@@ -95,6 +99,7 @@ void main() {
         expect(dto.enableNotifications, false);
         expect(dto.notificationFrequency, 1);
         expect(dto.favoriteReachIds, isEmpty);
+        expect(dto.favoriteSources, isEmpty);
         expect(dto.fcmTokens, isEmpty);
         expect(dto.customBackgroundImagePaths, isEmpty);
       });
@@ -108,6 +113,7 @@ void main() {
           enableNotifications: false,
           notificationFrequency: 3,
           favoriteReachIds: ['123', '456'],
+          favoriteSources: {'456': 'geoglows'},
           fcmTokens: ['token_abc'],
           customBackgroundImagePaths: ['/path/to/img.jpg'],
         );
@@ -127,6 +133,7 @@ void main() {
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
         expect(restored.favoriteReachIds, ['123', '456']);
+        expect(restored.favoriteSources, {'456': 'geoglows'});
         expect(restored.fcmTokens, ['token_abc']);
         expect(restored.customBackgroundImagePaths, ['/path/to/img.jpg']);
         expect(restored.lastLoginDate, original.lastLoginDate);

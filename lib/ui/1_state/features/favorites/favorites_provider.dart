@@ -23,6 +23,7 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 
 /// State management for user's favorite rivers
 /// Works with cloud-based favorites (reach IDs only) and manages rich data in memory
@@ -184,8 +185,22 @@ class FavoritesProvider with ChangeNotifier {
     _favoriteReachIds = _favorites.map((f) => f.reachId).toSet();
   }
 
+  /// The data source of a favorited reach (NWM vs GEOGLOWS); defaults to NWM
+  /// for anything not currently in the list. Used to open the correct forecast
+  /// and refresh from the right API.
+  ForecastSource sourceForReach(String reachId) {
+    for (final f in _favorites) {
+      if (f.reachId == reachId) return f.source;
+    }
+    return ForecastSource.nwm;
+  }
+
   /// Add a new favorite river (coordinates loaded in background)
-  Future<bool> addFavorite(String reachId, {String? customName}) async {
+  Future<bool> addFavorite(
+    String reachId, {
+    String? customName,
+    ForecastSource source = ForecastSource.nwm,
+  }) async {
     try {
       // Check if already exists using O(1) lookup
       if (isFavorite(reachId)) {
@@ -193,7 +208,7 @@ class FavoritesProvider with ChangeNotifier {
       }
 
       // Add to cloud storage via use case
-      final result = await _addFavoriteUseCase(reachId);
+      final result = await _addFavoriteUseCase(reachId, source: source);
       if (result.isFailure) {
         _setError(result.errorMessage ?? 'Failed to add favorite');
         return false;
@@ -223,6 +238,7 @@ class FavoritesProvider with ChangeNotifier {
     required double longitude,
     String? riverName,
     double? currentFlow,
+    ForecastSource source = ForecastSource.nwm,
   }) async {
     try {
       // Check if already exists using O(1) lookup
@@ -231,7 +247,7 @@ class FavoritesProvider with ChangeNotifier {
       }
 
       // Add to cloud storage via use case
-      final result = await _addFavoriteUseCase(reachId);
+      final result = await _addFavoriteUseCase(reachId, source: source);
       if (result.isFailure) {
         _setError(result.errorMessage ?? 'Failed to add favorite');
         return false;
@@ -500,7 +516,11 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Ultra-fast favorite addition for map integration
-  Future<bool> addFavoriteFromMap(String reachId, {String? customName}) async {
+  Future<bool> addFavoriteFromMap(
+    String reachId, {
+    String? customName,
+    ForecastSource source = ForecastSource.nwm,
+  }) async {
     try {
       // Check if already exists using O(1) lookup
       if (isFavorite(reachId)) {
@@ -516,7 +536,7 @@ class FavoritesProvider with ChangeNotifier {
       }
 
       // Add to cloud storage via use case
-      final result = await _addFavoriteUseCase(reachId);
+      final result = await _addFavoriteUseCase(reachId, source: source);
       if (result.isFailure) {
         _setError(result.errorMessage ?? 'Failed to add favorite');
         return false;
@@ -554,54 +574,86 @@ class FavoritesProvider with ChangeNotifier {
       _refreshingReachIds.add(reachId);
       notifyListeners();
 
-      // Read the shared reach summary (current flow + name + return periods)
-      // through the single-source-of-truth repository. Favorites are NWM reaches.
-      final entry = await _repository.read(
-        RiverDataKey(
-          source: ForecastSource.nwm,
-          reachId: reachId,
-          product: ForecastProduct.reachSummary,
-        ),
-      );
+      // Read through the single-source-of-truth repository, branching on the
+      // favorite's source: NWM reach summary vs GEOGLOWS forecast.
+      final source = sourceForReach(reachId);
 
-      // Discard result if a newer refresh for this reach has been started
-      if (_refreshGenerations[reachId] != gen) return;
+      String? riverName;
+      double? currentFlow;
+      Map<int, double>? returnPeriods;
+      double? lat;
+      double? lon;
 
-      if (entry == null) {
-        AppLogger.error(
-          'FavoritesProvider',
-          'Failed to refresh $reachId: no reach summary',
+      if (source.isGeoglows) {
+        final entry = await _repository.read(
+          RiverDataKey(
+            source: ForecastSource.geoglows,
+            reachId: reachId,
+            product: ForecastProduct.geoglowsForecast,
+          ),
         );
-        return;
+        if (_refreshGenerations[reachId] != gen) return;
+        if (entry == null) {
+          AppLogger.error(
+            'FavoritesProvider',
+            'Failed to refresh $reachId: no GEOGLOWS forecast',
+          );
+          return;
+        }
+        final forecast = GeoglowsForecastPayload.decode(entry, _unitService);
+        // GEOGLOWS reaches are unnamed and carry no coords here — keep existing.
+        currentFlow = forecast.currentMedian;
+        returnPeriods = forecast.returnPeriods;
+      } else {
+        final entry = await _repository.read(
+          RiverDataKey(
+            source: ForecastSource.nwm,
+            reachId: reachId,
+            product: ForecastProduct.reachSummary,
+          ),
+        );
+        if (_refreshGenerations[reachId] != gen) return;
+        if (entry == null) {
+          AppLogger.error(
+            'FavoritesProvider',
+            'Failed to refresh $reachId: no reach summary',
+          );
+          return;
+        }
+        final details = ReachSummaryPayload.decode(entry, _unitService);
+        riverName = details.riverName;
+        currentFlow = details.currentFlow;
+        returnPeriods = details.returnPeriods;
+        lat = details.latitude;
+        lon = details.longitude;
       }
 
-      final details = ReachSummaryPayload.decode(entry, _unitService);
       final currentUnit = _unitService.currentFlowUnit;
 
-      // Store all data in session storage (preserves custom name/image)
+      // Store all data in session storage (preserves custom name/image). A null
+      // riverName leaves the existing one untouched (copyWith merge semantics).
       final existing = _sessionData[reachId] ?? FavoriteSessionData.empty;
       _sessionData[reachId] = existing.copyWith(
-        riverName: details.riverName,
-        lastKnownFlow: details.currentFlow,
+        riverName: riverName,
+        lastKnownFlow: currentFlow,
         flowUnit: currentUnit,
         lastUpdated: DateTime.now(),
-        coordinates: (details.latitude != null && details.longitude != null)
-            ? (lat: details.latitude!, lon: details.longitude!)
+        coordinates: (lat != null && lon != null)
+            ? (lat: lat, lon: lon)
             : existing.coordinates,
       );
 
       // Cache raw return periods for the card's own flood-risk computation.
-      final returnPeriods = details.returnPeriods;
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         _sessionReturnPeriods[reachId] = returnPeriods;
       }
 
       final session = _sessionData[reachId]!;
-      final riverName = session.riverName ?? 'Unknown';
+      final logName = session.riverName ?? 'Unknown';
 
       AppLogger.debug(
         'FavoritesProvider',
-        '$riverName ($reachId) - Current Flow: ${session.lastKnownFlow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
+        '$logName ($reachId) - Current Flow: ${session.lastKnownFlow?.toStringAsFixed(1) ?? 'No data'} $currentUnit',
       );
 
       // Persist updated session data after each successful refresh
@@ -610,7 +662,7 @@ class FavoritesProvider with ChangeNotifier {
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         AppLogger.debug(
           'FavoritesProvider',
-          '$riverName ($reachId) - Return Periods: ${returnPeriods.toString()}',
+          '$logName ($reachId) - Return Periods: ${returnPeriods.toString()}',
         );
       } else {
         AppLogger.debug(

@@ -1,6 +1,7 @@
 // lib/services/2_coordinators/features/favorites/favorites_repository_impl.dart
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
@@ -50,11 +51,13 @@ class FavoritesRepositoryImpl implements IFavoritesRepository {
   Future<ServiceResult<bool>> addFavorite(
     String reachId, {
     String? customName,
+    ForecastSource source = ForecastSource.nwm,
   }) async {
     try {
       final success = await _favoritesService.addFavorite(
         reachId,
         customName: customName,
+        source: source,
       );
       return ServiceResult.success(success);
     } catch (e) {

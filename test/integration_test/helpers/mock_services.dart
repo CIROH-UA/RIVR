@@ -5,6 +5,7 @@
 
 import 'dart:async';
 import 'package:flutter/widgets.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart' show MockUser;
@@ -540,7 +541,10 @@ class MockFavoritesService implements IFavoritesService {
 
   @override
   Future<bool> addFavorite(String reachId,
-      {String? customName, double? latitude, double? longitude}) async {
+      {String? customName,
+      double? latitude,
+      double? longitude,
+      ForecastSource source = ForecastSource.nwm}) async {
     if (shouldFail) return false;
     _favorites.add(FavoriteRiver(
       reachId: reachId,
@@ -548,6 +552,7 @@ class MockFavoritesService implements IFavoritesService {
       displayOrder: _favorites.length,
       latitude: latitude,
       longitude: longitude,
+      source: source,
     ));
     return true;
   }

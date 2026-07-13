@@ -142,7 +142,8 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
           _showFeedback('Removed from favorites');
         }
       } else {
-        // Use coordinates we already loaded
+        // Use coordinates we already loaded. Carry the reach's data source so
+        // GEOGLOWS favorites open + refresh + alert against the right API.
         if (widget.latitude != null && widget.longitude != null) {
           success = await favoritesProvider.addFavoriteWithKnownCoordinates(
             reachId,
@@ -150,9 +151,13 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
             longitude: widget.longitude!,
             riverName: widget.riverName,
             currentFlow: widget.currentFlow,
+            source: widget.selectedReach.source,
           );
         } else {
-          success = await favoritesProvider.addFavorite(reachId);
+          success = await favoritesProvider.addFavorite(
+            reachId,
+            source: widget.selectedReach.source,
+          );
         }
 
         if (success) {

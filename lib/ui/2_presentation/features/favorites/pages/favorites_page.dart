@@ -21,6 +21,7 @@ import 'package:rivr/ui/2_presentation/features/favorites/widgets/skeleton_river
 import 'package:rivr/ui/2_presentation/shared/widgets/offline_banner.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/notification_prompt_banner.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
@@ -606,7 +607,7 @@ class _FavoritesPageState extends State<FavoritesPage>
           key: index == 0 && (_isTourActive || !_hasShownFavoritesTour) ? _firstCardKey : ValueKey(favorite.reachId),
           favorite: favorite,
           cardIndex: index,
-          onTap: () => _navigateToForecast(favorite.reachId),
+          onTap: () => _navigateToForecast(favorite.reachId, favorite.source),
           onRename: () => _showRenameDialog(favorite),
           onChangeImage: () => _navigateToImageSelection(favorite),
           isReorderable: _searchQuery.isEmpty,
@@ -1050,8 +1051,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     AppRouter.pushMap(context);
   }
 
-  void _navigateToForecast(String reachId) {
-    AppRouter.pushForecast(context, reachId: reachId);
+  void _navigateToForecast(String reachId, ForecastSource source) {
+    AppRouter.pushForecast(context, reachId: reachId, source: source);
   }
 
   void _navigateToImageSelection(FavoriteRiver favorite) {

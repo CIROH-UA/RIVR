@@ -6,7 +6,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/ui/2_presentation/routing/app_routes.dart';
+import 'package:rivr/ui/2_presentation/routing/route_args.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
@@ -275,11 +277,16 @@ class FCMService implements IFCMService {
   }
 
   /// Tap on a locally-displayed (foreground) notification → route to the reach.
+  /// Payload is `reachId|source` (see [_handleForegroundMessage]).
   void _onLocalNotificationTap(NotificationResponse response) {
-    final reachId = response.payload;
-    if (reachId != null && reachId.isNotEmpty) {
-      _navigateToReach(reachId);
-    }
+    final payload = response.payload;
+    if (payload == null || payload.isEmpty) return;
+    final parts = payload.split('|');
+    final reachId = parts.isNotEmpty ? parts[0] : '';
+    if (reachId.isEmpty) return;
+    final source =
+        ForecastSource.fromId(parts.length > 1 ? parts[1] : null);
+    _navigateToReach(reachId, source);
   }
 
   /// Handle foreground messages (when app is open).
@@ -309,7 +316,11 @@ class FCMService implements IFCMService {
           color: Color(0xFFFF6B35),
         ),
       ),
-      payload: message.data['reachId'] as String?,
+      // Encode reachId + source so a tap on the foreground notification opens
+      // the correct forecast API (NWM vs GEOGLOWS). reach ids are numeric, so
+      // '|' is a safe delimiter.
+      payload: '${message.data['reachId'] ?? ''}|'
+          '${message.data['source'] ?? ForecastSource.nwm.id}',
     );
   }
 
@@ -320,20 +331,27 @@ class FCMService implements IFCMService {
 
     final reachId = message.data['reachId'] as String?;
     if (reachId != null && reachId.isNotEmpty) {
-      _navigateToReach(reachId);
+      _navigateToReach(
+        reachId,
+        ForecastSource.fromId(message.data['source'] as String?),
+      );
     }
   }
 
-  /// Navigate to the forecast page for a given reach.
-  void _navigateToReach(String reachId) {
+  /// Navigate to the forecast page for a given reach, using the right source so
+  /// GEOGLOWS reaches load from the GEOGLOWS API rather than defaulting to NWM.
+  void _navigateToReach(String reachId, ForecastSource source) {
     final nav = _navigatorKey?.currentState;
     if (nav == null) {
       AppLogger.warning('FcmService', 'Navigator not available, cannot route to reach: $reachId');
       return;
     }
 
-    AppLogger.info('FcmService', 'Navigating to reach: $reachId');
-    nav.pushNamed(AppRoutes.forecast, arguments: reachId);
+    AppLogger.info('FcmService', 'Navigating to reach: $reachId (${source.id})');
+    nav.pushNamed(
+      AppRoutes.forecast,
+      arguments: ReachArgs(reachId: reachId, source: source),
+    );
   }
 
   /// Enable notifications for a user (gets token and saves it atomically with the flag)

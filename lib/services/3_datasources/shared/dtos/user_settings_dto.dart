@@ -16,6 +16,7 @@ class UserSettingsDto {
   final bool enableNotifications;
   final int notificationFrequency;
   final List<String> favoriteReachIds;
+  final Map<String, String> favoriteSources;
   final List<String> fcmTokens;
   final List<String> customBackgroundImagePaths;
   final String lastLoginDate;
@@ -32,6 +33,7 @@ class UserSettingsDto {
     required this.enableNotifications,
     this.notificationFrequency = 1,
     required this.favoriteReachIds,
+    this.favoriteSources = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [],
     required this.lastLoginDate,
@@ -53,6 +55,10 @@ class UserSettingsDto {
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
       ),
+      favoriteSources: (json['favoriteSources'] as Map?)?.map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          ) ??
+          const {},
       fcmTokens: _parseFcmTokens(json),
       customBackgroundImagePaths: List<String>.from(
         json['customBackgroundImagePaths'] as List? ?? [],
@@ -74,6 +80,7 @@ class UserSettingsDto {
       'enableNotifications': enableNotifications,
       'notificationFrequency': notificationFrequency,
       'favoriteReachIds': favoriteReachIds,
+      'favoriteSources': favoriteSources,
       'fcmTokens': fcmTokens,
       'customBackgroundImagePaths': customBackgroundImagePaths,
       'lastLoginDate': lastLoginDate,
@@ -96,6 +103,7 @@ class UserSettingsDto {
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
       favoriteReachIds: favoriteReachIds,
+      favoriteSources: favoriteSources,
       fcmTokens: fcmTokens,
       customBackgroundImagePaths: customBackgroundImagePaths,
       lastLoginDate: DateTime.parse(lastLoginDate),
@@ -130,6 +138,7 @@ class UserSettingsDto {
       enableNotifications: entity.enableNotifications,
       notificationFrequency: entity.notificationFrequency,
       favoriteReachIds: entity.favoriteReachIds,
+      favoriteSources: entity.favoriteSources,
       fcmTokens: entity.fcmTokens,
       customBackgroundImagePaths: entity.customBackgroundImagePaths,
       lastLoginDate: entity.lastLoginDate.toIso8601String(),

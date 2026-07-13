@@ -25,6 +25,10 @@ class UserSettings {
   final bool enableNotifications;
   final int notificationFrequency; // 1, 2, 3, or 4 times per day
   final List<String> favoriteReachIds;
+  // Per-favorite data source, keyed by reachId (value = ForecastSource.id, e.g.
+  // 'geoglows'). Only non-NWM favorites are stored; a missing key means NWM.
+  // The notification Cloud Function reads this to pick the right forecast API.
+  final Map<String, String> favoriteSources;
   final List<String> fcmTokens;
   final List<String>
   customBackgroundImagePaths; // List of custom uploaded image paths
@@ -42,6 +46,7 @@ class UserSettings {
     required this.enableNotifications,
     this.notificationFrequency = 1, // Default to once daily
     required this.favoriteReachIds,
+    this.favoriteSources = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [], // Default to empty list
     required this.lastLoginDate,
@@ -58,6 +63,7 @@ class UserSettings {
     bool? enableNotifications,
     int? notificationFrequency,
     List<String>? favoriteReachIds,
+    Map<String, String>? favoriteSources,
     List<String>? fcmTokens,
     List<String>? customBackgroundImagePaths,
     DateTime? lastLoginDate,
@@ -73,6 +79,7 @@ class UserSettings {
       notificationFrequency:
           notificationFrequency ?? this.notificationFrequency,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
+      favoriteSources: favoriteSources ?? this.favoriteSources,
       fcmTokens: fcmTokens ?? this.fcmTokens,
       customBackgroundImagePaths:
           customBackgroundImagePaths ?? this.customBackgroundImagePaths,

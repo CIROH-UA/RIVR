@@ -1,6 +1,7 @@
 // lib/services/4_infrastructure/favorites/favorites_service.dart
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
@@ -47,6 +48,8 @@ class FavoritesService implements IFavoritesService {
           FavoriteRiver(
             reachId: reachId,
             displayOrder: i, // Use array index as display order
+            // Missing entry ⇒ NWM (all pre-GEOGLOWS favorites are NWM).
+            source: ForecastSource.fromId(userSettings.favoriteSources[reachId]),
           ),
         );
       }
@@ -98,6 +101,7 @@ class FavoritesService implements IFavoritesService {
     String? customName,
     double? latitude,
     double? longitude,
+    ForecastSource source = ForecastSource.nwm,
   }) async {
     try {
       final userId = _currentUserIdOrNull;
@@ -106,7 +110,7 @@ class FavoritesService implements IFavoritesService {
         return false;
       }
 
-      AppLogger.debug('FavoritesService', 'Adding favorite: $reachId');
+      AppLogger.debug('FavoritesService', 'Adding favorite: $reachId (${source.id})');
 
       final userSettings = await _userSettingsService.getUserSettings(userId);
       if (userSettings == null) {
@@ -123,9 +127,20 @@ class FavoritesService implements IFavoritesService {
       // Add to the end of the list
       final updatedReachIds = [...userSettings.favoriteReachIds, reachId];
 
+      // Track the source so the app + notification function pick the right API.
+      // Only non-NWM sources are stored (NWM is the default when absent).
+      final updatedSources =
+          Map<String, String>.from(userSettings.favoriteSources);
+      if (source.isGeoglows) {
+        updatedSources[reachId] = source.id;
+      } else {
+        updatedSources.remove(reachId);
+      }
+
       // Update user settings
       await _userSettingsService.updateUserSettings(userId, {
         'favoriteReachIds': updatedReachIds,
+        'favoriteSources': updatedSources,
       });
 
       AppLogger.info('FavoritesService', 'Added favorite: $reachId');
@@ -165,9 +180,15 @@ class FavoritesService implements IFavoritesService {
           .where((id) => id != reachId)
           .toList();
 
+      // Prune the source entry too, if any.
+      final updatedSources =
+          Map<String, String>.from(userSettings.favoriteSources)
+            ..remove(reachId);
+
       // Update user settings
       await _userSettingsService.updateUserSettings(userId, {
         'favoriteReachIds': updatedReachIds,
+        'favoriteSources': updatedSources,
       });
 
       AppLogger.info('FavoritesService', 'Removed favorite: $reachId');
@@ -290,6 +311,7 @@ class FavoritesService implements IFavoritesService {
       // Update user settings with empty list
       await _userSettingsService.updateUserSettings(userId, {
         'favoriteReachIds': <String>[],
+        'favoriteSources': <String, String>{},
       });
 
       AppLogger.info('FavoritesService', 'All favorites cleared');

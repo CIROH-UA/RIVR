@@ -1,5 +1,7 @@
 // lib/models/1_domain/shared/favorite_river.dart
 
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+
 /// Pure domain entity for a user's favorite river.
 ///
 /// No framework imports (GetIt, Firebase, etc.) — serialization is handled
@@ -17,6 +19,10 @@ class FavoriteRiver {
   final double? latitude;
   final double? longitude;
 
+  /// Which model this reach's forecast comes from (NWM vs GEOGLOWS). Drives
+  /// opening the correct forecast page and refreshing from the right API.
+  final ForecastSource source;
+
   const FavoriteRiver({
     required this.reachId,
     this.customName,
@@ -28,6 +34,7 @@ class FavoriteRiver {
     this.lastUpdated,
     this.latitude,
     this.longitude,
+    this.source = ForecastSource.nwm,
   });
 
   FavoriteRiver copyWith({
@@ -41,6 +48,7 @@ class FavoriteRiver {
     DateTime? lastUpdated,
     double? latitude,
     double? longitude,
+    ForecastSource? source,
   }) {
     return FavoriteRiver(
       reachId: reachId ?? this.reachId,
@@ -53,6 +61,7 @@ class FavoriteRiver {
       lastUpdated: lastUpdated ?? this.lastUpdated,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      source: source ?? this.source,
     );
   }
 

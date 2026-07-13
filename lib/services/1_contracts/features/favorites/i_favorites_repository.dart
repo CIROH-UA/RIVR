@@ -1,6 +1,7 @@
 // lib/services/1_contracts/features/favorites/i_favorites_repository.dart
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 
@@ -9,7 +10,11 @@ import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 /// IFlowUnitPreferenceService, and INoaaApiService.
 abstract class IFavoritesRepository {
   Future<ServiceResult<List<FavoriteRiver>>> loadFavorites();
-  Future<ServiceResult<bool>> addFavorite(String reachId, {String? customName});
+  Future<ServiceResult<bool>> addFavorite(
+    String reachId, {
+    String? customName,
+    ForecastSource source,
+  });
   Future<ServiceResult<bool>> removeFavorite(String reachId);
   Future<ServiceResult<bool>> updateFavorite(
     String reachId, {

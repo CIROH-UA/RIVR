@@ -18,9 +18,27 @@ interface UserSettings {
   notificationFrequency: number; // 1, 2, 3, or 4 times per day
   preferredFlowUnit: "cfs" | "cms";
   favoriteReachIds: string[];
+  // Per-reach data source. Missing/unknown reach ⇒ "nwm" (all pre-GEOGLOWS
+  // favorites are NWM). Only non-NWM entries are stored on the user doc.
+  favoriteSources: Record<string, string>;
   fcmTokens: string[];
   firstName: string;
   lastName: string;
+}
+
+type ReachSource = "nwm" | "geoglows";
+
+/** Resolve a favorite's source; anything not "geoglows" is treated as NWM. */
+function sourceOf(user: UserSettings, reachId: string): ReachSource {
+  return user.favoriteSources[reachId] === "geoglows" ? "geoglows" : "nwm";
+}
+
+/**
+ * Reach ids are only unique WITHIN a source (an NWM comid and a GEOGLOWS linkno
+ * can collide numerically), so key pre-fetched data by source + id.
+ */
+function reachKey(source: ReachSource, reachId: string): string {
+  return `${source}:${reachId}`;
 }
 
 interface ForecastData {
@@ -88,21 +106,23 @@ export async function checkAlertsForTimeSlot(
       return result;
     }
 
-    // Step 2: Collect all unique reach IDs across all users
-    const uniqueReachIds = new Set<string>();
+    // Step 2: Collect all unique (source, reach) pairs across all users.
+    // Keyed by source+id because an NWM comid and a GEOGLOWS linkno can collide.
+    const uniqueReaches = new Map<string, {source: ReachSource; reachId: string}>();
     for (const user of users) {
       for (const reachId of user.favoriteReachIds) {
-        uniqueReachIds.add(reachId);
+        const source = sourceOf(user, reachId);
+        uniqueReaches.set(reachKey(source, reachId), {source, reachId});
       }
     }
     logger.info(
-      `🏞️ ${uniqueReachIds.size} unique reaches to check ` +
+      `🏞️ ${uniqueReaches.size} unique reaches to check ` +
       `across ${users.length} users`
     );
 
-    // Step 3: Batch-fetch data for all unique reaches
+    // Step 3: Batch-fetch data for all unique reaches (branches NWM/GEOGLOWS)
     const reachDataMap = await batchFetchReachData(
-      Array.from(uniqueReachIds)
+      Array.from(uniqueReaches.values())
     );
 
     // Step 4: Evaluate alerts per user using pre-fetched data
@@ -127,7 +147,7 @@ export async function checkAlertsForTimeSlot(
 
     logger.info(`🎯 Slot ${timeSlot} check complete`, {
       ...result,
-      uniqueReaches: uniqueReachIds.size,
+      uniqueReaches: uniqueReaches.size,
       reachesWithForecast: reachesWithData,
       reachesWithReturnPeriods: reachesWithThresholds,
     });
@@ -147,22 +167,31 @@ export async function checkAlertsForTimeSlot(
  * so one failure doesn't block others.
  */
 async function batchFetchReachData(
-  reachIds: string[]
+  reaches: Array<{source: ReachSource; reachId: string}>
 ): Promise<Map<string, ReachData>> {
   const {getForecast, getReturnPeriods, getRiverName} =
     await import("./noaa-client.js");
+  const {getGeoglowsReachData} = await import("./geoglows-client.js");
 
   const reachDataMap = new Map<string, ReachData>();
 
   // Process reaches in parallel batches of 10 to avoid overwhelming APIs
   const BATCH_SIZE = 10;
-  for (let i = 0; i < reachIds.length; i += BATCH_SIZE) {
-    const batch = reachIds.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < reaches.length; i += BATCH_SIZE) {
+    const batch = reaches.slice(i, i + BATCH_SIZE);
 
     const batchResults = await Promise.allSettled(
-      batch.map(async (reachId) => {
-        // Fetch all three data sources in parallel using Promise.allSettled
-        // so a river name failure doesn't discard forecast data
+      batch.map(async ({source, reachId}) => {
+        const key = reachKey(source, reachId);
+
+        // GEOGLOWS: one proxy call returns forecast + return periods + name.
+        if (source === "geoglows") {
+          const data = await getGeoglowsReachData(reachId);
+          return {key, ...data};
+        }
+
+        // NWM: fetch the three sources in parallel so a river-name failure
+        // doesn't discard forecast data.
         const [forecastResult, returnPeriodsResult, riverNameResult] =
           await Promise.allSettled([
             getForecast(reachId),
@@ -188,15 +217,15 @@ async function batchFetchReachData(
           });
         }
 
-        return {reachId, forecast, returnPeriods, riverName};
+        return {key, forecast, returnPeriods, riverName};
       })
     );
 
     // Store results in the map
     for (const result of batchResults) {
       if (result.status === "fulfilled") {
-        const {reachId, forecast, returnPeriods, riverName} = result.value;
-        reachDataMap.set(reachId, {forecast, returnPeriods, riverName});
+        const {key, forecast, returnPeriods, riverName} = result.value;
+        reachDataMap.set(key, {forecast, returnPeriods, riverName});
       } else {
         logger.error("❌ Unexpected batch fetch error", {
           error: result.reason instanceof Error
@@ -269,6 +298,9 @@ async function getNotificationUsers(
           notificationFrequency: data.notificationFrequency || 1,
           preferredFlowUnit: data.preferredFlowUnit || "cfs",
           favoriteReachIds: data.favoriteReachIds,
+          favoriteSources: (data.favoriteSources &&
+            typeof data.favoriteSources === "object") ?
+            data.favoriteSources as Record<string, string> : {},
           fcmTokens: tokens,
           firstName: data.firstName || "User",
           lastName: data.lastName || "",
@@ -324,9 +356,10 @@ async function checkUserRivers(
 
   for (const reachId of user.favoriteReachIds) {
     try {
-      const reachData = reachDataMap.get(reachId);
+      const source = sourceOf(user, reachId);
+      const reachData = reachDataMap.get(reachKey(source, reachId));
       if (!reachData) {
-        logger.warn(`⚠️ No pre-fetched data for reach ${reachId}`);
+        logger.warn(`⚠️ No pre-fetched data for reach ${reachId} (${source})`);
         continue;
       }
 
@@ -337,7 +370,7 @@ async function checkUserRivers(
       );
 
       if (alertData) {
-        const success = await sendAlert(user, reachId, alertData);
+        const success = await sendAlert(user, reachId, alertData, source);
         if (success) {
           alertsSent++;
         }
@@ -449,7 +482,8 @@ function evaluateAlert(
 async function sendAlert(
   user: UserSettings,
   reachId: string,
-  alertData: AlertData
+  alertData: AlertData,
+  source: ReachSource
 ): Promise<boolean> {
   // Check if this is a repeat alert (sent within last 6 hours)
   const isRepeat = await checkRecentAlert(user.userId, reachId);
@@ -472,6 +506,8 @@ async function sendAlert(
         data: {
           type: "flood_alert",
           reachId: reachId,
+          // So the notification tap opens the correct forecast source.
+          source: source,
           riverName: alertData.riverName,
           forecastFlow: String(alertData.forecastFlow),
           threshold: String(alertData.threshold),
