@@ -75,6 +75,23 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
     final onlyThisReach = _reachFilter;
 
     try {
+      // Standard style config: daylight, 3D buildings, and place/road/POI
+      // labels on, so the sheet reads with proper spatial context.
+      try {
+        const cfg = {
+          'lightPreset': 'day',
+          'show3dObjects': true,
+          'showPlaceLabels': true,
+          'showRoadLabels': true,
+          'showPointOfInterestLabels': true,
+          'showTransitLabels': true,
+        };
+        for (final e in cfg.entries) {
+          await map.style
+              .setStyleImportConfigProperty('basemap', e.key, e.value);
+        }
+      } catch (_) {}
+
       // Hill relief (Standard already renders 3D buildings when pitched).
       try {
         await map.style.addSource(RasterDemSource(
@@ -138,8 +155,8 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
       // [_frameStream] once tiles load. setCamera applies pitch; flyTo doesn't.
       await map.setCamera(CameraOptions(
         center: Point(coordinates: Position(widget.lon, widget.lat)),
-        zoom: 14.0,
-        pitch: 56.0,
+        zoom: 13.5,
+        pitch: 50.0,
         bearing: 18.0,
       ));
     } catch (e) {
@@ -171,15 +188,19 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
         }
       }
       if (geometry == null) return;
+      // Generous padding leaves surrounding context (nearby town, roads, the
+      // parent river) around the stream instead of framing it in isolation.
       final cam = await map.cameraForGeometry(
         geometry,
-        MbxEdgeInsets(top: 70, left: 50, bottom: 70, right: 50),
+        MbxEdgeInsets(top: 110, left: 80, bottom: 110, right: 80),
         null,
-        56.0,
+        50.0,
       );
-      final z = (cam.zoom ?? 14.0).clamp(11.0, 16.0);
+      // Cap the zoom so a short reach still shows context (and can be pinched
+      // in for 3D buildings).
+      final z = (cam.zoom ?? 13.5).clamp(10.5, 16.0);
       await map.setCamera(CameraOptions(
-          center: cam.center, zoom: z, pitch: 56.0, bearing: 18.0));
+          center: cam.center, zoom: z, pitch: 50.0, bearing: 18.0));
     } catch (e) {
       AppLogger.error('StreamMapSheet', 'Failed to frame stream', e);
     }
