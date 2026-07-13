@@ -33,8 +33,10 @@ void main() {
       expect(f.riverId, '210230337');
       expect(f.unit, 'ft³/s');
       expect(f.points.length, 4);
-      // First median in the fixture is 41.46 m³/s.
-      expect(f.currentMedian, closeTo(41.46 * cmsToCfs, 0.1));
+      // First median in the fixture is 41.46 m³/s. (currentMedian picks the
+      // step closest to *now*, which is undefined against a fixed fixture, so
+      // assert the conversion on the stable first point.)
+      expect(f.points.first.median, closeTo(41.46 * cmsToCfs, 0.1));
       // generatedAt derives from forecast_date (20260702).
       expect(f.generatedAt.toUtc(), DateTime.utc(2026, 7, 2));
       expect(f.points.first.lower, closeTo(41.46 * cmsToCfs, 0.1));
@@ -50,7 +52,7 @@ void main() {
       final f = await svc.fetchForecast('210230337');
 
       expect(f.unit, 'm³/s');
-      expect(f.currentMedian, closeTo(41.46, 0.001));
+      expect(f.points.first.median, closeTo(41.46, 0.001));
     });
 
     test('surfaces proxy error bodies as failures', () async {

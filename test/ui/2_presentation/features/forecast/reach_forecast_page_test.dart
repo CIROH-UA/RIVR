@@ -103,10 +103,13 @@ void main() {
       riverId: '210230337',
       unit: 'ft³/s',
       generatedAt: DateTime.utc(2026, 7, 12),
+      // Anchor the series at "now" so the step nearest the current time
+      // (which currentMedian selects) is deterministically the first one
+      // (median 1000) regardless of when the test runs.
       points: [
         for (var i = 0; i < 15; i++)
           GeoglowsForecastPoint(
-            validTime: DateTime.utc(2026, 7, 12 + i),
+            validTime: DateTime.now().toUtc().add(Duration(days: i)),
             median: 1000.0 - i * 5,
             lower: 900,
             upper: 1100,

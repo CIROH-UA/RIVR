@@ -61,8 +61,24 @@ class GeoglowsForecast {
   DateTime? get start => points.isEmpty ? null : points.first.validTime;
   DateTime? get end => points.isEmpty ? null : points.last.validTime;
 
-  /// The nearest-term median flow — what a glance ("flowing at X now") shows.
-  double? get currentMedian => points.isEmpty ? null : points.first.median;
+  /// The median flow closest to the current time — what a glance
+  /// ("flowing at X now") shows. Mirrors NWM's `getFlowAt(now)`: the series is
+  /// ordered earliest-first and starts at the model init (~00Z), so `points.first`
+  /// is only "now" early in the day; pick the step nearest to now instead.
+  double? get currentMedian {
+    if (points.isEmpty) return null;
+    final now = DateTime.now().toUtc();
+    GeoglowsForecastPoint? closest;
+    Duration? minDiff;
+    for (final p in points) {
+      final diff = p.validTime.difference(now).abs();
+      if (minDiff == null || diff < minDiff) {
+        minDiff = diff;
+        closest = p;
+      }
+    }
+    return closest?.median;
+  }
 }
 
 /// A single timestep of the GEOGLOWS ensemble summary — the data behind the
