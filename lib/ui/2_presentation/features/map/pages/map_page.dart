@@ -561,6 +561,10 @@ class MapPageState extends State<MapPage> {
       builder: (context) => ReachDetailsBottomSheet(
         selectedReach: selectedReach,
         onViewForecast: () => _navigateToForecast(selectedReach),
+        // Recolor the map highlight from gold to the flood-category color once
+        // the sheet has classified the flow.
+        onFlowCategoryColor: (argb) =>
+            _reachSelectionService.recolorHighlight(argb),
       ),
     ).then((_) async {
       // Sheet dismissed: drop the highlight and restore the camera padding.

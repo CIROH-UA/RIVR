@@ -20,12 +20,21 @@ class MapReachSelectionService {
   static const _hlGlow = 'tap-highlight-glow';
   static const _hlCasing = 'tap-highlight-casing';
   static const _hlCore = 'tap-highlight-core';
-  // Gold reads as "selected" against both blue water and green land.
+  // Gold reads as "selected" against both blue water and green land; it's the
+  // default until the details sheet loads the flood category and recolors it.
   static const _selectionColor = 0xFFFFC400;
+  // Both tilesets expose their streams under the same source-layer.
+  static const _channelsSourceLayer = 'channels';
   bool _lineHighlightAdded = false;
+  // A category color that arrived before the highlight was on the map; applied
+  // once the layers exist.
+  int? _pendingRecolor;
 
-  // Geometry of the most recently tapped reach, captured from the tile feature
-  // so the line highlight can trace the actual stream (not just a point).
+  // The most recently tapped reach — its tile source id + station id let us pull
+  // the *whole* reach geometry, and the clipped tile segment is kept as a
+  // fallback if the full-source query comes up empty.
+  String? _lastTappedSourceId;
+  String? _lastTappedReachId;
   Map<String, dynamic>? _lastTappedGeometry;
 
   // Callbacks for selection events
@@ -46,8 +55,10 @@ class MapReachSelectionService {
       final tapPoint = context.point;
       final touchPosition = context.touchPosition;
 
-      // Reset stale geometry so an empty tap can't reuse the previous reach's.
+      // Reset stale selection so an empty tap can't reuse the previous reach's.
       _lastTappedGeometry = null;
+      _lastTappedSourceId = null;
+      _lastTappedReachId = null;
 
       AppLogger.debug(
         'MapReachSelectionService',
@@ -387,12 +398,16 @@ class MapReachSelectionService {
 
   /// Highlight the most recently tapped reach as a bright line following the
   /// stream geometry (soft glow + white casing + colored core), so it's obvious
-  /// which stream the details sheet refers to. Reuses the same source/layers on
-  /// repeat taps, just swapping the geometry. No-op if no line was captured.
+  /// which stream the details sheet refers to. Traces the *whole* reach (every
+  /// tile segment for its station id), falling back to the tapped tile segment.
+  /// Starts gold; [recolorHighlight] swaps in the flood-category color once the
+  /// sheet loads it. Reuses the source/layers on repeat taps, swapping geometry.
   Future<void> highlightSelectedReach() async {
     final map = _mapboxMap;
-    final geom = _lastTappedGeometry;
-    if (map == null || geom == null) return;
+    if (map == null) return;
+
+    final geom = await _fullReachGeometry() ?? _lastTappedGeometry;
+    if (geom == null) return;
 
     final featureCollection = jsonEncode({
       'type': 'FeatureCollection',
@@ -403,7 +418,11 @@ class MapReachSelectionService {
 
     try {
       if (_lineHighlightAdded) {
-        await map.style.setStyleSourceProperty(_hlSource, 'data', featureCollection);
+        await map.style
+            .setStyleSourceProperty(_hlSource, 'data', featureCollection);
+        // New selection starts gold again until its category loads.
+        _pendingRecolor = null;
+        await _applyHighlightColor(_selectionColor);
         return;
       }
 
@@ -450,8 +469,90 @@ class MapReachSelectionService {
       ));
 
       _lineHighlightAdded = true;
+
+      // A category color may have arrived while we were adding the layers.
+      if (_pendingRecolor != null) {
+        final c = _pendingRecolor!;
+        _pendingRecolor = null;
+        await _applyHighlightColor(c);
+      }
     } catch (e) {
       AppLogger.error('MapReachSelectionService', 'Error highlighting reach line', e);
+    }
+  }
+
+  /// Recolor the highlight's glow + core to [argb] (the flood-category color)
+  /// once the details sheet has classified the flow. Queued if the highlight
+  /// isn't on the map yet.
+  Future<void> recolorHighlight(int argb) async {
+    if (!_lineHighlightAdded) {
+      _pendingRecolor = argb;
+      return;
+    }
+    await _applyHighlightColor(argb);
+  }
+
+  /// Pull the full geometry for the last-tapped reach by querying its tile
+  /// source for every segment sharing the station id (the tapped tile feature is
+  /// clipped to a tile, so a long reach would otherwise stop at a tile edge).
+  Future<Map<String, dynamic>?> _fullReachGeometry() async {
+    final map = _mapboxMap;
+    final src = _lastTappedSourceId;
+    final id = _lastTappedReachId;
+    if (map == null || src == null || id == null) return null;
+
+    try {
+      // The source-level filter is unreliable (returns the whole viewport), so
+      // query broadly and match the station id in Dart.
+      final feats = await map.querySourceFeatures(
+        src,
+        SourceQueryOptions(sourceLayerIds: [_channelsSourceLayer], filter: ''),
+      );
+      final wantInt = int.tryParse(id);
+      final lines = <List<Object?>>[];
+      for (final f in feats) {
+        final feature = f?.queriedFeature.feature;
+        if (feature == null) continue;
+        final props = feature['properties'];
+        final sid = props is Map ? props['station_id'] : null;
+        final matches =
+            sid != null && (sid == wantInt || sid.toString() == id);
+        if (!matches) continue;
+        final g = feature['geometry'];
+        if (g is! Map) continue;
+        final type = g['type'];
+        final coords = g['coordinates'];
+        if (type == 'LineString' && coords is List) {
+          lines.add(List<Object?>.from(coords));
+        } else if (type == 'MultiLineString' && coords is List) {
+          for (final seg in coords) {
+            if (seg is List) lines.add(List<Object?>.from(seg));
+          }
+        }
+      }
+      if (lines.isEmpty) return null;
+      return {'type': 'MultiLineString', 'coordinates': lines};
+    } catch (e) {
+      AppLogger.warning('MapReachSelectionService', 'Full-reach query failed: $e');
+      return null;
+    }
+  }
+
+  /// Apply a color to the glow + core highlight layers. Mapbox's runtime
+  /// style setter wants a color string, so encode as `rgba(...)`.
+  Future<void> _applyHighlightColor(int argb) async {
+    final map = _mapboxMap;
+    if (map == null || !_lineHighlightAdded) return;
+    final a = ((argb >> 24) & 0xFF) / 255.0;
+    final r = (argb >> 16) & 0xFF;
+    final g = (argb >> 8) & 0xFF;
+    final b = argb & 0xFF;
+    final rgba = 'rgba($r, $g, $b, $a)';
+    try {
+      await map.style.setStyleLayerProperty(_hlCore, 'line-color', rgba);
+      await map.style.setStyleLayerProperty(_hlGlow, 'line-color', rgba);
+    } catch (e) {
+      AppLogger.warning('MapReachSelectionService', 'Recolor failed: $e');
     }
   }
 
@@ -470,6 +571,7 @@ class MapReachSelectionService {
       } catch (_) {}
     } finally {
       _lineHighlightAdded = false;
+      _pendingRecolor = null;
     }
   }
 
@@ -561,8 +663,11 @@ class MapReachSelectionService {
         return null;
       }
 
-      // Capture the tapped reach's line geometry so it can be highlighted. The
-      // rendered feature carries the (tile-clipped) LineString/MultiLineString.
+      // Capture what we need to highlight the whole reach: its tile source id +
+      // station id (to query every segment), plus the tapped tile's clipped
+      // LineString/MultiLineString as a fallback.
+      _lastTappedSourceId = queriedRenderedFeature.queriedFeature.source;
+      _lastTappedReachId = properties['station_id'].toString();
       final rawGeometry = feature['geometry'];
       if (rawGeometry is Map) {
         final geom = Map<String, dynamic>.from(rawGeometry);

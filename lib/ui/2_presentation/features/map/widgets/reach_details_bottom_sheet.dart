@@ -26,10 +26,15 @@ class ReachDetailsBottomSheet extends StatefulWidget {
   final SelectedReach selectedReach;
   final VoidCallback? onViewForecast;
 
+  /// Called with the flood-category color (resolved ARGB) once the flow has been
+  /// classified, so the map can recolor its stream highlight to match.
+  final void Function(int argb)? onFlowCategoryColor;
+
   const ReachDetailsBottomSheet({
     super.key,
     required this.selectedReach,
     this.onViewForecast,
+    this.onFlowCategoryColor,
   });
 
   @override
@@ -539,6 +544,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       _isLoadingFlow = false;
       _isLoadingClassification = false;
     });
+    _notifyCategoryColor();
 
     AppLogger.info(
       'ReachDetailsSheet',
@@ -582,6 +588,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _isLoadingFlow = false;
         _isLoadingClassification = false;
       });
+      _notifyCategoryColor();
       AppLogger.info(
         'ReachDetailsSheet',
         'GEOGLOWS details loaded, flow: $_currentFlow',
@@ -600,6 +607,16 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   Color _getFlowCategoryColor() {
     // Use the existing AppConstants method for consistent colors
     return AppConstants.getFlowCategoryColor(_flowCategory);
+  }
+
+  /// Hand the resolved flood-category color to the map so it can recolor the
+  /// tapped-stream highlight. No-op until the flow has actually been classified.
+  void _notifyCategoryColor() {
+    final cb = widget.onFlowCategoryColor;
+    if (cb == null || _flowCategory == null || !mounted) return;
+    final base = AppConstants.getFlowCategoryColor(_flowCategory);
+    final resolved = CupertinoDynamicColor.maybeResolve(base, context) ?? base;
+    cb(resolved.toARGB32());
   }
 
   Widget _buildInfoRow(String label, String value) {
