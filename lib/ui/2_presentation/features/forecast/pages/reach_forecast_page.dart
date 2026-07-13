@@ -22,6 +22,7 @@ import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/utils/flow_format.dart';
 import 'package:rivr/utils/forecast_peak.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/return_periods_sheet.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/stream_map_sheet.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -382,7 +383,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Header(river: _river, location: _location),
+              _Header(
+                river: _river,
+                location: _location,
+                onTitleTap: ((_details?.latitude ?? widget.lat) != null &&
+                        (_details?.longitude ?? widget.lon) != null)
+                    ? _showStreamMapSheet
+                    : null,
+              ),
               Expanded(child: _buildScroll()),
             ],
           ),
@@ -661,6 +669,29 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       // Tapping the return period opens the full threshold list (with copy).
       onReturnPeriodTap:
           (rp != null && rp.isNotEmpty) ? _showReturnPeriodsSheet : null,
+    );
+  }
+
+  /// Opens a bottom sheet with this one stream highlighted on a 3D map.
+  void _showStreamMapSheet() {
+    final lat = _details?.latitude ?? widget.lat;
+    final lon = _details?.longitude ?? widget.lon;
+    if (lat == null || lon == null) return;
+    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
+    final color = catI >= 0
+        ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
+        : CupertinoColors.activeBlue.resolveFrom(context);
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (_) => StreamMapSheet(
+        reachId: widget.reachId,
+        isGeoglows: _isGeoglows,
+        lat: lat,
+        lon: lon,
+        title: _river,
+        subtitle: _location,
+        highlightColor: color,
+      ),
     );
   }
 
@@ -1658,13 +1689,15 @@ class _WeekCard extends StatelessWidget {
 // ── Header ───────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
-  const _Header({required this.river, required this.location});
+  const _Header({required this.river, required this.location, this.onTitleTap});
 
   final String river;
   final String location;
+  final VoidCallback? onTitleTap;
 
   @override
   Widget build(BuildContext context) {
+    final sub = CupertinoColors.secondaryLabel.resolveFrom(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
       child: Row(
@@ -1674,30 +1707,43 @@ class _Header extends StatelessWidget {
             onPressed: () => Navigator.of(context).maybePop(),
           ),
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  river,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                if (location.isNotEmpty)
+            // Tapping the name/location opens the stream on a map.
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTitleTap,
+              child: Column(
+                children: [
                   Text(
-                    location,
+                    river,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color:
-                          CupertinoColors.secondaryLabel.resolveFrom(context),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
                     ),
                   ),
-              ],
+                  if (location.isNotEmpty)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (onTitleTap != null) ...[
+                          Icon(CupertinoIcons.map, size: 11, color: sub),
+                          const SizedBox(width: 4),
+                        ],
+                        Flexible(
+                          child: Text(
+                            location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12.5, color: sub),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
           // Balances the back button so the title stays centred. A real
