@@ -50,7 +50,7 @@ class GeocodingService {
 
       final queryParams = {
         'access_token': AppConfig.mapboxPublicToken,
-        'types': 'place,region',
+        'types': 'place,region,country',
       };
 
       final uri = Uri.parse(
@@ -64,7 +64,7 @@ class GeocodingService {
         final features = data['features'] as List;
 
         if (features.isNotEmpty) {
-          String? city, state;
+          String? city, state, country;
 
           for (final feature in features) {
             final placeType = feature['place_type'] as List?;
@@ -81,12 +81,30 @@ class GeocodingService {
                 } else {
                   state = text;
                 }
+              } else if (placeType.contains('country') && country == null) {
+                country = text;
+              }
+            }
+
+            // Country also lives in each feature's context hierarchy — use it as
+            // a fallback when no dedicated country feature is returned.
+            if (country == null) {
+              final context = feature['context'] as List?;
+              if (context != null) {
+                for (final c in context) {
+                  final id = (c as Map)['id'] as String?;
+                  if (id != null && id.startsWith('country')) {
+                    country = c['text'] as String?;
+                    break;
+                  }
+                }
               }
             }
           }
 
-          AppLogger.debug('GeocodingService', 'Reverse geocoded to: $city, $state');
-          final result = {'city': city, 'state': state};
+          AppLogger.debug(
+              'GeocodingService', 'Reverse geocoded to: $city, $state, $country');
+          final result = {'city': city, 'state': state, 'country': country};
           _cache[cacheKey] = result;
 
           // Persist to L2 (fire-and-forget)
@@ -101,7 +119,7 @@ class GeocodingService {
       AppLogger.error('GeocodingService', 'Reverse geocoding failed', e);
     }
 
-    final fallback = {'city': null, 'state': null};
+    final fallback = {'city': null, 'state': null, 'country': null};
     _cache[cacheKey] = fallback;
     return fallback;
   }

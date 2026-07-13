@@ -189,19 +189,25 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       }
       final fc = GeoglowsForecastPayload.decode(entry, unitService);
 
-      // GEOGLOWS reaches have no name — reverse-geocode the tap coordinate to
-      // a place so the header reads "Stream near {city}" instead of a raw id.
+      // GEOGLOWS reaches have no name — reverse-geocode the tap coordinate to a
+      // place so the header reads "Stream near {city}" with a "City, Country"
+      // subtitle, matching how NWM streams show their location.
       var riverName = 'Stream ${widget.reachId}';
+      var location = '';
       if (widget.lat != null && widget.lon != null) {
         try {
           final geo = await GeocodingService.reverseGeocode(
               widget.lat!, widget.lon!);
           // 'state'/region is unreliable internationally (Mapbox returns codes
-          // like '13' for French departments), so name from the city only.
+          // like '13' for French departments), so name from city + country.
           final city = geo['city'];
+          final country = geo['country'];
           if (city != null && city.isNotEmpty) {
             riverName = 'Stream near $city';
           }
+          location = [city, country]
+              .where((s) => s != null && s.isNotEmpty)
+              .join(', ');
         } catch (_) {
           // Keep the id fallback if geocoding fails.
         }
@@ -211,7 +217,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       setState(() {
         _details = ReachDetailsData(
           riverName: riverName,
-          formattedLocation: '',
+          formattedLocation: location,
           currentFlow: fc.currentMedian,
           returnPeriods: fc.returnPeriods,
         );
