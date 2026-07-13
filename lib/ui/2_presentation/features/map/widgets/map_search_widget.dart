@@ -139,9 +139,25 @@ class _MapSearchModalState extends State<MapSearchModal> {
     setState(() => _isSearching = true);
 
     try {
+      // Bias worldwide results toward the current map view so the nearest match
+      // ranks first (e.g. the closest "Springfield").
+      double? proximityLng;
+      double? proximityLat;
+      final map = widget.mapboxMap;
+      if (map != null) {
+        try {
+          final camera = await map.getCameraState();
+          proximityLng = camera.center.coordinates.lng.toDouble();
+          proximityLat = camera.center.coordinates.lat.toDouble();
+        } catch (_) {
+          // Non-fatal: fall back to unbiased (still worldwide) search.
+        }
+      }
+
       final results = await MapSearchService.searchPlaces(
         query: query,
-        usOnly: true, // Filter to US only
+        proximityLng: proximityLng,
+        proximityLat: proximityLat,
       );
       if (mounted) {
         setState(() {

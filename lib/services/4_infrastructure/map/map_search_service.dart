@@ -125,12 +125,19 @@ class MapSearchService {
   static Future<List<SearchedPlace>> searchPlaces({
     required String query,
     int limit = 8,
-    bool usOnly = true,
+    bool usOnly = false,
+    double? proximityLng,
+    double? proximityLat,
   }) async {
     if (query.trim().isEmpty) return [];
 
-    // Check cache (normalized key)
-    final cacheKey = query.trim().toLowerCase();
+    // Check cache (normalized key). Include coarse proximity so results biased
+    // toward one map location aren't served for a query near a different one.
+    final hasProximity = proximityLng != null && proximityLat != null;
+    final proximityKey = hasProximity
+        ? '@${proximityLng.toStringAsFixed(1)},${proximityLat.toStringAsFixed(1)}'
+        : '';
+    final cacheKey = '${query.trim().toLowerCase()}$proximityKey';
     final cached = _searchCache[cacheKey];
     if (cached != null && !cached.isExpired(_searchCacheTtl)) {
       AppLogger.debug('MapSearchService', 'Search cache hit for: $cacheKey');
@@ -148,6 +155,12 @@ class MapSearchService {
 
       if (usOnly) {
         queryParams['country'] = 'US';
+      }
+
+      // Bias results toward the current map view so a global search still
+      // surfaces nearby places first (e.g. the closest "Springfield").
+      if (hasProximity) {
+        queryParams['proximity'] = '$proximityLng,$proximityLat';
       }
 
       final uri = Uri.parse(
