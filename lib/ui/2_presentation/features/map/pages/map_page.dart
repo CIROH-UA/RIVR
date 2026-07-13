@@ -167,13 +167,9 @@ class MapPageState extends State<MapPage> {
         ),
 
         // "Zoom in" hint shown while the map is too far out to see/tap streams.
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: SafeArea(
-            bottom: false,
-            child: _buildZoomHint(),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Center(child: _buildZoomHint()),
           ),
         ),
 
@@ -182,49 +178,43 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Non-blocking pill that fades in when zoomed out past the usable stream
-  /// range, telling the user to zoom in to see and tap rivers.
+  /// Non-blocking pill that fades in, centered on screen, when zoomed out past
+  /// the usable stream range, telling the user to zoom in to see and tap rivers.
   Widget _buildZoomHint() {
-    return IgnorePointer(
-      child: AnimatedOpacity(
-        opacity: _showZoomHint ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 250),
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Container(
-            margin: const EdgeInsets.only(top: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: CupertinoColors.systemBackground.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: CupertinoColors.black.withValues(alpha: 0.15),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+    return AnimatedOpacity(
+      opacity: _showZoomHint ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 250),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        decoration: BoxDecoration(
+          color: CupertinoColors.systemBackground.withValues(alpha: 0.92),
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: CupertinoColors.black.withValues(alpha: 0.18),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  CupertinoIcons.zoom_in,
-                  size: 18,
-                  color: CupertinoColors.systemBlue,
-                ),
-                SizedBox(width: 8),
-                Text(
-                  'Zoom in to see and tap rivers',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: CupertinoColors.label,
-                  ),
-                ),
-              ],
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CupertinoIcons.zoom_in,
+              size: 20,
+              color: CupertinoColors.systemBlue,
             ),
-          ),
+            SizedBox(width: 8),
+            Text(
+              'Zoom in to see and tap rivers',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: CupertinoColors.label,
+              ),
+            ),
+          ],
         ),
       ),
     );
