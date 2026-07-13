@@ -50,18 +50,6 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
       ? AppConfig.geoglowsSourceLayer
       : AppConfig.vectorSourceLayer;
 
-  /// Filter matching this one reach by its tile id. The tiles store `station_id`
-  /// as an int, so compare numerically (Mapbox filters don't apply a `to-string`
-  /// coercion reliably here); fall back to the raw string for non-numeric ids.
-  List<Object> get _reachFilter {
-    final asInt = int.tryParse(widget.reachId);
-    return <Object>[
-      '==',
-      <Object>['get', 'station_id'],
-      asInt ?? widget.reachId,
-    ];
-  }
-
   Future<void> _onStyleLoaded() async {
     final map = _map;
     if (map == null) return;
@@ -72,7 +60,6 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
         : AppConfig.getVectorTileSourceUrl();
     final sourceLayer = _sourceLayer;
     final brand = widget.isGeoglows ? _brandGeoglows : _brandNwm;
-    final onlyThisReach = _reachFilter;
 
     try {
       // Standard style config: daylight, 3D buildings, and place/road/POI
@@ -110,52 +97,28 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
 
       // The Mapbox Standard style occludes custom layers unless they're placed
       // in a slot; 'top' keeps the streams above the basemap.
-      // Faint surrounding network for context.
+      // Faint surrounding network for context. This rides the vector tiles, so
+      // it naturally thins out as you zoom in — exactly what we want for context.
       await map.style.addLayer(LineLayer(
         id: 'sheet-context',
         sourceId: sourceId,
         sourceLayer: sourceLayer,
         slot: 'top',
         lineColor: brand,
-        lineOpacity: 0.45,
+        lineOpacity: 0.28,
         lineWidth: 1.4,
       ));
 
-      // White casing under the highlight so it reads over any basemap.
-      await map.style.addLayer(LineLayer(
-        id: 'sheet-casing',
-        sourceId: sourceId,
-        sourceLayer: sourceLayer,
-        slot: 'top',
-        lineColor: 0xFFFFFFFF,
-        lineOpacity: 0.95,
-        lineWidth: 8.0,
-        lineCap: LineCap.ROUND,
-        lineJoin: LineJoin.ROUND,
-        lineEmissiveStrength: 1.0,
-        filter: onlyThisReach,
-      ));
-
-      // The highlighted stream itself.
-      await map.style.addLayer(LineLayer(
-        id: 'sheet-highlight',
-        sourceId: sourceId,
-        sourceLayer: sourceLayer,
-        slot: 'top',
-        lineColor: widget.highlightColor.toARGB32(),
-        lineWidth: 4.0,
-        lineCap: LineCap.ROUND,
-        lineJoin: LineJoin.ROUND,
-        lineEmissiveStrength: 1.0,
-        filter: onlyThisReach,
-      ));
-
-      // Initial framing on the reach's coordinate (which sits on the stream),
-      // pitched for the 3D view. Refined to the stream's full extent by
-      // [_frameStream] once tiles load. setCamera applies pitch; flyTo doesn't.
+      // The highlighted reach itself is NOT drawn from the vector tiles: small
+      // reaches are zoom-filtered out of the tiles, so they'd vanish the moment
+      // we pull back for context. Instead [_frameStream] extracts this reach's
+      // geometry once (while it's still in the loaded tiles), adds it as its own
+      // GeoJSON source, and draws the casing + highlight from that — which stays
+      // visible at any zoom. The initial camera below just needs to be close
+      // enough that the reach is present in the loaded tiles to be captured.
       await map.setCamera(CameraOptions(
         center: Point(coordinates: Position(widget.lon, widget.lat)),
-        zoom: 13.5,
+        zoom: 12.8,
         pitch: 50.0,
         bearing: 18.0,
       ));
@@ -164,41 +127,129 @@ class _StreamMapSheetState extends State<StreamMapSheet> {
     }
   }
 
-  /// Once tiles load, find this reach's geometry and frame the camera to its
-  /// full extent (pitched). Runs once; if the reach isn't in the loaded tiles
-  /// the coordinate-centred view from [_onStyleLoaded] stays.
+  /// Once tiles load, pull this reach's geometry out of the loaded tiles, add it
+  /// as its own GeoJSON source (unaffected by tile zoom-filtering so it stays
+  /// visible when we pull back), draw the casing + highlight from it, then frame
+  /// the camera wide enough to show the surrounding river network. Runs once; if
+  /// the reach isn't in the loaded tiles the coordinate-centred view stays.
   Future<void> _frameStream() async {
     final map = _map;
     if (map == null || _framed) return;
-    _framed = true;
     try {
+      // A source-level filter here is unreliable (it silently returns the whole
+      // viewport), so query broadly and match this reach's `station_id` in Dart.
       final feats = await map.querySourceFeatures(
         _sourceId,
-        SourceQueryOptions(
-          sourceLayerIds: [_sourceLayer],
-          filter: jsonEncode(_reachFilter),
-        ),
+        SourceQueryOptions(sourceLayerIds: [_sourceLayer], filter: ''),
       );
-      Map<String?, Object?>? geometry;
+
+      final wantInt = int.tryParse(widget.reachId);
+
+      // Collect every line segment of this reach (a reach can span several tile
+      // features) into one MultiLineString.
+      final lines = <List<Object?>>[];
       for (final f in feats) {
-        final g = f?.queriedFeature.feature['geometry'];
-        if (g is Map) {
-          geometry = g.cast<String?, Object?>();
-          break;
+        final feature = f?.queriedFeature.feature;
+        if (feature == null) continue;
+
+        // Match by station_id — tiles store it as an int, but compare loosely.
+        final props = feature['properties'];
+        final sid = props is Map ? props['station_id'] : null;
+        final matches = sid != null &&
+            (sid == wantInt || sid.toString() == widget.reachId);
+        if (!matches) continue;
+
+        final g = feature['geometry'];
+        if (g is! Map) continue;
+        final type = g['type'];
+        final coords = g['coordinates'];
+        if (type == 'LineString' && coords is List) {
+          lines.add(List<Object?>.from(coords));
+        } else if (type == 'MultiLineString' && coords is List) {
+          for (final seg in coords) {
+            if (seg is List) lines.add(List<Object?>.from(seg));
+          }
         }
       }
-      if (geometry == null) return;
-      // Generous padding leaves surrounding context (nearby town, roads, the
-      // parent river) around the stream instead of framing it in isolation.
+      if (lines.isEmpty) return;
+
+      // Only commit once we've actually captured geometry — that way an early
+      // idle over empty tiles doesn't lock us out of a later successful capture.
+      _framed = true;
+
+      final geometry = <String, Object?>{
+        'type': 'MultiLineString',
+        'coordinates': lines,
+      };
+      final featureCollection = <String, Object?>{
+        'type': 'FeatureCollection',
+        'features': [
+          {
+            'type': 'Feature',
+            'properties': const <String, Object?>{},
+            'geometry': geometry,
+          }
+        ],
+      };
+
+      final highlight = widget.highlightColor.toARGB32();
+
+      await map.style.addSource(GeoJsonSource(
+        id: 'sheet-reach-src',
+        data: jsonEncode(featureCollection),
+        lineMetrics: true,
+      ));
+
+      // Soft colored glow so the reach reads as "lit up" even against busy
+      // basemap detail.
+      await map.style.addLayer(LineLayer(
+        id: 'sheet-glow',
+        sourceId: 'sheet-reach-src',
+        slot: 'top',
+        lineColor: highlight,
+        lineOpacity: 0.28,
+        lineWidth: 16.0,
+        lineBlur: 8.0,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      // White casing so the colored core separates cleanly from the water/land.
+      await map.style.addLayer(LineLayer(
+        id: 'sheet-casing',
+        sourceId: 'sheet-reach-src',
+        slot: 'top',
+        lineColor: 0xFFFFFFFF,
+        lineOpacity: 0.95,
+        lineWidth: 8.5,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      // The highlighted reach itself, in the flood-category color.
+      await map.style.addLayer(LineLayer(
+        id: 'sheet-highlight',
+        sourceId: 'sheet-reach-src',
+        slot: 'top',
+        lineColor: highlight,
+        lineWidth: 4.0,
+        lineCap: LineCap.ROUND,
+        lineJoin: LineJoin.ROUND,
+        lineEmissiveStrength: 1.0,
+      ));
+
+      // Frame wide enough to see the reach against the surrounding network, but
+      // keep it comfortably filling the view. Generous padding leaves context
+      // (nearby town, the parent river) around it.
       final cam = await map.cameraForGeometry(
         geometry,
-        MbxEdgeInsets(top: 110, left: 80, bottom: 110, right: 80),
+        MbxEdgeInsets(top: 120, left: 90, bottom: 120, right: 90),
         null,
         50.0,
       );
-      // Cap the zoom so a short reach still shows context (and can be pinched
-      // in for 3D buildings).
-      final z = (cam.zoom ?? 13.5).clamp(10.5, 16.0);
+      final z = ((cam.zoom ?? 12.0) - 1.3).clamp(10.0, 12.5);
       await map.setCamera(CameraOptions(
           center: cam.center, zoom: z, pitch: 50.0, bearing: 18.0));
     } catch (e) {
