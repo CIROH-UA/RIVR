@@ -527,22 +527,38 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
 
   List<Widget> _geoglowsBodySlivers() {
     final pts = _geoPoints;
-    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
-    final color = catI >= 0
-        ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
-        : CupertinoColors.systemBlue.resolveFrom(context);
+    // Resolve the category palette once for the painters/widgets below, which
+    // can't resolve CupertinoDynamicColor without a context.
+    final catColors = _zoneColors
+        .map((c) => CupertinoDynamicColor.resolve(c, context))
+        .toList();
     return [
       SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
+          padding: const EdgeInsets.fromLTRB(18, 22, 18, 8),
           // For GEOGLOWS the 15-day ensemble reads as a trend, not a table:
-          // the median + uncertainty-band chart IS the detail.
+          // the category-colored median + uncertainty-band chart IS the detail,
+          // and the weekly split synthesizes it into "this week / next week".
           child: (pts == null || pts.isEmpty)
               ? const _DetailLoading()
-              : _GeoglowsChartCard(
-                  points: pts,
-                  color: color,
-                  onExpand: _openGeoglowsChart,
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _GeoglowsChartCard(
+                      points: pts,
+                      returnPeriods: _returnPeriods,
+                      unit: _unit,
+                      catColors: catColors,
+                      onExpand: _openGeoglowsChart,
+                    ),
+                    const SizedBox(height: 24),
+                    _GeoglowsWeeklySplit(
+                      points: pts,
+                      returnPeriods: _returnPeriods,
+                      unit: _unit,
+                      catColors: catColors,
+                    ),
+                  ],
                 ),
         ),
       ),
@@ -1069,15 +1085,22 @@ class _ForecastSkeleton extends StatelessWidget {
 
 // ── GEOGLOWS 15-day chart (median + uncertainty band) ────────────────────────
 
+/// Concept #1 — the category-colored median + uncertainty-band hydrograph.
+/// The median is coloured per segment by flood category, return-period
+/// thresholds are drawn as labelled guide-lines, and the peak is called out.
 class _GeoglowsChartCard extends StatelessWidget {
   const _GeoglowsChartCard({
     required this.points,
-    required this.color,
+    required this.returnPeriods,
+    required this.unit,
+    required this.catColors,
     required this.onExpand,
   });
 
   final List<GeoglowsForecastPoint> points;
-  final Color color;
+  final Map<int, double>? returnPeriods;
+  final String unit;
+  final List<Color> catColors;
   final VoidCallback onExpand;
 
   @override
@@ -1090,7 +1113,7 @@ class _GeoglowsChartCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
-              '15-day forecast',
+              'Outlook',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
             CupertinoButton(
@@ -1117,15 +1140,27 @@ class _GeoglowsChartCard extends StatelessWidget {
         GestureDetector(
           onTap: onExpand,
           child: Container(
-            height: 190,
+            height: 214,
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: CupertinoColors.white.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(16),
             ),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
             child: CustomPaint(
               size: Size.infinite,
-              painter: _BandChartPainter(points, color),
+              painter: _HydrographPainter(
+                points: points,
+                returnPeriods: returnPeriods,
+                unit: unit,
+                catColors: catColors,
+                accent: accent,
+                gridColor: CupertinoColors.separator.resolveFrom(context),
+                labelColor: CupertinoColors.secondaryLabel.resolveFrom(context),
+                calloutBg: CupertinoColors.label.resolveFrom(context),
+                calloutFg:
+                    CupertinoColors.systemBackground.resolveFrom(context),
+              ),
             ),
           ),
         ),
@@ -1134,62 +1169,452 @@ class _GeoglowsChartCard extends StatelessWidget {
   }
 }
 
-class _BandChartPainter extends CustomPainter {
-  _BandChartPainter(this.points, this.color);
+class _HydrographPainter extends CustomPainter {
+  _HydrographPainter({
+    required this.points,
+    required this.returnPeriods,
+    required this.unit,
+    required this.catColors,
+    required this.accent,
+    required this.gridColor,
+    required this.labelColor,
+    required this.calloutBg,
+    required this.calloutFg,
+  });
 
   final List<GeoglowsForecastPoint> points;
-  final Color color;
+  final Map<int, double>? returnPeriods;
+  final String unit;
+  final List<Color> catColors;
+  final Color accent, gridColor, labelColor, calloutBg, calloutFg;
+
+  static const _wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  int _cat(double v) => FlowClassification.indexFor(v, returnPeriods);
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final minV =
-        points.map((p) => p.lower).reduce((a, b) => a < b ? a : b);
-    final maxV =
-        points.map((p) => p.upper).reduce((a, b) => a > b ? a : b);
-    final range = (maxV - minV).abs() < 1e-6 ? 1.0 : (maxV - minV);
     final n = points.length;
+    if (n < 2) return;
 
-    Offset at(int i, double v) {
-      final x = i / (n - 1) * size.width;
-      final norm = (v - minV) / range;
-      final y = size.height - 10 - norm * (size.height - 22);
-      return Offset(x, y);
-    }
+    final med = points.map((p) => p.median).toList();
+    final lo = points.map((p) => p.lower).toList();
+    final hi = points.map((p) => p.upper).toList();
 
-    // Uncertainty band (upper forward, lower back).
-    final band = Path();
-    for (var i = 0; i < n; i++) {
-      final p = at(i, points[i].upper);
-      i == 0 ? band.moveTo(p.dx, p.dy) : band.lineTo(p.dx, p.dy);
+    var minV = lo.reduce((a, b) => a < b ? a : b);
+    var maxV = hi.reduce((a, b) => a > b ? a : b);
+    final span0 = (maxV - minV).abs();
+    final pad = span0 < 1e-6 ? 1.0 : span0 * 0.10;
+    minV -= pad;
+    maxV += pad;
+    final range = maxV - minV;
+
+    const padTop = 26.0; // callout headroom
+    const padBottom = 16.0; // x labels
+    final plotTop = padTop;
+    final plotBottom = size.height - padBottom;
+    const left = 2.0;
+    final right = size.width - 2.0;
+
+    double x(int i) => left + (right - left) * i / (n - 1);
+    double y(double v) =>
+        plotBottom - (v - minV) / range * (plotBottom - plotTop);
+
+    // Uncertainty band.
+    final band = Path()..moveTo(x(0), y(hi[0]));
+    for (var i = 1; i < n; i++) {
+      band.lineTo(x(i), y(hi[i]));
     }
     for (var i = n - 1; i >= 0; i--) {
-      final p = at(i, points[i].lower);
-      band.lineTo(p.dx, p.dy);
+      band.lineTo(x(i), y(lo[i]));
     }
     band.close();
-    canvas.drawPath(band, Paint()..color = color.withValues(alpha: 0.16));
+    canvas.drawPath(band, Paint()..color = accent.withValues(alpha: 0.13));
 
-    // Median line.
-    final line = Path();
-    for (var i = 0; i < n; i++) {
-      final p = at(i, points[i].median);
-      i == 0 ? line.moveTo(p.dx, p.dy) : line.lineTo(p.dx, p.dy);
+    // Return-period threshold guide-lines (only those within view).
+    final rp = returnPeriods;
+    if (rp != null) {
+      const yearToCat = {2: 1, 5: 2, 10: 3, 25: 4};
+      final dashPaint = Paint()..strokeWidth = 1;
+      yearToCat.forEach((year, ci) {
+        final t = rp[year];
+        if (t == null || t < minV || t > maxV) return;
+        final yy = y(t);
+        dashPaint.color = catColors[ci].withValues(alpha: 0.32);
+        _dashedH(canvas, yy, left, right, dashPaint);
+        _text(canvas, kFloodCategories[ci], Offset(right, yy - 13),
+            catColors[ci].withValues(alpha: 0.9),
+            size: 10, weight: FontWeight.w700, alignRight: true);
+      });
     }
-    canvas.drawPath(
-      line,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.4
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
+
+    // Median line, coloured per segment by the higher category of its endpoints.
+    final seg = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    for (var i = 0; i < n - 1; i++) {
+      final a = _cat(med[i]);
+      final b = _cat(med[i + 1]);
+      final ci = a >= b ? a : b;
+      seg.color = ci >= 0 ? catColors[ci] : accent;
+      canvas.drawLine(
+          Offset(x(i), y(med[i])), Offset(x(i + 1), y(med[i + 1])), seg);
+    }
+
+    // X-axis baseline + date ticks.
+    canvas.drawLine(Offset(left, plotBottom), Offset(right, plotBottom),
+        Paint()..color = gridColor..strokeWidth = 1);
+    const ticks = 4;
+    for (var k = 0; k <= ticks; k++) {
+      final i = ((n - 1) * k / ticks).round();
+      final d = points[i].validTime.toLocal();
+      _text(canvas, '${d.month}/${d.day}', Offset(x(i), plotBottom + 3),
+          labelColor,
+          size: 9.5, weight: FontWeight.w600, center: true);
+    }
+
+    // Peak dot + callout.
+    var peakI = 0;
+    for (var i = 1; i < n; i++) {
+      if (med[i] > med[peakI]) peakI = i;
+    }
+    final pc = _cat(med[peakI]);
+    final dotColor = pc >= 0 ? catColors[pc] : accent;
+    final px = x(peakI);
+    final py = y(med[peakI]);
+    canvas.drawCircle(Offset(px, py), 5.5, Paint()..color = calloutFg);
+    canvas.drawCircle(Offset(px, py), 4, Paint()..color = dotColor);
+
+    final d = points[peakI].validTime.toLocal();
+    _callout(canvas, size, 'PEAK · ${_wd[d.weekday - 1]} ${d.day}',
+        '${FlowFormat.grouped(med[peakI])} $unit', px, py);
+  }
+
+  void _dashedH(Canvas c, double yy, double x0, double x1, Paint p) {
+    const dash = 2.0, gap = 5.0;
+    var xx = x0;
+    while (xx < x1) {
+      final xe = (xx + dash) > x1 ? x1 : (xx + dash);
+      c.drawLine(Offset(xx, yy), Offset(xe, yy), p);
+      xx += dash + gap;
+    }
+  }
+
+  void _text(Canvas c, String s, Offset o, Color color,
+      {double size = 10,
+      FontWeight weight = FontWeight.w600,
+      bool alignRight = false,
+      bool center = false}) {
+    final tp = TextPainter(
+      text: TextSpan(
+          text: s,
+          style: TextStyle(color: color, fontSize: size, fontWeight: weight)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    var dx = o.dx;
+    if (alignRight) dx = o.dx - tp.width;
+    if (center) dx = o.dx - tp.width / 2;
+    tp.paint(c, Offset(dx, o.dy));
+  }
+
+  void _callout(
+      Canvas c, Size size, String top, String bottom, double px, double py) {
+    final tpTop = TextPainter(
+      text: TextSpan(
+          text: top,
+          style: TextStyle(
+              color: calloutFg.withValues(alpha: 0.72),
+              fontSize: 8.5,
+              fontWeight: FontWeight.w700)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final tpBot = TextPainter(
+      text: TextSpan(
+          text: bottom,
+          style: TextStyle(
+              color: calloutFg, fontSize: 11.5, fontWeight: FontWeight.w800)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final w = (tpTop.width > tpBot.width ? tpTop.width : tpBot.width) + 16;
+    const h = 28.0;
+    var bx = px - w / 2;
+    if (bx < 0) bx = 0;
+    if (bx + w > size.width) bx = size.width - w;
+    var by = py - h - 8;
+    if (by < 0) by = py + 8;
+    c.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(bx, by, w, h), const Radius.circular(7)),
+        Paint()..color = calloutBg);
+    tpTop.paint(c, Offset(bx + 8, by + 5));
+    tpBot.paint(c, Offset(bx + 8, by + 14));
   }
 
   @override
-  bool shouldRepaint(_BandChartPainter old) =>
-      old.color != color || old.points != points;
+  bool shouldRepaint(_HydrographPainter old) =>
+      old.points != points ||
+      old.returnPeriods != returnPeriods ||
+      old.unit != unit ||
+      old.catColors != catColors;
+}
+
+/// Concept #6 — synthesizes the 15-day series into "this week / next week",
+/// each placed on the flood-category scale with its peak, trend, and range.
+class _GeoglowsWeeklySplit extends StatelessWidget {
+  const _GeoglowsWeeklySplit({
+    required this.points,
+    required this.returnPeriods,
+    required this.unit,
+    required this.catColors,
+  });
+
+  final List<GeoglowsForecastPoint> points;
+  final Map<int, double>? returnPeriods;
+  final String unit;
+  final List<Color> catColors;
+
+  static DateTime _day(DateTime t) {
+    final d = t.toLocal();
+    return DateTime(d.year, d.month, d.day);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final days = points.map((p) => _day(p.validTime)).toSet().toList()..sort();
+    if (days.length < 4) return const SizedBox.shrink();
+
+    final cut = days.length > 7 ? 7 : (days.length / 2).ceil();
+    final boundary = days[cut];
+    final wk1 =
+        points.where((p) => _day(p.validTime).isBefore(boundary)).toList();
+    final wk2 =
+        points.where((p) => !_day(p.validTime).isBefore(boundary)).toList();
+    if (wk1.isEmpty || wk2.isEmpty) return const SizedBox.shrink();
+
+    // Shared scale so both cards are directly comparable.
+    final rp = returnPeriods;
+    final t2 = rp?[2], t5 = rp?[5], t10 = rp?[10], t25 = rp?[25];
+    final full = t2 != null && t5 != null && t10 != null && t25 != null;
+    final dataMax =
+        points.map((p) => p.median).reduce((a, b) => a > b ? a : b);
+    final scaleMax = full
+        ? (t25 * 1.15 > dataMax * 1.05 ? t25 * 1.15 : dataMax * 1.05)
+        : dataMax * 1.15;
+
+    List<Color>? gColors;
+    List<double>? gStops;
+    if (full) {
+      double f(double t) => (t / scaleMax).clamp(0.0, 1.0);
+      gColors = [
+        catColors[0], catColors[0],
+        catColors[1], catColors[1],
+        catColors[2], catColors[2],
+        catColors[3], catColors[3],
+        catColors[4], catColors[4],
+      ];
+      gStops = [0, f(t2), f(t2), f(t5), f(t5), f(t10), f(t10), f(t25), f(t25), 1];
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: _WeekCard(
+            title: 'This week',
+            pts: wk1,
+            returnPeriods: returnPeriods,
+            unit: unit,
+            catColors: catColors,
+            scaleMax: scaleMax,
+            gradientColors: gColors,
+            gradientStops: gStops,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _WeekCard(
+            title: 'Next week',
+            pts: wk2,
+            returnPeriods: returnPeriods,
+            unit: unit,
+            catColors: catColors,
+            scaleMax: scaleMax,
+            gradientColors: gColors,
+            gradientStops: gStops,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WeekCard extends StatelessWidget {
+  const _WeekCard({
+    required this.title,
+    required this.pts,
+    required this.returnPeriods,
+    required this.unit,
+    required this.catColors,
+    required this.scaleMax,
+    required this.gradientColors,
+    required this.gradientStops,
+  });
+
+  final String title;
+  final List<GeoglowsForecastPoint> pts;
+  final Map<int, double>? returnPeriods;
+  final String unit;
+  final List<Color> catColors;
+  final double scaleMax;
+  final List<Color>? gradientColors;
+  final List<double>? gradientStops;
+
+  static const _mo = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final meds = pts.map((p) => p.median).toList();
+    final minMed = meds.reduce((a, b) => a < b ? a : b);
+    final maxMed = meds.reduce((a, b) => a > b ? a : b);
+    final cat = FlowClassification.indexFor(maxMed, returnPeriods);
+    final rising = pts.last.median >= pts.first.median;
+    final start = pts.first.validTime.toLocal();
+    final end = pts.last.validTime.toLocal();
+
+    final label = CupertinoColors.label.resolveFrom(context);
+    final sub = CupertinoColors.secondaryLabel.resolveFrom(context);
+    final faint = CupertinoColors.tertiaryLabel.resolveFrom(context);
+    final catColor = cat >= 0 ? catColors[cat] : sub;
+
+    final leftFrac = (minMed / scaleMax).clamp(0.0, 1.0);
+    final rightFrac = (maxMed / scaleMax).clamp(0.0, 1.0);
+    var widthFrac = rightFrac - leftFrac;
+    if (widthFrac < 0.04) widthFrac = 0.04;
+    // Flex weights place the range overlay without a LayoutBuilder (which would
+    // break intrinsic sizing inside the two-card Row).
+    final leftFlex = (leftFrac * 1000).round();
+    final rightFlex = ((1 - leftFrac - widthFrac).clamp(0.0, 1.0) * 1000).round();
+    var widthFlex = (widthFrac * 1000).round();
+    if (widthFlex < 1) widthFlex = 1;
+
+    String range() {
+      final sameMonth = start.month == end.month;
+      return sameMonth
+          ? '${_mo[start.month - 1]} ${start.day}–${end.day}'
+          : '${_mo[start.month - 1]} ${start.day} – ${_mo[end.month - 1]} ${end.day}';
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.tertiarySystemFill.resolveFrom(context),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w700, color: label)),
+          Text(range(),
+              style: TextStyle(
+                  fontSize: 11.5, fontWeight: FontWeight.w600, color: faint)),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(FlowFormat.grouped(maxMed),
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                      color: label)),
+              const SizedBox(width: 4),
+              Text(unit,
+                  style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600, color: sub)),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: catColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  '${cat >= 0 ? kFloodCategories[cat] : 'Peak'} · ${rising ? '▲ rising' : '▼ easing'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600, color: sub),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 11),
+          // Flood-category scale with this week's range overlaid. Flex spacers
+          // (not a LayoutBuilder) so the card stays intrinsic-sizeable.
+          SizedBox(
+            height: 12,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(6),
+                      gradient: gradientColors != null
+                          ? LinearGradient(
+                              colors: gradientColors!, stops: gradientStops)
+                          : null,
+                      color: gradientColors == null
+                          ? catColors[0].withValues(alpha: 0.25)
+                          : null,
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      if (leftFlex > 0) Spacer(flex: leftFlex),
+                      Expanded(
+                        flex: widthFlex,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: CupertinoColors.systemBackground
+                                .resolveFrom(context)
+                                .withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: label, width: 1.5),
+                          ),
+                        ),
+                      ),
+                      if (rightFlex > 0) Spacer(flex: rightFlex),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text('range ${FlowFormat.compact(minMed)}–${FlowFormat.compact(maxMed)}',
+              style: TextStyle(
+                  fontSize: 10.5, fontWeight: FontWeight.w600, color: faint)),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
