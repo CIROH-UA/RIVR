@@ -222,7 +222,13 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   CupertinoNavigationBar _buildNavigationBar() {
     return CupertinoNavigationBar(
-      // No middle title anymore
+      // "This Week" outlook entry point
+      leading: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: () => AppRouter.pushWeeklyOutlook(context),
+        child: const Icon(CupertinoIcons.calendar,
+            semanticLabel: "This week's outlook"),
+      ),
       trailing: CupertinoButton(
         key: (_isTourActive || !_hasShownFavoritesTour) ? _settingsButtonKey : null,
         padding: EdgeInsets.zero,

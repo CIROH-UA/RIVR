@@ -12,6 +12,7 @@ class AppRoutes {
   static const hydrograph = '/hydrograph';
   static const imageSelection = '/image-selection';
   static const notificationsSettings = '/notifications-settings';
+  static const weeklyOutlook = '/weekly-outlook';
   static const sponsors = '/sponsors';
   static const account = '/account';
 }

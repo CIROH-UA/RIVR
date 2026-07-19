@@ -21,6 +21,7 @@ import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/utils/flow_format.dart';
 import 'package:rivr/utils/forecast_peak.dart';
+import 'package:rivr/utils/forecast_trend.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/return_periods_sheet.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/stream_map_sheet.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
@@ -634,17 +635,17 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       trendValue = '—';
       trendSub = '';
     } else {
-      final cur = up.first.flow;
-      final last = up.last.flow;
-      if (peak.flow > cur * 1.05) {
-        trendValue = 'Rising';
-        trendSub = 'peaks ${_formatEta(peak.time)}';
-      } else if (last < cur * 0.95) {
-        trendValue = 'Falling';
-        trendSub = 'easing';
-      } else {
-        trendValue = 'Steady';
-        trendSub = 'holding';
+      // Shared with the weekly outlook so the two never disagree.
+      switch (computeFlowTrend([for (final p in up) p.flow])) {
+        case FlowTrend.rising:
+          trendValue = 'Rising';
+          trendSub = 'peaks ${_formatEta(peak.time)}';
+        case FlowTrend.falling:
+          trendValue = 'Falling';
+          trendSub = 'easing';
+        case FlowTrend.steady:
+          trendValue = 'Steady';
+          trendSub = 'holding';
       }
     }
 

@@ -7,6 +7,7 @@ import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_forecast_pa
 import 'package:rivr/ui/2_presentation/features/forecast/pages/hydrograph_page.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/pages/image_selection_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/notifications_settings_page.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/pages/weekly_outlook_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/sponsors_page.dart';
 import 'package:rivr/ui/2_presentation/features/profile/pages/account_page.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_with_favorites.dart';
@@ -48,6 +49,7 @@ class AppRouter {
     },
     AppRoutes.notificationsSettings: (context) =>
         const NotificationsSettingsPage(),
+    AppRoutes.weeklyOutlook: (context) => const WeeklyOutlookPage(),
     AppRoutes.sponsors: (context) => const SponsorsPage(),
     AppRoutes.account: (context) => const AccountPage(),
   };
@@ -137,6 +139,10 @@ class AppRouter {
 
   static Future<T?> pushNotificationsSettings<T>(BuildContext context) {
     return Navigator.pushNamed<T>(context, AppRoutes.notificationsSettings);
+  }
+
+  static Future<T?> pushWeeklyOutlook<T>(BuildContext context) {
+    return Navigator.pushNamed<T>(context, AppRoutes.weeklyOutlook);
   }
 
   static Future<T?> pushSponsors<T>(BuildContext context) {
