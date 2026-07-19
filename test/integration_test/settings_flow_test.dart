@@ -46,14 +46,16 @@ void main() {
       // Page title
       expect(find.text('Notifications'), findsOneWidget);
 
-      // Section header
+      // Both notification-type sections are present
       expect(find.text('FLOOD ALERTS'), findsOneWidget);
+      expect(find.text('DIGEST'), findsOneWidget);
 
-      // Toggle label
+      // Toggle labels
       expect(find.text('River Flood Alerts'), findsOneWidget);
+      expect(find.text('Weekly Outlook'), findsOneWidget);
 
-      // Toggle switch is present
-      expect(find.byType(CupertinoSwitch), findsOneWidget);
+      // One switch per notification type
+      expect(find.byType(CupertinoSwitch), findsNWidgets(2));
     });
 
     testWidgets('toggle enables notifications and shows frequency section',
@@ -69,11 +71,17 @@ void main() {
       // Monitoring section should not be visible
       expect(find.text('MONITORING'), findsNothing);
 
-      // Tap the toggle
-      await tester.tap(find.byType(CupertinoSwitch));
+      // Tap the Flood Alerts toggle (first switch)
+      await tester.tap(find.byType(CupertinoSwitch).first);
       await tester.pumpAndSettle();
 
-      // After enabling, monitoring section should appear
+      // After enabling, monitoring section should appear (scroll it into view —
+      // the page now has an extra DIGEST section above it).
+      await tester.scrollUntilVisible(
+        find.text('MONITORING'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('MONITORING'), findsOneWidget);
     });
 
@@ -97,7 +105,12 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Monitoring section visible
+      // Monitoring section visible (scroll past the DIGEST section to reach it).
+      await tester.scrollUntilVisible(
+        find.text('MONITORING'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('MONITORING'), findsOneWidget);
     });
   });

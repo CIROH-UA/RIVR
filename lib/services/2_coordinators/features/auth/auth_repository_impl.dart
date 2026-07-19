@@ -200,10 +200,11 @@ class AuthRepositoryImpl implements IAuthRepository {
         );
       }
 
-      // Step 2: Drop FCM token registration. Best-effort — a failure here does
-      // not block deletion; the token simply expires server-side eventually.
+      // Step 2: Drop this device's FCM token unconditionally (the doc is about
+      // to be deleted anyway). Best-effort — a failure here does not block
+      // deletion; the token simply expires server-side eventually.
       try {
-        await _fcmService.disableNotifications(uid);
+        await _fcmService.unregisterDeviceToken(uid);
       } catch (e) {
         AppLogger.warning(
           'AuthRepositoryImpl',

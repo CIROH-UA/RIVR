@@ -22,8 +22,10 @@ class UserSettings {
   final String lastName;
   final FlowUnit preferredFlowUnit;
   final TimeFormat preferredTimeFormat;
-  final bool enableNotifications;
+  final bool enableNotifications; // Flood Alerts (threshold pushes)
   final int notificationFrequency; // 1, 2, 3, or 4 times per day
+  // Weekly Outlook digest — an independent notification type from flood alerts.
+  final bool weeklyOutlookEnabled;
   final List<String> favoriteReachIds;
   // Per-favorite data source, keyed by reachId (value = ForecastSource.id, e.g.
   // 'geoglows'). Only non-NWM favorites are stored; a missing key means NWM.
@@ -45,6 +47,7 @@ class UserSettings {
     required this.preferredTimeFormat,
     required this.enableNotifications,
     this.notificationFrequency = 1, // Default to once daily
+    this.weeklyOutlookEnabled = false,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
     this.fcmTokens = const [],
@@ -62,6 +65,7 @@ class UserSettings {
     TimeFormat? preferredTimeFormat,
     bool? enableNotifications,
     int? notificationFrequency,
+    bool? weeklyOutlookEnabled,
     List<String>? favoriteReachIds,
     Map<String, String>? favoriteSources,
     List<String>? fcmTokens,
@@ -78,6 +82,8 @@ class UserSettings {
       enableNotifications: enableNotifications ?? this.enableNotifications,
       notificationFrequency:
           notificationFrequency ?? this.notificationFrequency,
+      weeklyOutlookEnabled:
+          weeklyOutlookEnabled ?? this.weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       favoriteSources: favoriteSources ?? this.favoriteSources,
       fcmTokens: fcmTokens ?? this.fcmTokens,

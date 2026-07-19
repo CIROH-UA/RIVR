@@ -25,9 +25,14 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
 
   bool _notificationsEnabled = false;
   int _notificationFrequency = 1;
+  bool _weeklyOutlookEnabled = false;
   bool _isLoading = true;
   bool _isUpdating = false;
   UserSettings? _userSettings;
+
+  /// True when the user wants at least one notification type — drives whether
+  /// the device-status and monitoring sections are shown.
+  bool get _anyEnabled => _notificationsEnabled || _weeklyOutlookEnabled;
 
   @override
   void initState() {
@@ -51,6 +56,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           _userSettings = settings;
           _notificationsEnabled = settings.enableNotifications;
           _notificationFrequency = settings.notificationFrequency;
+          _weeklyOutlookEnabled = settings.weeklyOutlookEnabled;
           _isLoading = false;
         });
       }
@@ -112,6 +118,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         setState(() {
           _userSettings = refreshedSettings;
           _notificationsEnabled = refreshedSettings.enableNotifications;
+          _weeklyOutlookEnabled = refreshedSettings.weeklyOutlookEnabled;
         });
 
         // Refresh AuthProvider so favorites page banner re-evaluates
@@ -130,6 +137,55 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           _isUpdating = false;
         });
       }
+    }
+  }
+
+  /// Toggle the Weekly Outlook digest — independent from flood alerts. Shares
+  /// the permission/token flow, so enabling it will prompt for permission if
+  /// this is the first notification type the user turns on.
+  Future<void> _toggleWeeklyOutlook(bool value) async {
+    if (_isUpdating) return;
+    setState(() => _isUpdating = true);
+
+    try {
+      final userId = context.read<AuthProvider>().currentUser?.uid;
+      if (userId == null) {
+        _showError('Please log in to change notification settings');
+        return;
+      }
+
+      if (value) {
+        final result = await _fcmService.enableWeeklyOutlook(userId);
+        if (result == NotificationPermissionResult.permanentlyDenied ||
+            result == NotificationPermissionResult.denied) {
+          _showPermissionDeniedDialog();
+          return;
+        }
+        if (result != NotificationPermissionResult.granted) {
+          _showError('Failed to enable the weekly outlook. Please try again.');
+          return;
+        }
+        _fcmService.setupNotificationListeners();
+      } else {
+        await _fcmService.disableWeeklyOutlook(userId);
+      }
+
+      final refreshed = await _userSettingsService.getUserSettings(userId);
+      if (refreshed != null && mounted) {
+        setState(() {
+          _userSettings = refreshed;
+          _notificationsEnabled = refreshed.enableNotifications;
+          _weeklyOutlookEnabled = refreshed.weeklyOutlookEnabled;
+        });
+        if (mounted) context.read<AuthProvider>().refreshUserSettings();
+      } else {
+        _showError('Failed to update notification settings');
+      }
+    } catch (e) {
+      AppLogger.error('NotificationSettings', 'Error toggling weekly outlook', e);
+      _showError('Error updating weekly outlook: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isUpdating = false);
     }
   }
 
@@ -199,7 +255,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
         title: const Text('Notifications Blocked'),
         content: const Text(
           'Notification permission was previously denied. '
-          'To enable flood alerts, open Settings and allow notifications for RIVR.',
+          'To receive notifications, open Settings and allow notifications for RIVR.',
         ),
         actions: [
           CupertinoDialogAction(
@@ -234,13 +290,8 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                 children: [
                   const SizedBox(height: 20),
 
-                  // Section 1 — Flood alerts toggle
+                  // ALERTS — flood threshold pushes
                   _buildToggleSection(),
-
-                  // Section 2 — Device registration status (only when enabled)
-                  if (_notificationsEnabled) _buildRegistrationStatusSection(),
-
-                  // Section 3 — Frequency picker (only when enabled)
                   if (_notificationsEnabled)
                     NotificationFrequencyPicker(
                       selectedFrequency: _notificationFrequency,
@@ -248,8 +299,12 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                       isEnabled: !_isUpdating,
                     ),
 
-                  // Section 4 — Monitoring (only when enabled)
-                  if (_notificationsEnabled) _buildMonitoringSection(),
+                  // DIGEST — weekly outlook (independent toggle)
+                  _buildDigestSection(),
+
+                  // Shared context — shown when either type is on
+                  if (_anyEnabled) _buildRegistrationStatusSection(),
+                  if (_anyEnabled) _buildMonitoringSection(),
                 ],
               ),
       ),
@@ -343,6 +398,49 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                   onChanged: _toggleNotifications,
                 ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildDigestSection() {
+    return CupertinoListSection.insetGrouped(
+      header: const Text('DIGEST'),
+      footer: const Text(
+        'A calm weekly summary of how your favorite rivers are forecast to do — '
+        'delivered even when nothing crosses a flood threshold. Independent from '
+        'flood alerts; turn either off without affecting the other.',
+      ),
+      children: [
+        CupertinoListTile(
+          leading: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _weeklyOutlookEnabled
+                  ? const Color(0xFF0E9BB3)
+                  : CupertinoColors.systemGrey,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              CupertinoIcons.calendar,
+              color: CupertinoColors.white,
+              size: 18,
+            ),
+          ),
+          title: const Text('Weekly Outlook'),
+          trailing: _isUpdating
+              ? const CupertinoActivityIndicator()
+              : CupertinoSwitch(
+                  value: _weeklyOutlookEnabled,
+                  onChanged: _toggleWeeklyOutlook,
+                ),
+        ),
+        if (_weeklyOutlookEnabled)
+          const CupertinoListTile(
+            leading: SizedBox(width: 32),
+            title: Text('Delivered'),
+            additionalInfo: Text('Fridays, 7:00 AM'),
+          ),
       ],
     );
   }

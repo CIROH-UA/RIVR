@@ -30,8 +30,15 @@ abstract class IFCMService {
   /// Call on every app launch for users with notifications enabled.
   void setupNotificationListeners();
   Future<String?> getAndSaveToken(String userId);
+  /// Enable/disable Flood Alerts (threshold pushes).
   Future<NotificationPermissionResult> enableNotifications(String userId);
   Future<void> disableNotifications(String userId);
+
+  /// Enable/disable the Weekly Outlook digest — an independent notification
+  /// type. A device token is registered while either type is on and removed
+  /// only when both are off.
+  Future<NotificationPermissionResult> enableWeeklyOutlook(String userId);
+  Future<void> disableWeeklyOutlook(String userId);
   Future<bool> isEnabledForUser(String userId);
   Future<void> refreshTokenIfNeeded(String userId);
 

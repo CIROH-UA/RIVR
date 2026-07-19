@@ -354,94 +354,134 @@ class FCMService implements IFCMService {
     );
   }
 
-  /// Enable notifications for a user (gets token and saves it atomically with the flag)
+  /// Ensure THIS device can receive pushes: request permission (if needed) and
+  /// write the FCM token to the user's doc. Does NOT set any per-type flag —
+  /// shared by the Flood Alerts and Weekly Outlook enable paths so a token
+  /// exists whenever the user wants ANY notification type.
+  Future<NotificationPermissionResult> _ensureRegistered(String userId) async {
+    if (!_isInitialized) {
+      final initialized = await initialize();
+      if (!initialized) {
+        final status = await _messaging.getNotificationSettings();
+        if (status.authorizationStatus == AuthorizationStatus.denied) {
+          return NotificationPermissionResult.permanentlyDenied;
+        }
+        return NotificationPermissionResult.denied;
+      }
+    }
+
+    final token = await _getToken();
+    if (token == null) return NotificationPermissionResult.error;
+
+    if (token == 'pending') {
+      // iOS simulator / APNS not ready: preference is saved by the caller; the
+      // token registers on a later launch via refreshTokenIfNeeded.
+      AppLogger.info('FcmService', 'Token pending — will register on a real device');
+    } else {
+      await _userSettingsService.updateUserSettings(userId, {
+        'fcmTokens': FieldValue.arrayUnion([token]),
+      });
+    }
+    return NotificationPermissionResult.granted;
+  }
+
+  /// Remove this device's token — but ONLY if the user has turned OFF every
+  /// notification type. Both types share one token, so we keep it while either
+  /// is still on. Resolves the token even on a fresh launch (empty cache).
+  Future<void> _maybeTeardownToken(String userId) async {
+    try {
+      final settings = await _userSettingsService.getUserSettings(userId);
+      final stillWantsPush = (settings?.enableNotifications ?? false) ||
+          (settings?.weeklyOutlookEnabled ?? false);
+      if (stillWantsPush) return;
+
+      final tokenToRemove = await _currentDeviceToken();
+      _cachedToken = null;
+      if (tokenToRemove != null && tokenToRemove != 'pending') {
+        await _userSettingsService.updateUserSettings(userId, {
+          'fcmTokens': FieldValue.arrayRemove([tokenToRemove]),
+        });
+      }
+      // Best-effort on-device invalidation; a missing token is a benign no-op.
+      try {
+        await _messaging.deleteToken();
+      } catch (e) {
+        AppLogger.debug('FcmService', 'Skipped token deletion: $e');
+      }
+      AppLogger.info('FcmService', 'All notifications off — device token removed');
+    } catch (e) {
+      AppLogger.error('FcmService', 'Error tearing down token: $e', e);
+      ErrorService.logError('FCMService._maybeTeardownToken', e);
+    }
+  }
+
+  /// Enable Flood Alerts (threshold pushes) for a user.
   @override
   Future<NotificationPermissionResult> enableNotifications(String userId) async {
     try {
-      AppLogger.debug('FcmService', 'Enabling notifications for user: $userId');
+      AppLogger.debug('FcmService', 'Enabling flood alerts for user: $userId');
+      final result = await _ensureRegistered(userId);
+      if (result != NotificationPermissionResult.granted) return result;
 
-      // Initialize if not already done
-      if (!_isInitialized) {
-        final initialized = await initialize();
-        if (!initialized) {
-          // Check whether the denial is permanent
-          final status = await _messaging.getNotificationSettings();
-          if (status.authorizationStatus == AuthorizationStatus.denied) {
-            return NotificationPermissionResult.permanentlyDenied;
-          }
-          return NotificationPermissionResult.denied;
-        }
-      }
-
-      // Get the token (without saving yet)
-      final token = await _getToken();
-      if (token == null) {
-        return NotificationPermissionResult.error;
-      }
-
-      // Write token + flag atomically in one partial update
-      if (token == 'pending') {
-        // iOS simulator: no device token, just save the preference
-        AppLogger.info('FcmService', 'Notifications enabled (token pending — will register on real device)');
-        await _userSettingsService.updateUserSettings(userId, {
-          'enableNotifications': true,
-          'notificationFrequency': 1,
-        });
-      } else {
-        // Normal path: add token to array + flag + frequency together
-        await _userSettingsService.updateUserSettings(userId, {
-          'fcmTokens': FieldValue.arrayUnion([token]),
-          'enableNotifications': true,
-          'notificationFrequency': 1,
-        });
-      }
-
+      await _userSettingsService.updateUserSettings(userId, {
+        'enableNotifications': true,
+      });
       AnalyticsService.instance.logNotificationsEnabled();
       return NotificationPermissionResult.granted;
     } catch (e) {
-      AppLogger.error('FcmService', 'Error enabling notifications: $e', e);
+      AppLogger.error('FcmService', 'Error enabling flood alerts: $e', e);
       ErrorService.logError('FCMService.enableNotifications', e);
       return NotificationPermissionResult.error;
     }
   }
 
-  /// Disable notifications for a user (clears token)
+  /// Disable Flood Alerts. Keeps the token if the Weekly Outlook is still on.
   @override
   Future<void> disableNotifications(String userId) async {
     try {
-      AppLogger.debug('FcmService', 'Disabling notifications for user: $userId');
-
-      // Remove this device's token from the array. Resolve it even on a fresh
-      // launch (cache empty) so we don't leave an orphaned token behind.
-      final tokenToRemove = await _currentDeviceToken();
-      _cachedToken = null;
-
-      final updates = <String, dynamic>{
+      AppLogger.debug('FcmService', 'Disabling flood alerts for user: $userId');
+      await _userSettingsService.updateUserSettings(userId, {
         'enableNotifications': false,
-      };
-      if (tokenToRemove != null && tokenToRemove != 'pending') {
-        updates['fcmTokens'] = FieldValue.arrayRemove([tokenToRemove]);
-      }
-      await _userSettingsService.updateUserSettings(userId, updates);
-      AppLogger.info('FcmService', 'Token removed and notifications disabled');
-
-      // Delete token from Firebase (prevents old tokens from being used).
-      // Best-effort: if there's no APNS token (iOS simulator, push not
-      // provisioned, or token not yet delivered) there's nothing to delete —
-      // that's a benign no-op, not a crash worth reporting to Crashlytics.
-      try {
-        await _messaging.deleteToken();
-        AppLogger.info('FcmService', 'Token deleted from Firebase');
-      } catch (e) {
-        AppLogger.debug(
-          'FcmService',
-          'Skipped token deletion (no token to delete): $e',
-        );
-      }
+      });
+      await _maybeTeardownToken(userId);
       AnalyticsService.instance.logNotificationsDisabled();
     } catch (e) {
-      AppLogger.error('FcmService', 'Error disabling notifications: $e', e);
+      AppLogger.error('FcmService', 'Error disabling flood alerts: $e', e);
       ErrorService.logError('FCMService.disableNotifications', e);
+    }
+  }
+
+  /// Enable the Weekly Outlook digest (independent of Flood Alerts).
+  @override
+  Future<NotificationPermissionResult> enableWeeklyOutlook(String userId) async {
+    try {
+      AppLogger.debug('FcmService', 'Enabling weekly outlook for user: $userId');
+      final result = await _ensureRegistered(userId);
+      if (result != NotificationPermissionResult.granted) return result;
+
+      await _userSettingsService.updateUserSettings(userId, {
+        'weeklyOutlookEnabled': true,
+      });
+      return NotificationPermissionResult.granted;
+    } catch (e) {
+      AppLogger.error('FcmService', 'Error enabling weekly outlook: $e', e);
+      ErrorService.logError('FCMService.enableWeeklyOutlook', e);
+      return NotificationPermissionResult.error;
+    }
+  }
+
+  /// Disable the Weekly Outlook. Keeps the token if Flood Alerts is still on.
+  @override
+  Future<void> disableWeeklyOutlook(String userId) async {
+    try {
+      AppLogger.debug('FcmService', 'Disabling weekly outlook for user: $userId');
+      await _userSettingsService.updateUserSettings(userId, {
+        'weeklyOutlookEnabled': false,
+      });
+      await _maybeTeardownToken(userId);
+    } catch (e) {
+      AppLogger.error('FcmService', 'Error disabling weekly outlook: $e', e);
+      ErrorService.logError('FCMService.disableWeeklyOutlook', e);
     }
   }
 

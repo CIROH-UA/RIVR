@@ -231,16 +231,20 @@ class _StubSettingsService implements IUserSettingsService {
 }
 
 class _StubFcmService implements IFCMService {
-  Exception? disableExceptionToThrow;
-  int disableCallCount = 0;
-  String? lastDisabledUserId;
+  // Account deletion unregisters the device token (not disableNotifications).
+  Exception? unregisterExceptionToThrow;
+  int unregisterCallCount = 0;
+  String? lastUnregisteredUserId;
 
   @override
-  Future<void> disableNotifications(String userId) async {
-    disableCallCount++;
-    lastDisabledUserId = userId;
-    if (disableExceptionToThrow != null) throw disableExceptionToThrow!;
+  Future<void> unregisterDeviceToken(String userId) async {
+    unregisterCallCount++;
+    lastUnregisteredUserId = userId;
+    if (unregisterExceptionToThrow != null) throw unregisterExceptionToThrow!;
   }
+
+  @override
+  Future<void> disableNotifications(String userId) async {}
 
   // ── Unused interface methods ──────────────────────────────────────────────
   @override
@@ -257,11 +261,14 @@ class _StubFcmService implements IFCMService {
   Future<NotificationPermissionResult> enableNotifications(String userId) async =>
       NotificationPermissionResult.granted;
   @override
+  Future<NotificationPermissionResult> enableWeeklyOutlook(String userId) async =>
+      NotificationPermissionResult.granted;
+  @override
+  Future<void> disableWeeklyOutlook(String userId) async {}
+  @override
   Future<bool> isEnabledForUser(String userId) async => false;
   @override
   Future<void> refreshTokenIfNeeded(String userId) async {}
-  @override
-  Future<void> unregisterDeviceToken(String userId) async {}
   @override
   void clearCache() {}
 }
@@ -525,8 +532,8 @@ void main() {
 
       expect(result.isSuccess, isTrue);
       expect(stubAuth.reauthenticateCallCount, 1);
-      expect(stubFcm.disableCallCount, 1);
-      expect(stubFcm.lastDisabledUserId, 'user1');
+      expect(stubFcm.unregisterCallCount, 1);
+      expect(stubFcm.lastUnregisteredUserId, 'user1');
       expect(stubSettings.deleteUserSettingsCallCount, 1);
       expect(stubSettings.lastDeletedUserId, 'user1');
       expect(stubAuth.deleteCurrentUserCallCount, 1);
@@ -540,7 +547,7 @@ void main() {
       expect(result.isFailure, isTrue);
       expect(result.errorMessage, contains('No user signed in'));
       expect(stubAuth.reauthenticateCallCount, 0);
-      expect(stubFcm.disableCallCount, 0);
+      expect(stubFcm.unregisterCallCount, 0);
       expect(stubSettings.deleteUserSettingsCallCount, 0);
       expect(stubAuth.deleteCurrentUserCallCount, 0);
     });
@@ -554,7 +561,7 @@ void main() {
       expect(result.isFailure, isTrue);
       expect(result.errorMessage, 'Wrong password');
       // Critically: no destructive work happens if reauth fails.
-      expect(stubFcm.disableCallCount, 0);
+      expect(stubFcm.unregisterCallCount, 0);
       expect(stubSettings.deleteUserSettingsCallCount, 0);
       expect(stubAuth.deleteCurrentUserCallCount, 0);
     });
@@ -572,12 +579,12 @@ void main() {
     });
 
     test('continues to auth deletion even if FCM cleanup throws', () async {
-      stubFcm.disableExceptionToThrow = Exception('FCM unreachable');
+      stubFcm.unregisterExceptionToThrow = Exception('FCM unreachable');
 
       final result = await repository.deleteAccount(password: 'correct-pass');
 
       expect(result.isSuccess, isTrue);
-      expect(stubFcm.disableCallCount, 1);
+      expect(stubFcm.unregisterCallCount, 1);
       // Firestore + auth deletion still ran:
       expect(stubSettings.deleteUserSettingsCallCount, 1);
       expect(stubAuth.deleteCurrentUserCallCount, 1);

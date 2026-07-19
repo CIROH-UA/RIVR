@@ -15,6 +15,7 @@ class UserSettingsDto {
   final String preferredTimeFormat;
   final bool enableNotifications;
   final int notificationFrequency;
+  final bool weeklyOutlookEnabled;
   final List<String> favoriteReachIds;
   final Map<String, String> favoriteSources;
   final List<String> fcmTokens;
@@ -32,6 +33,7 @@ class UserSettingsDto {
     required this.preferredTimeFormat,
     required this.enableNotifications,
     this.notificationFrequency = 1,
+    this.weeklyOutlookEnabled = false,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
     this.fcmTokens = const [],
@@ -52,6 +54,7 @@ class UserSettingsDto {
           json['preferredTimeFormat'] as String? ?? 'twelveHour',
       enableNotifications: json['enableNotifications'] as bool? ?? false,
       notificationFrequency: json['notificationFrequency'] as int? ?? 1,
+      weeklyOutlookEnabled: json['weeklyOutlookEnabled'] as bool? ?? false,
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
       ),
@@ -79,6 +82,7 @@ class UserSettingsDto {
       'preferredTimeFormat': preferredTimeFormat,
       'enableNotifications': enableNotifications,
       'notificationFrequency': notificationFrequency,
+      'weeklyOutlookEnabled': weeklyOutlookEnabled,
       'favoriteReachIds': favoriteReachIds,
       'favoriteSources': favoriteSources,
       'fcmTokens': fcmTokens,
@@ -102,6 +106,7 @@ class UserSettingsDto {
           : TimeFormat.twelveHour,
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
+      weeklyOutlookEnabled: weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
       fcmTokens: fcmTokens,
@@ -137,6 +142,7 @@ class UserSettingsDto {
       preferredTimeFormat: entity.preferredTimeFormat.value,
       enableNotifications: entity.enableNotifications,
       notificationFrequency: entity.notificationFrequency,
+      weeklyOutlookEnabled: entity.weeklyOutlookEnabled,
       favoriteReachIds: entity.favoriteReachIds,
       favoriteSources: entity.favoriteSources,
       fcmTokens: entity.fcmTokens,

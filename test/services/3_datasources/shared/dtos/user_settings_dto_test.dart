@@ -14,6 +14,7 @@ void main() {
     TimeFormat preferredTimeFormat = TimeFormat.twelveHour,
     bool enableNotifications = true,
     int notificationFrequency = 1,
+    bool weeklyOutlookEnabled = false,
     List<String> favoriteReachIds = const [],
     Map<String, String> favoriteSources = const {},
     List<String> fcmTokens = const [],
@@ -31,6 +32,7 @@ void main() {
       preferredTimeFormat: preferredTimeFormat,
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
+      weeklyOutlookEnabled: weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
       fcmTokens: fcmTokens,
@@ -53,6 +55,7 @@ void main() {
           preferredTimeFormat: 'twentyFourHour',
           enableNotifications: false,
           notificationFrequency: 3,
+          weeklyOutlookEnabled: true,
           favoriteReachIds: ['123', '456'],
           favoriteSources: {'456': 'geoglows'},
           fcmTokens: ['token_abc'],
@@ -73,6 +76,7 @@ void main() {
         expect(restored.preferredTimeFormat, 'twentyFourHour');
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
+        expect(restored.weeklyOutlookEnabled, true);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.favoriteSources, {'456': 'geoglows'});
         expect(restored.fcmTokens, ['token_abc']);
@@ -98,6 +102,7 @@ void main() {
         final dto = UserSettingsDto.fromJson(json);
         expect(dto.enableNotifications, false);
         expect(dto.notificationFrequency, 1);
+        expect(dto.weeklyOutlookEnabled, false);
         expect(dto.favoriteReachIds, isEmpty);
         expect(dto.favoriteSources, isEmpty);
         expect(dto.fcmTokens, isEmpty);
@@ -112,6 +117,7 @@ void main() {
           preferredTimeFormat: TimeFormat.twentyFourHour,
           enableNotifications: false,
           notificationFrequency: 3,
+          weeklyOutlookEnabled: true,
           favoriteReachIds: ['123', '456'],
           favoriteSources: {'456': 'geoglows'},
           fcmTokens: ['token_abc'],
@@ -132,6 +138,7 @@ void main() {
         expect(restored.preferredTimeFormat, TimeFormat.twentyFourHour);
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
+        expect(restored.weeklyOutlookEnabled, true);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.favoriteSources, {'456': 'geoglows'});
         expect(restored.fcmTokens, ['token_abc']);

@@ -199,6 +199,12 @@ class _MockFCMService implements IFCMService {
   @override
   Future<void> disableNotifications(String userId) async {}
   @override
+  Future<NotificationPermissionResult> enableWeeklyOutlook(
+          String userId) async =>
+      NotificationPermissionResult.granted;
+  @override
+  Future<void> disableWeeklyOutlook(String userId) async {}
+  @override
   Future<bool> isEnabledForUser(String userId) async => false;
   @override
   Future<void> refreshTokenIfNeeded(String userId) async {}
