@@ -251,6 +251,25 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
                       _sourceBadge(r.source),
                     ],
                   ),
+                  if (r.location != null) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(CupertinoIcons.location_solid,
+                            size: 11, color: sub),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(r.location!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: sub)),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     children: [

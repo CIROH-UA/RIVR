@@ -67,11 +67,12 @@ class FavoriteRiver {
 
   bool get hasCoordinates => latitude != null && longitude != null;
 
-  /// Display name priority: custom name > NOAA river name > station ID.
+  /// Display name priority: custom name > river name > id. GEOGLOWS reaches are
+  /// unnamed, so their fallback reads `Global Reach {id}` rather than "Station".
   String get displayName {
     if (customName != null && customName!.isNotEmpty) return customName!;
     if (riverName != null && riverName!.isNotEmpty) return riverName!;
-    return 'Station $reachId';
+    return source.isGeoglows ? 'Global Reach $reachId' : 'Station $reachId';
   }
 
   bool get isFlowDataStale {

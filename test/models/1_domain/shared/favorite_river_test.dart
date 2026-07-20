@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/favorite_river_dto.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 
 void main() {
   group('FavoriteRiver', () {
@@ -145,6 +146,15 @@ void main() {
       test('falls back to station ID when both names are empty', () {
         final fav = createFavorite(customName: '', riverName: '');
         expect(fav.displayName, 'Station 23021904');
+      });
+
+      test('unnamed GEOGLOWS reach falls back to "Global Reach <id>"', () {
+        const fav = FavoriteRiver(
+          reachId: '670068119',
+          displayOrder: 0,
+          source: ForecastSource.geoglows,
+        );
+        expect(fav.displayName, 'Global Reach 670068119');
       });
     });
 

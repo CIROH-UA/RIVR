@@ -10,6 +10,7 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
+import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/utils/forecast_peak.dart';
 import 'package:rivr/utils/forecast_trend.dart';
@@ -83,6 +84,9 @@ class WeeklyOutlookService {
       displayName: forecast.reach.riverName.isNotEmpty
           ? forecast.reach.riverName
           : favorite.displayName,
+      // Prefer the favorite's stored coords; fall back to the reach's.
+      lat: favorite.latitude ?? forecast.reach.latitude,
+      lon: favorite.longitude ?? forecast.reach.longitude,
     );
   }
 
@@ -109,18 +113,22 @@ class WeeklyOutlookService {
       thresholds: fc.returnPeriods,
       unitLabel: fc.unit,
       displayName: favorite.displayName,
+      lat: favorite.latitude,
+      lon: favorite.longitude,
     );
   }
 
   /// Shared row assembly: window to what's ahead, then derive sparkline, trend,
-  /// peak, and category.
-  OutlookRow _assemble({
+  /// peak, category, and a reverse-geocoded place label.
+  Future<OutlookRow> _assemble({
     required FavoriteRiver favorite,
     required List<({double flow, DateTime time})> points,
     required Map<int, double>? thresholds,
     required String unitLabel,
     required String displayName,
-  }) {
+    required double? lat,
+    required double? lon,
+  }) async {
     final upcoming = ForecastPeak.upcomingPoints(points);
     final window = upcoming.isNotEmpty ? upcoming : points;
     final flows = [for (final p in window) p.flow];
@@ -133,6 +141,7 @@ class WeeklyOutlookService {
       reachId: favorite.reachId,
       source: favorite.source,
       displayName: displayName,
+      location: await _locationLabel(lat, lon),
       unit: unitLabel,
       sparkline: flows,
       trend: computeFlowTrend(flows),
@@ -141,5 +150,29 @@ class WeeklyOutlookService {
       category: category,
       categoryIndex: categoryIndex,
     );
+  }
+
+  /// Reverse-geocode to a place label — "City, ST" in the US, "City, Country"
+  /// elsewhere. Best-effort: null when coords/geocoding are unavailable so a
+  /// slow or failed lookup never blocks the row.
+  Future<String?> _locationLabel(double? lat, double? lon) async {
+    if (lat == null || lon == null || (lat == 0 && lon == 0)) return null;
+    try {
+      final geo = await GeocodingService.reverseGeocode(lat, lon);
+      final city = geo['city'];
+      final state = geo['state'];
+      final country = geo['country'];
+      if (city == null || city.isEmpty) {
+        return (country != null && country.isNotEmpty) ? country : null;
+      }
+      final isUS = country == 'United States' ||
+          country == 'United States of America';
+      if (isUS && state != null && state.isNotEmpty) return '$city, $state';
+      if (country != null && country.isNotEmpty) return '$city, $country';
+      return city;
+    } catch (e) {
+      AppLogger.debug('WeeklyOutlookService', 'Geocode failed: $e');
+      return null;
+    }
   }
 }

@@ -12,6 +12,10 @@ class OutlookRow {
   final ForecastSource source;
   final String displayName;
 
+  /// Reverse-geocoded place: "City, ST" in the US, "City, Country" elsewhere.
+  /// Null when coordinates or geocoding are unavailable.
+  final String? location;
+
   /// Display unit label for [peakFlow] (e.g. 'ft³/s', 'm³/s').
   final String unit;
 
@@ -33,6 +37,7 @@ class OutlookRow {
     required this.reachId,
     required this.source,
     required this.displayName,
+    this.location,
     required this.unit,
     required this.sparkline,
     required this.trend,
