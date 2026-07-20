@@ -94,6 +94,32 @@ async function runAlertCheckForSlot(
 }
 
 /**
+ * Weekly Outlook digest — Fridays at 7:00 AM Mountain Time. One summary push per
+ * opted-in user (weeklyOutlookEnabled). Independent from flood alerts.
+ */
+export const sendWeeklyOutlook = functions
+  .runWith({memory: "1GB", timeoutSeconds: 540})
+  .pubsub.schedule("0 7 * * 5")
+  .timeZone("America/Denver")
+  .onRun(async () => {
+    const startTime = Date.now();
+    logger.info("📅 Starting weekly outlook digest");
+    try {
+      const {sendWeeklyDigests} = await import("./weekly-digest.js");
+      const result = await sendWeeklyDigests();
+      logger.info("✅ Weekly outlook digest completed", {
+        duration: `${Date.now() - startTime}ms`,
+        ...result,
+      });
+    } catch (error) {
+      logger.error("❌ Weekly outlook digest failed", {
+        error: error instanceof Error ? error.message : String(error),
+        duration: `${Date.now() - startTime}ms`,
+      });
+    }
+  });
+
+/**
  * Validates the admin API key against the ADMIN_API_KEY env variable.
  * Accepts the key via `Authorization: Bearer <key>` or `X-Admin-Key: <key>`.
  * The X-Admin-Key header is useful when Google Cloud IAM consumes the
@@ -199,6 +225,29 @@ export const triggerAlertCheck = functions
       }
     }
   );
+
+/**
+ * Manual trigger for the weekly outlook digest (requires ADMIN_API_KEY).
+ * Usage: POST with Authorization: Bearer <ADMIN_API_KEY> (or X-Admin-Key).
+ */
+export const triggerWeeklyOutlook = functions
+  .runWith({memory: "1GB", timeoutSeconds: 540})
+  .https.onRequest(async (request, response) => {
+    if (!authenticateRequest(request, response)) return;
+
+    logger.info("🧪 Manual weekly outlook triggered");
+    try {
+      const {sendWeeklyDigests} = await import("./weekly-digest.js");
+      const result = await sendWeeklyDigests();
+      response.json({success: true, ...result});
+    } catch (error) {
+      logger.error("❌ Manual weekly outlook failed", {error});
+      response.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 
 /**
  * Health check endpoint (requires ADMIN_API_KEY)

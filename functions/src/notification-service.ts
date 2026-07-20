@@ -26,7 +26,7 @@ interface UserSettings {
   lastName: string;
 }
 
-type ReachSource = "nwm" | "geoglows";
+export type ReachSource = "nwm" | "geoglows";
 
 /** Resolve a favorite's source; anything not "geoglows" is treated as NWM. */
 function sourceOf(user: UserSettings, reachId: string): ReachSource {
@@ -35,13 +35,14 @@ function sourceOf(user: UserSettings, reachId: string): ReachSource {
 
 /**
  * Reach ids are only unique WITHIN a source (an NWM comid and a GEOGLOWS linkno
- * can collide numerically), so key pre-fetched data by source + id.
+ * can collide numerically), so key pre-fetched data by source + id. Exported so
+ * the weekly-digest reuses the exact same keying.
  */
-function reachKey(source: ReachSource, reachId: string): string {
+export function reachKey(source: ReachSource, reachId: string): string {
   return `${source}:${reachId}`;
 }
 
-interface ForecastData {
+export interface ForecastData {
   values: Array<{
     value: number;
     validTime: string;
@@ -62,7 +63,7 @@ interface AlertData {
 }
 
 /** Pre-fetched data for a single reach, shared across all users. */
-interface ReachData {
+export interface ReachData {
   forecast: {
     shortRange: ForecastData | null;
     mediumRange: ForecastData | null;
@@ -166,7 +167,7 @@ export async function checkAlertsForTimeSlot(
  * reach IDs. Each reach is fetched exactly once using Promise.allSettled
  * so one failure doesn't block others.
  */
-async function batchFetchReachData(
+export async function batchFetchReachData(
   reaches: Array<{source: ReachSource; reachId: string}>
 ): Promise<Map<string, ReachData>> {
   const {getForecast, getReturnPeriods, getRiverName} =
