@@ -4,7 +4,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/forecast/weekly_outlook_row.dart';
-import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
@@ -218,6 +217,24 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     final sub = CupertinoColors.secondaryLabel.resolveFrom(context);
     final color = _catColor(r.category);
 
+    // Named reaches (NWM) keep their name as the title with the place beneath;
+    // unnamed reaches (GEOGLOWS + unnamed NWM) lead with the place and drop the
+    // id into the subtitle so it never clips. The placeholder names embed the
+    // id, so a title that contains the id means "no real name".
+    final srcId = '${r.source.isGeoglows ? 'GEOGLOWS' : 'NWM'} · ${r.reachId}';
+    final hasName = !r.displayName.contains(r.reachId);
+    final String title;
+    final String subtitle;
+    if (hasName) {
+      title = r.displayName;
+      subtitle = r.location ?? srcId;
+    } else {
+      title = r.location ?? r.displayName;
+      subtitle = r.location != null
+          ? srcId
+          : (r.source.isGeoglows ? 'GEOGLOWS' : 'NWM');
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => AppRouter.pushForecast(context, reachId: r.reachId, source: r.source),
@@ -235,41 +252,22 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(r.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
-                                color: label)),
-                      ),
-                      const SizedBox(width: 7),
-                      _sourceBadge(r.source),
-                    ],
-                  ),
-                  if (r.location != null) ...[
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Icon(CupertinoIcons.location_solid,
-                            size: 11, color: sub),
-                        const SizedBox(width: 3),
-                        Flexible(
-                          child: Text(r.location!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: sub)),
-                        ),
-                      ],
-                    ),
-                  ],
+                  Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                          color: label)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: sub)),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -307,22 +305,6 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _sourceBadge(ForecastSource source) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey5.resolveFrom(context),
-        borderRadius: BorderRadius.circular(5),
-      ),
-      child: Text(source.isGeoglows ? 'GEOGLOWS' : 'NWM',
-          style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
-              color: CupertinoColors.secondaryLabel.resolveFrom(context))),
     );
   }
 
