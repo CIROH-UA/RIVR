@@ -26,7 +26,56 @@ OutlookRow row({
   );
 }
 
+OutlookRow rowFor({
+  required String reachId,
+  required String displayName,
+  String? location,
+}) {
+  return OutlookRow(
+    reachId: reachId,
+    source: ForecastSource.nwm,
+    displayName: displayName,
+    location: location,
+    unit: 'ft³/s',
+    sparkline: const [1, 2, 3],
+    trend: FlowTrend.steady,
+    peakFlow: 100,
+    peakTime: null,
+    category: 'Normal',
+    categoryIndex: 0,
+  );
+}
+
 void main() {
+  group('OutlookRow.title (also the persisted digest label)', () {
+    test('a named reach keeps its name as the title', () {
+      final r = rowFor(
+        reachId: '21609641',
+        displayName: 'White River',
+        location: 'Monroe City, IN',
+      );
+      expect(r.title, 'White River');
+    });
+
+    test('an unnamed reach leads with its geocoded place', () {
+      final r = rowFor(
+        reachId: '670068119',
+        displayName: 'Global Reach 670068119', // placeholder embeds the id
+        location: 'Castilla, Peru',
+      );
+      expect(r.title, 'Castilla, Peru');
+    });
+
+    test('an unnamed reach with no place falls back to the display name', () {
+      final r = rowFor(
+        reachId: '670068119',
+        displayName: 'Global Reach 670068119',
+        location: null,
+      );
+      expect(r.title, 'Global Reach 670068119');
+    });
+  });
+
   group('OutlookRow newsworthiness ranking', () {
     test('higher flood category ranks first regardless of trend', () {
       final elevated = row(id: 'a', categoryIndex: 2, trend: FlowTrend.steady);

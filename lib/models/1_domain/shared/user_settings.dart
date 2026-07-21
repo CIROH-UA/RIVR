@@ -31,6 +31,11 @@ class UserSettings {
   // 'geoglows'). Only non-NWM favorites are stored; a missing key means NWM.
   // The notification Cloud Function reads this to pick the right forecast API.
   final Map<String, String> favoriteSources;
+  // App-populated display label per favorite (reachId -> "White River" or
+  // "Castilla, Peru"). The weekly-digest Cloud Function reads these for the push
+  // banner because it can't geocode; the app writes them once it has the name or
+  // reverse-geocoded place. Missing keys fall back to the server's river name.
+  final Map<String, String> favoriteLabels;
   final List<String> fcmTokens;
   final List<String>
   customBackgroundImagePaths; // List of custom uploaded image paths
@@ -50,6 +55,7 @@ class UserSettings {
     this.weeklyOutlookEnabled = false,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
+    this.favoriteLabels = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [], // Default to empty list
     required this.lastLoginDate,
@@ -68,6 +74,7 @@ class UserSettings {
     bool? weeklyOutlookEnabled,
     List<String>? favoriteReachIds,
     Map<String, String>? favoriteSources,
+    Map<String, String>? favoriteLabels,
     List<String>? fcmTokens,
     List<String>? customBackgroundImagePaths,
     DateTime? lastLoginDate,
@@ -86,6 +93,7 @@ class UserSettings {
           weeklyOutlookEnabled ?? this.weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       favoriteSources: favoriteSources ?? this.favoriteSources,
+      favoriteLabels: favoriteLabels ?? this.favoriteLabels,
       fcmTokens: fcmTokens ?? this.fcmTokens,
       customBackgroundImagePaths:
           customBackgroundImagePaths ?? this.customBackgroundImagePaths,

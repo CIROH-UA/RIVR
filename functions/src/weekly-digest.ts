@@ -32,6 +32,10 @@ interface DigestUser {
   preferredFlowUnit: "cfs" | "cms";
   favoriteReachIds: string[];
   favoriteSources: Record<string, string>;
+  // App-populated display labels (reachId -> "White River" / "Castilla, Peru").
+  // Used for the banner because the server can't geocode; falls back to the
+  // reach's river name when a label hasn't been written yet.
+  favoriteLabels: Record<string, string>;
   fcmTokens: string[];
 }
 
@@ -117,6 +121,9 @@ async function getWeeklyOutlookUsers(): Promise<DigestUser[]> {
       favoriteSources: (data.favoriteSources &&
         typeof data.favoriteSources === "object") ?
         data.favoriteSources as Record<string, string> : {},
+      favoriteLabels: (data.favoriteLabels &&
+        typeof data.favoriteLabels === "object") ?
+        data.favoriteLabels as Record<string, string> : {},
       fcmTokens: tokens,
     });
   }
@@ -146,7 +153,9 @@ function buildRows(
     for (const p of series) if (p.value > peak.value) peak = p;
 
     rows.push({
-      name: reach.riverName,
+      // Prefer the app-populated label (real name / geocoded place); the
+      // server's riverName ("Stream <id>" for GEOGLOWS) is the fallback.
+      name: user.favoriteLabels[reachId] ?? reach.riverName,
       peakCfs: peak.value,
       dayLabel: dayLabel(peak.validTime, now),
       trend: trendOf(series),

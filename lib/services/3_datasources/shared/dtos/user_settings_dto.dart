@@ -18,6 +18,7 @@ class UserSettingsDto {
   final bool weeklyOutlookEnabled;
   final List<String> favoriteReachIds;
   final Map<String, String> favoriteSources;
+  final Map<String, String> favoriteLabels;
   final List<String> fcmTokens;
   final List<String> customBackgroundImagePaths;
   final String lastLoginDate;
@@ -36,6 +37,7 @@ class UserSettingsDto {
     this.weeklyOutlookEnabled = false,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
+    this.favoriteLabels = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [],
     required this.lastLoginDate,
@@ -62,6 +64,10 @@ class UserSettingsDto {
             (k, v) => MapEntry(k.toString(), v.toString()),
           ) ??
           const {},
+      favoriteLabels: (json['favoriteLabels'] as Map?)?.map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          ) ??
+          const {},
       fcmTokens: _parseFcmTokens(json),
       customBackgroundImagePaths: List<String>.from(
         json['customBackgroundImagePaths'] as List? ?? [],
@@ -85,6 +91,7 @@ class UserSettingsDto {
       'weeklyOutlookEnabled': weeklyOutlookEnabled,
       'favoriteReachIds': favoriteReachIds,
       'favoriteSources': favoriteSources,
+      'favoriteLabels': favoriteLabels,
       'fcmTokens': fcmTokens,
       'customBackgroundImagePaths': customBackgroundImagePaths,
       'lastLoginDate': lastLoginDate,
@@ -109,6 +116,7 @@ class UserSettingsDto {
       weeklyOutlookEnabled: weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
+      favoriteLabels: favoriteLabels,
       fcmTokens: fcmTokens,
       customBackgroundImagePaths: customBackgroundImagePaths,
       lastLoginDate: DateTime.parse(lastLoginDate),
@@ -145,6 +153,7 @@ class UserSettingsDto {
       weeklyOutlookEnabled: entity.weeklyOutlookEnabled,
       favoriteReachIds: entity.favoriteReachIds,
       favoriteSources: entity.favoriteSources,
+      favoriteLabels: entity.favoriteLabels,
       fcmTokens: entity.fcmTokens,
       customBackgroundImagePaths: entity.customBackgroundImagePaths,
       lastLoginDate: entity.lastLoginDate.toIso8601String(),

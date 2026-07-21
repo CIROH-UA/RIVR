@@ -17,6 +17,7 @@ void main() {
     bool weeklyOutlookEnabled = false,
     List<String> favoriteReachIds = const [],
     Map<String, String> favoriteSources = const {},
+    Map<String, String> favoriteLabels = const {},
     List<String> fcmTokens = const [],
     List<String> customBackgroundImagePaths = const [],
     DateTime? lastLoginDate,
@@ -35,6 +36,7 @@ void main() {
       weeklyOutlookEnabled: weeklyOutlookEnabled,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
+      favoriteLabels: favoriteLabels,
       fcmTokens: fcmTokens,
       customBackgroundImagePaths: customBackgroundImagePaths,
       lastLoginDate: lastLoginDate ?? now,
@@ -58,6 +60,7 @@ void main() {
           weeklyOutlookEnabled: true,
           favoriteReachIds: ['123', '456'],
           favoriteSources: {'456': 'geoglows'},
+          favoriteLabels: {'123': 'White River', '456': 'Castilla, Peru'},
           fcmTokens: ['token_abc'],
           customBackgroundImagePaths: ['/path/to/img.jpg'],
           lastLoginDate: now.toIso8601String(),
@@ -79,6 +82,8 @@ void main() {
         expect(restored.weeklyOutlookEnabled, true);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.favoriteSources, {'456': 'geoglows'});
+        expect(restored.favoriteLabels,
+            {'123': 'White River', '456': 'Castilla, Peru'});
         expect(restored.fcmTokens, ['token_abc']);
         expect(restored.customBackgroundImagePaths, ['/path/to/img.jpg']);
         expect(restored.lastLoginDate, now.toIso8601String());
@@ -105,6 +110,7 @@ void main() {
         expect(dto.weeklyOutlookEnabled, false);
         expect(dto.favoriteReachIds, isEmpty);
         expect(dto.favoriteSources, isEmpty);
+        expect(dto.favoriteLabels, isEmpty);
         expect(dto.fcmTokens, isEmpty);
         expect(dto.customBackgroundImagePaths, isEmpty);
       });
@@ -120,6 +126,7 @@ void main() {
           weeklyOutlookEnabled: true,
           favoriteReachIds: ['123', '456'],
           favoriteSources: {'456': 'geoglows'},
+          favoriteLabels: {'456': 'Castilla, Peru'},
           fcmTokens: ['token_abc'],
           customBackgroundImagePaths: ['/path/to/img.jpg'],
         );
@@ -141,6 +148,7 @@ void main() {
         expect(restored.weeklyOutlookEnabled, true);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.favoriteSources, {'456': 'geoglows'});
+        expect(restored.favoriteLabels, {'456': 'Castilla, Peru'});
         expect(restored.fcmTokens, ['token_abc']);
         expect(restored.customBackgroundImagePaths, ['/path/to/img.jpg']);
         expect(restored.lastLoginDate, original.lastLoginDate);

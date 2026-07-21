@@ -7,7 +7,9 @@ import 'package:rivr/models/1_domain/features/forecast/weekly_outlook_row.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
@@ -66,6 +68,9 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
         _rows = rows;
         _loading = false;
       });
+      // Persist the resolved labels so the weekly-digest Cloud Function can put
+      // real names/places on the push banner (it can't geocode). Fire-and-forget.
+      _persistLabels(rows);
     } catch (e) {
       AppLogger.error('WeeklyOutlookPage', 'Failed to build outlook', e);
       if (!mounted) return;
@@ -73,6 +78,26 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
         _error = 'Could not load this week\'s outlook.';
         _loading = false;
       });
+    }
+  }
+
+  /// Write each loaded favorite's resolved label to the user doc so the Friday
+  /// digest banner reads the same name/place the app shows. Merges with existing
+  /// labels (read-modify-write) so favorites that failed to load keep theirs.
+  Future<void> _persistLabels(List<OutlookRow> rows) async {
+    if (rows.isEmpty || !mounted) return;
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+    try {
+      final svc = GetIt.I<IUserSettingsService>();
+      final settings = await svc.getUserSettings(userId);
+      final merged = Map<String, String>.from(settings?.favoriteLabels ?? {});
+      for (final r in rows) {
+        merged[r.reachId] = r.title;
+      }
+      await svc.updateUserSettings(userId, {'favoriteLabels': merged});
+    } catch (e) {
+      AppLogger.debug('WeeklyOutlookPage', 'Label persist failed: $e');
     }
   }
 
@@ -217,19 +242,15 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     final sub = CupertinoColors.secondaryLabel.resolveFrom(context);
     final color = _catColor(r.category);
 
-    // Named reaches (NWM) keep their name as the title with the place beneath;
-    // unnamed reaches (GEOGLOWS + unnamed NWM) lead with the place and drop the
-    // id into the subtitle so it never clips. The placeholder names embed the
-    // id, so a title that contains the id means "no real name".
+    // Title = OutlookRow.title (name for named reaches, place for unnamed). The
+    // subtitle carries the id so it never clips; named reaches show the place.
     final srcId = '${r.source.isGeoglows ? 'GEOGLOWS' : 'NWM'} · ${r.reachId}';
     final hasName = !r.displayName.contains(r.reachId);
-    final String title;
+    final title = r.title;
     final String subtitle;
     if (hasName) {
-      title = r.displayName;
       subtitle = r.location ?? srcId;
     } else {
-      title = r.location ?? r.displayName;
       subtitle = r.location != null
           ? srcId
           : (r.source.isGeoglows ? 'GEOGLOWS' : 'NWM');

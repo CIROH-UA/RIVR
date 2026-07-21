@@ -56,6 +56,17 @@ class OutlookRow {
     return catScore + trendScore;
   }
 
+  /// The card headline: a named reach keeps its name; an unnamed one (GEOGLOWS
+  /// or unnamed NWM) leads with its geocoded place, falling back to the id-based
+  /// display name. Placeholder display names embed the reach id, so a name that
+  /// contains the id means "no real name". Also persisted as the digest label so
+  /// the push banner reads the same.
+  String get title {
+    final hasName = !displayName.contains(reachId);
+    if (hasName) return displayName;
+    return location ?? displayName;
+  }
+
   /// Sort comparator: most newsworthy first, breaking ties by higher peak.
   static int byNewsworthiness(OutlookRow a, OutlookRow b) {
     final byScore = b.newsworthiness.compareTo(a.newsworthiness);
