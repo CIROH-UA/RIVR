@@ -36,6 +36,7 @@ interface DigestUser {
   // Used for the banner because the server can't geocode; falls back to the
   // reach's river name when a label hasn't been written yet.
   favoriteLabels: Record<string, string>;
+  weeklyDigestsSinceOpen: number;
   fcmTokens: string[];
 }
 
@@ -61,9 +62,18 @@ export async function sendWeeklyDigests(): Promise<DigestResult> {
   logger.info(`📅 ${users.length} users opted into the weekly outlook`);
   if (users.length === 0) return result;
 
-  // One fetch per unique (source, reach) across all users.
+  // Engagement back-off: only users "due" this week (see isDueThisWeek).
+  const now = new Date();
+  const weekIndex = Math.floor(now.getTime() / (7 * 86400000));
+  const dueUsers = users.filter(
+    (u) => isDueThisWeek(u.weeklyDigestsSinceOpen, weekIndex)
+  );
+  logger.info(`📬 ${dueUsers.length}/${users.length} due this week`);
+  if (dueUsers.length === 0) return result;
+
+  // One fetch per unique (source, reach) across the due users.
   const unique = new Map<string, {source: ReachSource; reachId: string}>();
-  for (const user of users) {
+  for (const user of dueUsers) {
     for (const reachId of user.favoriteReachIds) {
       const source = sourceFor(user, reachId);
       unique.set(reachKey(source, reachId), {source, reachId});
@@ -71,15 +81,18 @@ export async function sendWeeklyDigests(): Promise<DigestResult> {
   }
   const reachDataMap = await batchFetchReachData(Array.from(unique.values()));
 
-  const now = new Date();
-  for (const user of users) {
+  for (const user of dueUsers) {
     try {
       result.usersChecked++;
       const rows = buildRows(user, reachDataMap, now);
       if (rows.length === 0) continue; // nothing loaded for this user
       const {title, body} = compose(rows, user.preferredFlowUnit);
       const sent = await sendDigest(user, title, body);
-      if (sent) result.digestsSent++;
+      if (sent) {
+        result.digestsSent++;
+        // Count this send; the app resets it to 0 when the user opens the outlook.
+        await bumpSinceOpen(user.userId);
+      }
     } catch (error) {
       result.errors++;
       logger.error(`❌ Weekly digest failed for ${user.userId}`, {
@@ -90,6 +103,30 @@ export async function sendWeeklyDigests(): Promise<DigestResult> {
 
   logger.info("🎯 Weekly digest run complete", {...result});
   return result;
+}
+
+/**
+ * Engagement back-off: weekly until 4 consecutive unopened digests, then
+ * biweekly, then monthly after 12. Uses a global week index so the skipped
+ * weeks are spread deterministically — no per-user "last sent" bookkeeping.
+ */
+export function isDueThisWeek(sinceOpen: number, weekIndex: number): boolean {
+  if (sinceOpen >= 12) return weekIndex % 4 === 0; // monthly
+  if (sinceOpen >= 4) return weekIndex % 2 === 0; // biweekly
+  return true; // weekly
+}
+
+/** Increment a user's unopened-digest counter (reset to 0 by the app on open). */
+async function bumpSinceOpen(userId: string): Promise<void> {
+  try {
+    await db.collection("users").doc(userId).update({
+      weeklyDigestsSinceOpen: admin.firestore.FieldValue.increment(1),
+    });
+  } catch (e) {
+    logger.warn(`Could not bump weeklyDigestsSinceOpen for ${userId}`, {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 }
 
 /** Users with the weekly outlook on, a valid token, and at least one favorite. */
@@ -124,6 +161,9 @@ async function getWeeklyOutlookUsers(): Promise<DigestUser[]> {
       favoriteLabels: (data.favoriteLabels &&
         typeof data.favoriteLabels === "object") ?
         data.favoriteLabels as Record<string, string> : {},
+      weeklyDigestsSinceOpen:
+        typeof data.weeklyDigestsSinceOpen === "number" ?
+          data.weeklyDigestsSinceOpen : 0,
       fcmTokens: tokens,
     });
   }

@@ -58,6 +58,7 @@ void main() {
           enableNotifications: false,
           notificationFrequency: 3,
           weeklyOutlookEnabled: true,
+          weeklyDigestsSinceOpen: 5,
           favoriteReachIds: ['123', '456'],
           favoriteSources: {'456': 'geoglows'},
           favoriteLabels: {'123': 'White River', '456': 'Castilla, Peru'},
@@ -80,6 +81,7 @@ void main() {
         expect(restored.enableNotifications, false);
         expect(restored.notificationFrequency, 3);
         expect(restored.weeklyOutlookEnabled, true);
+        expect(restored.weeklyDigestsSinceOpen, 5);
         expect(restored.favoriteReachIds, ['123', '456']);
         expect(restored.favoriteSources, {'456': 'geoglows'});
         expect(restored.favoriteLabels,
@@ -108,6 +110,7 @@ void main() {
         expect(dto.enableNotifications, false);
         expect(dto.notificationFrequency, 1);
         expect(dto.weeklyOutlookEnabled, false);
+        expect(dto.weeklyDigestsSinceOpen, 0);
         expect(dto.favoriteReachIds, isEmpty);
         expect(dto.favoriteSources, isEmpty);
         expect(dto.favoriteLabels, isEmpty);

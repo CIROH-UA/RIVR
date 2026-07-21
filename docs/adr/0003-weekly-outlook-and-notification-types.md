@@ -1,6 +1,6 @@
 # ADR 0003 — Weekly Outlook digest and independent notification types
 
-- **Status:** Accepted — phases 1–3 delivered (settings + data model, Digest-List page, server cron) 2026-07-19/20; phase 4 (deep-link routing + engagement back-off) pending
+- **Status:** Accepted — phases 1–4 delivered (settings + data model, Digest-List page, server cron, deep-link + engagement back-off) 2026-07-19/20
 - **Date:** 2026-07-20
 - **Deciders:** Jerson Garcia (lead)
 - **Relates to:** ADR 0002 (`0002-canonical-derived-value-layer.md`), `project_push_notifications_audit` (memory)
@@ -35,6 +35,8 @@ We wanted a second, calmer touchpoint — a **once-a-week digest** of how each f
 
 **D7 — Content is ranked by newsworthiness and honest on calm weeks.** Rows are ordered by flood-category severity, then rising-before-steady-before-falling, then peak. The push body leads with the single most newsworthy river (value even unopened) and states calm weeks plainly ("A calm week — all N rivers steady and normal") rather than manufacturing drama.
 
+**D8 — The digest deep-links to the page, and cadence backs off with disengagement.** The push carries `data.type == 'weekly_outlook'`; the tap routing is a pure `notificationRoute(data)` function (unit-tested) that opens the Outlook page for that type and a reach's forecast otherwise. A `weeklyDigestsSinceOpen` counter on the user doc is incremented by the cron per send and **reset to 0 by the app whenever the Outlook page opens** (any open counts as engagement). The cron backs off deterministically via a global week index — weekly until 4 consecutive unopened digests, then biweekly, then monthly after 12 (`isDueThisWeek`) — so ignoring the digest quietly reduces its frequency instead of grinding toward an opt-out. Opening it snaps back to weekly.
+
 ## Alternatives considered
 
 - **One master notification toggle with the digest as a sub-option.** Rejected — coupling means a user can't keep the calm digest while muting alerts, which defeats D1's anti-spam premise.
@@ -51,6 +53,6 @@ We wanted a second, calmer touchpoint — a **once-a-week digest** of how each f
 - No new server secret; geocoding stays app-side with one source of truth.
 
 **Negative / follow-ups**
-- `favoriteLabels` is populated when the app surfaces a favorite (viewing the Outlook page); a favorite never surfaced falls back to the server river name until then.
+- `favoriteLabels` is populated when the app surfaces a favorite (viewing the Outlook page); a favorite never surfaced falls back to the server river name until then. The same open also resets the back-off counter (D8), so a user who never opens the page still gets the digest — just at a backed-off cadence.
 - Digest send time is MT for everyone until per-user timezones land (D6).
-- The digest tap does nothing useful until phase 4 wires `data.type == 'weekly_outlook'` to open the Outlook page.
+- The back-off uses a global week index, so its biweekly/monthly "off weeks" are shared across users rather than per-user anniversaries — simpler and stateless, at the cost of exact per-user spacing.

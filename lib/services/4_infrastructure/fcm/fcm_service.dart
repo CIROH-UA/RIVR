@@ -1,6 +1,7 @@
 // lib/services/4_infrastructure/fcm/fcm_service.dart
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
@@ -14,6 +15,29 @@ import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
+
+/// Resolve where a notification tap should navigate, purely from its data map
+/// (no navigator needed — kept separate so the routing rules are unit-testable):
+/// - `type: 'weekly_outlook'` → the Weekly Outlook page;
+/// - otherwise a non-empty `reachId` (+ optional `source`) → that reach's
+///   forecast, defaulting to NWM;
+/// - anything else → null (nowhere to go).
+({String name, Object? args})? notificationRoute(Map<String, dynamic> data) {
+  if (data['type'] == 'weekly_outlook') {
+    return (name: AppRoutes.weeklyOutlook, args: null);
+  }
+  final reachId = data['reachId'] as String?;
+  if (reachId != null && reachId.isNotEmpty) {
+    return (
+      name: AppRoutes.forecast,
+      args: ReachArgs(
+        reachId: reachId,
+        source: ForecastSource.fromId(data['source'] as String?),
+      ),
+    );
+  }
+  return null;
+}
 
 /// Simple FCM service for managing push notification tokens
 /// Integrates with existing UserSettingsService
@@ -276,25 +300,25 @@ class FCMService implements IFCMService {
     }
   }
 
-  /// Tap on a locally-displayed (foreground) notification → route to the reach.
-  /// Payload is `reachId|source` (see [_handleForegroundMessage]).
+  /// Tap on a locally-displayed (foreground) notification. The payload is the
+  /// message's JSON data map (see [_handleForegroundMessage]).
   void _onLocalNotificationTap(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
-    final parts = payload.split('|');
-    final reachId = parts.isNotEmpty ? parts[0] : '';
-    if (reachId.isEmpty) return;
-    final source =
-        ForecastSource.fromId(parts.length > 1 ? parts[1] : null);
-    _navigateToReach(reachId, source);
+    try {
+      final data = jsonDecode(payload);
+      if (data is Map) _routeFromData(data.cast<String, dynamic>());
+    } catch (e) {
+      AppLogger.debug('FcmService', 'Bad local-notification payload: $e');
+    }
   }
 
   /// Handle foreground messages (when app is open).
   ///
   /// iOS displays them itself via setForegroundNotificationPresentationOptions.
   /// Android does NOT auto-display FCM notification payloads while foregrounded,
-  /// so we render one ourselves through flutter_local_notifications, carrying
-  /// the reachId as the payload so a tap routes to the forecast.
+  /// so we render one ourselves through flutter_local_notifications, carrying the
+  /// full data map as the payload so a tap routes wherever the message wants.
   void _handleForegroundMessage(RemoteMessage message) {
     final notification = message.notification;
     AppLogger.debug('FcmService', 'Received foreground message: ${message.messageId}');
@@ -316,11 +340,7 @@ class FCMService implements IFCMService {
           color: Color(0xFFFF6B35),
         ),
       ),
-      // Encode reachId + source so a tap on the foreground notification opens
-      // the correct forecast API (NWM vs GEOGLOWS). reach ids are numeric, so
-      // '|' is a safe delimiter.
-      payload: '${message.data['reachId'] ?? ''}|'
-          '${message.data['source'] ?? ForecastSource.nwm.id}',
+      payload: jsonEncode(message.data),
     );
   }
 
@@ -328,30 +348,20 @@ class FCMService implements IFCMService {
   void _handleNotificationTap(RemoteMessage message) {
     AppLogger.debug('FcmService', 'Notification tapped: ${message.messageId}');
     AppLogger.debug('FcmService', 'Data: ${message.data}');
-
-    final reachId = message.data['reachId'] as String?;
-    if (reachId != null && reachId.isNotEmpty) {
-      _navigateToReach(
-        reachId,
-        ForecastSource.fromId(message.data['source'] as String?),
-      );
-    }
+    _routeFromData(message.data);
   }
 
-  /// Navigate to the forecast page for a given reach, using the right source so
-  /// GEOGLOWS reaches load from the GEOGLOWS API rather than defaulting to NWM.
-  void _navigateToReach(String reachId, ForecastSource source) {
+  /// Route a notification tap by its data payload (see [notificationRoute]).
+  void _routeFromData(Map<String, dynamic> data) {
     final nav = _navigatorKey?.currentState;
     if (nav == null) {
-      AppLogger.warning('FcmService', 'Navigator not available, cannot route to reach: $reachId');
+      AppLogger.warning('FcmService', 'Navigator not available, cannot route notification');
       return;
     }
-
-    AppLogger.info('FcmService', 'Navigating to reach: $reachId (${source.id})');
-    nav.pushNamed(
-      AppRoutes.forecast,
-      arguments: ReachArgs(reachId: reachId, source: source),
-    );
+    final route = notificationRoute(data);
+    if (route == null) return;
+    AppLogger.info('FcmService', 'Routing notification to ${route.name}');
+    nav.pushNamed(route.name, arguments: route.args);
   }
 
   /// Ensure THIS device can receive pushes: request permission (if needed) and

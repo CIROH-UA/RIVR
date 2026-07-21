@@ -16,6 +16,7 @@ class UserSettingsDto {
   final bool enableNotifications;
   final int notificationFrequency;
   final bool weeklyOutlookEnabled;
+  final int weeklyDigestsSinceOpen;
   final List<String> favoriteReachIds;
   final Map<String, String> favoriteSources;
   final Map<String, String> favoriteLabels;
@@ -35,6 +36,7 @@ class UserSettingsDto {
     required this.enableNotifications,
     this.notificationFrequency = 1,
     this.weeklyOutlookEnabled = false,
+    this.weeklyDigestsSinceOpen = 0,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
     this.favoriteLabels = const {},
@@ -57,6 +59,7 @@ class UserSettingsDto {
       enableNotifications: json['enableNotifications'] as bool? ?? false,
       notificationFrequency: json['notificationFrequency'] as int? ?? 1,
       weeklyOutlookEnabled: json['weeklyOutlookEnabled'] as bool? ?? false,
+      weeklyDigestsSinceOpen: json['weeklyDigestsSinceOpen'] as int? ?? 0,
       favoriteReachIds: List<String>.from(
         json['favoriteReachIds'] as List? ?? [],
       ),
@@ -89,6 +92,7 @@ class UserSettingsDto {
       'enableNotifications': enableNotifications,
       'notificationFrequency': notificationFrequency,
       'weeklyOutlookEnabled': weeklyOutlookEnabled,
+      'weeklyDigestsSinceOpen': weeklyDigestsSinceOpen,
       'favoriteReachIds': favoriteReachIds,
       'favoriteSources': favoriteSources,
       'favoriteLabels': favoriteLabels,
@@ -114,6 +118,7 @@ class UserSettingsDto {
       enableNotifications: enableNotifications,
       notificationFrequency: notificationFrequency,
       weeklyOutlookEnabled: weeklyOutlookEnabled,
+      weeklyDigestsSinceOpen: weeklyDigestsSinceOpen,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
       favoriteLabels: favoriteLabels,
@@ -151,6 +156,7 @@ class UserSettingsDto {
       enableNotifications: entity.enableNotifications,
       notificationFrequency: entity.notificationFrequency,
       weeklyOutlookEnabled: entity.weeklyOutlookEnabled,
+      weeklyDigestsSinceOpen: entity.weeklyDigestsSinceOpen,
       favoriteReachIds: entity.favoriteReachIds,
       favoriteSources: entity.favoriteSources,
       favoriteLabels: entity.favoriteLabels,

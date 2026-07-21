@@ -68,9 +68,9 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
         _rows = rows;
         _loading = false;
       });
-      // Persist the resolved labels so the weekly-digest Cloud Function can put
-      // real names/places on the push banner (it can't geocode). Fire-and-forget.
-      _persistLabels(rows);
+      // Persist labels (for the digest banner) + reset the back-off counter,
+      // since opening the outlook is engagement. Fire-and-forget.
+      _recordOutlookOpen(rows);
     } catch (e) {
       AppLogger.error('WeeklyOutlookPage', 'Failed to build outlook', e);
       if (!mounted) return;
@@ -81,23 +81,28 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     }
   }
 
-  /// Write each loaded favorite's resolved label to the user doc so the Friday
-  /// digest banner reads the same name/place the app shows. Merges with existing
-  /// labels (read-modify-write) so favorites that failed to load keep theirs.
-  Future<void> _persistLabels(List<OutlookRow> rows) async {
-    if (rows.isEmpty || !mounted) return;
+  /// On opening the outlook: reset the digest back-off counter (opening is
+  /// engagement) and persist each loaded favorite's label to the user doc so the
+  /// Friday digest banner reads the same name/place the app shows. Labels merge
+  /// (read-modify-write) so favorites that failed to load keep theirs.
+  Future<void> _recordOutlookOpen(List<OutlookRow> rows) async {
+    if (!mounted) return;
     final userId = context.read<AuthProvider>().currentUser?.uid;
     if (userId == null) return;
     try {
       final svc = GetIt.I<IUserSettingsService>();
-      final settings = await svc.getUserSettings(userId);
-      final merged = Map<String, String>.from(settings?.favoriteLabels ?? {});
-      for (final r in rows) {
-        merged[r.reachId] = r.title;
+      final updates = <String, dynamic>{'weeklyDigestsSinceOpen': 0};
+      if (rows.isNotEmpty) {
+        final settings = await svc.getUserSettings(userId);
+        final merged = Map<String, String>.from(settings?.favoriteLabels ?? {});
+        for (final r in rows) {
+          merged[r.reachId] = r.title;
+        }
+        updates['favoriteLabels'] = merged;
       }
-      await svc.updateUserSettings(userId, {'favoriteLabels': merged});
+      await svc.updateUserSettings(userId, updates);
     } catch (e) {
-      AppLogger.debug('WeeklyOutlookPage', 'Label persist failed: $e');
+      AppLogger.debug('WeeklyOutlookPage', 'Outlook-open persist failed: $e');
     }
   }
 

@@ -26,6 +26,10 @@ class UserSettings {
   final int notificationFrequency; // 1, 2, 3, or 4 times per day
   // Weekly Outlook digest — an independent notification type from flood alerts.
   final bool weeklyOutlookEnabled;
+  // Consecutive weekly digests sent without the user opening the outlook. The
+  // cron increments it and backs off cadence (biweekly, then monthly) as it
+  // grows; the app resets it to 0 when the Outlook page is opened.
+  final int weeklyDigestsSinceOpen;
   final List<String> favoriteReachIds;
   // Per-favorite data source, keyed by reachId (value = ForecastSource.id, e.g.
   // 'geoglows'). Only non-NWM favorites are stored; a missing key means NWM.
@@ -53,6 +57,7 @@ class UserSettings {
     required this.enableNotifications,
     this.notificationFrequency = 1, // Default to once daily
     this.weeklyOutlookEnabled = false,
+    this.weeklyDigestsSinceOpen = 0,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
     this.favoriteLabels = const {},
@@ -72,6 +77,7 @@ class UserSettings {
     bool? enableNotifications,
     int? notificationFrequency,
     bool? weeklyOutlookEnabled,
+    int? weeklyDigestsSinceOpen,
     List<String>? favoriteReachIds,
     Map<String, String>? favoriteSources,
     Map<String, String>? favoriteLabels,
@@ -91,6 +97,8 @@ class UserSettings {
           notificationFrequency ?? this.notificationFrequency,
       weeklyOutlookEnabled:
           weeklyOutlookEnabled ?? this.weeklyOutlookEnabled,
+      weeklyDigestsSinceOpen:
+          weeklyDigestsSinceOpen ?? this.weeklyDigestsSinceOpen,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       favoriteSources: favoriteSources ?? this.favoriteSources,
       favoriteLabels: favoriteLabels ?? this.favoriteLabels,
