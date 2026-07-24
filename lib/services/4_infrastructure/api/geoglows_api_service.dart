@@ -162,7 +162,42 @@ class GeoglowsApiService implements IGeoglowsApiService {
     }
   }
 
+  @override
+  Future<({double lat, double lon})?> fetchReachCoords(String riverId) async {
+    final url = AppConfig.getGeoglowsCoordsUrl(riverId);
+    AppLogger.debug('GEOGLOWS_API', 'Fetching coordinates for river $riverId');
+
+    try {
+      final data = await _getJson(url, riverId);
+      final lat = _parseCoord(data['lat']);
+      final lon = _parseCoord(data['lon']);
+      if (lat == null || lon == null) {
+        AppLogger.warning(
+          'GEOGLOWS_API',
+          'Coordinates missing in response for $riverId',
+        );
+        return null;
+      }
+      AppLogger.info('GEOGLOWS_API', 'Coordinates for $riverId: $lat, $lon');
+      return (lat: lat, lon: lon);
+    } catch (e) {
+      // Best-effort: a missing coordinate shouldn't fail the caller (e.g. a
+      // favorites refresh), it just means no place label for this reach.
+      AppLogger.warning(
+        'GEOGLOWS_API',
+        'Could not resolve coordinates for $riverId: $e',
+      );
+      return null;
+    }
+  }
+
   // --- helpers --------------------------------------------------------------
+
+  double? _parseCoord(dynamic v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
 
   /// GET + decode JSON, surfacing GEOGLOWS's `{"error": "..."}` bodies (which
   /// arrive with HTTP 200) as proper failures.

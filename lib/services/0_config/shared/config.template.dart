@@ -28,6 +28,15 @@ class AppConfig {
   static String getGeoglowsProxyUrl(String riverId) =>
       '$geoglowsProxyUrl?river_id=$riverId';
 
+  // GEOGLOWS reach-coordinates proxy — a separate Cloud Function that maps a
+  // river_id (LINKNO) to its {lat, lon} from the GEOGLOWS metadata table.
+  // GEOGLOWS forecasts carry no coordinates, so this is how a global reach gets
+  // reverse-geocoded to a city/country. Code: functions_geoglows/.
+  static const String geoglowsCoordsUrl =
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_reach_coords';
+  static String getGeoglowsCoordsUrl(String riverId) =>
+      '$geoglowsCoordsUrl?river_id=$riverId';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =

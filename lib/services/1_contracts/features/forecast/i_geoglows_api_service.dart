@@ -14,4 +14,10 @@ abstract class IGeoglowsApiService {
   /// Ensemble-statistics forecast (min/25p/median/75p/max) for [riverId] — the
   /// data behind the uncertainty-fan hero.
   Future<GeoglowsEnsembleForecast> fetchEnsembleStats(String riverId);
+
+  /// The reach's static geographic coordinates, resolved from the GEOGLOWS
+  /// metadata table. GEOGLOWS forecasts carry no coordinates, so this is how a
+  /// global reach is located (e.g. to reverse-geocode it to a city/country).
+  /// Returns null when the reach isn't found or the lookup fails.
+  Future<({double lat, double lon})?> fetchReachCoords(String riverId);
 }

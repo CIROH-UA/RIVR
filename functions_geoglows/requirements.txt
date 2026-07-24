@@ -1,2 +1,9 @@
 firebase-functions>=0.4.0
 geoglows==2.2.0
+# geoglows_reach_coords: read the metadata parquet + binary-search an in-memory
+# index. geoglows already pulls these in transitively; pinned here so the
+# coords function is explicit about what it needs.
+numpy>=1.26
+pandas>=2.0
+pyarrow>=14.0
+requests>=2.31

@@ -69,6 +69,47 @@ void main() {
     });
   });
 
+  group('GeoglowsApiService.fetchReachCoords', () {
+    test('hits the coords proxy and returns {lat, lon}', () async {
+      final unit = FlowUnitPreferenceService();
+      final client = MockClient((req) async {
+        expect(req.url.toString(), contains('geoglows_reach_coords'));
+        expect(req.url.toString(), contains('river_id=440380672'));
+        return http.Response(
+          '{"river_id":440380672,"lat":16.737556,"lon":77.121667}',
+          200,
+        );
+      });
+      final svc = GeoglowsApiService(client: client, unitService: unit);
+
+      final coords = await svc.fetchReachCoords('440380672');
+
+      expect(coords, isNotNull);
+      expect(coords!.lat, closeTo(16.737556, 1e-6));
+      expect(coords.lon, closeTo(77.121667, 1e-6));
+    });
+
+    test('returns null when the reach is not found (best-effort)', () async {
+      final unit = FlowUnitPreferenceService();
+      final client = MockClient(
+        (req) async => http.Response('{"error":"river_id 1 not found"}', 404),
+      );
+      final svc = GeoglowsApiService(client: client, unitService: unit);
+
+      expect(await svc.fetchReachCoords('1'), isNull);
+    });
+
+    test('returns null when coordinates are missing from the body', () async {
+      final unit = FlowUnitPreferenceService();
+      final client = MockClient(
+        (req) async => http.Response('{"river_id":5}', 200),
+      );
+      final svc = GeoglowsApiService(client: client, unitService: unit);
+
+      expect(await svc.fetchReachCoords('5'), isNull);
+    });
+  });
+
   group('GeoglowsApiService.fetchEnsembleStats', () {
     test('reads the ensemble object and skips null gaps', () async {
       final unit = FlowUnitPreferenceService()..setFlowUnit('CMS');

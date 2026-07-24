@@ -13,6 +13,7 @@ import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
@@ -40,6 +41,10 @@ class FavoritesProvider with ChangeNotifier {
   final IForecastService _forecastService;
   final IReachCacheService _reachCacheService;
   final IFlowUnitPreferenceService _unitService;
+  // Optional — used only to self-heal missing GEOGLOWS reach coordinates.
+  // Resolved lazily from GetIt when absent (see [_resolveGeoglowsApi]) so tests
+  // that don't register it simply skip coordinate resolution.
+  final IGeoglowsApiService? _geoglowsApi;
   final Map<String, Map<int, double>> _sessionReturnPeriods =
       {}; // reachId -> return periods
 
@@ -53,7 +58,9 @@ class FavoritesProvider with ChangeNotifier {
     RemoveFavoriteUseCase? removeFavoriteUseCase,
     ReorderFavoritesUseCase? reorderFavoritesUseCase,
     IRiverDataRepository? repository,
-  })  : _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
+    IGeoglowsApiService? geoglowsApi,
+  })  : _geoglowsApi = geoglowsApi,
+        _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
         _forecastService = forecastService ?? GetIt.I<IForecastService>(),
         _reachCacheService =
             reachCacheService ?? GetIt.I<IReachCacheService>(),
@@ -566,6 +573,18 @@ class FavoritesProvider with ChangeNotifier {
   }
 
   /// Refresh a single favorite's flow data and store in session
+  /// The GEOGLOWS API used to self-heal missing reach coordinates: the injected
+  /// instance, else GetIt's if registered, else null (tests that don't wire it
+  /// just skip coordinate resolution). Cached after first successful resolve.
+  IGeoglowsApiService? _resolvedGeoglowsApi;
+  IGeoglowsApiService? _resolveGeoglowsApi() {
+    _resolvedGeoglowsApi ??= _geoglowsApi ??
+        (GetIt.I.isRegistered<IGeoglowsApiService>()
+            ? GetIt.I<IGeoglowsApiService>()
+            : null);
+    return _resolvedGeoglowsApi;
+  }
+
   Future<void> _refreshSingleFavorite(String reachId) async {
     final gen = (_refreshGenerations[reachId] ?? 0) + 1;
     _refreshGenerations[reachId] = gen;
@@ -601,9 +620,20 @@ class FavoritesProvider with ChangeNotifier {
           return;
         }
         final forecast = GeoglowsForecastPayload.decode(entry, _unitService);
-        // GEOGLOWS reaches are unnamed and carry no coords here — keep existing.
         currentFlow = forecast.currentMedian;
         returnPeriods = forecast.returnPeriods;
+        // GEOGLOWS forecasts carry no coordinates, so a favorite that was never
+        // captured with coords (or lost them) can't be geocoded to a place.
+        // Resolve them once from the reach-coords proxy; once persisted below
+        // they're never fetched again.
+        if (_sessionData[reachId]?.coordinates == null) {
+          final coords = await _resolveGeoglowsApi()?.fetchReachCoords(reachId);
+          if (_refreshGenerations[reachId] != gen) return;
+          if (coords != null) {
+            lat = coords.lat;
+            lon = coords.lon;
+          }
+        }
       } else {
         final entry = await _repository.read(
           RiverDataKey(
