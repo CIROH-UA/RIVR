@@ -393,6 +393,73 @@ class MapVectorTilesService {
     }
   }
 
+  // --- condition coloring ----------------------------------------------------
+  //
+  // Data-drive line-color on the EXISTING vector layers by station_id, so an
+  // above-normal reach shows yellow/orange/red/purple without re-tiling. The
+  // color is a `match` expression keyed on station_id: only listed reaches
+  // recolor, everything else keeps the base color. Validated on device — a
+  // 10k-entry expression applies in ~34ms with no render lag — so a single
+  // global blob of above-normal reaches is viable (no viewport chunking needed).
+  // The map of elevated reaches comes from the backend (computed peak vs return
+  // periods); this method just paints it.
+
+  /// Category index (1..4) -> hex line color, matching the forecast gauge.
+  /// 0 (Normal) is intentionally absent — normal reaches keep the base color.
+  static const Map<int, String> _categoryColors = {
+    1: '#FFC400', // Action   — yellow
+    2: '#FF8C00', // Moderate — orange
+    3: '#E53935', // Major    — red
+    4: '#8E24AA', // Extreme  — purple
+  };
+
+  static String _hex(int argb) {
+    final r = (argb >> 16) & 0xFF;
+    final g = (argb >> 8) & 0xFF;
+    final b = argb & 0xFF;
+    return '#${r.toRadixString(16).padLeft(2, '0')}'
+        '${g.toRadixString(16).padLeft(2, '0')}'
+        '${b.toRadixString(16).padLeft(2, '0')}';
+  }
+
+  /// Apply per-reach condition colors to [layerIds] as a `match` expression on
+  /// `station_id`. [categoryByStationId] maps a reach's numeric station id to a
+  /// category index (1..4); anything not listed falls through to [baseColor].
+  Future<void> applyConditionColors(
+    Map<int, int> categoryByStationId, {
+    required List<String> layerIds,
+    required int baseColor,
+  }) async {
+    if (_mapboxMap == null) return;
+
+    // ["match", ["get","station_id"], id, color, id, color, ..., default]
+    final expr = <Object>['match', ['get', 'station_id']];
+    categoryByStationId.forEach((stationId, category) {
+      final color = _categoryColors[category];
+      if (color != null) {
+        expr.add(stationId);
+        expr.add(color);
+      }
+    });
+    expr.add(_hex(baseColor)); // default
+
+    final encoded = json.encode(expr);
+    for (final layerId in layerIds) {
+      try {
+        await _mapboxMap!.style.setStyleLayerProperty(
+          layerId,
+          'line-color',
+          encoded,
+        );
+      } catch (e) {
+        AppLogger.warning(
+          'MapVectorTilesService',
+          'applyConditionColors failed for $layerId: $e',
+        );
+      }
+    }
+  }
+
   /// Remove existing vector source and layers to avoid conflicts
   Future<void> _removeExistingLayers() async {
     try {
