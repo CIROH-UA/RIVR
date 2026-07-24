@@ -613,7 +613,12 @@ class _FavoritesPageState extends State<FavoritesPage>
           key: index == 0 && (_isTourActive || !_hasShownFavoritesTour) ? _firstCardKey : ValueKey(favorite.reachId),
           favorite: favorite,
           cardIndex: index,
-          onTap: () => _navigateToForecast(favorite.reachId, favorite.source),
+          onTap: () => _navigateToForecast(
+            favorite.reachId,
+            favorite.source,
+            lat: favorite.latitude,
+            lon: favorite.longitude,
+          ),
           onRename: () => _showRenameDialog(favorite),
           onChangeImage: () => _navigateToImageSelection(favorite),
           isReorderable: _searchQuery.isEmpty,
@@ -1057,8 +1062,22 @@ class _FavoritesPageState extends State<FavoritesPage>
     AppRouter.pushMap(context);
   }
 
-  void _navigateToForecast(String reachId, ForecastSource source) {
-    AppRouter.pushForecast(context, reachId: reachId, source: source);
+  void _navigateToForecast(
+    String reachId,
+    ForecastSource source, {
+    double? lat,
+    double? lon,
+  }) {
+    // Pass the favorite's coordinates so the forecast page can show a location.
+    // GEOGLOWS reaches have no name/location of their own — without these, the
+    // page can't reverse-geocode a place (NWM reaches carry their own coords).
+    AppRouter.pushForecast(
+      context,
+      reachId: reachId,
+      source: source,
+      lat: lat,
+      lon: lon,
+    );
   }
 
   void _navigateToImageSelection(FavoriteRiver favorite) {
