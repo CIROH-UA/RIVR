@@ -124,6 +124,37 @@ class GeocodingService {
     return fallback;
   }
 
+  /// A human place label for a coordinate — "City, ST" inside the US,
+  /// "City, Country" elsewhere. Returns null when coordinates or geocoding are
+  /// unavailable. Shared by the favorites card and the weekly outlook so a river
+  /// reads the same place everywhere.
+  static Future<String?> placeLabel(double? lat, double? lon) async {
+    if (lat == null || lon == null || (lat == 0 && lon == 0)) return null;
+    try {
+      return formatPlace(await reverseGeocode(lat, lon));
+    } catch (e) {
+      AppLogger.debug('GeocodingService', 'placeLabel failed: $e');
+      return null;
+    }
+  }
+
+  /// Format a reverse-geocode result into a place label: "City, ST" inside the
+  /// US, "City, Country" elsewhere, the country alone when there's no city, and
+  /// null when there's nothing usable. Pure — the display rule, unit-testable.
+  static String? formatPlace(Map<String, String?> geo) {
+    final city = geo['city'];
+    final state = geo['state'];
+    final country = geo['country'];
+    if (city == null || city.isEmpty) {
+      return (country != null && country.isNotEmpty) ? country : null;
+    }
+    final isUS = country == 'United States' ||
+        country == 'United States of America';
+    if (isUS && state != null && state.isNotEmpty) return '$city, $state';
+    if (country != null && country.isNotEmpty) return '$city, $country';
+    return city;
+  }
+
   /// Persist a geocoding result to SharedPreferences (non-blocking)
   static Future<void> _persistResult(
     String cacheKey,

@@ -9,6 +9,7 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
+import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/services/4_infrastructure/favorites/flood_risk_video_service.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/components/slide_action_buttons.dart';
@@ -55,6 +56,10 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   bool _needsVideoReinitialize = false;
   DateTime? _lastPlayRetryTime;
 
+  // GEOGLOWS reaches are unnamed ("Global Reach <id>"), so we show their
+  // reverse-geocoded place (city/country) as the title instead.
+  String? _placeLabel;
+
   @override
   void initState() {
     super.initState();
@@ -63,11 +68,40 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
       vsync: this,
     );
     _initializeVideoBackground();
+    _resolvePlaceLabel();
+  }
+
+  /// The card headline: a GEOGLOWS reach shows its place (once geocoded);
+  /// everything else uses the favorite's display name.
+  String get _displayTitle {
+    if (widget.favorite.source.isGeoglows && _placeLabel != null) {
+      return _placeLabel!;
+    }
+    return widget.favorite.displayName;
+  }
+
+  /// Reverse-geocode a GEOGLOWS reach's coordinates to a city/country label.
+  Future<void> _resolvePlaceLabel() async {
+    final f = widget.favorite;
+    if (!f.source.isGeoglows || !f.hasCoordinates) return;
+    final label = await GeocodingService.placeLabel(f.latitude, f.longitude);
+    if (label != null && label != _placeLabel && mounted) {
+      setState(() => _placeLabel = label);
+    }
   }
 
   @override
   void didUpdateWidget(FavoriteRiverCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // Re-geocode when the reach changes or its coordinates first arrive
+    // (coords are enriched asynchronously from session data).
+    if (oldWidget.favorite.reachId != widget.favorite.reachId ||
+        (!oldWidget.favorite.hasCoordinates &&
+            widget.favorite.hasCoordinates)) {
+      _placeLabel = null;
+      _resolvePlaceLabel();
+    }
 
     // Reinitialize video when switching from custom image to null
     if (oldWidget.favorite.customImageAsset != null &&
@@ -547,9 +581,10 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // River name
+        // River name (GEOGLOWS reaches show their geocoded place instead of
+        // the "Global Reach <id>" placeholder).
         Text(
-          widget.favorite.displayName,
+          _displayTitle,
           style: const TextStyle(
             color: CupertinoColors.white,
             fontSize: 18,

@@ -152,27 +152,8 @@ class WeeklyOutlookService {
     );
   }
 
-  /// Reverse-geocode to a place label — "City, ST" in the US, "City, Country"
-  /// elsewhere. Best-effort: null when coords/geocoding are unavailable so a
-  /// slow or failed lookup never blocks the row.
-  Future<String?> _locationLabel(double? lat, double? lon) async {
-    if (lat == null || lon == null || (lat == 0 && lon == 0)) return null;
-    try {
-      final geo = await GeocodingService.reverseGeocode(lat, lon);
-      final city = geo['city'];
-      final state = geo['state'];
-      final country = geo['country'];
-      if (city == null || city.isEmpty) {
-        return (country != null && country.isNotEmpty) ? country : null;
-      }
-      final isUS = country == 'United States' ||
-          country == 'United States of America';
-      if (isUS && state != null && state.isNotEmpty) return '$city, $state';
-      if (country != null && country.isNotEmpty) return '$city, $country';
-      return city;
-    } catch (e) {
-      AppLogger.debug('WeeklyOutlookService', 'Geocode failed: $e');
-      return null;
-    }
-  }
+  /// Reverse-geocode to a place label — shared with the favorites card so a
+  /// river reads the same place everywhere. Best-effort (null on failure).
+  Future<String?> _locationLabel(double? lat, double? lon) =>
+      GeocodingService.placeLabel(lat, lon);
 }
