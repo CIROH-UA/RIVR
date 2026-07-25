@@ -61,10 +61,13 @@ lib/
       shared/{pages,widgets}/            -- Shared UI components
       features/{auth,favorites,forecast,map,onboarding,settings}/  -- Pages + widgets
   utils/                                 -- Utilities (river_image, email_validator, etc.)
-functions/                               -- Firebase Cloud Functions (TypeScript)
+functions/                               -- Firebase Cloud Functions (TypeScript, "default" codebase)
   src/index.ts                           -- Cloud Function entry points
   src/notification-service.ts            -- Push notification logic
   src/noaa-client.ts                     -- Server-side NOAA API client
+functions_geoglows/                      -- Firebase Cloud Functions (Python, "geoglows" codebase)
+  main.py                                -- GEOGLOWS forecast/coords + GEOGLOWS & NWM stream-condition proxies
+  vpu_slices.json                        -- bundled VPU -> river-slice index (stream conditions)
 ```
 
 ### Key Patterns
@@ -239,6 +242,7 @@ The following files contain secrets and are **gitignored**:
 | `ios/Runner/GoogleService-Info.plist` | iOS Firebase config |
 | `ios/Flutter/Secrets.xcconfig` | iOS secrets |
 | `functions/.env` | Cloud Functions environment variables |
+| `functions_geoglows/.env` | Python Cloud Functions env vars (`NWM_API_KEY` for the NWM stream-conditions proxy) |
 | `android/key.properties` | Android upload keystore path and passwords |
 
 ### Android Upload Keystore
@@ -266,9 +270,11 @@ flutter build apk --debug             # Debug Android build
 flutter build ios --no-codesign       # Debug iOS build (no signing)
 make release-android                  # Signed release AAB with obfuscation (requires android/key.properties)
 make release-ios                      # Release IPA with obfuscation
-cd functions && npm install           # Install Cloud Functions deps
+cd functions && npm install           # Install Cloud Functions deps (TypeScript "default" codebase)
 cd functions && npm run build         # Build Cloud Functions
-firebase deploy --only functions      # Deploy Cloud Functions
+firebase deploy --only functions:default              # Deploy TypeScript functions
+firebase deploy --only functions:geoglows             # Deploy Python functions (functions_geoglows/)
+firebase deploy --only functions:geoglows:<name>      # Deploy one Python function (e.g. nwm_stream_conditions)
 ```
 
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
