@@ -55,6 +55,12 @@ class MapPageState extends State<MapPage> {
   bool _conditionsInFlight = false;
   bool _colorByCondition = MapPreferenceService.colorByConditionDefault;
 
+  // NWM (US) coloring is per-reach (no region concept): classify the reaches on
+  // screen, accumulating results so panning only ever asks about new reaches.
+  final Map<int, int> _appliedNwmConditions = {};
+  final Set<int> _resolvedNwmIds = {};
+  bool _nwmInFlight = false;
+
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
@@ -92,7 +98,35 @@ class MapPageState extends State<MapPage> {
     if (_appliedConditions.isNotEmpty) {
       await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
     }
+    if (_appliedNwmConditions.isNotEmpty) {
+      await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
+    }
     await _maybeColorVisibleRegion();
+    await _maybeColorVisibleNwm();
+  }
+
+  /// Color the NWM (US) reaches on screen by flood condition: classify only the
+  /// ones we haven't seen yet, accumulate, and paint. Best-effort.
+  Future<void> _maybeColorVisibleNwm() async {
+    if (!_colorByCondition || _nwmInFlight) return;
+    final ids = await _vectorTilesService.visibleNwmStationIds();
+    final unresolved =
+        ids.where((id) => !_resolvedNwmIds.contains(id)).toList();
+    if (unresolved.isEmpty || !mounted) return;
+
+    _nwmInFlight = true;
+    try {
+      final conditions =
+          await _conditionsService.fetchNwmByStations(unresolved);
+      if (!mounted) return;
+      _resolvedNwmIds.addAll(unresolved);
+      if (conditions.isNotEmpty) {
+        _appliedNwmConditions.addAll(conditions);
+        await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
+      }
+    } finally {
+      _nwmInFlight = false;
+    }
   }
 
   /// Turn condition coloring on/off — persist the choice, then either paint the
@@ -104,9 +138,14 @@ class MapPageState extends State<MapPage> {
       if (_appliedConditions.isNotEmpty) {
         await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
       }
+      if (_appliedNwmConditions.isNotEmpty) {
+        await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
+      }
       await _maybeColorVisibleRegion();
+      await _maybeColorVisibleNwm();
     } else {
       await _vectorTilesService.clearGeoglowsConditions();
+      await _vectorTilesService.clearNwmConditions();
     }
   }
 
@@ -333,9 +372,10 @@ class MapPageState extends State<MapPage> {
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
     _reconcileZoomState();
-    // Color the region the user just settled on (no-op if already colored or
-    // no GEOGLOWS streams are in view).
+    // Color whatever the user just settled on (no-op if already colored or no
+    // streams are in view) — GEOGLOWS by region, NWM by visible reach.
     unawaited(_maybeColorVisibleRegion());
+    unawaited(_maybeColorVisibleNwm());
   }
 
   /// Hide streams (and surface the hint) when zoomed out past the usable range;

@@ -49,6 +49,14 @@ class AppConfig {
   static String getGeoglowsConditionsByStationUrl(int stationId) =>
       '$geoglowsConditionsUrl?station_id=$stationId';
 
+  // NWM (US) stream-conditions proxy — returns {station_id: floodCategory} for
+  // the above-normal reaches among the ones passed in (the reaches on screen),
+  // computed from the short-range forecast peak vs return periods.
+  static const String nwmConditionsUrl =
+      'https://us-east1-ciroh-rivr-app.cloudfunctions.net/nwm_stream_conditions';
+  static String getNwmConditionsUrl(Iterable<int> stationIds) =>
+      '$nwmConditionsUrl?station_ids=${stationIds.join(',')}';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =

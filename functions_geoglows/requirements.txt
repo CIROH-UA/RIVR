@@ -11,3 +11,7 @@ requests>=2.31
 # GEOGLOWS S3 to classify each reach's flood category.
 s3fs>=2024.2
 zarr>=3,<4
+# nwm_stream_conditions: read NWM short-range channel_rt NetCDF4 (HDF5) files.
+xarray>=2024.1
+h5netcdf>=1.3
+h5py>=3.10

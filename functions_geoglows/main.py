@@ -28,9 +28,24 @@ import numpy as np
 import pandas as pd
 import requests
 import s3fs
+import xarray as xr
 import zarr
 from firebase_functions import https_fn, options
 import geoglows
+
+# NWM (US National Water Model) — the same "flood category" coloring as GEOGLOWS,
+# but for US streams. Forecast peak comes from the short-range channel_rt files
+# on the NOAA NWM Open Data bucket; return periods come from the CIROH API
+# (batched). Key held in Secret Manager, not committed.
+_NWM_SHORT_RANGE = "noaa-nwm-pds/nwm.{day}/short_range"
+_NWM_CHANNEL_RT = "nwm.{cycle}.short_range.channel_rt.f{hour:03d}.conus.nc"
+_CIROH_RP_URL = "https://nwm-api.ciroh.org/return-period"
+# The CIROH key already ships inside the client app, so it lives in the codebase
+# .env (gitignored, deployed as an env var) rather than Secret Manager.
+# Don't flag near-dry headwaters: a trickle can "exceed" a tiny return period.
+_NWM_MIN_FLOW_CMS = 0.5
+# Cap per request so the CIROH URL + our own query stay well under length limits.
+_NWM_MAX_IDS = 800
 
 # GEOGLOWS open-data on S3 (anonymous). Daily global forecast (raw ensemble) and
 # the retrospective-derived Gumbel return periods share the same river ordering.
@@ -362,6 +377,148 @@ def geoglows_stream_conditions(req: https_fn.Request) -> https_fn.Response:
         payload,
         status=200,
         headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=10800"},
+    )
+
+
+# --- NWM (US) stream conditions ----------------------------------------------
+
+_nwm_lock = threading.Lock()
+_nwm_peak = None  # (cycle_key, ids_sorted[int], peak[f4]) — cached per cycle
+_rp_cache = {}    # feature_id -> return-period dict, or None if unavailable
+
+
+def _latest_nwm_cycle():
+    """Newest short-range cycle that has a full f001..f018 run published."""
+    fs = _s3()
+    now = datetime.now(timezone.utc)
+    for dt in (now, now - timedelta(days=1)):
+        day = dt.strftime("%Y%m%d")
+        d = _NWM_SHORT_RANGE.format(day=day)
+        if not fs.exists(d):
+            continue
+        for hour in range(23, -1, -1):
+            cyc = f"t{hour:02d}z"
+            last = f"{d}/{_NWM_CHANNEL_RT.format(cycle=cyc, hour=18)}"
+            if fs.exists(last):
+                return day, cyc
+    raise RuntimeError("no NWM short-range cycle published")
+
+
+def _load_nwm_peak():
+    """Peak streamflow per reach over the short-range horizon (max over the
+    forecast hours), for the newest cycle. Cached per cycle in memory — the
+    read runs once, later requests reuse it. feature_id is sorted, so callers
+    binary-search it."""
+    global _nwm_peak
+    day, cyc = _latest_nwm_cycle()
+    key = f"{day}.{cyc}"
+    if _nwm_peak is not None and _nwm_peak[0] == key:
+        return _nwm_peak[1], _nwm_peak[2]
+    with _nwm_lock:
+        if _nwm_peak is not None and _nwm_peak[0] == key:
+            return _nwm_peak[1], _nwm_peak[2]
+        fs = _s3()
+        base = _NWM_SHORT_RANGE.format(day=day)
+        peak = None
+        ids = None
+        # Every 2nd hour is enough to catch the peak of a smooth short-range
+        # hydrograph while halving the read.
+        for hour in range(1, 19, 2):
+            path = f"{base}/{_NWM_CHANNEL_RT.format(cycle=cyc, hour=hour)}"
+            with fs.open(path) as fh:
+                ds = xr.open_dataset(fh, engine="h5netcdf")
+                sf = ds["streamflow"].values
+                if peak is None:
+                    peak = sf.astype("f4")
+                    ids = ds["feature_id"].values
+                else:
+                    np.maximum(peak, sf, out=peak)
+        _nwm_peak = (key, ids, peak)
+        return ids, peak
+
+
+def _return_periods_for(feature_ids):
+    """Return-period thresholds per reach from the CIROH API, batched and cached
+    (return periods are static). Missing reaches map to None."""
+    need = [f for f in feature_ids if f not in _rp_cache]
+    key = os.environ.get("NWM_API_KEY", "")
+    for s in range(0, len(need), 500):
+        batch = need[s : s + 500]
+        url = f"{_CIROH_RP_URL}?comids=" + ",".join(map(str, batch)) + f"&key={key}"
+        try:
+            data = requests.get(url, timeout=60).json()
+            seen = set()
+            for r in data:
+                fid = r.get("feature_id")
+                if fid is not None:
+                    _rp_cache[int(fid)] = r
+                    seen.add(int(fid))
+            for f in batch:
+                if f not in seen:
+                    _rp_cache[f] = None
+        except Exception:
+            for f in batch:
+                _rp_cache.setdefault(f, None)
+    return {f: _rp_cache.get(f) for f in feature_ids}
+
+
+def _classify_nwm(feature_ids):
+    """Flood category (1..4) for each above-normal reach in [feature_ids]."""
+    ids, peak = _load_nwm_peak()
+    rp = _return_periods_for(feature_ids)
+    out = {}
+    for f in feature_ids:
+        i = int(np.searchsorted(ids, f))
+        if not (0 <= i < len(ids) and int(ids[i]) == f):
+            continue
+        p = float(peak[i])
+        if p < _NWM_MIN_FLOW_CMS:
+            continue
+        r = rp.get(f)
+        if not r or r.get("return_period_2") is None:
+            continue
+        cat = 0
+        for year, c in ((2, 1), (5, 2), (10, 3), (25, 4)):
+            thr = r.get(f"return_period_{year}")
+            if thr is not None and p >= thr:
+                cat = c
+        if cat > 0:
+            out[str(f)] = cat
+    return out
+
+
+@https_fn.on_request(
+    region="us-east1",  # next to the NOAA NWM Open Data bucket (us-east-1)
+    memory=options.MemoryOption.GB_4,  # holds the 2.78M-reach peak array
+    timeout_sec=300,
+)
+def nwm_stream_conditions(req: https_fn.Request) -> https_fn.Response:
+    raw = req.args.get("station_ids")
+    if not raw:
+        return https_fn.Response(
+            json.dumps({"error": "missing station_ids"}),
+            status=400, headers=_JSON_HEADERS,
+        )
+    try:
+        ids = [int(x) for x in raw.split(",") if x][:_NWM_MAX_IDS]
+    except ValueError:
+        return https_fn.Response(
+            json.dumps({"error": "station_ids must be comma-separated integers"}),
+            status=400, headers=_JSON_HEADERS,
+        )
+    try:
+        day, cyc = _latest_nwm_cycle()
+        conditions = _classify_nwm(ids)
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"{type(e).__name__}: {e}"}),
+            status=502, headers=_JSON_HEADERS,
+        )
+    return https_fn.Response(
+        json.dumps({"date": day, "cycle": cyc, "count": len(conditions),
+                    "conditions": conditions}),
+        status=200,
+        headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=3600"},
     )
 
 

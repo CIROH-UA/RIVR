@@ -71,3 +71,4 @@ rivr-secrets.zip
 
 # Internal team docs (local-only, never commit)
 docs/internal/
+functions_geoglows/.env

@@ -44,6 +44,17 @@ class StreamConditionsService {
     return (vpu: res.vpu!, conditions: res.conditions);
   }
 
+  /// Above-normal reaches among [stationIds] (the NWM reaches currently on
+  /// screen) as station-id -> category. Best-effort: empty on any failure.
+  Future<Map<int, int>> fetchNwmByStations(Iterable<int> stationIds) async {
+    if (stationIds.isEmpty) return const {};
+    final res = await _fetch(
+      AppConfig.getNwmConditionsUrl(stationIds),
+      'NWM (${stationIds.length} reaches)',
+    );
+    return res?.conditions ?? const {};
+  }
+
   Future<({int? vpu, Map<int, int> conditions})?> _fetch(
     String url,
     String label,

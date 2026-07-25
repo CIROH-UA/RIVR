@@ -506,13 +506,65 @@ class MapVectorTilesService {
   /// Reset the GEOGLOWS "outside the US" stream layers to their plain base color
   /// (used when the user turns condition coloring off).
   Future<void> clearGeoglowsConditions() async {
+    await _resetLineColor(_geoglowsWorldLayerIds, _geoglowsColor);
+  }
+
+  /// Up to [limit] station ids of NWM (US) reaches currently loaded in view —
+  /// the reaches to ask the backend to classify. Empty when no NWM streams are
+  /// on screen (e.g. outside the US, or zoomed too far out).
+  Future<List<int>> visibleNwmStationIds({int limit = 800}) async {
+    final map = _mapboxMap;
+    if (map == null) return const [];
+    try {
+      final feats = await map.querySourceFeatures(
+        AppConfig.vectorSourceId,
+        SourceQueryOptions(
+          sourceLayerIds: [AppConfig.vectorSourceLayer],
+          filter: '',
+        ),
+      );
+      final ids = <int>{};
+      for (final f in feats) {
+        final props = f?.queriedFeature.feature['properties'];
+        final sid = props is Map ? props['station_id'] : null;
+        if (sid is int) {
+          ids.add(sid);
+          if (ids.length >= limit) break;
+        }
+      }
+      return ids.toList();
+    } catch (e) {
+      AppLogger.warning(
+        'MapVectorTilesService',
+        'visibleNwmStationIds failed: $e',
+      );
+      return const [];
+    }
+  }
+
+  /// Paint the NWM (US) stream layers by flood condition.
+  Future<void> applyNwmConditions(Map<int, int> categoryByStationId) async {
+    if (categoryByStationId.isEmpty) return;
+    await applyConditionColors(
+      categoryByStationId,
+      layerIds: _nwmLayerIds,
+      baseColor: _streamColor,
+    );
+  }
+
+  /// Reset the NWM stream layers to their plain base color.
+  Future<void> clearNwmConditions() async {
+    await _resetLineColor(_nwmLayerIds, _streamColor);
+  }
+
+  Future<void> _resetLineColor(List<String> layerIds, int baseColor) async {
     if (_mapboxMap == null) return;
-    for (final layerId in _geoglowsWorldLayerIds) {
+    for (final layerId in layerIds) {
       try {
         await _mapboxMap!.style.setStyleLayerProperty(
           layerId,
           'line-color',
-          _hex(_geoglowsColor),
+          _hex(baseColor),
         );
       } catch (e) {
         // Layer might not exist yet, that's fine.

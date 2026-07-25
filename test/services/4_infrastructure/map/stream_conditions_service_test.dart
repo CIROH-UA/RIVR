@@ -91,4 +91,35 @@ void main() {
       expect(await svc.fetchByStation(5), isNull);
     });
   });
+
+  group('StreamConditionsService.fetchNwmByStations', () {
+    test('sends the visible reach ids and parses the conditions', () async {
+      final client = MockClient((req) async {
+        expect(req.url.toString(), contains('station_ids=3716996,24561403,101'));
+        return http.Response(
+          '{"date":"20260725","count":2,'
+          '"conditions":{"3716996":4,"24561403":1}}',
+          200,
+        );
+      });
+      final svc = StreamConditionsService(client: client);
+
+      final c = await svc.fetchNwmByStations([3716996, 24561403, 101]);
+
+      expect(c, {3716996: 4, 24561403: 1});
+    });
+
+    test('returns empty for an empty id list without hitting the network',
+        () async {
+      var called = false;
+      final client = MockClient((req) async {
+        called = true;
+        return http.Response('{}', 200);
+      });
+      final svc = StreamConditionsService(client: client);
+
+      expect(await svc.fetchNwmByStations(const []), isEmpty);
+      expect(called, isFalse);
+    });
+  });
 }
