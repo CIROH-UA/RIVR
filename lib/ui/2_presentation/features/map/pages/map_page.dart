@@ -1,5 +1,7 @@
 // lib/ui/2_presentation/features/map/pages/map_page.dart
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/ui/2_presentation/shared/widgets/navigation_button.dart';
@@ -22,6 +24,7 @@ import 'package:rivr/services/4_infrastructure/map/map_vector_tiles_service.dart
 import 'package:rivr/services/4_infrastructure/map/map_reach_selection_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_marker_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_service_factory.dart';
+import 'package:rivr/services/4_infrastructure/map/stream_conditions_service.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
@@ -38,6 +41,12 @@ class MapPageState extends State<MapPage> {
   late final MapReachSelectionService _reachSelectionService;
   late final MapMarkerService _markerService;
   late final MapControlsService _controlsService;
+  final StreamConditionsService _conditionsService = StreamConditionsService();
+
+  // Phase 1 POC: the VPU whose flood conditions pre-color the GEOGLOWS streams.
+  // 614 = the Piura, Peru region (our demo area). Phase 2 resolves this from the
+  // viewport and covers the globe.
+  static const int _kConditionsVpu = 614;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -67,6 +76,15 @@ class MapPageState extends State<MapPage> {
     _initializeCacheService();
     _loadSavedCamera();
     _loadStreamLayerPrefs();
+  }
+
+  /// Fetch the region's flood conditions and paint the GEOGLOWS streams by
+  /// category. Best-effort: on failure the streams simply stay their base color.
+  Future<void> _applyStreamConditions() async {
+    final conditions =
+        await _conditionsService.fetchConditions(_kConditionsVpu);
+    if (!mounted || conditions.isEmpty) return;
+    await _vectorTilesService.applyGeoglowsConditions(conditions);
   }
 
   /// Load the persisted stream-network toggles for the modal's initial state.
@@ -393,6 +411,11 @@ class MapPageState extends State<MapPage> {
         geoglowsWorld: streamLayers.geoglowsWorld,
         geoglowsUs: streamLayers.geoglowsUs,
       );
+
+      // Pre-color GEOGLOWS streams by current flood condition. Fetched off the
+      // critical path (the backend read can take up to ~90s cold) — streams
+      // render immediately and recolor when the conditions arrive.
+      unawaited(_applyStreamConditions());
 
       // Initialize markers on top of vector tiles (correct z-ordering)
       await _markerService.initializeMarkers(_mapboxMap!);

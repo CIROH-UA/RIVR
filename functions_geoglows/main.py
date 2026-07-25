@@ -18,6 +18,7 @@ Returns:   { river_id, forecast_date, units, source,
 import io
 import json
 import math
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -26,8 +27,26 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 import requests
+import s3fs
+import zarr
 from firebase_functions import https_fn, options
 import geoglows
+
+# GEOGLOWS open-data on S3 (anonymous). Daily global forecast (raw ensemble) and
+# the retrospective-derived Gumbel return periods share the same river ordering.
+_FORECAST_ZARR = "geoglows-v2-forecasts/{date}00.zarr"
+_RETURN_PERIODS_ZARR = "geoglows-v2/retrospective/return-periods.zarr"
+
+# Bundled VPU -> [i0, i1) slice into the (contiguous) river ordering, so we can
+# read one region's forecast + return periods without loading the 240 MB model
+# table at runtime. Generated offline from the model table; see git history.
+with open(os.path.join(os.path.dirname(__file__), "vpu_slices.json")) as _f:
+    _VPU_SLICES = json.load(_f)["slices"]
+
+# Return-period recurrence-year -> flood category index, matching the app's
+# FlowClassification (Action/Moderate/Major/Extreme at 2/5/10/25-yr). Higher
+# exceeded threshold wins. Reaches below the 2-yr stay "normal" (0, omitted).
+_RP_CATEGORY = [(25, 4), (10, 3), (5, 2), (2, 1)]
 
 UNITS = "m3/s"
 SOURCE = "GEOGLOWS RFS v2"
@@ -188,6 +207,112 @@ def geoglows_reach_coords(req: https_fn.Request) -> https_fn.Response:
         status=200,
         # Coordinates are static, so let clients/CDNs cache them for a long time.
         headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+# --- stream conditions (per-VPU flood category for map coloring) -------------
+
+_s3_lock = threading.Lock()
+_s3fs = None
+
+
+def _s3():
+    global _s3fs
+    if _s3fs is None:
+        with _s3_lock:
+            if _s3fs is None:
+                _s3fs = s3fs.S3FileSystem(anon=True)
+    return _s3fs
+
+
+def _forecast_date():
+    """Newest published daily forecast date (today, else yesterday)."""
+    fs = _s3()
+    today = datetime.now(timezone.utc).date()
+    for d in (today, today - timedelta(days=1)):
+        ds = d.strftime("%Y%m%d")
+        if fs.exists(_FORECAST_ZARR.format(date=ds) + "/.zmetadata"):
+            return ds
+    raise RuntimeError("no recent GEOGLOWS forecast published")
+
+
+@lru_cache(maxsize=256)
+def _conditions_for_vpu(vpu: str, date: str) -> str:
+    """Compute the above-normal reaches for one VPU on one forecast date.
+
+    Reads the region's forecast slice (raw ensemble) and its Gumbel return
+    periods, derives each reach's forecast peak (median over ensembles, max over
+    the horizon), classifies it against the return periods, and returns JSON of
+    only the elevated reaches: {station_id: categoryIndex}. Cached per (vpu,
+    date) — the heavy read runs once per day per region."""
+    slc = _VPU_SLICES.get(str(vpu))
+    if slc is None:
+        raise ValueError(f"unknown vpu {vpu}")
+    i0, i1 = slc
+    fs = _s3()
+
+    fz = zarr.open(s3fs.S3Map(_FORECAST_ZARR.format(date=date), s3=fs), mode="r")
+    rp = zarr.open(s3fs.S3Map(_RETURN_PERIODS_ZARR, s3=fs), mode="r")
+
+    rivids = fz["rivid"][i0:i1]
+    n = i1 - i0
+
+    # Forecast peak per reach, streamed in blocks to bound memory.
+    peak = np.empty(n, dtype="f4")
+    block = 4000
+    for s in range(0, n, block):
+        e = min(s + block, n)
+        q = fz["Qout"][:, :, i0 + s : i0 + e]  # [ensemble, time, block]
+        peak[s:e] = np.nanmax(np.median(q, axis=0), axis=0)
+
+    years = rp["return_period"][:].tolist()
+    row = {int(y): k for k, y in enumerate(years)}
+    gum = rp["gumbel"][:, i0:i1]  # [return_period, n]
+
+    conditions = {}
+    for i in range(n):
+        p = peak[i]
+        for year, cat in _RP_CATEGORY:  # highest exceeded wins
+            if p >= gum[row[year], i]:
+                conditions[str(int(rivids[i]))] = cat
+                break
+
+    return json.dumps(
+        {"vpu": int(vpu), "date": date, "count": len(conditions), "conditions": conditions}
+    )
+
+
+@https_fn.on_request(
+    region="us-west1",  # next to the GEOGLOWS S3 buckets (us-west-2)
+    memory=options.MemoryOption.GB_4,  # blockwise read keeps well under this
+    timeout_sec=180,
+    # Scale to zero. First call per (vpu, date) reads ~1-3 GB of forecast from S3
+    # (~15-30s) then caches the tiny elevated-reach blob; later calls are
+    # instant. The app fetches conditions asynchronously and colors streams when
+    # they arrive, so this latency never blocks the map.
+)
+def geoglows_stream_conditions(req: https_fn.Request) -> https_fn.Response:
+    vpu = req.args.get("vpu")
+    if not vpu:
+        return https_fn.Response(
+            json.dumps({"error": "missing vpu"}), status=400, headers=_JSON_HEADERS
+        )
+    if str(vpu) not in _VPU_SLICES:
+        return https_fn.Response(
+            json.dumps({"error": f"unknown vpu {vpu}"}), status=404, headers=_JSON_HEADERS
+        )
+    try:
+        date = _forecast_date()
+        payload = _conditions_for_vpu(str(vpu), date)
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"{type(e).__name__}: {e}"}), status=502, headers=_JSON_HEADERS
+        )
+    # Conditions change once daily; let clients cache for a few hours.
+    return https_fn.Response(
+        payload,
+        status=200,
+        headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=10800"},
     )
 
 

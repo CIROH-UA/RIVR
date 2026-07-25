@@ -460,6 +460,21 @@ class MapVectorTilesService {
     }
   }
 
+  /// Paint the GEOGLOWS "outside the US" stream layers by flood condition —
+  /// [categoryByStationId] maps a reach's station id to a category (1..4), from
+  /// [StreamConditionsService]. Above-normal reaches show their category color;
+  /// everything else keeps the base GEOGLOWS teal. Safe to call repeatedly.
+  Future<void> applyGeoglowsConditions(
+    Map<int, int> categoryByStationId,
+  ) async {
+    if (categoryByStationId.isEmpty) return;
+    await applyConditionColors(
+      categoryByStationId,
+      layerIds: _geoglowsWorldLayerIds,
+      baseColor: _geoglowsColor,
+    );
+  }
+
   /// Remove existing vector source and layers to avoid conflicts
   Future<void> _removeExistingLayers() async {
     try {

@@ -37,6 +37,14 @@ class AppConfig {
   static String getGeoglowsCoordsUrl(String riverId) =>
       '$geoglowsCoordsUrl?river_id=$riverId';
 
+  // GEOGLOWS stream-conditions proxy — a Cloud Function that returns the
+  // above-normal reaches for a VPU as {station_id: floodCategory}, computed from
+  // the daily forecast peak vs return periods. Used to pre-color map streams.
+  static const String geoglowsConditionsUrl =
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_stream_conditions';
+  static String getGeoglowsConditionsUrl(int vpu) =>
+      '$geoglowsConditionsUrl?vpu=$vpu';
+
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';
   static const String mapboxSearchApiUrl =
