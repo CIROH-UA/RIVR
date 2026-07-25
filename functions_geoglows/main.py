@@ -215,6 +215,37 @@ def geoglows_reach_coords(req: https_fn.Request) -> https_fn.Response:
 _s3_lock = threading.Lock()
 _s3fs = None
 
+# LINKNO-sorted (station id -> VPU code) index, so the map can resolve which VPU
+# a visible reach belongs to from a single station id (exact — no spatial
+# guesswork). Lazily loaded from the metadata table, cached per instance.
+_linkno_vpu_lock = threading.Lock()
+_linkno_vpu = None  # (ids_sorted[int64], vpu[int64]) or None
+
+
+def _load_linkno_vpu():
+    global _linkno_vpu
+    if _linkno_vpu is not None:
+        return _linkno_vpu
+    with _linkno_vpu_lock:
+        if _linkno_vpu is not None:
+            return _linkno_vpu
+        raw = requests.get(_METADATA_URL, timeout=90).content
+        df = pd.read_parquet(io.BytesIO(raw), columns=["LINKNO", "VPUCode"])
+        ids = df["LINKNO"].to_numpy()
+        vpu = df["VPUCode"].to_numpy()
+        del df, raw
+        order = np.argsort(ids, kind="stable")
+        _linkno_vpu = (ids[order], vpu[order])
+        return _linkno_vpu
+
+
+def _vpu_for_station(station_id: int):
+    ids, vpu = _load_linkno_vpu()
+    i = int(np.searchsorted(ids, station_id))
+    if 0 <= i < len(ids) and int(ids[i]) == station_id:
+        return int(vpu[i])
+    return None
+
 
 def _s3():
     global _s3fs
@@ -292,10 +323,28 @@ def _conditions_for_vpu(vpu: str, date: str) -> str:
     # they arrive, so this latency never blocks the map.
 )
 def geoglows_stream_conditions(req: https_fn.Request) -> https_fn.Response:
+    # Resolve the target VPU either directly (?vpu=) or from a reach the client
+    # can see (?station_id=) — the latter lets the map color whatever region is
+    # on screen without knowing VPU boundaries.
     vpu = req.args.get("vpu")
+    station_id = req.args.get("station_id")
+    if not vpu and station_id:
+        try:
+            vpu = _vpu_for_station(int(station_id))
+        except ValueError:
+            return https_fn.Response(
+                json.dumps({"error": "station_id must be an integer"}),
+                status=400, headers=_JSON_HEADERS,
+            )
+        if vpu is None:
+            return https_fn.Response(
+                json.dumps({"error": f"unknown station_id {station_id}"}),
+                status=404, headers=_JSON_HEADERS,
+            )
     if not vpu:
         return https_fn.Response(
-            json.dumps({"error": "missing vpu"}), status=400, headers=_JSON_HEADERS
+            json.dumps({"error": "missing vpu or station_id"}),
+            status=400, headers=_JSON_HEADERS,
         )
     if str(vpu) not in _VPU_SLICES:
         return https_fn.Response(

@@ -52,4 +52,43 @@ void main() {
       expect(await svc.fetchConditions(614), {670004548: 4, 670002503: 3});
     });
   });
+
+  group('StreamConditionsService.fetchByStation', () {
+    test('resolves the region from a station id and returns vpu + conditions',
+        () async {
+      final client = MockClient((req) async {
+        expect(req.url.toString(), contains('station_id=670008640'));
+        return http.Response(
+          '{"vpu":614,"date":"20260724","count":2,'
+          '"conditions":{"670008640":4,"670005194":1}}',
+          200,
+        );
+      });
+      final svc = StreamConditionsService(client: client);
+
+      final res = await svc.fetchByStation(670008640);
+
+      expect(res, isNotNull);
+      expect(res!.vpu, 614);
+      expect(res.conditions, {670008640: 4, 670005194: 1});
+    });
+
+    test('returns null when the reach is not found', () async {
+      final client = MockClient(
+        (req) async => http.Response('{"error":"unknown station_id 1"}', 404),
+      );
+      final svc = StreamConditionsService(client: client);
+
+      expect(await svc.fetchByStation(1), isNull);
+    });
+
+    test('returns null when the response omits the vpu', () async {
+      final client = MockClient(
+        (req) async => http.Response('{"conditions":{"5":2}}', 200),
+      );
+      final svc = StreamConditionsService(client: client);
+
+      expect(await svc.fetchByStation(5), isNull);
+    });
+  });
 }

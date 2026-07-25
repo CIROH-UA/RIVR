@@ -44,6 +44,10 @@ class AppConfig {
       'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_stream_conditions';
   static String getGeoglowsConditionsUrl(int vpu) =>
       '$geoglowsConditionsUrl?vpu=$vpu';
+  // Resolve the region from a visible reach — the backend maps the station id to
+  // its VPU, so the map can color whatever's on screen without knowing borders.
+  static String getGeoglowsConditionsByStationUrl(int stationId) =>
+      '$geoglowsConditionsUrl?station_id=$stationId';
 
   // Mapbox Configuration
   static const String mapboxPublicToken = 'INSERT-THE-KEY';

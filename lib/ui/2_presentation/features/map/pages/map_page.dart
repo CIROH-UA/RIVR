@@ -43,10 +43,15 @@ class MapPageState extends State<MapPage> {
   late final MapControlsService _controlsService;
   final StreamConditionsService _conditionsService = StreamConditionsService();
 
-  // Phase 1 POC: the VPU whose flood conditions pre-color the GEOGLOWS streams.
-  // 614 = the Piura, Peru region (our demo area). Phase 2 resolves this from the
-  // viewport and covers the globe.
-  static const int _kConditionsVpu = 614;
+  // Flood-condition coloring, resolved from whatever region is on screen.
+  // [_appliedConditions] accumulates station-id -> category across the VPUs the
+  // user visits (so panning back keeps colors); [_appliedVpus] tracks which
+  // regions we've already fetched; [_stationVpu] caches a reach -> VPU so a
+  // known reach never triggers a second lookup.
+  final Map<int, int> _appliedConditions = {};
+  final Set<int> _appliedVpus = {};
+  final Map<int, int> _stationVpu = {};
+  bool _conditionsInFlight = false;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -78,13 +83,38 @@ class MapPageState extends State<MapPage> {
     _loadStreamLayerPrefs();
   }
 
-  /// Fetch the region's flood conditions and paint the GEOGLOWS streams by
-  /// category. Best-effort: on failure the streams simply stay their base color.
-  Future<void> _applyStreamConditions() async {
-    final conditions =
-        await _conditionsService.fetchConditions(_kConditionsVpu);
-    if (!mounted || conditions.isEmpty) return;
-    await _vectorTilesService.applyGeoglowsConditions(conditions);
+  /// Re-apply any colors we've already computed (a style reload wipes the
+  /// layers), then fetch conditions for whatever region is now on screen.
+  Future<void> _refreshConditionsAfterLoad() async {
+    if (_appliedConditions.isNotEmpty) {
+      await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
+    }
+    await _maybeColorVisibleRegion();
+  }
+
+  /// Color the region currently on screen: resolve its VPU from a visible reach,
+  /// fetch that region's flood conditions once, and paint them. Accumulates
+  /// across regions so revisiting is instant. Best-effort — silent on failure.
+  Future<void> _maybeColorVisibleRegion() async {
+    if (_conditionsInFlight) return;
+    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId();
+    if (sid == null || !mounted) return;
+
+    // Already know this reach's region and have it painted? Nothing to do.
+    final knownVpu = _stationVpu[sid];
+    if (knownVpu != null && _appliedVpus.contains(knownVpu)) return;
+
+    _conditionsInFlight = true;
+    try {
+      final res = await _conditionsService.fetchByStation(sid);
+      if (res == null || !mounted) return;
+      _stationVpu[sid] = res.vpu;
+      if (!_appliedVpus.add(res.vpu)) return; // region already applied
+      _appliedConditions.addAll(res.conditions);
+      await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
+    } finally {
+      _conditionsInFlight = false;
+    }
   }
 
   /// Load the persisted stream-network toggles for the modal's initial state.
@@ -270,6 +300,9 @@ class MapPageState extends State<MapPage> {
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
     _reconcileZoomState();
+    // Color the region the user just settled on (no-op if already colored or
+    // no GEOGLOWS streams are in view).
+    unawaited(_maybeColorVisibleRegion());
   }
 
   /// Hide streams (and surface the hint) when zoomed out past the usable range;
@@ -415,7 +448,7 @@ class MapPageState extends State<MapPage> {
       // Pre-color GEOGLOWS streams by current flood condition. Fetched off the
       // critical path (the backend read can take up to ~90s cold) — streams
       // render immediately and recolor when the conditions arrive.
-      unawaited(_applyStreamConditions());
+      unawaited(_refreshConditionsAfterLoad());
 
       // Initialize markers on top of vector tiles (correct z-ordering)
       await _markerService.initializeMarkers(_mapboxMap!);

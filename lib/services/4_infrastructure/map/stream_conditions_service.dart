@@ -26,19 +26,39 @@ class StreamConditionsService {
   /// Best-effort: returns an empty map on any failure so the map simply stays
   /// uncolored rather than erroring.
   Future<Map<int, int>> fetchConditions(int vpu) async {
-    final url = AppConfig.getGeoglowsConditionsUrl(vpu);
+    final res = await _fetch(AppConfig.getGeoglowsConditionsUrl(vpu), 'VPU $vpu');
+    return res?.conditions ?? const {};
+  }
+
+  /// Resolve the region from a reach the client can see and return its VPU +
+  /// above-normal reaches. Lets the map color whatever's on screen without
+  /// knowing VPU boundaries. Null on failure (best-effort).
+  Future<({int vpu, Map<int, int> conditions})?> fetchByStation(
+    int stationId,
+  ) async {
+    final res = await _fetch(
+      AppConfig.getGeoglowsConditionsByStationUrl(stationId),
+      'station $stationId',
+    );
+    if (res == null || res.vpu == null) return null;
+    return (vpu: res.vpu!, conditions: res.conditions);
+  }
+
+  Future<({int? vpu, Map<int, int> conditions})?> _fetch(
+    String url,
+    String label,
+  ) async {
     try {
-      final res =
-          await _client.get(Uri.parse(url)).timeout(_timeout);
+      final res = await _client.get(Uri.parse(url)).timeout(_timeout);
       if (res.statusCode != 200) {
         AppLogger.warning(
           'StreamConditions',
-          'VPU $vpu returned ${res.statusCode}: ${res.body}',
+          '$label returned ${res.statusCode}: ${res.body}',
         );
-        return const {};
+        return null;
       }
       final decoded = jsonDecode(res.body);
-      if (decoded is! Map || decoded['conditions'] is! Map) return const {};
+      if (decoded is! Map || decoded['conditions'] is! Map) return null;
 
       final out = <int, int>{};
       (decoded['conditions'] as Map).forEach((k, v) {
@@ -46,14 +66,18 @@ class StreamConditionsService {
         final cat = v is int ? v : int.tryParse(v.toString());
         if (id != null && cat != null) out[id] = cat;
       });
+      final vpu = decoded['vpu'];
       AppLogger.info(
         'StreamConditions',
-        'VPU $vpu: ${out.length} above-normal reaches',
+        '$label: ${out.length} above-normal reaches (vpu ${decoded['vpu']})',
       );
-      return out;
+      return (
+        vpu: vpu is int ? vpu : int.tryParse('${vpu ?? ''}'),
+        conditions: out,
+      );
     } catch (e) {
-      AppLogger.warning('StreamConditions', 'Fetch failed for VPU $vpu: $e');
-      return const {};
+      AppLogger.warning('StreamConditions', 'Fetch failed for $label: $e');
+      return null;
     }
   }
 }

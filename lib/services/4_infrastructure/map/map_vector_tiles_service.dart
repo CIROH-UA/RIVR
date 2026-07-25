@@ -460,6 +460,34 @@ class MapVectorTilesService {
     }
   }
 
+  /// The station id of some GEOGLOWS reach currently loaded in view — used to
+  /// resolve which region (VPU) to fetch conditions for. Null when no GEOGLOWS
+  /// streams are on screen (e.g. inside the US, or zoomed too far out).
+  Future<int?> firstVisibleGeoglowsStationId() async {
+    final map = _mapboxMap;
+    if (map == null) return null;
+    try {
+      final feats = await map.querySourceFeatures(
+        AppConfig.geoglowsSourceId,
+        SourceQueryOptions(
+          sourceLayerIds: [AppConfig.geoglowsSourceLayer],
+          filter: '',
+        ),
+      );
+      for (final f in feats) {
+        final props = f?.queriedFeature.feature['properties'];
+        final sid = props is Map ? props['station_id'] : null;
+        if (sid is int) return sid;
+      }
+    } catch (e) {
+      AppLogger.warning(
+        'MapVectorTilesService',
+        'firstVisibleGeoglowsStationId failed: $e',
+      );
+    }
+    return null;
+  }
+
   /// Paint the GEOGLOWS "outside the US" stream layers by flood condition —
   /// [categoryByStationId] maps a reach's station id to a category (1..4), from
   /// [StreamConditionsService]. Above-normal reaches show their category color;
