@@ -9,11 +9,15 @@ import 'package:rivr/services/4_infrastructure/map/map_preference_service.dart';
 class StreamSourceModal extends StatefulWidget {
   final StreamLayerVisibility initial;
   final ValueChanged<StreamLayerVisibility> onChanged;
+  final bool colorByCondition;
+  final ValueChanged<bool> onColorByConditionChanged;
 
   const StreamSourceModal({
     super.key,
     required this.initial,
     required this.onChanged,
+    required this.colorByCondition,
+    required this.onColorByConditionChanged,
   });
 
   @override
@@ -22,6 +26,7 @@ class StreamSourceModal extends StatefulWidget {
 
 class _StreamSourceModalState extends State<StreamSourceModal> {
   late StreamLayerVisibility _layers = widget.initial;
+  late bool _colorByCondition = widget.colorByCondition;
 
   // Match the on-map stream colors so a row reads as its layer.
   static const Color _nwmColor = Color(0xFF191970); // Midnight blue
@@ -76,6 +81,37 @@ class _StreamSourceModalState extends State<StreamSourceModal> {
               value: _layers.geoglowsUs,
               onChanged: (v) => _update(_layers.copyWith(geoglowsUs: v)),
             ),
+            Container(
+              height: 0.5,
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: CupertinoColors.separator.resolveFrom(context),
+            ),
+            CupertinoListTile(
+              leading: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFFFFC400),
+                      Color(0xFFFF8C00),
+                      Color(0xFFE53935),
+                      Color(0xFF8E24AA),
+                    ],
+                  ),
+                ),
+              ),
+              title: const Text('Color by flood risk'),
+              subtitle: const Text('Highlight above-normal rivers'),
+              trailing: CupertinoSwitch(
+                value: _colorByCondition,
+                onChanged: (v) {
+                  setState(() => _colorByCondition = v);
+                  widget.onColorByConditionChanged(v);
+                },
+              ),
+            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -109,11 +145,18 @@ void showStreamSourceModal(
   BuildContext context, {
   required StreamLayerVisibility initial,
   required ValueChanged<StreamLayerVisibility> onChanged,
+  required bool colorByCondition,
+  required ValueChanged<bool> onColorByConditionChanged,
 }) {
   showCupertinoModalPopup<void>(
     context: context,
     builder: (BuildContext context) {
-      return StreamSourceModal(initial: initial, onChanged: onChanged);
+      return StreamSourceModal(
+        initial: initial,
+        onChanged: onChanged,
+        colorByCondition: colorByCondition,
+        onColorByConditionChanged: onColorByConditionChanged,
+      );
     },
   );
 }

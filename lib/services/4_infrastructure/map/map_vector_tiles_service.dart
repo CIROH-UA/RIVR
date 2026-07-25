@@ -503,6 +503,23 @@ class MapVectorTilesService {
     );
   }
 
+  /// Reset the GEOGLOWS "outside the US" stream layers to their plain base color
+  /// (used when the user turns condition coloring off).
+  Future<void> clearGeoglowsConditions() async {
+    if (_mapboxMap == null) return;
+    for (final layerId in _geoglowsWorldLayerIds) {
+      try {
+        await _mapboxMap!.style.setStyleLayerProperty(
+          layerId,
+          'line-color',
+          _hex(_geoglowsColor),
+        );
+      } catch (e) {
+        // Layer might not exist yet, that's fine.
+      }
+    }
+  }
+
   /// Remove existing vector source and layers to avoid conflicts
   Future<void> _removeExistingLayers() async {
     try {

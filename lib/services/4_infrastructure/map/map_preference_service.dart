@@ -147,6 +147,21 @@ class MapPreferenceService {
     await prefs.setBool(_geoglowsUsVisibleKey, layers.geoglowsUs);
   }
 
+  /// Whether to pre-color streams by current flood condition. Defaults to on so
+  /// the map surfaces above-normal rivers without the user opting in.
+  static const String _colorByConditionKey = 'stream_color_by_condition';
+  static const bool colorByConditionDefault = true;
+
+  static Future<bool> loadColorByCondition() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_colorByConditionKey) ?? colorByConditionDefault;
+  }
+
+  static Future<void> saveColorByCondition(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_colorByConditionKey, enabled);
+  }
+
   /// Reset all map preferences to defaults
   static Future<void> resetToDefaults() async {
     final prefs = await SharedPreferences.getInstance();

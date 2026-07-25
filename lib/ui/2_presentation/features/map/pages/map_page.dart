@@ -25,6 +25,7 @@ import 'package:rivr/services/4_infrastructure/map/map_reach_selection_service.d
 import 'package:rivr/services/4_infrastructure/map/map_marker_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_service_factory.dart';
 import 'package:rivr/services/4_infrastructure/map/stream_conditions_service.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
@@ -52,6 +53,7 @@ class MapPageState extends State<MapPage> {
   final Set<int> _appliedVpus = {};
   final Map<int, int> _stationVpu = {};
   bool _conditionsInFlight = false;
+  bool _colorByCondition = MapPreferenceService.colorByConditionDefault;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -86,17 +88,33 @@ class MapPageState extends State<MapPage> {
   /// Re-apply any colors we've already computed (a style reload wipes the
   /// layers), then fetch conditions for whatever region is now on screen.
   Future<void> _refreshConditionsAfterLoad() async {
+    if (!_colorByCondition) return;
     if (_appliedConditions.isNotEmpty) {
       await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
     }
     await _maybeColorVisibleRegion();
   }
 
+  /// Turn condition coloring on/off — persist the choice, then either paint the
+  /// current region or reset the streams to their base color.
+  Future<void> _setColorByCondition(bool enabled) async {
+    setState(() => _colorByCondition = enabled);
+    await MapPreferenceService.saveColorByCondition(enabled);
+    if (enabled) {
+      if (_appliedConditions.isNotEmpty) {
+        await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
+      }
+      await _maybeColorVisibleRegion();
+    } else {
+      await _vectorTilesService.clearGeoglowsConditions();
+    }
+  }
+
   /// Color the region currently on screen: resolve its VPU from a visible reach,
   /// fetch that region's flood conditions once, and paint them. Accumulates
   /// across regions so revisiting is instant. Best-effort — silent on failure.
   Future<void> _maybeColorVisibleRegion() async {
-    if (_conditionsInFlight) return;
+    if (!_colorByCondition || _conditionsInFlight) return;
     final sid = await _vectorTilesService.firstVisibleGeoglowsStationId();
     if (sid == null || !mounted) return;
 
@@ -121,7 +139,13 @@ class MapPageState extends State<MapPage> {
   /// The authoritative apply-to-map happens in [_loadLayersAfterStyleReady].
   Future<void> _loadStreamLayerPrefs() async {
     final layers = await MapPreferenceService.loadStreamLayers();
-    if (mounted) setState(() => _streamLayers = layers);
+    final colorByCondition = await MapPreferenceService.loadColorByCondition();
+    if (mounted) {
+      setState(() {
+        _streamLayers = layers;
+        _colorByCondition = colorByCondition;
+      });
+    }
   }
 
   /// Load last camera position from storage before first build
@@ -213,6 +237,15 @@ class MapPageState extends State<MapPage> {
             ),
           ),
         ),
+
+        // Flood-risk color key — shown while coloring is on and streams are in
+        // range. Positioned above the search bar, out of the controls' way.
+        if (_colorByCondition && !_showZoomHint)
+          Positioned(
+            left: 16,
+            bottom: 96,
+            child: SafeArea(child: const ConditionLegend()),
+          ),
 
         // "Zoom in" hint shown while the map is too far out to see/tap streams.
         Positioned.fill(
@@ -512,6 +545,8 @@ class MapPageState extends State<MapPage> {
     showStreamSourceModal(
       context,
       initial: _streamLayers,
+      colorByCondition: _colorByCondition,
+      onColorByConditionChanged: _setColorByCondition,
       onChanged: (layers) async {
         setState(() => _streamLayers = layers);
         await _vectorTilesService.applyStreamVisibility(
