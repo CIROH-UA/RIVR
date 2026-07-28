@@ -464,19 +464,39 @@ class MapVectorTilesService {
     }
   }
 
-  /// The station id of some GEOGLOWS reach currently loaded in view — used to
-  /// resolve which region (VPU) to fetch conditions for. Null when no GEOGLOWS
-  /// streams are on screen (e.g. inside the US, or zoomed too far out).
+  /// Side of the centered screen box used to find one on-screen GEOGLOWS reach.
+  /// Small on purpose — see [firstVisibleGeoglowsStationId].
+  static const double _probeBoxSide = 160;
+
+  /// The station id of some GEOGLOWS reach on screen — used to resolve which
+  /// region (VPU) to fetch conditions for. Null when nothing is under the
+  /// probe (e.g. inside the US, or open ocean at the center of the map).
+  ///
+  /// This deliberately uses a *rendered* query over a small box at the center
+  /// rather than a source query. `querySourceFeatures` returns every feature in
+  /// every loaded tile and serializes the lot across the platform channel —
+  /// fine at a city zoom (~23-36 reaches), but it grows without bound as you
+  /// zoom out and was the main cost of drawing streams at low zoom. We only
+  /// ever need *one* reach to identify the region, so a small bounded probe is
+  /// enough. A miss just means no new region resolves this idle; the next pan
+  /// or zoom retries, and callers already handle null.
   Future<int?> firstVisibleGeoglowsStationId() async {
     final map = _mapboxMap;
     if (map == null) return null;
     try {
-      final feats = await map.querySourceFeatures(
-        AppConfig.geoglowsSourceId,
-        SourceQueryOptions(
-          sourceLayerIds: [AppConfig.geoglowsSourceLayer],
-          filter: '',
+      final size = await map.getSize();
+      final cx = size.width / 2;
+      final cy = size.height / 2;
+      final half = _probeBoxSide / 2;
+
+      final feats = await map.queryRenderedFeatures(
+        RenderedQueryGeometry.fromScreenBox(
+          ScreenBox(
+            min: ScreenCoordinate(x: cx - half, y: cy - half),
+            max: ScreenCoordinate(x: cx + half, y: cy + half),
+          ),
         ),
+        RenderedQueryOptions(layerIds: _geoglowsWorldLayerIds),
       );
       for (final f in feats) {
         final props = f?.queriedFeature.feature['properties'];

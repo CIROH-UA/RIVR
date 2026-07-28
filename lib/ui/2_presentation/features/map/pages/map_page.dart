@@ -108,8 +108,19 @@ class MapPageState extends State<MapPage> {
 
   /// Color the NWM (US) reaches on screen by flood condition: classify only the
   /// ones we haven't seen yet, accumulate, and paint. Best-effort.
+  ///
+  /// Skipped when zoomed out past [AppConfig.minZoomForVectorTiles]. NWM
+  /// coloring is per-reach and capped at 800 ids per pass — against 2.78M
+  /// reaches that can't meaningfully fill a regional view, so out there it is
+  /// all cost (a large source query, an 800-id round trip, and a re-encode of
+  /// an ever-growing match expression) for no visible payoff. GEOGLOWS keeps
+  /// running at every zoom because it resolves a whole VPU at once.
   Future<void> _maybeColorVisibleNwm() async {
     if (!_colorByCondition || _nwmInFlight) return;
+
+    final zoom = await _vectorTilesService.getCurrentZoom();
+    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) return;
+
     final ids = await _vectorTilesService.visibleNwmStationIds();
     final unresolved =
         ids.where((id) => !_resolvedNwmIds.contains(id)).toList();
