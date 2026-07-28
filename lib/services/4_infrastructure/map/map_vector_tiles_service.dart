@@ -13,8 +13,11 @@ class MapVectorTilesService {
   MapboxMap? _mapboxMap;
   bool _isLoaded = false;
 
-  static const int _streamColor = 0xFF191970; // Midnight blue (NWM)
-  static const int _geoglowsColor = 0xFF1E88A8; // Brand teal (GEOGLOWS)
+  /// The base color of a normal (not above-normal) reach. Deliberately shared
+  /// by NWM and GEOGLOWS: the flood-risk legend describes conditions, not data
+  /// sources, so "Normal" has to look the same whichever network drew the line.
+  /// Source is still distinguishable in the Stream Data sheet and on tap.
+  static const int _streamColor = 0xFF191970; // Midnight blue
 
   /// NWM stream layer ids (US only, by the tileset's own extent).
   static const List<String> _nwmLayerIds = [
@@ -295,8 +298,9 @@ class MapVectorTilesService {
   }
 
   /// Add the GEOGLOWS vector source + stream-order layers (global rivers).
-  /// Mirrors the NWM layer styling but with the brand-teal color and
-  /// `geoglows-*` layer ids that drive source-routing on tap.
+  /// Mirrors the NWM layer styling — same base [_streamColor], so normal
+  /// reaches look identical across sources — with `geoglows-*` layer ids that
+  /// drive source-routing on tap.
   Future<void> _addGeoglowsSourceAndLayers() async {
     try {
       await _mapboxMap!.style.addSource(
@@ -311,7 +315,7 @@ class MapVectorTilesService {
           id: 'geoglows-order-1-2',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 1.0,
           lineOpacity: 0.8,
           filter: _outsideUs(["<=", ["get", "streamOrder"], 2]),
@@ -322,7 +326,7 @@ class MapVectorTilesService {
           id: 'geoglows-order-3-4',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 2.0,
           lineOpacity: 0.8,
           filter: _outsideUs([
@@ -337,7 +341,7 @@ class MapVectorTilesService {
           id: 'geoglows-order-5-plus',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 3.5,
           lineOpacity: 0.9,
           filter: _outsideUs([">=", ["get", "streamOrder"], 5]),
@@ -351,7 +355,7 @@ class MapVectorTilesService {
           id: 'geoglows-us-order-1-2',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 1.0,
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
@@ -363,7 +367,7 @@ class MapVectorTilesService {
           id: 'geoglows-us-order-3-4',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 2.0,
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
@@ -379,7 +383,7 @@ class MapVectorTilesService {
           id: 'geoglows-us-order-5-plus',
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
-          lineColor: _geoglowsColor,
+          lineColor: _streamColor,
           lineWidth: 3.5,
           lineOpacity: 0.9,
           visibility: Visibility.NONE,
@@ -491,7 +495,7 @@ class MapVectorTilesService {
   /// Paint the GEOGLOWS "outside the US" stream layers by flood condition —
   /// [categoryByStationId] maps a reach's station id to a category (1..4), from
   /// [StreamConditionsService]. Above-normal reaches show their category color;
-  /// everything else keeps the base GEOGLOWS teal. Safe to call repeatedly.
+  /// everything else keeps the shared base color. Safe to call repeatedly.
   Future<void> applyGeoglowsConditions(
     Map<int, int> categoryByStationId,
   ) async {
@@ -499,14 +503,14 @@ class MapVectorTilesService {
     await applyConditionColors(
       categoryByStationId,
       layerIds: _geoglowsWorldLayerIds,
-      baseColor: _geoglowsColor,
+      baseColor: _streamColor,
     );
   }
 
   /// Reset the GEOGLOWS "outside the US" stream layers to their plain base color
   /// (used when the user turns condition coloring off).
   Future<void> clearGeoglowsConditions() async {
-    await _resetLineColor(_geoglowsWorldLayerIds, _geoglowsColor);
+    await _resetLineColor(_geoglowsWorldLayerIds, _streamColor);
   }
 
   /// Up to [limit] station ids of NWM (US) reaches currently loaded in view —

@@ -28,9 +28,10 @@ class _StreamSourceModalState extends State<StreamSourceModal> {
   late StreamLayerVisibility _layers = widget.initial;
   late bool _colorByCondition = widget.colorByCondition;
 
-  // Match the on-map stream colors so a row reads as its layer.
-  static const Color _nwmColor = Color(0xFF191970); // Midnight blue
-  static const Color _geoglowsColor = Color(0xFF1E88A8); // Brand teal
+  // The on-map stream color. Shared by both networks now — normal reaches read
+  // the same whichever source drew them — so these dots no longer distinguish
+  // NWM from GEOGLOWS; the row labels do.
+  static const Color _streamColor = Color(0xFF191970); // Midnight blue
 
   void _update(StreamLayerVisibility next) {
     setState(() => _layers = next);
@@ -59,7 +60,7 @@ class _StreamSourceModalState extends State<StreamSourceModal> {
             ),
             _row(
               context,
-              color: _nwmColor,
+              color: _streamColor,
               title: 'NWM (US)',
               subtitle: 'National Water Model',
               value: _layers.nwm,
@@ -67,7 +68,7 @@ class _StreamSourceModalState extends State<StreamSourceModal> {
             ),
             _row(
               context,
-              color: _geoglowsColor,
+              color: _streamColor,
               title: 'GEOGLOWS · outside US',
               subtitle: 'Global rivers beyond the US',
               value: _layers.geoglowsWorld,
@@ -75,7 +76,7 @@ class _StreamSourceModalState extends State<StreamSourceModal> {
             ),
             _row(
               context,
-              color: _geoglowsColor,
+              color: _streamColor,
               title: 'GEOGLOWS · US area',
               subtitle: 'Overlaps NWM — for comparison',
               value: _layers.geoglowsUs,
