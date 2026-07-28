@@ -617,32 +617,15 @@ class MapVectorTilesService {
     }
   }
 
-  /// Update layer visibility based on zoom level
-  /// Called when zoom changes to optimize performance
-  Future<void> updateVisibilityForZoom(double zoom) async {
-    if (!_isLoaded || _mapboxMap == null) return;
-
-    try {
-      // Hide streams only when zoomed out past the point where the tileset's
-      // geometry is usable (renders as dots and can't be tapped). We gate the
-      // low end only — zooming in never hides streams. Effective visibility is
-      // (zoomed in enough) AND (user hasn't disabled the layer), so zoom gating
-      // never turns a user-disabled layer back on.
-      final shouldShow = zoom >= AppConfig.minZoomForVectorTiles;
-
-      await _setLayerGroupVisibility(_nwmLayerIds, shouldShow && _nwmVisible);
-      await _setLayerGroupVisibility(
-        _geoglowsWorldLayerIds,
-        shouldShow && _geoglowsWorldVisible,
-      );
-      await _setLayerGroupVisibility(
-        _geoglowsUsLayerIds,
-        shouldShow && _geoglowsUsVisible,
-      );
-    } catch (e) {
-      AppLogger.error('MapVectorTilesService', 'Error updating layer visibility', e);
-    }
-  }
+  // Stream visibility is no longer zoom-dependent. It used to be: streams were
+  // hidden below AppConfig.minZoomForVectorTiles because the tileset's
+  // low-zoom geometry renders as dots and can't be reliably tapped. But that
+  // conflated two separate problems — "you can't tap this" and "you shouldn't
+  // see this" — and hiding the streams also hid the flood-risk coloring at
+  // exactly the scale where a regional view is most useful. Tappability is now
+  // gated on its own in MapPage._onMapTap; rendering is purely the per-network
+  // toggles. Both tilesets serve geometry far below that threshold (NWM z0-16,
+  // GEOGLOWS z3-12), so there is real geometry to draw out there.
 
   /// Get current zoom level from map
   Future<double?> getCurrentZoom() async {

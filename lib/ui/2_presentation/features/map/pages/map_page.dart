@@ -65,11 +65,12 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
 
-  // True when the map is zoomed out past the point where stream geometry is
-  // usable (below AppConfig.minZoomForVectorTiles). Below this the tileset
-  // serves over-simplified geometry that renders as dots and can't be reliably
-  // tapped, so we hide the streams and show a "zoom in" hint instead.
+  // Momentary "zoom in to tap rivers" hint. Below AppConfig.minZoomForVector-
+  // Tiles the tileset serves over-simplified geometry that can't be reliably
+  // tapped — the streams still render (and still carry their flood coloring),
+  // so this only fires when a tap out there actually can't be resolved.
   bool _showZoomHint = false;
+  Timer? _zoomHintTimer;
 
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
@@ -198,6 +199,7 @@ class MapPageState extends State<MapPage> {
   @override
   void dispose() {
     // Save camera position before tearing down (fire-and-forget)
+    _zoomHintTimer?.cancel();
     _controlsService.saveLastCameraPosition();
     _vectorTilesService.dispose();
     _markerService.dispose();
@@ -277,9 +279,10 @@ class MapPageState extends State<MapPage> {
           ),
         ),
 
-        // Flood-risk color key — shown while coloring is on and streams are in
-        // range. Positioned above the search bar, out of the controls' way.
-        if (_colorByCondition && !_showZoomHint)
+        // Flood-risk color key — shown whenever coloring is on. Streams render
+        // at every zoom now, so this stays up when zoomed out too, where the
+        // regional GEOGLOWS coloring is most worth explaining.
+        if (_colorByCondition)
           Positioned(
             left: 16,
             bottom: 96,
@@ -298,8 +301,9 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Non-blocking pill that fades in, centered on screen, when zoomed out past
-  /// the usable stream range, telling the user to zoom in to see and tap rivers.
+  /// Non-blocking pill that fades in, centered on screen, after a tap that was
+  /// too far out to resolve a reach. Fades itself back out (see
+  /// [_flashZoomHint]) rather than standing over the map.
   Widget _buildZoomHint() {
     return AnimatedOpacity(
       opacity: _showZoomHint ? 1.0 : 0.0,
@@ -327,7 +331,7 @@ class MapPageState extends State<MapPage> {
             ),
             SizedBox(width: 8),
             Text(
-              'Zoom in to see and tap rivers',
+              'Zoom in to tap rivers',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -367,30 +371,26 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Save camera position when the map stops moving, and reconcile the
-  /// zoom-dependent stream visibility + "zoom in" hint.
+  /// Save camera position when the map stops moving, then color what the user
+  /// settled on. Streams no longer show/hide with zoom, so there is no
+  /// visibility to reconcile here.
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
-    _reconcileZoomState();
     // Color whatever the user just settled on (no-op if already colored or no
     // streams are in view) — GEOGLOWS by region, NWM by visible reach.
     unawaited(_maybeColorVisibleRegion());
     unawaited(_maybeColorVisibleNwm());
   }
 
-  /// Hide streams (and surface the hint) when zoomed out past the usable range;
-  /// restore them when zoomed back in. Driven off map-idle so it tracks pans
-  /// and zooms without a continuous camera listener.
-  Future<void> _reconcileZoomState() async {
-    final zoom = await _vectorTilesService.getCurrentZoom();
-    if (zoom == null || !mounted) return;
-
-    await _vectorTilesService.updateVisibilityForZoom(zoom);
-
-    final tooFarOut = zoom < AppConfig.minZoomForVectorTiles;
-    if (tooFarOut != _showZoomHint) {
-      setState(() => _showZoomHint = tooFarOut);
-    }
+  /// Surface the "zoom in to tap" hint briefly, then let it fade. Shown in
+  /// response to a tap that couldn't resolve a reach — not as a standing
+  /// overlay — since the streams themselves are now visible at every zoom.
+  void _flashZoomHint() {
+    _zoomHintTimer?.cancel();
+    if (!_showZoomHint) setState(() => _showZoomHint = true);
+    _zoomHintTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) setState(() => _showZoomHint = false);
+    });
   }
 
   Widget _buildLoadingOverlay() {
@@ -673,7 +673,7 @@ class MapPageState extends State<MapPage> {
     // zoom in.
     final zoom = await _vectorTilesService.getCurrentZoom();
     if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) {
-      if (mounted && !_showZoomHint) setState(() => _showZoomHint = true);
+      if (mounted) _flashZoomHint();
       return;
     }
 
