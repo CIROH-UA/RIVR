@@ -64,6 +64,18 @@ class MapVectorTilesService {
 
   static double _maxOf(double a, double b) => a > b ? a : b;
 
+  /// Normal opacity per band — the values the stream layers are built with.
+  static const Map<int, double> _opacityByBand = {
+    _bandSmall: 0.8,
+    _bandMedium: 0.8,
+    _bandLarge: 0.9,
+  };
+
+  /// Opacity for normal reaches while condition coloring is on. Holding the
+  /// base network back makes the above-normal reaches read as foreground
+  /// without touching their own styling — contrast does the work.
+  static const double _dimmedOpacity = 0.45;
+
   /// NWM stream layer ids (US only, by the tileset's own extent).
   static const List<String> _nwmLayerIds = [
     'streams2-order-1-2',
@@ -608,6 +620,31 @@ class MapVectorTilesService {
         'visibleNwmStationIds failed: $e',
       );
       return const [];
+    }
+  }
+
+  /// Hold the normal stream network back (or restore it) so above-normal
+  /// reaches read as foreground. Called when condition coloring is toggled.
+  /// Band is positional: every layer-id list is ordered small, medium, large.
+  Future<void> setBaseStreamsDimmed(bool dimmed) async {
+    if (_mapboxMap == null) return;
+    for (final ids in [
+      _nwmLayerIds,
+      _geoglowsWorldLayerIds,
+      _geoglowsUsLayerIds,
+    ]) {
+      for (var band = 0; band < ids.length; band++) {
+        final opacity = dimmed ? _dimmedOpacity : _opacityByBand[band]!;
+        try {
+          await _mapboxMap!.style.setStyleLayerProperty(
+            ids[band],
+            'line-opacity',
+            opacity,
+          );
+        } catch (e) {
+          // Layer might not exist yet, that's fine.
+        }
+      }
     }
   }
 

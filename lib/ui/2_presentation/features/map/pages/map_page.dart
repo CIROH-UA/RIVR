@@ -96,6 +96,8 @@ class MapPageState extends State<MapPage> {
   /// layers), then fetch conditions for whatever region is now on screen.
   Future<void> _refreshConditionsAfterLoad() async {
     if (!_colorByCondition) return;
+    // A style reload rebuilds the layers at full opacity — re-dim them.
+    await _vectorTilesService.setBaseStreamsDimmed(true);
     if (_appliedConditions.isNotEmpty) {
       await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
     }
@@ -146,6 +148,9 @@ class MapPageState extends State<MapPage> {
   Future<void> _setColorByCondition(bool enabled) async {
     setState(() => _colorByCondition = enabled);
     await MapPreferenceService.saveColorByCondition(enabled);
+    // Hold the normal network back while coloring is on so elevated reaches
+    // read as foreground; restore full opacity when it's off.
+    await _vectorTilesService.setBaseStreamsDimmed(enabled);
     if (enabled) {
       if (_appliedConditions.isNotEmpty) {
         await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
