@@ -19,6 +19,51 @@ class MapVectorTilesService {
   /// Source is still distinguishable in the Stream Data sheet and on tap.
   static const int _streamColor = 0xFF191970; // Midnight blue
 
+  /// The three stream-order bands every network is split into. Layers are per
+  /// band so each can carry its own width; the band is also what [_widthFor]
+  /// keys off, which is what keeps NWM and GEOGLOWS identically thick.
+  static const int _bandSmall = 0; // stream order 1-2
+  static const int _bandMedium = 1; // stream order 3-4
+  static const int _bandLarge = 2; // stream order 5+
+
+  /// Line width per (band, zoom). One table, used by every stream layer of
+  /// every network — previously these were nine hardcoded constants that
+  /// happened to agree, with nothing enforcing that they stay in step.
+  ///
+  /// Width also has to vary with zoom now that streams render at every zoom.
+  /// Fixed widths made a continental view a solid hairball and a street-level
+  /// view look anaemic; these taper to hairlines when zoomed out and thicken
+  /// up close. The z10 row is the old fixed set, so mid zooms look unchanged.
+  static const List<int> _widthStops = [3, 7, 10, 14];
+  static const Map<int, List<double>> _widthByBand = {
+    _bandSmall: [0.4, 0.8, 1.0, 2.0],
+    _bandMedium: [0.7, 1.4, 2.0, 3.5],
+    _bandLarge: [1.2, 2.2, 3.5, 6.0],
+  };
+
+  /// A `line-width` expression interpolating [_widthByBand] over zoom.
+  /// [scale]/[floor] widen a line relative to the shared curve while keeping
+  /// its shape — used by the condition-highlight layers so an above-normal
+  /// reach stays proportionally thicker at every zoom (see [_highlightLayer]).
+  static List<Object> _widthFor(int band, {double scale = 1.0, double floor = 0}) {
+    final widths = _widthByBand[band]!;
+    final expr = <Object>[
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+    ];
+    for (var i = 0; i < _widthStops.length; i++) {
+      final w = widths[i];
+      expr.add(_widthStops[i]);
+      // A pure multiplier vanishes where the base is already sub-pixel, so
+      // also guarantee a minimum absolute gain.
+      expr.add(scale == 1.0 ? w : _maxOf(w * scale, w + floor));
+    }
+    return expr;
+  }
+
+  static double _maxOf(double a, double b) => a > b ? a : b;
+
   /// NWM stream layer ids (US only, by the tileset's own extent).
   static const List<String> _nwmLayerIds = [
     'streams2-order-1-2',
@@ -239,7 +284,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.vectorSourceId,
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
-          lineWidth: 1.0,
+          lineWidthExpression: _widthFor(_bandSmall),
           lineOpacity: 0.8,
           filter: [
             "<=",
@@ -256,7 +301,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.vectorSourceId,
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
-          lineWidth: 2.0,
+          lineWidthExpression: _widthFor(_bandMedium),
           lineOpacity: 0.8,
           filter: [
             "all",
@@ -281,7 +326,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.vectorSourceId,
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
-          lineWidth: 3.5,
+          lineWidthExpression: _widthFor(_bandLarge),
           lineOpacity: 0.9,
           filter: [
             ">=",
@@ -316,7 +361,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 1.0,
+          lineWidthExpression: _widthFor(_bandSmall),
           lineOpacity: 0.8,
           filter: _outsideUs(["<=", ["get", "streamOrder"], 2]),
         ),
@@ -327,7 +372,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 2.0,
+          lineWidthExpression: _widthFor(_bandMedium),
           lineOpacity: 0.8,
           filter: _outsideUs([
             "all",
@@ -342,7 +387,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 3.5,
+          lineWidthExpression: _widthFor(_bandLarge),
           lineOpacity: 0.9,
           filter: _outsideUs([">=", ["get", "streamOrder"], 5]),
         ),
@@ -356,7 +401,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 1.0,
+          lineWidthExpression: _widthFor(_bandSmall),
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs(["<=", ["get", "streamOrder"], 2]),
@@ -368,7 +413,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 2.0,
+          lineWidthExpression: _widthFor(_bandMedium),
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs([
@@ -384,7 +429,7 @@ class MapVectorTilesService {
           sourceId: AppConfig.geoglowsSourceId,
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
-          lineWidth: 3.5,
+          lineWidthExpression: _widthFor(_bandLarge),
           lineOpacity: 0.9,
           visibility: Visibility.NONE,
           filter: _insideUs([">=", ["get", "streamOrder"], 5]),
