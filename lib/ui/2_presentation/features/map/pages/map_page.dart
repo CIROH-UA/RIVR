@@ -170,8 +170,12 @@ class MapPageState extends State<MapPage> {
   /// fetch that region's flood conditions once, and paint them. Accumulates
   /// across regions so revisiting is instant. Best-effort — silent on failure.
   Future<void> _maybeColorVisibleRegion() async {
-    if (!_colorByCondition || _conditionsInFlight) return;
-    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId();
+    if (!_colorByCondition || _conditionsInFlight || !mounted) return;
+    final size = MediaQuery.of(context).size;
+    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId(
+      screenWidth: size.width,
+      screenHeight: size.height,
+    );
     if (sid == null || !mounted) return;
 
     // Already know this reach's region and have it painted? Nothing to do.

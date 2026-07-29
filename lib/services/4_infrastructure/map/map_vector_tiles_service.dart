@@ -607,13 +607,17 @@ class MapVectorTilesService {
   /// ever need *one* reach to identify the region, so a small bounded probe is
   /// enough. A miss just means no new region resolves this idle; the next pan
   /// or zoom retries, and callers already handle null.
-  Future<int?> firstVisibleGeoglowsStationId() async {
+  /// [screenWidth]/[screenHeight] come from the caller's MediaQuery —
+  /// MapboxMap.getSize() is unimplemented on iOS and throws unconditionally.
+  Future<int?> firstVisibleGeoglowsStationId({
+    required double screenWidth,
+    required double screenHeight,
+  }) async {
     final map = _mapboxMap;
     if (map == null) return null;
     try {
-      final size = await map.getSize();
-      final cx = size.width / 2;
-      final cy = size.height / 2;
+      final cx = screenWidth / 2;
+      final cy = screenHeight / 2;
       final half = _probeBoxSide / 2;
 
       final feats = await map.queryRenderedFeatures(
@@ -652,22 +656,14 @@ class MapVectorTilesService {
       layerIds: _geoglowsWorldLayerIds,
       baseColor: _streamColor,
     );
-    await _applyHighlight(
-      _geoglowsWorldHighlightLayerIds,
-      categoryByStationId,
-      wrapOrderFilter: _outsideUs,
-    );
+    await _applyHighlight(_geoglowsWorldHighlightLayerIds, categoryByStationId);
   }
 
   /// Reset the GEOGLOWS "outside the US" stream layers to their plain base color
   /// (used when the user turns condition coloring off).
   Future<void> clearGeoglowsConditions() async {
     await _resetLineColor(_geoglowsWorldLayerIds, _streamColor);
-    await _applyHighlight(
-      _geoglowsWorldHighlightLayerIds,
-      const {},
-      wrapOrderFilter: _outsideUs,
-    );
+    await _applyHighlight(_geoglowsWorldHighlightLayerIds, const {});
   }
 
   /// Up to [limit] station ids of NWM (US) reaches currently loaded in view —
@@ -758,26 +754,31 @@ class MapVectorTilesService {
     final none = _stationIdFilter(const []);
     for (var band = 0; band < 3; band++) {
       final order = _orderFilterFor(band);
+      // No US mask here, unlike the base layers: the station-id filter already
+      // scopes these to reaches the backend classified, and `within` against a
+      // 381-vertex boundary is far too expensive to run per feature on layers
+      // that exist only to re-draw a handful of them. The id filter also comes
+      // first so `all` short-circuits on it.
       await add(
         _nwmHighlightLayerIds[band],
         AppConfig.vectorSourceId,
         AppConfig.vectorSourceLayer,
         band,
-        ['all', order, none],
+        ['all', none, order],
       );
       await add(
         _geoglowsWorldHighlightLayerIds[band],
         AppConfig.geoglowsSourceId,
         AppConfig.geoglowsSourceLayer,
         band,
-        ['all', _outsideUs(order), none],
+        ['all', none, order],
       );
       await add(
         _geoglowsUsHighlightLayerIds[band],
         AppConfig.geoglowsSourceId,
         AppConfig.geoglowsSourceLayer,
         band,
-        ['all', _insideUs(order), none],
+        ['all', none, order],
       );
     }
     AppLogger.info('MapVectorTilesService', 'Added condition-highlight layers');
@@ -787,9 +788,8 @@ class MapVectorTilesService {
   /// to those reaches and color each by its category. Empty clears them.
   Future<void> _applyHighlight(
     List<String> highlightLayerIds,
-    Map<int, int> categoryByStationId, {
-    required List<Object> Function(List<Object>) wrapOrderFilter,
-  }) async {
+    Map<int, int> categoryByStationId,
+  ) async {
     if (_mapboxMap == null) return;
     final idFilter = _stationIdFilter(categoryByStationId.keys);
     final colorExpr = json.encode(
@@ -798,10 +798,11 @@ class MapVectorTilesService {
 
     for (var band = 0; band < highlightLayerIds.length; band++) {
       final layerId = highlightLayerIds[band];
+      // Id filter first — `all` short-circuits, and it is the selective one.
       final filter = json.encode([
         'all',
-        wrapOrderFilter(_orderFilterFor(band)),
         idFilter,
+        _orderFilterFor(band),
       ]);
       try {
         await _mapboxMap!.style.setStyleLayerProperty(
@@ -856,21 +857,13 @@ class MapVectorTilesService {
       layerIds: _nwmLayerIds,
       baseColor: _streamColor,
     );
-    await _applyHighlight(
-      _nwmHighlightLayerIds,
-      categoryByStationId,
-      wrapOrderFilter: (order) => order,
-    );
+    await _applyHighlight(_nwmHighlightLayerIds, categoryByStationId);
   }
 
   /// Reset the NWM stream layers to their plain base color.
   Future<void> clearNwmConditions() async {
     await _resetLineColor(_nwmLayerIds, _streamColor);
-    await _applyHighlight(
-      _nwmHighlightLayerIds,
-      const {},
-      wrapOrderFilter: (order) => order,
-    );
+    await _applyHighlight(_nwmHighlightLayerIds, const {});
   }
 
   Future<void> _resetLineColor(List<String> layerIds, int baseColor) async {
