@@ -105,6 +105,78 @@ class MapVectorTilesService {
     ..._geoglowsUsLayerIds,
   ];
 
+  /// Condition-highlight layers — one per network per order band, mirroring the
+  /// base layers and added *after* them so they paint last.
+  ///
+  /// These exist for draw order. Coloring alone rides `line-color` on the base
+  /// layers, so an Extreme order-2 creek paints underneath a normal order-6
+  /// river: Mapbox draws per layer, in layer order, and no amount of width or
+  /// color fixes that. Above-normal reaches are re-drawn here, on top of
+  /// everything, wider than the base curve.
+  ///
+  /// Ids keep the `geoglows` prefix rule that [ForecastSource.fromLayerIds]
+  /// depends on — anything not so prefixed resolves to NWM.
+  static const List<String> _nwmHighlightLayerIds = [
+    'streams2-hl-order-1-2',
+    'streams2-hl-order-3-4',
+    'streams2-hl-order-5-plus',
+  ];
+  static const List<String> _geoglowsWorldHighlightLayerIds = [
+    'geoglows-hl-order-1-2',
+    'geoglows-hl-order-3-4',
+    'geoglows-hl-order-5-plus',
+  ];
+  static const List<String> _geoglowsUsHighlightLayerIds = [
+    'geoglows-us-hl-order-1-2',
+    'geoglows-us-hl-order-3-4',
+    'geoglows-us-hl-order-5-plus',
+  ];
+
+  static const List<String> _allHighlightLayerIds = [
+    ..._nwmHighlightLayerIds,
+    ..._geoglowsWorldHighlightLayerIds,
+    ..._geoglowsUsHighlightLayerIds,
+  ];
+
+  /// How much wider an above-normal reach is drawn than the base curve.
+  static const double _highlightScale = 1.8;
+  static const double _highlightFloor = 1.0;
+
+  /// The stream-order filter for each band, matching the base layers.
+  static List<Object> _orderFilterFor(int band) => switch (band) {
+    _bandSmall => [
+      '<=',
+      ['get', 'streamOrder'],
+      2,
+    ],
+    _bandMedium => [
+      'all',
+      [
+        '>=',
+        ['get', 'streamOrder'],
+        3,
+      ],
+      [
+        '<=',
+        ['get', 'streamOrder'],
+        4,
+      ],
+    ],
+    _ => [
+      '>=',
+      ['get', 'streamOrder'],
+      5,
+    ],
+  };
+
+  /// Restrict a layer to an explicit set of reaches. An empty [stationIds]
+  /// yields a filter that matches nothing — the natural "no conditions" state.
+  static List<Object> _stationIdFilter(Iterable<int> stationIds) => [
+    'in',
+    ['get', 'station_id'],
+    ['literal', stationIds.toList()],
+  ];
+
   // Per-network desired visibility (the Auto default: NWM + GEOGLOWS outside US,
   // GEOGLOWS-in-US off). Zoom gating multiplies these — a layer shows only when
   // its network is enabled AND the zoom is in range.
@@ -172,6 +244,10 @@ class MapVectorTilesService {
       // Add GEOGLOWS streams (global, non-US) as their own source + layers.
       await _addGeoglowsSourceAndLayers();
 
+      // Above-normal reaches are re-drawn on top of every base layer, so they
+      // must be added last. They start empty and fill in as conditions arrive.
+      await _addHighlightLayers();
+
       // Apply the current per-network visibility (Auto default hides GEOGLOWS
       // inside the US until the user turns that layer on).
       await applyStreamVisibility(
@@ -214,18 +290,21 @@ class MapVectorTilesService {
   Future<void> setNwmVisible(bool visible) async {
     _nwmVisible = visible;
     await _setLayerGroupVisibility(_nwmLayerIds, visible);
+    await _setLayerGroupVisibility(_nwmHighlightLayerIds, visible);
   }
 
   /// Set GEOGLOWS "outside the US" stream visibility.
   Future<void> setGeoglowsWorldVisible(bool visible) async {
     _geoglowsWorldVisible = visible;
     await _setLayerGroupVisibility(_geoglowsWorldLayerIds, visible);
+    await _setLayerGroupVisibility(_geoglowsWorldHighlightLayerIds, visible);
   }
 
   /// Set GEOGLOWS "US area" stream visibility (off by default — overlaps NWM).
   Future<void> setGeoglowsUsVisible(bool visible) async {
     _geoglowsUsVisible = visible;
     await _setLayerGroupVisibility(_geoglowsUsLayerIds, visible);
+    await _setLayerGroupVisibility(_geoglowsUsHighlightLayerIds, visible);
   }
 
   /// Apply all three network toggles at once (e.g. restoring a saved choice).
@@ -493,18 +572,9 @@ class MapVectorTilesService {
   }) async {
     if (_mapboxMap == null) return;
 
-    // ["match", ["get","station_id"], id, color, id, color, ..., default]
-    final expr = <Object>['match', ['get', 'station_id']];
-    categoryByStationId.forEach((stationId, category) {
-      final color = _categoryColors[category];
-      if (color != null) {
-        expr.add(stationId);
-        expr.add(color);
-      }
-    });
-    expr.add(_hex(baseColor)); // default
-
-    final encoded = json.encode(expr);
+    final encoded = json.encode(
+      _conditionColorExpression(categoryByStationId, baseColor),
+    );
     for (final layerId in layerIds) {
       try {
         await _mapboxMap!.style.setStyleLayerProperty(
@@ -582,12 +652,22 @@ class MapVectorTilesService {
       layerIds: _geoglowsWorldLayerIds,
       baseColor: _streamColor,
     );
+    await _applyHighlight(
+      _geoglowsWorldHighlightLayerIds,
+      categoryByStationId,
+      wrapOrderFilter: _outsideUs,
+    );
   }
 
   /// Reset the GEOGLOWS "outside the US" stream layers to their plain base color
   /// (used when the user turns condition coloring off).
   Future<void> clearGeoglowsConditions() async {
     await _resetLineColor(_geoglowsWorldLayerIds, _streamColor);
+    await _applyHighlight(
+      _geoglowsWorldHighlightLayerIds,
+      const {},
+      wrapOrderFilter: _outsideUs,
+    );
   }
 
   /// Up to [limit] station ids of NWM (US) reaches currently loaded in view —
@@ -620,6 +700,126 @@ class MapVectorTilesService {
         'visibleNwmStationIds failed: $e',
       );
       return const [];
+    }
+  }
+
+  /// `["match", ["get","station_id"], id, color, …, default]` — the mechanism
+  /// behind all condition coloring (see ADR 0004). Shared by the base layers
+  /// and the highlight layers so both read from one definition of the ladder.
+  static List<Object> _conditionColorExpression(
+    Map<int, int> categoryByStationId,
+    int baseColor,
+  ) {
+    final expr = <Object>['match', ['get', 'station_id']];
+    categoryByStationId.forEach((stationId, category) {
+      final color = _categoryColors[category];
+      if (color != null) {
+        expr.add(stationId);
+        expr.add(color);
+      }
+    });
+    expr.add(_hex(baseColor)); // default
+    return expr;
+  }
+
+  /// Add the condition-highlight layers for all three networks, on top of the
+  /// base layers. They carry no reaches until [applyConditionColors] fills in
+  /// a filter, so on a fresh load they render nothing.
+  Future<void> _addHighlightLayers() async {
+    Future<void> add(
+      String id,
+      String sourceId,
+      String sourceLayer,
+      int band,
+      List<Object> filter,
+    ) async {
+      try {
+        await _mapboxMap!.style.addLayer(
+          LineLayer(
+            id: id,
+            sourceId: sourceId,
+            sourceLayer: sourceLayer,
+            lineColor: _streamColor,
+            lineWidthExpression: _widthFor(
+              band,
+              scale: _highlightScale,
+              floor: _highlightFloor,
+            ),
+            lineOpacity: 1.0,
+            lineCap: LineCap.ROUND,
+            filter: filter,
+          ),
+        );
+      } catch (e) {
+        AppLogger.warning('MapVectorTilesService', 'Failed to add $id: $e');
+      }
+    }
+
+    final none = _stationIdFilter(const []);
+    for (var band = 0; band < 3; band++) {
+      final order = _orderFilterFor(band);
+      await add(
+        _nwmHighlightLayerIds[band],
+        AppConfig.vectorSourceId,
+        AppConfig.vectorSourceLayer,
+        band,
+        ['all', order, none],
+      );
+      await add(
+        _geoglowsWorldHighlightLayerIds[band],
+        AppConfig.geoglowsSourceId,
+        AppConfig.geoglowsSourceLayer,
+        band,
+        ['all', _outsideUs(order), none],
+      );
+      await add(
+        _geoglowsUsHighlightLayerIds[band],
+        AppConfig.geoglowsSourceId,
+        AppConfig.geoglowsSourceLayer,
+        band,
+        ['all', _insideUs(order), none],
+      );
+    }
+    AppLogger.info('MapVectorTilesService', 'Added condition-highlight layers');
+  }
+
+  /// Point a network's highlight layers at [categoryByStationId]: restrict them
+  /// to those reaches and color each by its category. Empty clears them.
+  Future<void> _applyHighlight(
+    List<String> highlightLayerIds,
+    Map<int, int> categoryByStationId, {
+    required List<Object> Function(List<Object>) wrapOrderFilter,
+  }) async {
+    if (_mapboxMap == null) return;
+    final idFilter = _stationIdFilter(categoryByStationId.keys);
+    final colorExpr = json.encode(
+      _conditionColorExpression(categoryByStationId, _streamColor),
+    );
+
+    for (var band = 0; band < highlightLayerIds.length; band++) {
+      final layerId = highlightLayerIds[band];
+      final filter = json.encode([
+        'all',
+        wrapOrderFilter(_orderFilterFor(band)),
+        idFilter,
+      ]);
+      try {
+        await _mapboxMap!.style.setStyleLayerProperty(
+          layerId,
+          'filter',
+          filter,
+        );
+        await _mapboxMap!.style.setStyleLayerProperty(
+          layerId,
+          'line-color',
+          colorExpr,
+        );
+      } catch (e) {
+        AppLogger.warning(
+          'MapVectorTilesService',
+          '_applyHighlight failed for $layerId: $e',
+        );
+      }
     }
   }
 
@@ -656,11 +856,21 @@ class MapVectorTilesService {
       layerIds: _nwmLayerIds,
       baseColor: _streamColor,
     );
+    await _applyHighlight(
+      _nwmHighlightLayerIds,
+      categoryByStationId,
+      wrapOrderFilter: (order) => order,
+    );
   }
 
   /// Reset the NWM stream layers to their plain base color.
   Future<void> clearNwmConditions() async {
     await _resetLineColor(_nwmLayerIds, _streamColor);
+    await _applyHighlight(
+      _nwmHighlightLayerIds,
+      const {},
+      wrapOrderFilter: (order) => order,
+    );
   }
 
   Future<void> _resetLineColor(List<String> layerIds, int baseColor) async {
@@ -689,6 +899,7 @@ class MapVectorTilesService {
         'streams2-order-5-plus',
         AppConfig.vectorLayerId, // Also remove the old generic layer
         ..._allGeoglowsLayerIds,
+        ..._allHighlightLayerIds,
       ];
 
       // Try to remove layers first

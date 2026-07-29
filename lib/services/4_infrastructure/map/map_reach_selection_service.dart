@@ -25,6 +25,35 @@ class MapReachSelectionService {
   static const _selectionColor = 0xFFFFC400;
   // Both tilesets expose their streams under the same source-layer.
   static const _channelsSourceLayer = 'channels';
+
+  /// Every stream layer a tap or viewport query should consider. One list —
+  /// the tap path and the visible-streams path used to keep their own copies,
+  /// which is exactly the kind of pair that drifts.
+  ///
+  /// Includes the `-hl-` condition-highlight layers: those draw above-normal
+  /// reaches on top and wider than the base curve, so a tap on the widened
+  /// part would otherwise land outside the base layer and miss. Source routing
+  /// still works off the `geoglows` prefix (see [ForecastSource.fromLayerIds]).
+  static const List<String> _streamLayerIds = [
+    'streams2-order-1-2', // Small streams (NWM)
+    'streams2-order-3-4', // Medium streams (NWM)
+    'streams2-order-5-plus', // Large rivers (NWM)
+    'geoglows-order-1-2', // GEOGLOWS outside the US
+    'geoglows-order-3-4',
+    'geoglows-order-5-plus',
+    'geoglows-us-order-1-2', // GEOGLOWS inside the US (Compare/Global modes)
+    'geoglows-us-order-3-4',
+    'geoglows-us-order-5-plus',
+    'streams2-hl-order-1-2', // Above-normal reaches, drawn on top
+    'streams2-hl-order-3-4',
+    'streams2-hl-order-5-plus',
+    'geoglows-hl-order-1-2',
+    'geoglows-hl-order-3-4',
+    'geoglows-hl-order-5-plus',
+    'geoglows-us-hl-order-1-2',
+    'geoglows-us-hl-order-3-4',
+    'geoglows-us-hl-order-5-plus',
+  ];
   bool _lineHighlightAdded = false;
   // A category color that arrived before the highlight was on the map; applied
   // once the layers exist.
@@ -90,30 +119,19 @@ class MapReachSelectionService {
 
     AppLogger.debug('MapReachSelectionService', 'Querying visible streams...');
 
-    final streams2LayerIds = [
-      'streams2-order-1-2', // Small streams (NWM)
-      'streams2-order-3-4', // Medium streams (NWM)
-      'streams2-order-5-plus', // Large rivers (NWM)
-      'geoglows-order-1-2', // GEOGLOWS outside the US
-      'geoglows-order-3-4',
-      'geoglows-order-5-plus',
-      'geoglows-us-order-1-2', // GEOGLOWS inside the US (Compare/Global modes)
-      'geoglows-us-order-3-4',
-      'geoglows-us-order-5-plus',
-    ];
 
     final width = screenWidth;
     final height = screenHeight;
 
     // Strategy 1: Screen-aware chunked query (4 quadrants)
-    var streams = await _tryChunkedQuery(streams2LayerIds, width, height);
+    var streams = await _tryChunkedQuery(_streamLayerIds, width, height);
     if (streams.isNotEmpty) {
       AppLogger.info('MapReachSelectionService', 'Chunked query successful: ${streams.length} streams found');
       return _sortStreams(streams);
     }
 
     // Strategy 2: Fallback center point query
-    streams = await _tryCenterPointQuery(streams2LayerIds, width, height);
+    streams = await _tryCenterPointQuery(_streamLayerIds, width, height);
     if (streams.isNotEmpty) {
       AppLogger.info(
         'MapReachSelectionService',
@@ -596,22 +614,10 @@ class MapReachSelectionService {
         ),
       );
 
-      final streams2LayerIds = [
-        'streams2-order-1-2',
-        'streams2-order-3-4',
-        'streams2-order-5-plus',
-        'geoglows-order-1-2',
-        'geoglows-order-3-4',
-        'geoglows-order-5-plus',
-        'geoglows-us-order-1-2',
-        'geoglows-us-order-3-4',
-        'geoglows-us-order-5-plus',
-      ];
-
       final List<QueriedRenderedFeature?> queryResult = await _mapboxMap!
           .queryRenderedFeatures(
             queryBox,
-            RenderedQueryOptions(layerIds: streams2LayerIds),
+            RenderedQueryOptions(layerIds: _streamLayerIds),
           );
 
       AppLogger.debug('MapReachSelectionService', 'Found ${queryResult.length} streams2 features in tap query');
