@@ -65,13 +65,6 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
 
-  // Momentary "zoom in to tap rivers" hint. Below AppConfig.minZoomForVector-
-  // Tiles the tileset serves over-simplified geometry that can't be reliably
-  // tapped — the streams still render (and still carry their flood coloring),
-  // so this only fires when a tap out there actually can't be resolved.
-  bool _showZoomHint = false;
-  Timer? _zoomHintTimer;
-
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
 
@@ -219,7 +212,6 @@ class MapPageState extends State<MapPage> {
   @override
   void dispose() {
     // Save camera position before tearing down (fire-and-forget)
-    _zoomHintTimer?.cancel();
     _controlsService.saveLastCameraPosition();
     _vectorTilesService.dispose();
     _markerService.dispose();
@@ -309,60 +301,11 @@ class MapPageState extends State<MapPage> {
             child: SafeArea(child: const ConditionLegend()),
           ),
 
-        // "Zoom in" hint shown while the map is too far out to see/tap streams.
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Center(child: _buildZoomHint()),
-          ),
-        ),
-
         if (_isLoading) _buildLoadingOverlay(),
       ],
     );
   }
 
-  /// Non-blocking pill that fades in, centered on screen, after a tap that was
-  /// too far out to resolve a reach. Fades itself back out (see
-  /// [_flashZoomHint]) rather than standing over the map.
-  Widget _buildZoomHint() {
-    return AnimatedOpacity(
-      opacity: _showZoomHint ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 250),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        decoration: BoxDecoration(
-          color: CupertinoColors.systemBackground.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: CupertinoColors.black.withValues(alpha: 0.18),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              CupertinoIcons.zoom_in,
-              size: 20,
-              color: CupertinoColors.systemBlue,
-            ),
-            SizedBox(width: 8),
-            Text(
-              'Zoom in to tap rivers',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: CupertinoColors.label,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Toggle 3D terrain on/off
   Future<void> _toggle3DTerrain() async {
@@ -402,16 +345,6 @@ class MapPageState extends State<MapPage> {
     unawaited(_maybeColorVisibleNwm());
   }
 
-  /// Surface the "zoom in to tap" hint briefly, then let it fade. Shown in
-  /// response to a tap that couldn't resolve a reach — not as a standing
-  /// overlay — since the streams themselves are now visible at every zoom.
-  void _flashZoomHint() {
-    _zoomHintTimer?.cancel();
-    if (!_showZoomHint) setState(() => _showZoomHint = true);
-    _zoomHintTimer = Timer(const Duration(milliseconds: 2500), () {
-      if (mounted) setState(() => _showZoomHint = false);
-    });
-  }
 
   Widget _buildLoadingOverlay() {
     return Container(
@@ -688,16 +621,13 @@ class MapPageState extends State<MapPage> {
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {
-    // Streams aren't rendered or reliably tappable below the usable zoom, so
-    // don't run a query that would silently miss — the hint tells the user to
-    // zoom in.
-    final zoom = await _vectorTilesService.getCurrentZoom();
-    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) {
-      if (mounted) _flashZoomHint();
-      return;
-    }
-
-    // Handle normal reach selection
+    // Tappable at any zoom. Taps used to be blocked below
+    // minZoomForVectorTiles, back when every order band drew down there and
+    // order-1 creeks simplified into dots nobody could hit. Now only order 5+
+    // renders when zoomed out — big rivers, the geometry that survives
+    // simplification best — so refusing the query was blocking taps on the
+    // one thing clearly visible. A tap that finds nothing falls through to
+    // onEmptyTap, which is all the feedback it needs.
     await _reachSelectionService.handleMapTap(context);
   }
 
