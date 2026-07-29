@@ -64,6 +64,26 @@ class MapVectorTilesService {
 
   static double _maxOf(double a, double b) => a > b ? a : b;
 
+  /// Zoom at which each order band starts drawing.
+  ///
+  /// The tileset decides what data is *in* a tile; this decides what we draw
+  /// from it. Without these every band rendered at every zoom, so a
+  /// continental view drew millions of order-1 creeks as sub-pixel hairlines —
+  /// invisible, but still filtered and rasterized every frame. Big rivers
+  /// carry the shape of the network when zoomed out; the small stuff only
+  /// starts to mean something up close. This is how HydroViewer reads.
+  ///
+  /// It also cuts the cost of the US mask, which only runs on features a layer
+  /// actually considers (see [_usMaskGeometry]).
+  ///
+  /// Highlight layers are deliberately exempt — an above-normal creek should
+  /// show at any zoom, which is the whole point of the feature.
+  static const Map<int, double> _minZoomByBand = {
+    _bandSmall: 9.0, // order 1-2
+    _bandMedium: 7.0, // order 3-4
+    _bandLarge: 0.0, // order 5+ — always drawn
+  };
+
   /// Normal opacity per band — the values the stream layers are built with.
   static const Map<int, double> _opacityByBand = {
     _bandSmall: 0.8,
@@ -376,6 +396,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandSmall),
+          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           filter: [
             "<=",
@@ -393,6 +414,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandMedium),
+          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           filter: [
             "all",
@@ -418,6 +440,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandLarge),
+          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           filter: [
             ">=",
@@ -453,6 +476,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandSmall),
+          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           filter: _outsideUs(["<=", ["get", "streamOrder"], 2]),
         ),
@@ -464,6 +488,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandMedium),
+          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           filter: _outsideUs([
             "all",
@@ -479,6 +504,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandLarge),
+          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           filter: _outsideUs([">=", ["get", "streamOrder"], 5]),
         ),
@@ -493,6 +519,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandSmall),
+          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs(["<=", ["get", "streamOrder"], 2]),
@@ -505,6 +532,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandMedium),
+          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs([
@@ -521,6 +549,7 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandLarge),
+          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           visibility: Visibility.NONE,
           filter: _insideUs([">=", ["get", "streamOrder"], 5]),
