@@ -41,28 +41,46 @@ class MapVectorTilesService {
     _bandLarge: [1.2, 2.2, 3.5, 6.0],
   };
 
-  /// A `line-width` expression interpolating [_widthByBand] over zoom.
-  /// [scale]/[floor] widen a line relative to the shared curve while keeping
-  /// its shape — used by the condition-highlight layers so an above-normal
-  /// reach stays proportionally thicker at every zoom (see [_highlightLayer]).
-  static List<Object> _widthFor(int band, {double scale = 1.0, double floor = 0}) {
-    final widths = _widthByBand[band]!;
+  /// Width for an above-normal reach — the inverse of [_widthByBand]: widest
+  /// when zoomed out, converging on the normal width by z14.
+  ///
+  /// Zoomed out, an elevated reach isn't functioning as geometry — it is a
+  /// symbol saying "flooding here", and symbols shouldn't shrink with the map
+  /// (city dots aren't drawn to scale either). At continental zooms the true
+  /// width is sub-pixel, so a proportional bump has nothing to bump; these are
+  /// absolute widths instead. The exaggeration then decays on its own, so by
+  /// the time the user is close enough to read the channel they are seeing its
+  /// real width, distinguished by color and draw order rather than size.
+  ///
+  /// Order hierarchy deliberately collapses at low zoom — an elevated creek
+  /// draws as heavily as an elevated large river. When you are looking at a
+  /// continent, how severe the event is matters more than how big the stream
+  /// is. The z14 row equals [_widthByBand] exactly, which is where the two
+  /// curves meet.
+  ///
+  /// Known risk: a region with many elevated reaches will merge into a mass at
+  /// low zoom. The knobs for that are these numbers and, if it isn't enough,
+  /// easing opacity down as width grows so overlap reads as density.
+  static const Map<int, List<double>> _highlightWidthByBand = {
+    _bandSmall: [7.0, 4.0, 1.8, 2.0],
+    _bandMedium: [7.0, 4.5, 3.6, 3.5],
+    _bandLarge: [8.0, 6.0, 6.3, 6.0],
+  };
+
+  /// A `line-width` expression interpolating a width table over zoom.
+  static List<Object> _widthFor(int band, {bool highlight = false}) {
+    final widths = (highlight ? _highlightWidthByBand : _widthByBand)[band]!;
     final expr = <Object>[
       'interpolate',
       ['linear'],
       ['zoom'],
     ];
     for (var i = 0; i < _widthStops.length; i++) {
-      final w = widths[i];
       expr.add(_widthStops[i]);
-      // A pure multiplier vanishes where the base is already sub-pixel, so
-      // also guarantee a minimum absolute gain.
-      expr.add(scale == 1.0 ? w : _maxOf(w * scale, w + floor));
+      expr.add(widths[i]);
     }
     return expr;
   }
-
-  static double _maxOf(double a, double b) => a > b ? a : b;
 
   /// Zoom at which each order band starts drawing.
   ///
@@ -157,10 +175,6 @@ class MapVectorTilesService {
     ..._geoglowsWorldHighlightLayerIds,
     ..._geoglowsUsHighlightLayerIds,
   ];
-
-  /// How much wider an above-normal reach is drawn than the base curve.
-  static const double _highlightScale = 1.8;
-  static const double _highlightFloor = 1.0;
 
   /// The stream-order filter for each band, matching the base layers.
   static List<Object> _orderFilterFor(int band) => switch (band) {
@@ -765,11 +779,7 @@ class MapVectorTilesService {
             sourceId: sourceId,
             sourceLayer: sourceLayer,
             lineColor: _streamColor,
-            lineWidthExpression: _widthFor(
-              band,
-              scale: _highlightScale,
-              floor: _highlightFloor,
-            ),
+            lineWidthExpression: _widthFor(band, highlight: true),
             lineOpacity: 1.0,
             lineCap: LineCap.ROUND,
             filter: filter,
