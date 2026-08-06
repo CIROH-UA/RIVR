@@ -187,6 +187,55 @@ precomputed elevated-reach set we are planning to compute ourselves. Paging at
 usable, most of the backend in this ADR — and its cost — may be unnecessary.
 See Unverified #9-#13 before acting on that.
 
+### Do the published ids join to ours? Yes — both (2026-08-06)
+
+**GEOGLOWS: proven.** Pulled every `returnperiod > 0` reach for `vpu=613` from
+the Esri service and intersected with our own backend's elevated set for the
+same VPU, same day:
+
+| | count |
+|---|---|
+| RIVR backend, VPU 613 | 559 |
+| Esri service, VPU 613 | 419 |
+| intersection | **419** |
+| ids only in Esri's set | **0** |
+
+Every id Esri publishes is one we also know. `comid` and our `station_id` are
+the same TDX-Hydro LINKNO space. **But we flag 140 more reaches than they do
+(25% more)** — the sets are not equivalent, only nested.
+
+**NWM: proven.** Our function returned 0 of 40 NOAA-flagged reaches, which
+looked like an id mismatch but is not. CIROH resolves NOAA's `feature_id`
+values (`3939`, `13648`, and a known-good `946020371` all return return-period
+data), so the id space is shared.
+
+The zero overlap is explained by two *deliberate* differences in our classifier:
+
+1. **Our 0.5 CMS min-flow floor** (ADR 0004 D3). `feature_id 3939` has
+   `rp2 = rp50 = 0.03 m³/s` — a flat, trivially-small curve. NOAA flags it as a
+   2% AEP event; we exclude it by design as a dry headwater trickle.
+2. **Ladder start.** Our lowest band is the 2-year event. NOAA publishes
+   anything above its high-water threshold, including `>50%` AEP — more
+   frequent than a 2-year event, i.e. below our floor.
+
+**So NOAA's 63,826 CONUS reaches are far more permissive than RIVR's
+classification.** Adopting their categories wholesale would fill the map with
+tiny streams RIVR deliberately excludes.
+
+### What each service would let us reuse
+
+This is the practical difference between the two:
+
+- **NOAA exposes the raw inputs**: `max_flow`, `high_water_threshold`, and
+  `flow_2yr` / `flow_5yr` / `flow_10yr` / `flow_25yr` / `flow_50yr` per reach.
+  That is everything our classifier needs — we could apply **our own floor and
+  our own ladder to their published numbers**, and skip both the NWM file read
+  and the CIROH backfill entirely.
+- **GEOGLOWS exposes only the verdict**: `meanflow` and a pre-classified
+  `returnperiod` (2/10/25/50). No thresholds are published, so we **cannot**
+  re-derive our 5-year band from it. Using it means accepting their ladder and
+  losing the Moderate class.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -241,9 +290,11 @@ See Unverified #9-#13 before acting on that.
    users with organizational accounts". Working anonymously is not the same as
    being permitted to depend on it in a shipped app. **Check before building
    anything on these.**
-10. **Whether the id fields match ours.** NOAA's `feature_id` vs our NWM
-    `station_id`; GEOGLOWS `comid` vs our `station_id`/LINKNO. The whole
-    approach rests on joining these to our vector tiles. Untested.
+10. ~~Whether the id fields match ours.~~ **RESOLVED 2026-08-06 — they do,
+    for both sources. See Measured above.** What remains open is not the join
+    but the *disagreement*: we flag 25% more GEOGLOWS reaches than Esri does,
+    and NOAA flags far more NWM reaches than we do. Which set is correct for
+    RIVR is a product question, not an engineering one.
 11. **Refresh cadence and staleness** of both services — how often each is
     republished, and what `valid_time` / `timevalue` actually mean.
 12. **Category ladder mismatch.** NOAA publishes AEP (`2/4/10/20/50%`),
