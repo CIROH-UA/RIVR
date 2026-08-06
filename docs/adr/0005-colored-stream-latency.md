@@ -236,6 +236,53 @@ This is the practical difference between the two:
   re-derive our 5-year band from it. Using it means accepting their ladder and
   losing the Moderate class.
 
+### Terms of use (2026-08-06)
+
+**NOAA — usable.** `copyrightText` is "National Water Model, NOAA/NWS National
+Water Center". The NWS disclaimer (weather.gov/disclaimer) puts NWS information
+in the public domain, "may be used without charge for any lawful purpose",
+commercial use included. Conditions that apply to us: don't claim copyright,
+don't imply NOAA endorsement, don't present modified content as official, and
+follow their automated-access guidance — know the refresh rate, request only
+what you need, respect HTTP error codes and retry limits. Attribution is
+required if the work is predominantly NWS material.
+
+**GEOGLOWS via Esri — not established, and this is a blocker.** The
+livefeeds3 service's own description says it is "available to all ArcGIS
+Online users with organizational accounts" and links to
+`goto.arcgisonline.com/livefeeds3/GWM_Medium` for terms. That shortlink is
+dead — it 301s to the arcgis.com root.
+
+Searching the ArcGIS Online item registry for the service returns exactly one
+Esri-owned GEOGLOWS item: *"GEOGloWS ECMWF Streamflow System (6 Day
+Forecast)"* (`5c2e6d2137bb4d2187db387979db2f31`). It is licensed under the
+**Esri Master License Agreement**, points at **livefeeds2** (not the
+livefeeds3 endpoint HydroViewer actually uses), and its own snippet marks it
+**"(Retiring)"**.
+
+So: the endpoint we would depend on answers anonymously, but has no findable
+published terms, and its closest documented sibling is under a commercial
+license and being retired. **Anonymous access working is not permission.**
+
+### Refresh cadence (measured 2026-08-06 ~16:25 UTC)
+
+**NOAA — hourly, confirmed two ways.** The service description says "Updated
+hourly", and the record timestamps agree: `reference_time` 2026-08-06 15:00:00
+UTC, `update_time` 15:45:10 UTC, `nwm_vers` 3.0. So each hourly cycle is
+published roughly **45 minutes behind its reference time**.
+
+**GEOGLOWS via Esri — a full day stale at the time of measurement.** Queried
+min and max of `timevalue` across the whole layer: both are
+**2026-08-05T00:00:00 UTC**. A 0-hour span, so it is a single snapshot rather
+than a time series, taken from the 2026-08-05 00Z run. At the moment of
+measurement that was ~40 hours old, while **our own backend was already
+serving the 20260806 run**.
+
+Caveat: this is one observation. It establishes that the service *was* a day
+behind us at that moment; it does not by itself establish the steady-state
+cadence. But it is enough to say we would be trading fresher data for
+precomputed data, not getting both.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -285,18 +332,22 @@ This is the practical difference between the two:
    `nwm-api.ciroh.org`.
 8. **vCPU allocation at 4 GiB**, and whether this workload qualifies for
    instance-based rather than request-based billing.
-9. **Terms of use for both ArcGIS services.** Anonymous queries succeeded, but
-   the GEOGLOWS service description says it is "available to all ArcGIS Online
-   users with organizational accounts". Working anonymously is not the same as
-   being permitted to depend on it in a shipped app. **Check before building
-   anything on these.**
+9. ~~Terms of use for both ArcGIS services.~~ **RESOLVED 2026-08-06.** NOAA is
+   public domain and usable commercially with attribution and responsible
+   automated access. GEOGLOWS-via-Esri has **no findable terms** for the
+   livefeeds3 endpoint; its documented sibling is under the Esri Master
+   License Agreement and is retiring. Treat GEOGLOWS-via-Esri as **not
+   cleared**. See Measured above.
 10. ~~Whether the id fields match ours.~~ **RESOLVED 2026-08-06 — they do,
     for both sources. See Measured above.** What remains open is not the join
     but the *disagreement*: we flag 25% more GEOGLOWS reaches than Esri does,
     and NOAA flags far more NWM reaches than we do. Which set is correct for
     RIVR is a product question, not an engineering one.
-11. **Refresh cadence and staleness** of both services — how often each is
-    republished, and what `valid_time` / `timevalue` actually mean.
+11. ~~Refresh cadence and staleness of both services.~~ **RESOLVED 2026-08-06.**
+    NOAA is hourly, published ~45 min behind reference time. The Esri GEOGLOWS
+    layer was serving the 2026-08-05 00Z run while our own backend served
+    20260806 — a full day behind us. See Measured above. Still open: whether
+    that one-day lag is the steady state or a one-off.
 12. **Category ladder mismatch.** NOAA publishes AEP (`2/4/10/20/50%`),
     GEOGLOWS publishes return period (`2/10/25/50`), RIVR uses `2/5/10/25`
     (ADR 0002). AEP maps to return period arithmetically, but neither source
@@ -351,12 +402,22 @@ client flow).
 
 ## Next actions
 
-1. **Resolve Unverified #9 and #10 first** — terms of use, and whether the
-   published ids join to our tiles. These decide whether we build a backend at
-   all, so nothing else should start before them.
-2. Fix the inverted client/server timeout. Independent of every other question
-   and currently guarantees failure for 33% of the world's rivers.
-3. If the ArcGIS route is unusable: resolve Unverified #2 (pre-derived GEOGLOWS
-   product), then #5 and #6, then measure #1 on device and pick a blob shape.
-4. If it is usable: re-scope this ADR around consuming published services, and
-   revisit whether any daily compute is needed.
+The two blocking questions are now answered, and they split the two sources:
+
+1. **Fix the inverted client/server timeout.** Independent of every other
+   question and currently guarantees failure for 33% of the world's rivers.
+2. **NWM — the published NOAA service is a genuine option.** Public domain,
+   hourly, and it exposes `max_flow` plus `flow_2yr`…`flow_50yr`, so RIVR's own
+   floor and ladder can be applied to their numbers. That removes the NWM
+   forecast read and the CIROH backfill entirely. Next: confirm paging ~32
+   pages hourly is acceptable under their automated-access guidance, and decide
+   whether to keep RIVR's stricter classification.
+3. **GEOGLOWS — the Esri route is not viable as things stand.** No findable
+   terms, a retiring documented sibling under a commercial licence, and it was
+   a day staler than our own pipeline when measured. So GEOGLOWS still needs
+   the precompute this ADR was originally scoped around: resolve Unverified #2
+   (pre-derived non-ensemble product), then #5 and #6, then measure #1 on
+   device and pick a blob shape.
+4. Decide the product question this research surfaced: RIVR currently flags
+   more GEOGLOWS reaches than HydroViewer and far fewer NWM reaches than NWPS.
+   Matching the reference viewers is a choice, not a bug fix.
