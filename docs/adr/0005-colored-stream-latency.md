@@ -139,6 +139,54 @@ scheduled ceiling** — a single scheduled job cannot do it. The largest single
 VPU ≈ 302s, which **fits inside the 540s event-driven ceiling** — so per-VPU
 fan-out is viable.
 
+### How the reference viewers do it (2026-08-05)
+
+Investigated because both NWPS and HydroViewer already show pre-colored
+high-flow streams. **Neither uses Mapbox — both are Esri/ArcGIS.** Method:
+fetched each site's HTML and JS bundles, extracted service URLs, then read the
+ArcGIS service and layer JSON including the renderer.
+
+**water.noaa.gov (NWPS)** — `maps.water.noaa.gov/server/rest/services/nwm/…`
+
+- Services exist per horizon: `ana_high_flow_magnitude` (analysis /
+  assimilation, i.e. current), `srf_48hr_max_high_flow_magnitude` (short range
+  48h max), `mrf_nbm_5day_max_high_flow_magnitude` (medium range 5-day max),
+  each with `_ak`, `_hi`, `_prvi` regional variants. Also
+  `*_inundation_extent` services.
+- Layer 0, "Est. Annual Exceedance Probability", polyline.
+- Fields: `feature_id`, `name`, `strm_order`, `huc6`, `state`, `nwm_vers`,
+  `reference_time`, `valid_time`, `max_flow`, `recur_cat`,
+  `high_water_threshold`, `flow_50yr`, `flow_25yr`, `flow_10yr`, `flow_5yr`,
+  `flow_2yr`.
+- Renderer: `uniqueValue` on **`recur_cat`** (annual exceedance probability):
+  `2%`, `4%`, `10%`, `20%`, `50%`, `>50% AND > High Water Threshold`,
+  `Insufficient Data`.
+- **The service contains only reaches at or above high-water thresholds** —
+  NOAA has already done the filtering. It *is* a published elevated-reach set.
+- **63,826 CONUS reaches** returned by an anonymous count query.
+- `capabilities: Map,Query,Data`, `maxRecordCount: 2000`, formats JSON/geoJSON/PBF.
+
+**hydroviewer.geoglows.org** — `livefeeds3.arcgis.com/arcgis/rest/services/GEOGLOWS/GlobalWaterModel_Medium/MapServer`
+
+- Layer 0, "Flow Forecast (m³/sec)", polyline.
+- Fields: `comid`, `outletcomid`, `region`, `vpu`, `upstreamarea`,
+  `geodesiclength`, `streamorder`, `rivercountry`, `outletcountry`,
+  `timevalue`, `meanflow`, `thickness`, `returnperiod`.
+- Renderer: `uniqueValue` on **`returnperiod`** — `0` Normal (teal), `2`
+  Exceeds 2yr (yellow), `10` Exceeds 10yr (orange), `25` Exceeds 25yr (red),
+  `50` Exceeds 50yr (purple). Nearly the same palette RIVR already uses.
+  Note a `thickness` field — they data-drive line width too.
+- **48,173 elevated reaches worldwide** (`returnperiod > 0`), anonymous count.
+- `maxRecordCount: 2000`.
+
+**Both services answered anonymous queries with no token.**
+
+Implication, and it is large: both organisations already publish the
+precomputed elevated-reach set we are planning to compute ourselves. Paging at
+2,000 records gives ~32 requests for CONUS and ~25 for the world. If these are
+usable, most of the backend in this ADR — and its cost — may be unnecessary.
+See Unverified #9-#13 before acting on that.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -188,6 +236,21 @@ fan-out is viable.
    `nwm-api.ciroh.org`.
 8. **vCPU allocation at 4 GiB**, and whether this workload qualifies for
    instance-based rather than request-based billing.
+9. **Terms of use for both ArcGIS services.** Anonymous queries succeeded, but
+   the GEOGLOWS service description says it is "available to all ArcGIS Online
+   users with organizational accounts". Working anonymously is not the same as
+   being permitted to depend on it in a shipped app. **Check before building
+   anything on these.**
+10. **Whether the id fields match ours.** NOAA's `feature_id` vs our NWM
+    `station_id`; GEOGLOWS `comid` vs our `station_id`/LINKNO. The whole
+    approach rests on joining these to our vector tiles. Untested.
+11. **Refresh cadence and staleness** of both services — how often each is
+    republished, and what `valid_time` / `timevalue` actually mean.
+12. **Category ladder mismatch.** NOAA publishes AEP (`2/4/10/20/50%`),
+    GEOGLOWS publishes return period (`2/10/25/50`), RIVR uses `2/5/10/25`
+    (ADR 0002). AEP maps to return period arithmetically, but neither source
+    exposes a 5-year class, so RIVR's Moderate band has no direct equivalent.
+13. **Rate limits and paging reliability** for pulling ~32 + ~25 pages daily.
 
 ---
 
@@ -237,8 +300,12 @@ client flow).
 
 ## Next actions
 
-1. Resolve Unverified #2 (pre-derived GEOGLOWS product) — largest cost lever.
-2. Resolve Unverified #5 and #6 — cheap, unblock scheduling.
-3. Fix the inverted client/server timeout. Independent of everything else and
-   currently guarantees failure for 33% of the world.
-4. Measure Unverified #1 on device, then pick the blob shape.
+1. **Resolve Unverified #9 and #10 first** — terms of use, and whether the
+   published ids join to our tiles. These decide whether we build a backend at
+   all, so nothing else should start before them.
+2. Fix the inverted client/server timeout. Independent of every other question
+   and currently guarantees failure for 33% of the world's rivers.
+3. If the ArcGIS route is unusable: resolve Unverified #2 (pre-derived GEOGLOWS
+   product), then #5 and #6, then measure #1 on device and pick a blob shape.
+4. If it is usable: re-scope this ADR around consuming published services, and
+   revisit whether any daily compute is needed.
