@@ -283,6 +283,51 @@ behind us at that moment; it does not by itself establish the steady-state
 cadence. But it is enough to say we would be trading fresher data for
 precomputed data, not getting both.
 
+### Category naming collides with NWS (2026-08-10)
+
+Surfaced while comparing ladders. Recorded here because the comparison research
+lives in this ADR, but it implicates **ADR 0002** — `FlowClassification` is the
+app's canonical ladder, consumed by 8 files including `weekly_outlook_service`,
+so any rename changes push-notification copy and the forecast gauge too.
+
+**NWS official flood categories are Minor / Moderate / Major** (weather.gov).
+"Action" is a monitoring *stage*, not a flood category.
+
+RIVR uses **Action / Moderate / Major / Extreme** — borrowing NWS's exact words
+but defining them by **return period** rather than by **impact**. NWS "Major
+flooding" means extensive inundation of structures and roads; RIVR "Major"
+means flow exceeded the 10-year recurrence. Those can disagree — a 10-year flow
+through a well-leveed reach may inundate nothing. For a US app whose users also
+read NWS products, that is a misstatement risk, not a style preference.
+
+**US Drought Monitor ladder** (verified, droughtmonitor.unl.edu): D0 Abnormally
+Dry, D1 Moderate, D2 **Severe**, D3 **Extreme**, D4 **Exceptional**. An
+established hydrologic severity vocabulary whose top three terms do not collide
+with NWS flood categories.
+
+### 5-band palette validation (2026-08-10)
+
+Run with the `dataviz` skill's `validate_palette.js`, light and dark surfaces.
+
+**The current 4-band palette already fails** the categorical normal-vision
+floor: Action↔Moderate (`#FFC400`↔`#FF8C00`) at ΔE 13.2, below the floor of 15.
+Pre-existing, not introduced by adding a band.
+
+Candidate for 5 bands — `#FFC400`, `#FF8C00`, `#F4511E`, `#C62828`, `#7B1FA2`:
+
+- Lightness 0.607 → 0.400 → 0.252 → 0.137 → 0.078. **Monotonic**, evenly
+  stepped — correct behaviour for an ordered scale.
+- CVD separation **passes** all adjacent pairs (worst 9.6 deutan, 8.1 tritan).
+- Normal-vision floor **fails**: worst pair 10yr↔25yr at ΔE 12.2. Inherent to
+  five warm bands; the categorical rule fights the ramp.
+- Contrast vs light surface weak for yellow (1.56) and orange (2.27) — also
+  already true of the current palette.
+- Against a dark surface, purple `#7B1FA2` drops to 2.12.
+
+Side effect worth noting: inserting a 50-year band shifts 10yr/25yr down one
+slot, which lands 2yr-yellow / 10yr-orange / 25yr-red / 50yr-purple — the same
+anchoring HydroViewer uses. The off-by-one documented above resolves itself.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -353,6 +398,12 @@ precomputed data, not getting both.
     (ADR 0002). AEP maps to return period arithmetically, but neither source
     exposes a 5-year class, so RIVR's Moderate band has no direct equivalent.
 13. **Rate limits and paging reliability** for pulling ~32 + ~25 pages daily.
+14. **Whether a thin dark casing fixes low-zoom contrast** for the yellow and
+    orange bands on a light basemap, and for purple on a dark one. Asserted
+    2026-08-10 without testing. The validator measures fill-vs-surface contrast,
+    not the perceptual effect of an outline. Cheapest test: render the five
+    bands as cased lines over both basemaps and look. Note this touches visual
+    treatment, which is out of scope unless Jerson reopens it.
 
 ---
 
