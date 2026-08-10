@@ -686,3 +686,40 @@ def geoglows_conditions_publish_global(event: scheduler_fn.ScheduledEvent) -> No
         f"from {len(present)}/{len(_VPU_SLICES)} VPUs for {date}"
         + (f"; missing {missing}" if missing else "")
     )
+
+
+@https_fn.on_request(
+    region="us-west1",  # same region as the bucket, so the read is a local hop
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60,
+)
+def geoglows_conditions_latest(req: https_fn.Request) -> https_fn.Response:
+    """Serve the precomputed world file.
+
+    Ideally the app would read the blob straight from Cloud Storage over the
+    CDN, but an org policy on this project forbids public buckets, so the file
+    is served through here instead. That costs one function hop rather than a
+    CDN read — still a download of an already-computed answer rather than a
+    15-300s computation, which is the point.
+
+    The response is cached client-side; the underlying file changes once a day.
+    """
+    try:
+        blob = _storage_client().bucket(_CONDITIONS_BUCKET).blob(
+            "conditions/geoglows/latest.json"
+        )
+        if not blob.exists():
+            return https_fn.Response(
+                json.dumps({"error": "not published yet", "conditions": {}}),
+                status=404, headers=_JSON_HEADERS,
+            )
+        return https_fn.Response(
+            blob.download_as_text(),
+            status=200,
+            headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=900"},
+        )
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"{type(e).__name__}: {e}"}),
+            status=502, headers=_JSON_HEADERS,
+        )

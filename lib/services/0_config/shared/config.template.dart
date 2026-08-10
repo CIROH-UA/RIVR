@@ -47,10 +47,11 @@ class AppConfig {
   // Resolve the region from a visible reach — the backend maps the station id to
   // its VPU, so the map can color whatever's on screen without knowing borders.
   /// The daily precomputed world file — every above-normal reach, published
-  /// after the GEOGLOWS run lands. A static CDN object, so reading it costs a
-  /// download rather than a computation (see ADR 0005).
+  /// after the GEOGLOWS run lands. Served through a function because an org
+  /// policy forbids public buckets; still a download of a precomputed answer
+  /// rather than a computation (see ADR 0005).
   static const String geoglowsConditionsLatestUrl =
-      'https://storage.googleapis.com/ciroh-rivr-app-conditions/conditions/geoglows/latest.json';
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_conditions_latest';
 
   static String getGeoglowsConditionsByStationUrl(int stationId) =>
       '$geoglowsConditionsUrl?station_id=$stationId';
