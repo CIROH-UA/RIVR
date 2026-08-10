@@ -10,7 +10,7 @@ class ConditionLegend extends StatefulWidget {
 
   // (label, color) from calm to severe. "Normal" is the base stream color.
   static const List<(String, Color)> _entries = [
-    ('Normal', Color(0xFF1E88A8)), // brand teal (base)
+    ('Normal', Color(0xFF191970)), // midnight blue — shared base, both sources
     ('Action', Color(0xFFFFC400)), // yellow  — > 2-yr
     ('Moderate', Color(0xFFFF8C00)), // orange — > 5-yr
     ('Major', Color(0xFFE53935)), // red      — > 10-yr

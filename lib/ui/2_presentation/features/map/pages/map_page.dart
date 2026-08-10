@@ -71,12 +71,6 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
 
-  // True when the map is zoomed out past the point where stream geometry is
-  // usable (below AppConfig.minZoomForVectorTiles). Below this the tileset
-  // serves over-simplified geometry that renders as dots and can't be reliably
-  // tapped, so we hide the streams and show a "zoom in" hint instead.
-  bool _showZoomHint = false;
-
   // Restored camera position (loaded before first build)
   ({double lat, double lng, double zoom})? _savedCamera;
 
@@ -101,6 +95,8 @@ class MapPageState extends State<MapPage> {
   /// layers), then make sure conditions are loaded.
   Future<void> _refreshConditionsAfterLoad() async {
     if (!_colorByCondition) return;
+    // A style reload rebuilds the layers at full opacity — re-dim them.
+    await _vectorTilesService.setBaseStreamsDimmed(true);
     if (_appliedConditions.isNotEmpty) {
       await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
     }
@@ -131,8 +127,19 @@ class MapPageState extends State<MapPage> {
 
   /// Color the NWM (US) reaches on screen by flood condition: classify only the
   /// ones we haven't seen yet, accumulate, and paint. Best-effort.
+  ///
+  /// Skipped when zoomed out past [AppConfig.minZoomForVectorTiles]. NWM
+  /// coloring is per-reach and capped at 800 ids per pass — against 2.78M
+  /// reaches that can't meaningfully fill a regional view, so out there it is
+  /// all cost (a large source query, an 800-id round trip, and a re-encode of
+  /// an ever-growing match expression) for no visible payoff. GEOGLOWS keeps
+  /// running at every zoom because it resolves a whole VPU at once.
   Future<void> _maybeColorVisibleNwm() async {
     if (!_colorByCondition || _nwmInFlight) return;
+
+    final zoom = await _vectorTilesService.getCurrentZoom();
+    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) return;
+
     final ids = await _vectorTilesService.visibleNwmStationIds();
     final unresolved =
         ids.where((id) => !_resolvedNwmIds.contains(id)).toList();
@@ -158,6 +165,9 @@ class MapPageState extends State<MapPage> {
   Future<void> _setColorByCondition(bool enabled) async {
     setState(() => _colorByCondition = enabled);
     await MapPreferenceService.saveColorByCondition(enabled);
+    // Hold the normal network back while coloring is on so elevated reaches
+    // read as foreground; restore full opacity when it's off.
+    await _vectorTilesService.setBaseStreamsDimmed(enabled);
     if (enabled) {
       if (_appliedConditions.isNotEmpty) {
         await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
@@ -177,12 +187,16 @@ class MapPageState extends State<MapPage> {
   /// fetch that region's flood conditions once, and paint them. Accumulates
   /// across regions so revisiting is instant. Best-effort — silent on failure.
   Future<void> _maybeColorVisibleRegion() async {
-    if (!_colorByCondition || _conditionsInFlight) return;
+    if (!_colorByCondition || _conditionsInFlight || !mounted) return;
     // The daily world file already covers every region, so there is nothing
     // left to resolve and no reason to fetch on pan. This path is now the
     // fallback for when that file hasn't published.
     if (_haveGlobalConditions) return;
-    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId();
+    final size = MediaQuery.of(context).size;
+    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId(
+      screenWidth: size.width,
+      screenHeight: size.height,
+    );
     if (sid == null || !mounted) return;
 
     // Already know this reach's region and have it painted? Nothing to do.
@@ -305,68 +319,21 @@ class MapPageState extends State<MapPage> {
           ),
         ),
 
-        // Flood-risk color key — shown while coloring is on and streams are in
-        // range. Positioned above the search bar, out of the controls' way.
-        if (_colorByCondition && !_showZoomHint)
+        // Flood-risk color key — shown whenever coloring is on. Streams render
+        // at every zoom now, so this stays up when zoomed out too, where the
+        // regional GEOGLOWS coloring is most worth explaining.
+        if (_colorByCondition)
           Positioned(
             left: 16,
             bottom: 96,
             child: SafeArea(child: const ConditionLegend()),
           ),
 
-        // "Zoom in" hint shown while the map is too far out to see/tap streams.
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Center(child: _buildZoomHint()),
-          ),
-        ),
-
         if (_isLoading) _buildLoadingOverlay(),
       ],
     );
   }
 
-  /// Non-blocking pill that fades in, centered on screen, when zoomed out past
-  /// the usable stream range, telling the user to zoom in to see and tap rivers.
-  Widget _buildZoomHint() {
-    return AnimatedOpacity(
-      opacity: _showZoomHint ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 250),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        decoration: BoxDecoration(
-          color: CupertinoColors.systemBackground.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: CupertinoColors.black.withValues(alpha: 0.18),
-              blurRadius: 12,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              CupertinoIcons.zoom_in,
-              size: 20,
-              color: CupertinoColors.systemBlue,
-            ),
-            SizedBox(width: 8),
-            Text(
-              'Zoom in to see and tap rivers',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: CupertinoColors.label,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Toggle 3D terrain on/off
   Future<void> _toggle3DTerrain() async {
@@ -395,31 +362,17 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Save camera position when the map stops moving, and reconcile the
-  /// zoom-dependent stream visibility + "zoom in" hint.
+  /// Save camera position when the map stops moving, then color what the user
+  /// settled on. Streams no longer show/hide with zoom, so there is no
+  /// visibility to reconcile here.
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
-    _reconcileZoomState();
     // Color whatever the user just settled on (no-op if already colored or no
     // streams are in view) — GEOGLOWS by region, NWM by visible reach.
     unawaited(_maybeColorVisibleRegion());
     unawaited(_maybeColorVisibleNwm());
   }
 
-  /// Hide streams (and surface the hint) when zoomed out past the usable range;
-  /// restore them when zoomed back in. Driven off map-idle so it tracks pans
-  /// and zooms without a continuous camera listener.
-  Future<void> _reconcileZoomState() async {
-    final zoom = await _vectorTilesService.getCurrentZoom();
-    if (zoom == null || !mounted) return;
-
-    await _vectorTilesService.updateVisibilityForZoom(zoom);
-
-    final tooFarOut = zoom < AppConfig.minZoomForVectorTiles;
-    if (tooFarOut != _showZoomHint) {
-      setState(() => _showZoomHint = tooFarOut);
-    }
-  }
 
   Widget _buildLoadingOverlay() {
     return Container(
@@ -696,16 +649,13 @@ class MapPageState extends State<MapPage> {
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {
-    // Streams aren't rendered or reliably tappable below the usable zoom, so
-    // don't run a query that would silently miss — the hint tells the user to
-    // zoom in.
-    final zoom = await _vectorTilesService.getCurrentZoom();
-    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) {
-      if (mounted && !_showZoomHint) setState(() => _showZoomHint = true);
-      return;
-    }
-
-    // Handle normal reach selection
+    // Tappable at any zoom. Taps used to be blocked below
+    // minZoomForVectorTiles, back when every order band drew down there and
+    // order-1 creeks simplified into dots nobody could hit. Now only order 5+
+    // renders when zoomed out — big rivers, the geometry that survives
+    // simplification best — so refusing the query was blocking taps on the
+    // one thing clearly visible. A tap that finds nothing falls through to
+    // onEmptyTap, which is all the feedback it needs.
     await _reachSelectionService.handleMapTap(context);
   }
 
