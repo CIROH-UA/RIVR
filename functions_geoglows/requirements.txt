@@ -15,3 +15,6 @@ zarr>=3,<4
 xarray>=2024.1
 h5netcdf>=1.3
 h5py>=3.10
+# Daily conditions precompute: fan out per VPU and publish static blobs.
+google-cloud-pubsub>=2.20
+google-cloud-storage>=2.14

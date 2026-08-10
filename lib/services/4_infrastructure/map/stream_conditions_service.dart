@@ -33,6 +33,23 @@ class StreamConditionsService {
   // (ADR 0005).
   static const Duration _timeout = Duration(seconds: 200);
 
+  /// Every above-normal reach on earth, from the daily precomputed file.
+  ///
+  /// This is the fast path and it replaces the whole per-region dance: no
+  /// working out which VPU is on screen, no waiting on a computation, no cold
+  /// start. It is a static file on a CDN, so it lands in well under a second
+  /// instead of the 15-300s a live region fetch costs — and unlike the live
+  /// path it covers the large regions that could never finish inside the
+  /// backend's own timeout at all.
+  ///
+  /// Only elevated reaches are in the file (under 1% of rivers on a typical
+  /// day), so it stays small. Returns empty if the file isn't published yet,
+  /// which leaves the caller free to fall back to the per-region endpoint.
+  Future<Map<int, int>> fetchGlobalConditions() async {
+    final res = await _fetch(AppConfig.geoglowsConditionsLatestUrl, 'global');
+    return res?.conditions ?? const {};
+  }
+
   /// Above-normal reaches for [vpu] as station-id -> category index (1..4).
   /// Best-effort: returns an empty map on any failure so the map simply stays
   /// uncolored rather than erroring.

@@ -55,6 +55,12 @@ class MapPageState extends State<MapPage> {
   bool _conditionsInFlight = false;
   bool _colorByCondition = MapPreferenceService.colorByConditionDefault;
 
+  // True once the daily world file has loaded. It contains every above-normal
+  // reach on earth, so there is nothing left to resolve per region — panning
+  // stops triggering fetches entirely. Only if that file is unavailable does
+  // the map fall back to asking about one region at a time.
+  bool _haveGlobalConditions = false;
+
   // NWM (US) coloring is per-reach (no region concept): classify the reaches on
   // screen, accumulating results so panning only ever asks about new reaches.
   final Map<int, int> _appliedNwmConditions = {};
@@ -92,7 +98,7 @@ class MapPageState extends State<MapPage> {
   }
 
   /// Re-apply any colors we've already computed (a style reload wipes the
-  /// layers), then fetch conditions for whatever region is now on screen.
+  /// layers), then make sure conditions are loaded.
   Future<void> _refreshConditionsAfterLoad() async {
     if (!_colorByCondition) return;
     if (_appliedConditions.isNotEmpty) {
@@ -101,8 +107,26 @@ class MapPageState extends State<MapPage> {
     if (_appliedNwmConditions.isNotEmpty) {
       await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
     }
+    await _loadGlobalConditions();
     await _maybeColorVisibleRegion();
     await _maybeColorVisibleNwm();
+  }
+
+  /// Load the daily world file once per session and paint all of it.
+  ///
+  /// This is the whole point of precomputing: one static download replaces the
+  /// per-region fetches, so every above-normal river on earth is already
+  /// colored before the user pans anywhere. Best-effort — if the file isn't
+  /// published, [_maybeColorVisibleRegion] still handles things region by
+  /// region, just slowly.
+  Future<void> _loadGlobalConditions() async {
+    if (_haveGlobalConditions) return;
+    final conditions = await _conditionsService.fetchGlobalConditions();
+    if (conditions.isEmpty || !mounted) return;
+
+    _haveGlobalConditions = true;
+    _appliedConditions.addAll(conditions);
+    await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
   }
 
   /// Color the NWM (US) reaches on screen by flood condition: classify only the
@@ -154,6 +178,10 @@ class MapPageState extends State<MapPage> {
   /// across regions so revisiting is instant. Best-effort — silent on failure.
   Future<void> _maybeColorVisibleRegion() async {
     if (!_colorByCondition || _conditionsInFlight) return;
+    // The daily world file already covers every region, so there is nothing
+    // left to resolve and no reason to fetch on pan. This path is now the
+    // fallback for when that file hasn't published.
+    if (_haveGlobalConditions) return;
     final sid = await _vectorTilesService.firstVisibleGeoglowsStationId();
     if (sid == null || !mounted) return;
 

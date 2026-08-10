@@ -15,6 +15,7 @@ Returns:   { river_id, forecast_date, units, source,
              return_periods: {"2":..,"5":..,"10":..,"25":..,"50":..,"100":..} }
 """
 
+import base64
 import io
 import json
 import math
@@ -30,7 +31,7 @@ import requests
 import s3fs
 import xarray as xr
 import zarr
-from firebase_functions import https_fn, options
+from firebase_functions import https_fn, options, pubsub_fn, scheduler_fn
 import geoglows
 
 # NWM (US National Water Model) — the same "flood category" coloring as GEOGLOWS,
@@ -542,3 +543,146 @@ def geoglows_forecast(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(_resolve(river_id), status=200, headers=_JSON_HEADERS)
     except Exception as e:
         return https_fn.Response(json.dumps({"error": f"{type(e).__name__}: {e}"}), status=502, headers=_JSON_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# Daily precompute — turn the on-demand read into a static file
+#
+# Computing conditions when a user pans is the wrong shape: the data changes
+# once a day, but every new region costs a fresh 15-300s read (ADR 0005). Worse,
+# the largest VPUs cannot finish inside the request timeout at all, so ~a third
+# of the world's rivers never colour no matter how long anyone waits.
+#
+# So compute all 125 regions once, after the daily forecast lands, and write
+# each as a small JSON blob. The app then does a CDN read instead of triggering
+# a computation.
+#
+# Shape is forced by two measured limits. The whole world takes ~120 min
+# serially, which blows past the 30-min ceiling on scheduled functions — so one
+# job cannot do it. But the largest single VPU is ~302s, which fits inside the
+# 540s ceiling on Pub/Sub-triggered functions. Hence scheduler -> 125 messages
+# -> one worker per region.
+# ---------------------------------------------------------------------------
+
+_CONDITIONS_BUCKET = os.environ.get("CONDITIONS_BUCKET", "ciroh-rivr-app-conditions")
+_CONDITIONS_TOPIC = "geoglows-conditions-vpu"
+
+
+def _storage_client():
+    from google.cloud import storage  # imported lazily; unused by the HTTP paths
+    return storage.Client()
+
+
+def _blob_path(date: str, vpu) -> str:
+    return f"conditions/geoglows/{date}/vpu-{vpu}.json"
+
+
+def _write_blob(path: str, payload: str) -> None:
+    """Publish one conditions file, public and briefly cacheable.
+
+    Cache-Control is short relative to the daily refresh so a client that asks
+    mid-publish is never stuck with a stale file for long; the path is
+    date-stamped anyway, so a new day is always a new URL.
+    """
+    blob = _storage_client().bucket(_CONDITIONS_BUCKET).blob(path)
+    blob.cache_control = "public, max-age=900"
+    blob.upload_from_string(payload, content_type="application/json")
+
+
+@scheduler_fn.on_schedule(
+    # GEOGLOWS publishes the daily run around 10:15-10:30 UTC (measured from S3
+    # Last-Modified on two consecutive days). 11:00 leaves margin without
+    # letting the data go stale into the user's morning.
+    schedule="0 11 * * *",
+    timezone=scheduler_fn.Timezone("UTC"),
+    region="us-west1",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=540,
+)
+def geoglows_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
+    """Fan out one message per VPU. Does no reading itself — it just decides
+    which date to build and hands the work to the workers."""
+    from google.cloud import pubsub_v1
+
+    date = _forecast_date()
+    publisher = pubsub_v1.PublisherClient()
+    topic = publisher.topic_path(os.environ["GCLOUD_PROJECT"], _CONDITIONS_TOPIC)
+
+    sent = 0
+    for vpu in _VPU_SLICES:
+        publisher.publish(topic, json.dumps({"vpu": vpu, "date": date}).encode())
+        sent += 1
+    print(f"geoglows_conditions_refresh: queued {sent} VPUs for {date}")
+
+
+@pubsub_fn.on_message_published(
+    topic=_CONDITIONS_TOPIC,
+    region="us-west1",
+    memory=options.MemoryOption.GB_4,
+    # The largest VPU (286,905 rivers at ~950 rivers/s) needs ~302s. 540s is the
+    # ceiling for this trigger type and leaves room for a cold start on top.
+    timeout_sec=540,
+    retry=True,
+)
+def geoglows_conditions_worker(event: pubsub_fn.CloudEvent) -> None:
+    """Compute one region and write its blob. Reuses the same
+    `_conditions_for_vpu` the live endpoint uses, so precomputed and on-demand
+    results cannot drift apart."""
+    msg = json.loads(base64.b64decode(event.data.message.data).decode())
+    vpu, date = msg["vpu"], msg["date"]
+
+    payload = _conditions_for_vpu(str(vpu), date)
+    _write_blob(_blob_path(date, vpu), payload)
+
+    count = json.loads(payload).get("count")
+    print(f"geoglows_conditions_worker: vpu={vpu} date={date} elevated={count}")
+
+
+@scheduler_fn.on_schedule(
+    # Half an hour after the fan-out. The whole world takes ~120 min of compute
+    # but the workers run concurrently, so the tail is the largest single VPU
+    # (~302s) plus queue time. Merging whatever exists is deliberate: a late or
+    # failed region simply isn't in today's global file, and the per-VPU blobs
+    # remain the authoritative fallback.
+    schedule="30 11 * * *",
+    timezone=scheduler_fn.Timezone("UTC"),
+    region="us-west1",
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=540,
+)
+def geoglows_conditions_publish_global(event: scheduler_fn.ScheduledEvent) -> None:
+    """Merge the per-VPU blobs into one world file.
+
+    This is what removes region resolution from the client entirely: instead of
+    working out which VPU it is looking at and fetching that region, the app
+    reads one file once and has every elevated reach on earth. Only elevated
+    reaches are included, so the file stays small — measured at ~16 bytes per
+    entry, and under 1% of rivers are elevated on a typical day.
+    """
+    date = _forecast_date()
+    bucket = _storage_client().bucket(_CONDITIONS_BUCKET)
+
+    merged, present, missing = {}, [], []
+    for vpu in _VPU_SLICES:
+        blob = bucket.blob(_blob_path(date, vpu))
+        if not blob.exists():
+            missing.append(vpu)
+            continue
+        merged.update(json.loads(blob.download_as_text()).get("conditions", {}))
+        present.append(vpu)
+
+    payload = json.dumps({
+        "date": date,
+        "count": len(merged),
+        "vpus": len(present),
+        "vpus_missing": missing,
+        "conditions": merged,
+    })
+    _write_blob(f"conditions/geoglows/{date}/global.json", payload)
+    _write_blob("conditions/geoglows/latest.json", payload)
+
+    print(
+        f"geoglows_conditions_publish_global: {len(merged)} elevated reaches "
+        f"from {len(present)}/{len(_VPU_SLICES)} VPUs for {date}"
+        + (f"; missing {missing}" if missing else "")
+    )
