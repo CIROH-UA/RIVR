@@ -32,7 +32,12 @@ import s3fs
 import xarray as xr
 import zarr
 from firebase_functions import https_fn, options, pubsub_fn, scheduler_fn
-import geoglows
+
+# NOTE: `geoglows` is NOT imported here. It takes ~12s to import (measured),
+# which alone exceeds the 10s budget the Firebase CLI allows for loading this
+# module to discover function signatures — deploys fail outright. It is also
+# dead weight for every endpoint except the forecast one, so importing it
+# lazily keeps cold starts off the conditions and coords paths too.
 
 # NWM (US National Water Model) — the same "flood category" coloring as GEOGLOWS,
 # but for US streams. Forecast peak comes from the short-range channel_rt files
@@ -112,6 +117,8 @@ def _build_payload(river_id: int, forecast_date: str) -> str:
     them in parallel — they are I/O-bound (network), so threads release the GIL
     and overlap. This cuts a ~3x-sequential wait down to ~1x the slowest read."""
     with ThreadPoolExecutor(max_workers=3) as pool:
+        import geoglows  # deferred: ~12s import, see note at top of file
+
         fc_future = pool.submit(geoglows.data.forecast, river_id=river_id, date=forecast_date)
         fs_future = pool.submit(geoglows.data.forecast_stats, river_id=river_id, date=forecast_date)
         rp_future = pool.submit(geoglows.data.return_periods, river_id=river_id, distribution="gumbel")
@@ -608,21 +615,54 @@ def geoglows_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
     publisher = pubsub_v1.PublisherClient()
     topic = publisher.topic_path(os.environ["GCLOUD_PROJECT"], _CONDITIONS_TOPIC)
 
-    sent = 0
-    for vpu in _VPU_SLICES:
+    # publish() is asynchronous — it hands back a future and returns
+    # immediately. Returning from this function without resolving them drops
+    # the messages on the floor, silently: the loop completes, the count looks
+    # right, and no worker ever runs. Block on every future so the log reflects
+    # what was actually accepted by Pub/Sub.
+    futures = [
         publisher.publish(topic, json.dumps({"vpu": vpu, "date": date}).encode())
-        sent += 1
-    print(f"geoglows_conditions_refresh: queued {sent} VPUs for {date}")
+        for vpu in _VPU_SLICES
+    ]
+
+    published, failed = 0, []
+    for vpu, future in zip(_VPU_SLICES, futures):
+        try:
+            future.result(timeout=60)
+            published += 1
+        except Exception as e:
+            failed.append(f"{vpu}:{type(e).__name__}")
+
+    print(
+        f"geoglows_conditions_refresh: published {published}/{len(futures)} "
+        f"VPUs for {date}" + (f"; failed {failed}" if failed else "")
+    )
+    if failed:
+        raise RuntimeError(f"{len(failed)} VPU messages failed to publish")
 
 
 @pubsub_fn.on_message_published(
     topic=_CONDITIONS_TOPIC,
     region="us-west1",
     memory=options.MemoryOption.GB_4,
+    # One region per instance. Cloud Run packs concurrent requests onto a single
+    # instance by default, and each region holds a ~233 MB forecast block while
+    # it works; two or three at once exceeded 4 GiB and the instances were
+    # killed mid-computation. The work is memory-bound, not IO-bound, so there
+    # is nothing to gain from sharing an instance anyway.
+    concurrency=1,
+    # Bound the fan-out. 125 regions at once would also hammer the same S3
+    # bucket — measured throughput already fell from ~950 to 300-670 rivers/s at
+    # a concurrency of only 3, so more parallelism buys less than it looks.
+    max_instances=20,
     # The largest VPU (286,905 rivers at ~950 rivers/s) needs ~302s. 540s is the
     # ceiling for this trigger type and leaves room for a cold start on top.
     timeout_sec=540,
-    retry=True,
+    # Deliberately no retry. Retried executions persist for up to 7 days and
+    # are billed each attempt, so a region that simply cannot finish inside the
+    # timeout would burn money failing repeatedly. A missed region is cheap by
+    # comparison: the merge step tolerates and logs it, the per-VPU blob from
+    # the previous day remains, and tomorrow's run fixes it.
 )
 def geoglows_conditions_worker(event: pubsub_fn.CloudEvent) -> None:
     """Compute one region and write its blob. Reuses the same
