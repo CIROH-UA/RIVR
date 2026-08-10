@@ -421,9 +421,11 @@ guarantee. NOAA is hourly, ~45 min behind its reference time (above).
 1. **Cost of a ~56,000-entry `match` expression on device.** ADR 0004 verified
    10,000 entries at ~34 ms. 56k is 5.6× and untested. **This gates the choice
    between a global blob and per-VPU blobs.**
-2. **Whether GEOGLOWS publishes a pre-derived, non-ensemble product.** If a
-   median/summary dataset exists in their S3, it could cut GEOGLOWS cost ~50×.
-   Currently the single largest open lever.
+2. ~~Whether GEOGLOWS publishes a pre-derived, non-ensemble product.~~
+   **RESOLVED 2026-08-10 — it does not.** See Measured. The forecast zarr holds
+   only `Qout` plus coordinates, and its chunking forces full ensemble + full
+   time reads, so ~398 GB/day is unavoidable when computing from the ensemble.
+   This lever is closed; the cost estimate stands as the floor.
 3. **GEOGLOWS forecast horizon.** If it is materially longer than NWM's 18
    hours, the same "Extreme" purple means different things by source under one
    legend. Possible correctness issue, not just cosmetic.
@@ -432,9 +434,13 @@ guarantee. NOAA is hourly, ~45 min behind its reference time (above).
    only. If true at full scale, the client could resolve a VPU locally with a
    125-entry table and skip a server round trip.
 5. **Cloud Storage bucket existence and write permission** for
-   `ciroh-rivr-app` under `jersondevs@gmail.com`.
-6. **Publish times** of the GEOGLOWS daily zarr and NWM cycles — needed so the
-   cron fires after the data lands.
+   `ciroh-rivr-app` under `jersondevs@gmail.com`. **BLOCKED 2026-08-10:** the
+   machine's active gcloud account is `admin@oqupa.com`, which must never be
+   used for this project, and its tokens need an interactive re-auth. Nothing
+   was run against gcloud. Switch accounts and re-authenticate to unblock.
+6. ~~Publish times of the GEOGLOWS daily zarr and NWM cycles.~~ **RESOLVED
+   2026-08-10.** GEOGLOWS lands ~10:15-10:30 UTC (two samples); NOAA is hourly,
+   ~45 min behind reference time. See Measured.
 7. **CIROH rate limits and permission** for a 5,560-call backfill against
    `nwm-api.ciroh.org`.
 8. **vCPU allocation at 4 GiB**, and whether this workload qualifies for
