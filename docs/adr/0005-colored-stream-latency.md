@@ -348,6 +348,48 @@ Side effect worth noting: inserting a 50-year band shifts 10yr/25yr down one
 slot, which lands 2yr-yellow / 10yr-orange / 25yr-red / 50yr-purple — the same
 anchoring HydroViewer uses. The off-by-one documented above resolves itself.
 
+### No pre-derived GEOGLOWS product exists (2026-08-10)
+
+The largest hoped-for cost lever. **Answer: it does not exist.**
+
+`geoglows-v2-forecasts/{date}00.zarr/.zmetadata` lists exactly four arrays:
+
+| array | shape | dtype | chunks |
+|---|---|---|---|
+| `Qout` | `[52, 280, 6838900]` | `<f4` | `[52, 280, 686]` |
+| `ensemble` | `[52]` | `<i8` | `[52]` |
+| `rivid` | `[6838900]` | `<i4` | `[213716]` |
+| `time` | `[280]` | `<i4` | `[280]` |
+
+No median, mean, or summary array. The bucket root holds only dated `.zarr`
+directories, and `geoglows-v2/` holds `hydrography`, `hydrography-global`,
+`hydrosos`, `retrospective`, `routing-configs`, `sources`, `tables`,
+`transformers` — none of which is a per-reach forecast summary.
+
+**The chunking is the binding constraint.** Each chunk is `[52, 280, 686]` —
+the *entire* ensemble and *entire* time axis for 686 rivers. There is no way to
+read fewer members or fewer timesteps; any reach you want costs all 52 members
+× 280 steps. Classifying the world therefore means moving
+**52 × 280 × 6,838,900 × 4 bytes ≈ 398 GB per day**.
+
+That reconciles the earlier throughput number: 6,838,900 ÷ 950/s ≈ 7,199s, and
+398 GB over 7,199s ≈ 55 MB/s of sustained S3 read. The ~$5-15/month estimate is
+the genuine floor for computing GEOGLOWS ourselves, not something better
+engineering removes.
+
+### Forecast publish times (2026-08-10)
+
+Measured from S3 `Last-Modified` on `{date}00.zarr/.zmetadata`:
+
+| run | landed (UTC) |
+|---|---|
+| 2026-08-10 | 10:26:37 |
+| 2026-08-09 | 10:13:04 |
+
+So the GEOGLOWS daily run lands around **10:15-10:30 UTC**; a cron at ~11:00
+UTC has margin. Two samples — enough to schedule against, not enough to call a
+guarantee. NOAA is hourly, ~45 min behind its reference time (above).
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
