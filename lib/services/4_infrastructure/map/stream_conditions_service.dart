@@ -17,10 +17,21 @@ class StreamConditionsService {
   StreamConditionsService({http.Client? client})
       : _client = client ?? http.Client();
 
-  // The backend read (~1-3 GB from S3) can take up to ~90s on a cold instance;
-  // the caller fetches this off the map's critical path, so a generous timeout
-  // is fine.
-  static const Duration _timeout = Duration(seconds: 120);
+  // Must exceed the backend's own timeout, or the client gives up on requests
+  // the server would still have answered.
+  //
+  // `geoglows_stream_conditions` is capped at `timeout_sec=180`, and the work
+  // is linear in river count at roughly 950 rivers/s (measured). At 120s the
+  // client abandoned anything over ~114,000 rivers — which is 14 of the 125
+  // VPUs, about a third of the world's rivers, silently uncolorable no matter
+  // how long the user waited. 200s gives the backend its full 180s plus
+  // network overhead. Both callers fetch this off the map's critical path, so
+  // a long ceiling costs nothing in responsiveness.
+  //
+  // This is a floor, not a fix: VPUs above ~171,000 rivers still cannot finish
+  // inside the backend's own 180s. Precomputing removes the ceiling entirely
+  // (ADR 0005).
+  static const Duration _timeout = Duration(seconds: 200);
 
   /// Above-normal reaches for [vpu] as station-id -> category index (1..4).
   /// Best-effort: returns an empty map on any failure so the map simply stays
