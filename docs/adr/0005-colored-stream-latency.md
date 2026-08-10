@@ -38,6 +38,26 @@ Confirmed by Jerson 2026-08-05: stream widths, category colors, the
 low-zoom exaggeration curve, and the heat-map read at continental zoom are
 **final**. Do not revisit them under this ADR.
 
+**Also out of scope — reclassification (confirmed by Jerson 2026-08-10).**
+Researching how NWPS and HydroViewer solve latency meant comparing their
+classification ladders, and that surfaced three real issues. None of them
+blocks this ADR's goal, and all of them are app-wide rather than map-local:
+
+- RIVR has no 50-year band; both reference viewers do.
+- RIVR's **Moderate** and **Major** borrow NWS's official flood-category words
+  but redefine them by return period rather than by impact.
+- RIVR's colors sit one band off HydroViewer's for the same return periods.
+
+These are findings, **not dependencies**. The latency work ships without
+touching a category, name, or color. They belong to **ADR 0002**
+(`FlowClassification` — consumed by 8 files including the forecast gauge, the
+timeline, favorites cards, and `weekly_outlook_service`), and the supporting
+measurements are kept in this document only because the comparison research
+happened here. Anyone acting on them should do so under ADR 0002.
+
+The single classification-adjacent item that **is** in scope is the inverted
+client/server timeout below — it is a latency bug, not a taxonomy question.
+
 ---
 
 ## Measured
@@ -469,6 +489,6 @@ The two blocking questions are now answered, and they split the two sources:
    the precompute this ADR was originally scoped around: resolve Unverified #2
    (pre-derived non-ensemble product), then #5 and #6, then measure #1 on
    device and pick a blob shape.
-4. Decide the product question this research surfaced: RIVR currently flags
-   more GEOGLOWS reaches than HydroViewer and far fewer NWM reaches than NWPS.
-   Matching the reference viewers is a choice, not a bug fix.
+4. *(Deferred, ADR 0002 — not this ADR.)* RIVR flags more GEOGLOWS reaches
+   than HydroViewer and far fewer NWM reaches than NWPS, has no 50-year band,
+   and its category names collide with NWS's. Findings only; see Out of scope.
