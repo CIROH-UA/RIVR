@@ -74,14 +74,16 @@ class _ConditionLegendState extends State<ConditionLegend> {
               ],
             ),
             if (_expanded) ...[
-              // What the colours actually mean. Without this the legend states
-              // a severity but not a period, and "Major" is meaningless without
-              // knowing whether it is happening now or sometime this week.
-              // Hawaii and Puerto Rico are the exception — NOAA publishes no
-              // 5-day product for them, only 48-hour.
+              // The colours are a forecast peak, and the window depends on
+              // which model covers the area: GEOGLOWS publishes 15 days
+              // outside the US, NOAA 5 days across CONUS and Alaska, and only
+              // 48 hours for Hawaii and Puerto Rico. Saying "in the days
+              // ahead" is vague on purpose — it is true everywhere, where any
+              // specific number would be wrong somewhere. Stating the exact
+              // window per region is still open (ADR 0005).
               const SizedBox(height: 6),
               Text(
-                'Peak risk in the next 5 days',
+                'Peak risk in the days ahead',
                 style: TextStyle(fontSize: 11, color: secondary),
               ),
               const SizedBox(height: 8),
