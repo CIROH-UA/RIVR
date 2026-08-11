@@ -1,7 +1,8 @@
 # ADR 0005 — Colored-stream latency (NWM + GEOGLOWS)
 
-- **Status:** Proposed — no decision made yet. This document is the running
-  research log for making flood-condition colors appear instantly while panning.
+- **Status:** Accepted for GEOGLOWS — daily precompute built, deployed and
+  measured 2026-08-10/11. Still the running research log; the NWM half is
+  untouched and remains on-demand.
 - **Date opened:** 2026-08-05
 - **Deciders:** Jerson Garcia (lead), Dr. Ames (approved pursuing a paid
   Cloud Functions path, 2026-08-05)
@@ -463,6 +464,40 @@ coordinates and no grouping**, so the client cannot select "the ones near me".
 The cheapest fix is to group the published file by VPU — the backend already
 computes it that way — so the client can apply the region it is looking at
 first and the remainder afterwards.
+
+### Final measurements after region-first painting (2026-08-11)
+
+The shipped behaviour. Times from app launch; "streams" is the map drawing the
+river network, "colour" is the first flood colours visible.
+
+| Site | Continent | streams | colour | gap | before |
+|---|---|---|---|---|---|
+| Yarlung Tsangpo, Tibet | Asia | 2.6s | 2.6s | 0.0s | 0.0s |
+| Patagonia, Chile | South America | 2.6s | 2.6s | 0.0s | 0.8s |
+| Nile Delta, Egypt | Africa | 2.6s | 3.4s | 0.9s | 6.9s |
+| Halmahera, Indonesia | Oceania / SE Asia | 1.7s | 3.4s | 1.7s | 2.6s |
+| Tanana valley, Alaska | North America | 2.6s | 6.0s | 3.4s | 3.5s |
+
+Four of five are inside two seconds. **Alaska is the exception and the reason
+is structural:** it is inside the US, where the GEOGLOWS base layers are masked
+out, so the viewport probe finds no reach, no region resolves, and the map
+falls through to applying the whole world. Any US location behaves this way for
+GEOGLOWS colouring.
+
+### Streams at zoom 0 — not possible with the current tiles
+
+Asked 2026-08-11. The `geoglows-world` tileset has **minzoom 3**, so below zoom
+3 there is no GEOGLOWS geometry to draw at all, coloured or otherwise. NWM goes
+to zoom 0, so US streams can render there. Three ways round it, none built:
+
+1. Generate the forthcoming split US / outside-US GEOGLOWS tilesets from zoom 0.
+   A tiling parameter, no app work — much the cheapest.
+2. Draw points rather than lines below zoom 3. Needs coordinates, which the
+   published file does not carry; adding lat/lon for the ~85k elevated reaches
+   roughly doubles it.
+3. One marker per region (116 of them) coloured by its worst category. Tiny,
+   works at any zoom, and arguably the honest picture at world scale where an
+   individual river is far below one pixel.
 
 ### Project configuration
 

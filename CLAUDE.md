@@ -66,9 +66,40 @@ functions/                               -- Firebase Cloud Functions (TypeScript
   src/notification-service.ts            -- Push notification logic
   src/noaa-client.ts                     -- Server-side NOAA API client
 functions_geoglows/                      -- Firebase Cloud Functions (Python, "geoglows" codebase)
-  main.py                                -- GEOGLOWS forecast/coords + GEOGLOWS & NWM stream-condition proxies
+  main.py                                -- GEOGLOWS forecast/coords, GEOGLOWS & NWM stream-condition
+                                            proxies, and the daily conditions precompute
   vpu_slices.json                        -- bundled VPU -> river-slice index (stream conditions)
 ```
+
+### Daily flood-conditions precompute
+
+Flood colours used to be computed when the user panned, which cost 15-300s per
+region and could not finish at all for the largest ones. They are now computed
+once a day and served as a static file. Four functions in the `geoglows`
+codebase, all us-west1:
+
+| Function | Trigger | Purpose |
+|---|---|---|
+| `geoglows_conditions_refresh` | daily 11:00 UTC | Fans out one Pub/Sub message per VPU. Reads nothing itself. |
+| `geoglows_conditions_worker` | Pub/Sub `geoglows-conditions-vpu` | Computes one region, writes its blob. `concurrency=1`, `max_instances=20`. |
+| `geoglows_conditions_publish_global` | daily 11:30 UTC | Merges the regions into one world file, grouped by VPU. |
+| `geoglows_conditions_latest` | HTTPS | Serves that file to the app. `min_instances=1`. |
+
+- **Storage:** `gs://ciroh-rivr-app-conditions`, paths
+  `conditions/geoglows/{YYYYMMDD}/vpu-{code}.json`, `.../global.json`, and a
+  stable `conditions/geoglows/latest.json`.
+- **The bucket is private** — an org policy on this project forbids public
+  buckets, which is why the app reads through a function rather than the CDN.
+- **Schedule rationale:** the GEOGLOWS daily run lands ~10:15-10:30 UTC
+  (measured). The whole world takes ~120 min of compute, over the 30-min
+  ceiling for scheduled functions, so it must fan out; the largest single VPU
+  is ~302s, inside the 540s Pub/Sub ceiling.
+- **`min_instances=1` on the serving function is deliberate** and raises the
+  bill by roughly $3/month. Without it the first request after an idle period
+  pays a ~7.5s cold start, and that request is the user opening the map.
+
+See `docs/adr/0005-colored-stream-latency.md` for the measurements behind all
+of the above.
 
 ### Key Patterns
 
@@ -275,7 +306,17 @@ cd functions && npm run build         # Build Cloud Functions
 firebase deploy --only functions:default              # Deploy TypeScript functions
 firebase deploy --only functions:geoglows             # Deploy Python functions (functions_geoglows/)
 firebase deploy --only functions:geoglows:<name>      # Deploy one Python function (e.g. nwm_stream_conditions)
+firebase deploy --only functions:geoglows:geoglows_conditions_latest --force   # --force needed: min_instances raises the bill
+gcloud scheduler jobs run firebase-schedule-geoglows_conditions_refresh-us-west1 --location=us-west1        # run the daily precompute now
+gcloud scheduler jobs run firebase-schedule-geoglows_conditions_publish_global-us-west1 --location=us-west1 # re-merge the world file now
 ```
+
+**Python venv:** `firebase.json` declares no runtime, so the CLI infers it from
+`functions_geoglows/venv`. Rebuild it with **Python 3.13** — a 3.12 venv
+silently migrates the deployed functions to a different runtime. Also note the
+`geoglows` package takes ~12s to import, over the CLI's 10s budget for reading
+function signatures, so it is imported lazily inside the one function that uses
+it. Moving it back to module scope will break deploys.
 
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
 **Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.

@@ -9,8 +9,9 @@ Rivr is powered by the **National Water Model (NWM)**, developed by the National
 ## Core Features
 
 ### Flood Risk Assessment
-- **Real-time Risk Categories**: Intelligent classification of river conditions into Normal, Elevated, High, and Flood Risk levels
-- **Return Period Analysis**: Advanced statistical analysis using 2-year, 5-year, and 25-year flood thresholds
+- **Real-time Risk Categories**: Classification of river conditions into Normal, Action, Moderate, Major and Extreme
+- **Return Period Analysis**: Statistical analysis against the 2-, 5-, 10- and 25-year flood thresholds
+- **Pre-coloured Flood Map**: Rivers running above normal are coloured on the map without tapping anything, worldwide via GEOGLOWS and across the US via the National Water Model
 - **Visual Risk Indicators**: Color-coded warnings and intuitive icons for quick risk assessment
 - **Safety-First Design**: Clear warnings and educational content to promote water safety
 
