@@ -732,6 +732,11 @@ def geoglows_conditions_publish_global(event: scheduler_fn.ScheduledEvent) -> No
     region="us-west1",  # same region as the bucket, so the read is a local hop
     memory=options.MemoryOption.MB_512,
     timeout_sec=60,
+    # Keep one instance alive. Scale-to-zero costs the first user of every idle
+    # period a ~7.5s cold start (measured) versus ~0.5s warm — and since this is
+    # the very first thing the map asks for, that cold start IS the user's
+    # experience of the feature. A single always-on 512 MB instance removes it.
+    min_instances=1,
 )
 def geoglows_conditions_latest(req: https_fn.Request) -> https_fn.Response:
     """Serve the precomputed world file.

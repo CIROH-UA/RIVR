@@ -61,6 +61,14 @@ class MapPageState extends State<MapPage> {
   // the map fall back to asking about one region at a time.
   bool _haveGlobalConditions = false;
 
+  // The world-file download, started in initState rather than after the map
+  // style loads. The two are independent — one is a network fetch, the other is
+  // Mapbox building its layers — so running them in series just added the
+  // download to the user's wait. Measured before this change: streams appeared
+  // at ~2.3s and colours ~4s later. Starting it up front lets the data be ready
+  // by the time there is anything to paint it onto.
+  Future<Map<int, int>>? _globalConditionsFetch;
+
   // NWM (US) coloring is per-reach (no region concept): classify the reaches on
   // screen, accumulating results so panning only ever asks about new reaches.
   final Map<int, int> _appliedNwmConditions = {};
@@ -87,6 +95,8 @@ class MapPageState extends State<MapPage> {
     _controlsService = factory.createControlsService();
     _setupSelectionCallbacks();
     _initializeCacheService();
+    // Start the conditions download immediately — do not wait for the map.
+    _globalConditionsFetch = _conditionsService.fetchGlobalConditions();
     _loadSavedCamera();
     _loadStreamLayerPrefs();
   }
@@ -117,7 +127,8 @@ class MapPageState extends State<MapPage> {
   /// region, just slowly.
   Future<void> _loadGlobalConditions() async {
     if (_haveGlobalConditions) return;
-    final conditions = await _conditionsService.fetchGlobalConditions();
+    final conditions =
+        await (_globalConditionsFetch ??= _conditionsService.fetchGlobalConditions());
     if (conditions.isEmpty || !mounted) return;
 
     _haveGlobalConditions = true;
@@ -483,9 +494,26 @@ class MapPageState extends State<MapPage> {
       // Apply lightPreset for Standard style (handles initial load + basemap changes)
       await _controlsService.applyLightPreset();
 
-      // Reset vector tiles state (safe for both initial and subsequent loads)
+      // Reset vector tiles state (safe for both initial and subsequent loads).
+      // Same race as the marker init below — bail rather than force-unwrap.
+      // onStyleLoaded can fire before onMapCreated has handed us the map.
+      // Wait briefly for it rather than force-unwrapping (which threw
+      // "Null check operator used on a null value", surfaced as a full-screen
+      // "Failed to load river data") or returning outright (which strands the
+      // loading spinner forever).
+      var mapForTiles = _mapboxMap;
+      for (var i = 0; mapForTiles == null && i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (!mounted) return;
+        mapForTiles = _mapboxMap;
+      }
+      if (mapForTiles == null) {
+        AppLogger.warning('MapPage', 'Map handle never arrived — aborting load');
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
       _vectorTilesService.dispose();
-      _vectorTilesService.setMapboxMap(_mapboxMap!);
+      _vectorTilesService.setMapboxMap(mapForTiles);
 
       // Load vector tiles
       await _vectorTilesService.loadRiverReaches();
@@ -504,8 +532,23 @@ class MapPageState extends State<MapPage> {
       // render immediately and recolor when the conditions arrive.
       unawaited(_refreshConditionsAfterLoad());
 
-      // Initialize markers on top of vector tiles (correct z-ordering)
-      await _markerService.initializeMarkers(_mapboxMap!);
+      // Initialize markers on top of vector tiles (correct z-ordering).
+      //
+      // Guarded rather than force-unwrapped: onStyleLoaded can fire before
+      // _mapboxMap is assigned (and after dispose), and a `!` here threw
+      // "Null check operator used on a null value" — surfaced to the user as
+      // "Failed to load river data", a full-screen Map Error with a Retry
+      // button, on a perfectly healthy map. It presents as random because it is
+      // a startup race; regions whose tiles resolve quickly hit it repeatedly.
+      final map = _mapboxMap;
+      if (map != null) {
+        await _markerService.initializeMarkers(map);
+      } else {
+        AppLogger.warning(
+          'MapPage',
+          'Style ready before map handle was set — skipping marker init',
+        );
+      }
 
       // Apply 3D terrain if enabled
       _controlsService.applyTerrainIfEnabled();

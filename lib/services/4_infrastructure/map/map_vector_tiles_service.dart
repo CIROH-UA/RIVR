@@ -82,25 +82,18 @@ class MapVectorTilesService {
     return expr;
   }
 
-  /// Zoom at which each order band starts drawing.
-  ///
-  /// The tileset decides what data is *in* a tile; this decides what we draw
-  /// from it. Without these every band rendered at every zoom, so a
-  /// continental view drew millions of order-1 creeks as sub-pixel hairlines —
-  /// invisible, but still filtered and rasterized every frame. Big rivers
-  /// carry the shape of the network when zoomed out; the small stuff only
-  /// starts to mean something up close. This is how HydroViewer reads.
-  ///
-  /// It also cuts the cost of the US mask, which only runs on features a layer
-  /// actually considers (see [_usMaskGeometry]).
-  ///
-  /// Highlight layers are deliberately exempt — an above-normal creek should
-  /// show at any zoom, which is the whole point of the feature.
-  static const Map<int, double> _minZoomByBand = {
-    _bandSmall: 9.0, // order 1-2
-    _bandMedium: 7.0, // order 3-4
-    _bandLarge: 0.0, // order 5+ — always drawn
-  };
+  // No per-band minZoom. Measured on device: hiding the small and medium
+  // bands does NOT reduce low-zoom cost — zoom 4 sits at ~950% CPU whether the
+  // bands are limited at z7/z9, at z5/z6, or not at all, because the large-river
+  // band always draws and it dominates. The limits were pure loss: they hid the
+  // river network at the zooms people browse (so flood colours floated on empty
+  // land in regions like Chile) while fixing nothing.
+  //
+  // The US boundary mask is not the cause either — disabling `within` left CPU
+  // unchanged at ~950%. It is raw geometry volume at continental scale.
+  //
+  // The tilesets serve every zoom they publish (NWM z0-16, GEOGLOWS z3-12).
+  // Draw what they serve.
 
   /// Normal opacity per band — the values the stream layers are built with.
   static const Map<int, double> _opacityByBand = {
@@ -356,10 +349,15 @@ class MapVectorTilesService {
     List<String> layerIds,
     bool visible,
   ) async {
-    if (_mapboxMap == null) return;
-    for (final layerId in layerIds) {
+    final map = _mapboxMap;
+    if (map == null) return;
+    // Issued together rather than one-at-a-time. Every style property set is a
+    // round trip to the native map, and the map load makes dozens of them; when
+    // awaited in sequence they serialise into seconds of dead time before the
+    // user sees anything.
+    await Future.wait(layerIds.map((layerId) async {
       try {
-        await _mapboxMap!.style.setStyleLayerProperty(
+        await map.style.setStyleLayerProperty(
           layerId,
           'visibility',
           visible ? 'visible' : 'none',
@@ -367,7 +365,7 @@ class MapVectorTilesService {
       } catch (e) {
         // Layer might not exist yet, that's fine
       }
-    }
+    }));
   }
 
   /// Remove vector tiles completely from map (for cleanup/switching layers)
@@ -410,7 +408,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandSmall),
-          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           filter: [
             "<=",
@@ -428,7 +425,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandMedium),
-          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           filter: [
             "all",
@@ -454,7 +450,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.vectorSourceLayer,
           lineColor: color,
           lineWidthExpression: _widthFor(_bandLarge),
-          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           filter: [
             ">=",
@@ -490,7 +485,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandSmall),
-          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           filter: _outsideUs(["<=", ["get", "streamOrder"], 2]),
         ),
@@ -502,7 +496,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandMedium),
-          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           filter: _outsideUs([
             "all",
@@ -518,7 +511,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandLarge),
-          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           filter: _outsideUs([">=", ["get", "streamOrder"], 5]),
         ),
@@ -533,7 +525,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandSmall),
-          minZoom: _minZoomByBand[_bandSmall],
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs(["<=", ["get", "streamOrder"], 2]),
@@ -546,7 +537,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandMedium),
-          minZoom: _minZoomByBand[_bandMedium],
           lineOpacity: 0.8,
           visibility: Visibility.NONE,
           filter: _insideUs([
@@ -563,7 +553,6 @@ class MapVectorTilesService {
           sourceLayer: AppConfig.geoglowsSourceLayer,
           lineColor: _streamColor,
           lineWidthExpression: _widthFor(_bandLarge),
-          minZoom: _minZoomByBand[_bandLarge],
           lineOpacity: 0.9,
           visibility: Visibility.NONE,
           filter: _insideUs([">=", ["get", "streamOrder"], 5]),
@@ -694,11 +683,11 @@ class MapVectorTilesService {
     Map<int, int> categoryByStationId,
   ) async {
     if (categoryByStationId.isEmpty) return;
-    await applyConditionColors(
-      categoryByStationId,
-      layerIds: _geoglowsWorldLayerIds,
-      baseColor: _streamColor,
-    );
+    // Only the highlight layers are painted. They are drawn above the base
+    // layers and are wider, so coloring the base layers underneath changes
+    // nothing visible — but it doubles the work: each application ships a
+    // ~1.7 MB expression across the platform channel, and with 85k reaches that
+    // was the dominant cost between the data arriving and the map showing it.
     await _applyHighlight(_geoglowsWorldHighlightLayerIds, categoryByStationId);
   }
 
@@ -835,32 +824,29 @@ class MapVectorTilesService {
       _conditionColorExpression(categoryByStationId, _streamColor),
     );
 
-    for (var band = 0; band < highlightLayerIds.length; band++) {
-      final layerId = highlightLayerIds[band];
-      // Id filter first — `all` short-circuits, and it is the selective one.
-      final filter = json.encode([
-        'all',
-        idFilter,
-        _orderFilterFor(band),
-      ]);
-      try {
-        await _mapboxMap!.style.setStyleLayerProperty(
-          layerId,
-          'filter',
-          filter,
-        );
-        await _mapboxMap!.style.setStyleLayerProperty(
-          layerId,
-          'line-color',
-          colorExpr,
-        );
-      } catch (e) {
-        AppLogger.warning(
-          'MapVectorTilesService',
-          '_applyHighlight failed for $layerId: $e',
-        );
-      }
-    }
+    final map = _mapboxMap!;
+    await Future.wait(
+      List.generate(highlightLayerIds.length, (band) async {
+        final layerId = highlightLayerIds[band];
+        // Id filter first — `all` short-circuits, and it is the selective one.
+        final filter = json.encode([
+          'all',
+          idFilter,
+          _orderFilterFor(band),
+        ]);
+        try {
+          await Future.wait([
+            map.style.setStyleLayerProperty(layerId, 'filter', filter),
+            map.style.setStyleLayerProperty(layerId, 'line-color', colorExpr),
+          ]);
+        } catch (e) {
+          AppLogger.warning(
+            'MapVectorTilesService',
+            '_applyHighlight failed for $layerId: $e',
+          );
+        }
+      }),
+    );
   }
 
   /// Hold the normal stream network back (or restore it) so above-normal
@@ -868,6 +854,9 @@ class MapVectorTilesService {
   /// Band is positional: every layer-id list is ordered small, medium, large.
   Future<void> setBaseStreamsDimmed(bool dimmed) async {
     if (_mapboxMap == null) return;
+    final map = _mapboxMap;
+    if (map == null) return;
+    final jobs = <Future<void>>[];
     for (final ids in [
       _nwmLayerIds,
       _geoglowsWorldLayerIds,
@@ -875,27 +864,24 @@ class MapVectorTilesService {
     ]) {
       for (var band = 0; band < ids.length; band++) {
         final opacity = dimmed ? _dimmedOpacity : _opacityByBand[band]!;
-        try {
-          await _mapboxMap!.style.setStyleLayerProperty(
-            ids[band],
-            'line-opacity',
-            opacity,
-          );
-        } catch (e) {
-          // Layer might not exist yet, that's fine.
-        }
+        jobs.add(() async {
+          try {
+            await map.style.setStyleLayerProperty(
+              ids[band], 'line-opacity', opacity,
+            );
+          } catch (e) {
+            // Layer might not exist yet, that's fine.
+          }
+        }());
       }
     }
+    await Future.wait(jobs); // concurrent — see _setLayerGroupVisibility
   }
 
   /// Paint the NWM (US) stream layers by flood condition.
   Future<void> applyNwmConditions(Map<int, int> categoryByStationId) async {
     if (categoryByStationId.isEmpty) return;
-    await applyConditionColors(
-      categoryByStationId,
-      layerIds: _nwmLayerIds,
-      baseColor: _streamColor,
-    );
+    // Highlight layers only — see applyGeoglowsConditions.
     await _applyHighlight(_nwmHighlightLayerIds, categoryByStationId);
   }
 
