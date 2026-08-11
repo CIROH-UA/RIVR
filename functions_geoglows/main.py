@@ -21,6 +21,7 @@ import json
 import math
 import os
 import threading
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -759,6 +760,177 @@ def geoglows_conditions_latest(req: https_fn.Request) -> https_fn.Response:
     try:
         blob = _storage_client().bucket(_CONDITIONS_BUCKET).blob(
             "conditions/geoglows/latest.json"
+        )
+        if not blob.exists():
+            return https_fn.Response(
+                json.dumps({"error": "not published yet", "conditions": {}}),
+                status=404, headers=_JSON_HEADERS,
+            )
+        return https_fn.Response(
+            blob.download_as_text(),
+            status=200,
+            headers={**_JSON_HEADERS, "Cache-Control": "public, max-age=900"},
+        )
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({"error": f"{type(e).__name__}: {e}"}),
+            status=502, headers=_JSON_HEADERS,
+        )
+
+
+# ---------------------------------------------------------------------------
+# NWM (US) daily conditions — from NOAA's published 5-day service
+#
+# NOAA already computes, hourly-to-6-hourly, which CONUS reaches are running
+# high, and publishes it with the raw numbers attached. That replaces what this
+# codebase used to do for NWM: read 9 short-range NetCDF files (27.5s for the
+# whole country) and then call the CIROH return-period API per reach in batches
+# of 500. We keep our own classification and apply it to their numbers.
+#
+# Why the 5-day service rather than the hourly "analysis" one:
+#   - It is the *peak over the next 5 days*, which is the question a person
+#     actually has, and it matches how GEOGLOWS is already classified (peak over
+#     its forecast) so the two halves of the map agree.
+#   - It refreshes every 6 hours rather than hourly, so four sweeps a day keeps
+#     it current instead of twenty-four.
+#   - It covers more reaches: 82,882 vs 63,826 (measured 2026-08-11).
+# ---------------------------------------------------------------------------
+
+_NWM_5DAY_QUERY = (
+    "https://maps.water.noaa.gov/server/rest/services/nwm/"
+    "mrf_nbm_5day_max_high_flow_magnitude/MapServer/0/query"
+)
+
+# Their stated maxRecordCount is 2000, but a 2000-row page timed out at 120s
+# while 1000 returned in ~0.8s (measured). Stay under the cliff.
+_NWM_PAGE = 1000
+
+# RIVR's minimum flow, in the units NOAA publishes. The floor exists so dry
+# headwaters whose return-period curve is degenerate (flow_2yr == flow_25yr, a
+# fraction of a cfs) are not reported as flooding. 0.5 m3/s -> cfs.
+_CFS_PER_CMS = 35.3146667
+_NWM_MIN_FLOW_CFS = _NWM_MIN_FLOW_CMS * _CFS_PER_CMS
+
+# Reaches with no basin code go in their own bucket rather than being dropped —
+# 2,683 of 82,882 have none (measured).
+_HUC_UNKNOWN = "unknown"
+
+
+def _classify_nwm_row(row):
+    """RIVR's flood category (1..4) for one published row, or None.
+
+    Deliberately ignores NOAA's own `recur_cat_5day`. Theirs includes anything
+    above a regional high-water threshold, which is below a 2-year event; ours
+    starts at the 2-year mark and applies a minimum flow. Using their numbers
+    with our ladder keeps the map consistent with the forecast gauge (ADR 0002).
+    """
+    flow = row.get("maxflow_5day_cfs")
+    if flow is None or flow < _NWM_MIN_FLOW_CFS:
+        return None
+    two = row.get("flow_2yr")
+    if not two:
+        return None
+    cat = 0
+    for year, c in ((2, 1), (5, 2), (10, 3), (25, 4)):
+        thr = row.get(f"flow_{year}yr")
+        if thr and flow >= thr:
+            cat = c
+    return cat or None
+
+
+def _fetch_nwm_5day():
+    """Page the whole service. Returns (by_huc, flat, reference_time)."""
+    fields = (
+        "feature_id,maxflow_5day_cfs,flow_2yr,flow_5yr,flow_10yr,flow_25yr,"
+        "huc6,reference_time"
+    )
+    by_huc, flat = {}, {}
+    reference = None
+    offset = 0
+    pages = 0
+    while True:
+        params = {
+            "where": "1=1",
+            "outFields": fields,
+            "returnGeometry": "false",
+            "resultOffset": offset,
+            "resultRecordCount": _NWM_PAGE,
+            "f": "json",
+        }
+        url = _NWM_5DAY_QUERY + "?" + urllib.parse.urlencode(params)
+        resp = requests.get(url, timeout=120)
+        resp.raise_for_status()
+        feats = resp.json().get("features", [])
+        pages += 1
+        for f in feats:
+            a = f.get("attributes", {})
+            if reference is None:
+                reference = a.get("reference_time")
+            fid = a.get("feature_id")
+            cat = _classify_nwm_row(a)
+            if cat is None or fid is None:
+                continue
+            huc = (a.get("huc6") or "").strip() or _HUC_UNKNOWN
+            by_huc.setdefault(huc, {})[str(fid)] = cat
+            flat[str(fid)] = cat
+        if len(feats) < _NWM_PAGE:
+            break
+        offset += len(feats)
+        if pages > 200:  # backstop; the service is ~83 pages
+            print("nwm_conditions: page cap hit, stopping early")
+            break
+    print(f"nwm_conditions: read {pages} pages, {len(flat)} elevated reaches")
+    return by_huc, flat, reference
+
+
+@scheduler_fn.on_schedule(
+    # NOAA's 5-day product refreshes every 6 hours and lands roughly 6.4h behind
+    # its reference time (reference 06:00 UTC seen published at 12:25 UTC), so
+    # cycles surface near 00:25 / 06:25 / 12:25 / 18:25. Run 20 minutes later.
+    schedule="45 0,6,12,18 * * *",
+    timezone=scheduler_fn.Timezone("UTC"),
+    region="us-west1",
+    memory=options.MemoryOption.GB_1,
+    # ~83 pages at ~0.8s each is well under two minutes; no fan-out needed,
+    # unlike GEOGLOWS where one region alone can take five.
+    timeout_sec=540,
+)
+def nwm_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
+    by_huc, flat, reference = _fetch_nwm_5day()
+    if not flat:
+        print("nwm_conditions: nothing elevated; leaving the previous file in place")
+        return
+
+    date = datetime.now(timezone.utc).strftime("%Y%m%d")
+    payload = json.dumps({
+        "date": date,
+        "reference_time": reference,
+        "source": "NOAA NWPS mrf_nbm_5day_max_high_flow_magnitude",
+        "horizon": "peak over next 5 days",
+        "count": len(flat),
+        "regions": len(by_huc),
+        "by_huc6": by_huc,
+        "conditions": flat,
+    })
+    _write_blob(f"conditions/nwm/{date}/latest.json", payload)
+    _write_blob("conditions/nwm/latest.json", payload)
+    print(
+        f"nwm_conditions_refresh: {len(flat)} elevated across {len(by_huc)} "
+        f"basins, reference {reference}"
+    )
+
+
+@https_fn.on_request(
+    region="us-west1",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=60,
+    min_instances=1,  # same reasoning as geoglows_conditions_latest
+)
+def nwm_conditions_latest(req: https_fn.Request) -> https_fn.Response:
+    """Serve the precomputed NWM file (private bucket, see ADR 0005)."""
+    try:
+        blob = _storage_client().bucket(_CONDITIONS_BUCKET).blob(
+            "conditions/nwm/latest.json"
         )
         if not blob.exists():
             return https_fn.Response(
