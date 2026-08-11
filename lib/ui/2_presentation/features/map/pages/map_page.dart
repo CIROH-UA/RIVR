@@ -67,7 +67,10 @@ class MapPageState extends State<MapPage> {
   // download to the user's wait. Measured before this change: streams appeared
   // at ~2.3s and colours ~4s later. Starting it up front lets the data be ready
   // by the time there is anything to paint it onto.
-  Future<Map<int, int>>? _globalConditionsFetch;
+  Future<Map<int, Map<int, int>>>? _globalConditionsFetch;
+
+  // Regions already painted, so a pan back does not repaint them.
+  final Set<int> _paintedVpus = {};
 
   // NWM (US) coloring is per-reach (no region concept): classify the reaches on
   // screen, accumulating results so panning only ever asks about new reaches.
@@ -96,7 +99,7 @@ class MapPageState extends State<MapPage> {
     _setupSelectionCallbacks();
     _initializeCacheService();
     // Start the conditions download immediately — do not wait for the map.
-    _globalConditionsFetch = _conditionsService.fetchGlobalConditions();
+    _globalConditionsFetch = _conditionsService.fetchGlobalConditionsByRegion();
     _loadSavedCamera();
     _loadStreamLayerPrefs();
   }
@@ -127,14 +130,104 @@ class MapPageState extends State<MapPage> {
   /// region, just slowly.
   Future<void> _loadGlobalConditions() async {
     if (_haveGlobalConditions) return;
-    final conditions =
-        await (_globalConditionsFetch ??= _conditionsService.fetchGlobalConditions());
-    if (conditions.isEmpty || !mounted) return;
+    final byRegion = await (_globalConditionsFetch ??=
+        _conditionsService.fetchGlobalConditionsByRegion());
+    if (byRegion.isEmpty || !mounted) return;
 
     _haveGlobalConditions = true;
-    _appliedConditions.addAll(conditions);
+
+    // Paint the region under the viewport first. Applying all ~85k reaches in
+    // one go takes 8-12s on device; a single region takes about three, and the
+    // difference is entirely the size of the expression handed to Mapbox. The
+    // rest is filled in afterwards, so the map is useful immediately and
+    // complete a moment later.
+    final visible = await _visibleVpu(byRegion);
+    final paintedRegionFirst =
+        visible != null && byRegion.containsKey(visible);
+    if (paintedRegionFirst) {
+      await _paintRegions({visible: byRegion[visible]!});
+    }
+    if (!mounted) return;
+
+    // Then, once the map has settled, apply everything in one pass.
+    //
+    // Deliberately not chunked: a Mapbox `match` expression cannot be appended
+    // to, so every chunk would have to re-send all the reaches accumulated so
+    // far. Chunking would make the total work worse, not better, and the final
+    // chunk would still carry all 85k. One late full application costs the same
+    // 8-12s it always did — but it now happens after the user can already see
+    // their region, instead of before.
+    // Only defer if something is already on screen. When no region resolved —
+    // inside the US, say, where GEOGLOWS base streams are masked out so the
+    // probe finds nothing — there is nothing painted yet, and waiting would
+    // just make the user wait longer for their first colour.
+    if (paintedRegionFirst) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    if (!mounted) return;
+    final all = <int, int>{};
+    for (final region in byRegion.values) {
+      all.addAll(region);
+    }
+    _appliedConditions.addAll(all);
+    _paintedVpus.addAll(byRegion.keys);
     await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
   }
+
+
+  /// Add [regions] to what is already painted and re-apply.
+  Future<void> _paintRegions(Map<int, Map<int, int>> regions) async {
+    if (regions.isEmpty) return;
+    for (final e in regions.entries) {
+      _paintedVpus.add(e.key);
+      _appliedConditions.addAll(e.value);
+    }
+    await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
+  }
+
+  /// Which region the camera is over, resolved locally.
+  ///
+  /// Deliberately does NOT call the per-region endpoint. That endpoint computes
+  /// a region on demand and takes 15-300s cold — calling it here would reinstate
+  /// exactly the wait this whole change exists to remove. Instead each region's
+  /// id range is derived from the file we already downloaded, and the visible
+  /// reach is matched against those ranges. GEOGLOWS ids are allocated per
+  /// region, so the ranges do not interleave.
+  ///
+  /// Null when nothing is under the probe, or when the reach belongs to a
+  /// region with no elevated water today — in which case there is nothing to
+  /// paint first anyway.
+  int? _vpuForStation(int stationId, Map<int, Map<int, int>> byRegion) {
+    for (final entry in byRegion.entries) {
+      var lo = 0, hi = 0;
+      var first = true;
+      for (final id in entry.value.keys) {
+        if (first) {
+          lo = hi = id;
+          first = false;
+        } else if (id < lo) {
+          lo = id;
+        } else if (id > hi) {
+          hi = id;
+        }
+      }
+      if (!first && stationId >= lo && stationId <= hi) return entry.key;
+    }
+    return null;
+  }
+
+  Future<int?> _visibleVpu(Map<int, Map<int, int>> byRegion) async {
+    if (!mounted) return null;
+    final size = MediaQuery.of(context).size;
+    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId(
+      screenWidth: size.width,
+      screenHeight: size.height,
+    );
+    if (sid == null) return null;
+    return _vpuForStation(sid, byRegion);
+  }
+
+
 
   /// Color the NWM (US) reaches on screen by flood condition: classify only the
   /// ones we haven't seen yet, accumulate, and paint. Best-effort.

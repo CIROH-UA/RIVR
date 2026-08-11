@@ -50,6 +50,49 @@ class StreamConditionsService {
     return res?.conditions ?? const {};
   }
 
+  /// The same daily file, but kept grouped by region.
+  ///
+  /// One download still carries the whole world; the grouping exists because
+  /// *painting* is what costs time. Handing Mapbox all 85k reaches at once
+  /// takes 8-12s; one region takes ~3s and a hundred reaches take no
+  /// measurable time at all. So the map paints the region under the viewport
+  /// first and backfills the rest.
+  ///
+  /// Empty if the file predates grouping, in which case the caller should fall
+  /// back to [fetchGlobalConditions].
+  Future<Map<int, Map<int, int>>> fetchGlobalConditionsByRegion() async {
+    try {
+      final res = await _client
+          .get(Uri.parse(AppConfig.geoglowsConditionsLatestUrl))
+          .timeout(_timeout);
+      if (res.statusCode != 200) return const {};
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map || decoded['by_vpu'] is! Map) return const {};
+
+      final out = <int, Map<int, int>>{};
+      (decoded['by_vpu'] as Map).forEach((vpuKey, reaches) {
+        final vpu = int.tryParse(vpuKey.toString());
+        if (vpu == null || reaches is! Map) return;
+        final inner = <int, int>{};
+        reaches.forEach((k, v) {
+          final id = int.tryParse(k.toString());
+          final cat = v is int ? v : int.tryParse(v.toString());
+          if (id != null && cat != null) inner[id] = cat;
+        });
+        if (inner.isNotEmpty) out[vpu] = inner;
+      });
+      AppLogger.info(
+        'StreamConditions',
+        'global by region: ${out.length} regions, '
+            '${out.values.fold<int>(0, (a, b) => a + b.length)} reaches',
+      );
+      return out;
+    } catch (e) {
+      AppLogger.warning('StreamConditions', 'Grouped fetch failed: $e');
+      return const {};
+    }
+  }
+
   /// Above-normal reaches for [vpu] as station-id -> category index (1..4).
   /// Best-effort: returns an empty map on any failure so the map simply stays
   /// uncolored rather than erroring.
