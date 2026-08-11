@@ -417,6 +417,53 @@ Provo, Utah (inside the US, where GEOGLOWS is masked out and NWM owns the map,
 so the GEOGLOWS world file cannot apply). **Only test GEOGLOWS colouring
 outside the US, in a region with known elevated reaches.**
 
+### Where the colour delay actually is (2026-08-11)
+
+Measured across five continents, then isolated with a controlled experiment.
+
+**Per-site timings** (from app launch; streams = map has drawn the network,
+colour = first flood colours visible):
+
+| Site | Continent | streams | colour |
+|---|---|---|---|
+| Yarlung Tsangpo, Tibet | Asia | 2.6s | 2.6s |
+| Patagonia, Chile | South America | 2.2s | 3.0s |
+| Tanana valley, Alaska | North America | 1.7s | 5.2s |
+| Halmahera, Indonesia | Oceania / SE Asia | 2.6s | 5.2s |
+| Nile Delta, Egypt | Africa | 2.6s | 9.5s |
+
+**The isolating experiment.** Same location (Patagonia), same binary, varying
+only how many reaches are handed to Mapbox:
+
+| reaches applied | streams | colour |
+|---|---|---|
+| 85,324 (whole world) | 2.6s | **8.3 - 12.0s** |
+| 3,946 (one VPU) | 2.6s | **3.4s** |
+| 100 | 2.6s | **2.6s** |
+
+**Conclusion: the cost is applying the expression, and it scales with entry
+count.** Not the download, not tile loading, not the function hop.
+
+Corollaries:
+
+- **The org policy forbidding public buckets is NOT responsible for the delay.**
+  The endpoint answers in 0.5-0.6s warm and, since the fetch now starts in
+  `initState`, the data is in hand at ~1.5s — before the map has drawn
+  anything. Serving from a public CDN would save ~0.3-0.4s and would not touch
+  the 3-9s gaps.
+- **ADR 0004's "10,000 entries in ~34 ms" does not extrapolate.** At 85,324 the
+  apply costs seconds, not ~290 ms. Whatever the cost curve is, it is not
+  linear in the range that matters.
+- Earlier readings of "3.0s" for the full set were outliers; repeated runs give
+  8.3, 8.3, 9.1, 12.0s.
+
+**Design implication.** Apply only what the viewport needs, then fill in the
+rest. The blocker is that the world file carries ids and categories but **no
+coordinates and no grouping**, so the client cannot select "the ones near me".
+The cheapest fix is to group the published file by VPU — the backend already
+computes it that way — so the client can apply the region it is looking at
+first and the remainder afterwards.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -445,9 +492,12 @@ outside the US, in a region with known elevated reaches.**
 
 ## Unverified — do not build on these
 
-1. ~~Cost of a large `match` expression on device.~~ **RESOLVED 2026-08-10 —
-   85,324 entries render with no visible stutter on the simulator.** The global
-   blob is viable. See Measured. (Observed, not instrumented.)
+1. ~~Cost of a large `match` expression on device.~~ **RESOLVED — and the
+   2026-08-10 answer was WRONG.** It renders without stutter, but it takes
+   **8-12 seconds** to apply 85,324 entries; 3,946 takes 3.4s and 100 takes
+   2.6s. "No visible stutter" was true and irrelevant — I measured whether the
+   map janked, not how long the paint took. The single global blob is NOT
+   viable as-is.
 2. ~~Whether GEOGLOWS publishes a pre-derived, non-ensemble product.~~
    **RESOLVED 2026-08-10 — it does not.** See Measured. The forecast zarr holds
    only `Qout` plus coordinates, and its chunking forces full ensemble + full
