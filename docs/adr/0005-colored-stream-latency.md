@@ -390,6 +390,33 @@ So the GEOGLOWS daily run lands around **10:15-10:30 UTC**; a cron at ~11:00
 UTC has margin. Two samples — enough to schedule against, not enough to call a
 guarantee. NOAA is hourly, ~45 min behind its reference time (above).
 
+### End-to-end verification on device (2026-08-10)
+
+The pipeline was run for real and confirmed in the app, not just in the bucket.
+
+- Scheduler fanned out **125/125** regions; workers wrote **125/125** blobs;
+  the merge published `latest.json`.
+- **85,324 elevated reaches worldwide** for 20260810 — 62,485 Action, 6,519
+  Moderate, 4,245 Major, 12,075 Extreme. File is **1.30 MiB**.
+- Endpoint timing: **0.5s warm, 7.5s cold** (was 40-300s of computation per
+  region, with the largest regions unable to finish at all).
+- Cloud Function access logs show the app fetching it on every launch:
+  `Dart/3.11`, HTTP 200, 1,365,455 bytes.
+- **Rendered correctly on the simulator** over the Yarlung Tsangpo (Tibet),
+  with all four categories visible simultaneously.
+
+**Unverified #1 is resolved.** The concern was whether a `match` expression far
+larger than the 10,000 entries validated in ADR 0004 would stall the map. At
+**85,324 entries** it renders with no visible stutter. Not instrumented, so
+this is an observation rather than a measurement — but it clears the risk that
+gated the global-blob design.
+
+**Testing note worth keeping.** Three separate sessions showed "no colours"
+and none of them were bugs: northern Chile (Atacama — almost no rivers) and
+Provo, Utah (inside the US, where GEOGLOWS is masked out and NWM owns the map,
+so the GEOGLOWS world file cannot apply). **Only test GEOGLOWS colouring
+outside the US, in a region with known elevated reaches.**
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
@@ -418,9 +445,9 @@ guarantee. NOAA is hourly, ~45 min behind its reference time (above).
 
 ## Unverified — do not build on these
 
-1. **Cost of a ~56,000-entry `match` expression on device.** ADR 0004 verified
-   10,000 entries at ~34 ms. 56k is 5.6× and untested. **This gates the choice
-   between a global blob and per-VPU blobs.**
+1. ~~Cost of a large `match` expression on device.~~ **RESOLVED 2026-08-10 —
+   85,324 entries render with no visible stutter on the simulator.** The global
+   blob is viable. See Measured. (Observed, not instrumented.)
 2. ~~Whether GEOGLOWS publishes a pre-derived, non-ensemble product.~~
    **RESOLVED 2026-08-10 — it does not.** See Measured. The forecast zarr holds
    only `Qout` plus coordinates, and its chunking forces full ensemble + full
