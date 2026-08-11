@@ -93,6 +93,50 @@ class StreamConditionsService {
     }
   }
 
+  /// The daily precomputed US conditions, grouped by HUC6 basin.
+  ///
+  /// Same shape and same reasoning as [fetchGlobalConditionsByRegion]: one
+  /// download, grouped so the map can paint the basin under the viewport first
+  /// rather than handing Mapbox every reach at once.
+  ///
+  /// This replaces asking the backend to classify the ~800 reaches on screen
+  /// every time the map settled. The horizon differs from the old path — NOAA's
+  /// published product is the peak over the next five days, where the old one
+  /// was an 18-hour short-range max — which also brings NWM into line with
+  /// GEOGLOWS, already classified on peak-over-forecast.
+  Future<Map<String, Map<int, int>>> fetchNwmConditionsByBasin() async {
+    try {
+      final res = await _client
+          .get(Uri.parse(AppConfig.nwmConditionsLatestUrl))
+          .timeout(_timeout);
+      if (res.statusCode != 200) return const {};
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map || decoded['by_huc6'] is! Map) return const {};
+
+      final out = <String, Map<int, int>>{};
+      (decoded['by_huc6'] as Map).forEach((huc, reaches) {
+        if (reaches is! Map) return;
+        final inner = <int, int>{};
+        reaches.forEach((k, v) {
+          final id = int.tryParse(k.toString());
+          final cat = v is int ? v : int.tryParse(v.toString());
+          if (id != null && cat != null) inner[id] = cat;
+        });
+        if (inner.isNotEmpty) out[huc.toString()] = inner;
+      });
+      AppLogger.info(
+        'StreamConditions',
+        'NWM by basin: ${out.length} basins, '
+            '${out.values.fold<int>(0, (a, b) => a + b.length)} reaches '
+            '(${decoded['horizon']})',
+      );
+      return out;
+    } catch (e) {
+      AppLogger.warning('StreamConditions', 'NWM grouped fetch failed: $e');
+      return const {};
+    }
+  }
+
   /// Above-normal reaches for [vpu] as station-id -> category index (1..4).
   /// Best-effort: returns an empty map on any failure so the map simply stays
   /// uncolored rather than erroring.

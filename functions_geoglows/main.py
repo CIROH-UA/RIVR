@@ -796,10 +796,20 @@ def geoglows_conditions_latest(req: https_fn.Request) -> https_fn.Response:
 #   - It covers more reaches: 82,882 vs 63,826 (measured 2026-08-11).
 # ---------------------------------------------------------------------------
 
-_NWM_5DAY_QUERY = (
-    "https://maps.water.noaa.gov/server/rest/services/nwm/"
-    "mrf_nbm_5day_max_high_flow_magnitude/MapServer/0/query"
-)
+_NWM_BASE = "https://maps.water.noaa.gov/server/rest/services/nwm"
+
+# The US is not one service. NOAA publishes the 5-day peak for CONUS and Alaska,
+# but Hawaii and Puerto Rico/Virgin Islands only exist on the 48-hour product —
+# there is no 5-day variant for them (checked 2026-08-11). Field names differ
+# too: CONUS calls the peak `maxflow_5day_cfs`, everywhere else `max_flow`.
+#
+# (service, flow field, horizon label)
+_NWM_SERVICES = [
+    ("mrf_nbm_5day_max_high_flow_magnitude", "maxflow_5day_cfs", "5 day"),
+    ("mrf_nbm_5day_max_high_flow_magnitude_ak", "max_flow", "5 day"),
+    ("srf_48hr_max_high_flow_magnitude_hi", "max_flow", "48 hour"),
+    ("srf_48hr_max_high_flow_magnitude_prvi", "max_flow", "48 hour"),
+]
 
 # Their stated maxRecordCount is 2000, but a 2000-row page timed out at 120s
 # while 1000 returned in ~0.8s (measured). Stay under the cliff.
@@ -816,7 +826,7 @@ _NWM_MIN_FLOW_CFS = _NWM_MIN_FLOW_CMS * _CFS_PER_CMS
 _HUC_UNKNOWN = "unknown"
 
 
-def _classify_nwm_row(row):
+def _classify_nwm_row(row, flow_field):
     """RIVR's flood category (1..4) for one published row, or None.
 
     Deliberately ignores NOAA's own `recur_cat_5day`. Theirs includes anything
@@ -824,7 +834,7 @@ def _classify_nwm_row(row):
     starts at the 2-year mark and applies a minimum flow. Using their numbers
     with our ladder keeps the map consistent with the forecast gauge (ADR 0002).
     """
-    flow = row.get("maxflow_5day_cfs")
+    flow = row.get(flow_field)
     if flow is None or flow < _NWM_MIN_FLOW_CFS:
         return None
     two = row.get("flow_2yr")
@@ -838,10 +848,10 @@ def _classify_nwm_row(row):
     return cat or None
 
 
-def _fetch_nwm_5day():
-    """Page the whole service. Returns (by_huc, flat, reference_time)."""
+def _fetch_nwm_service(service, flow_field):
+    """Page one NOAA service. Returns (by_huc, flat, reference_time)."""
     fields = (
-        "feature_id,maxflow_5day_cfs,flow_2yr,flow_5yr,flow_10yr,flow_25yr,"
+        f"feature_id,{flow_field},flow_2yr,flow_5yr,flow_10yr,flow_25yr,"
         "huc6,reference_time"
     )
     by_huc, flat = {}, {}
@@ -857,7 +867,7 @@ def _fetch_nwm_5day():
             "resultRecordCount": _NWM_PAGE,
             "f": "json",
         }
-        url = _NWM_5DAY_QUERY + "?" + urllib.parse.urlencode(params)
+        url = f"{_NWM_BASE}/{service}/MapServer/0/query?" + urllib.parse.urlencode(params)
         resp = requests.get(url, timeout=120)
         resp.raise_for_status()
         feats = resp.json().get("features", [])
@@ -867,7 +877,7 @@ def _fetch_nwm_5day():
             if reference is None:
                 reference = a.get("reference_time")
             fid = a.get("feature_id")
-            cat = _classify_nwm_row(a)
+            cat = _classify_nwm_row(a, flow_field)
             if cat is None or fid is None:
                 continue
             huc = (a.get("huc6") or "").strip() or _HUC_UNKNOWN
@@ -876,11 +886,29 @@ def _fetch_nwm_5day():
         if len(feats) < _NWM_PAGE:
             break
         offset += len(feats)
-        if pages > 200:  # backstop; the service is ~83 pages
-            print("nwm_conditions: page cap hit, stopping early")
+        if pages > 200:
+            print(f"nwm_conditions: {service} page cap hit")
             break
-    print(f"nwm_conditions: read {pages} pages, {len(flat)} elevated reaches")
+    print(f"nwm_conditions: {service} — {pages} pages, {len(flat)} elevated")
     return by_huc, flat, reference
+
+
+def _fetch_nwm_all():
+    """Every US territory NOAA publishes, merged."""
+    by_huc, flat, refs, horizons = {}, {}, {}, {}
+    for service, flow_field, horizon in _NWM_SERVICES:
+        try:
+            h, f, ref = _fetch_nwm_service(service, flow_field)
+        except Exception as e:
+            # One territory failing must not lose the others.
+            print(f"nwm_conditions: {service} FAILED {type(e).__name__}: {e}")
+            continue
+        for huc, reaches in h.items():
+            by_huc.setdefault(huc, {}).update(reaches)
+        flat.update(f)
+        refs[service] = ref
+        horizons[service] = horizon
+    return by_huc, flat, refs, horizons
 
 
 @scheduler_fn.on_schedule(
@@ -896,7 +924,7 @@ def _fetch_nwm_5day():
     timeout_sec=540,
 )
 def nwm_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
-    by_huc, flat, reference = _fetch_nwm_5day()
+    by_huc, flat, refs, horizons = _fetch_nwm_all()
     if not flat:
         print("nwm_conditions: nothing elevated; leaving the previous file in place")
         return
@@ -904,9 +932,10 @@ def nwm_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
     date = datetime.now(timezone.utc).strftime("%Y%m%d")
     payload = json.dumps({
         "date": date,
-        "reference_time": reference,
-        "source": "NOAA NWPS mrf_nbm_5day_max_high_flow_magnitude",
-        "horizon": "peak over next 5 days",
+        "reference_times": refs,
+        "source": "NOAA NWPS high-flow-magnitude services",
+        "horizon": "peak over next 5 days (CONUS, Alaska); 48 hours (Hawaii, PR/VI)",
+        "horizons": horizons,
         "count": len(flat),
         "regions": len(by_huc),
         "by_huc6": by_huc,
@@ -916,7 +945,7 @@ def nwm_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
     _write_blob("conditions/nwm/latest.json", payload)
     print(
         f"nwm_conditions_refresh: {len(flat)} elevated across {len(by_huc)} "
-        f"basins, reference {reference}"
+        f"basins from {len(refs)}/{len(_NWM_SERVICES)} services"
     )
 
 

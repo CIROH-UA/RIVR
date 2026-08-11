@@ -50,6 +50,12 @@ class AppConfig {
   /// after the GEOGLOWS run lands. Served through a function because an org
   /// policy forbids public buckets; still a download of a precomputed answer
   /// rather than a computation (see ADR 0005).
+  /// The daily precomputed US file — every above-normal NWM reach, derived
+  /// from NOAA's published 5-day peak service and classified with RIVR's own
+  /// ladder. Served through a function because the bucket is private.
+  static const String nwmConditionsLatestUrl =
+      'https://us-west1-ciroh-rivr-app.cloudfunctions.net/nwm_conditions_latest';
+
   static const String geoglowsConditionsLatestUrl =
       'https://us-west1-ciroh-rivr-app.cloudfunctions.net/geoglows_conditions_latest';
 

@@ -75,8 +75,13 @@ class MapPageState extends State<MapPage> {
   // NWM (US) coloring is per-reach (no region concept): classify the reaches on
   // screen, accumulating results so panning only ever asks about new reaches.
   final Map<int, int> _appliedNwmConditions = {};
-  final Set<int> _resolvedNwmIds = {};
-  bool _nwmInFlight = false;
+  bool _haveNwmConditions = false;
+
+  // The US conditions download, started alongside the global one in initState.
+  // NWM used to be classified per pan — the reaches on screen were sent to the
+  // backend on every map idle — which is why US views were the slowest on the
+  // map. It is now the same precomputed-file path GEOGLOWS uses.
+  Future<Map<String, Map<int, int>>>? _nwmConditionsFetch;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -100,6 +105,7 @@ class MapPageState extends State<MapPage> {
     _initializeCacheService();
     // Start the conditions download immediately — do not wait for the map.
     _globalConditionsFetch = _conditionsService.fetchGlobalConditionsByRegion();
+    _nwmConditionsFetch = _conditionsService.fetchNwmConditionsByBasin();
     _loadSavedCamera();
     _loadStreamLayerPrefs();
   }
@@ -118,7 +124,7 @@ class MapPageState extends State<MapPage> {
     }
     await _loadGlobalConditions();
     await _maybeColorVisibleRegion();
-    await _maybeColorVisibleNwm();
+    await _loadNwmConditions();
   }
 
   /// Load the daily world file once per session and paint all of it.
@@ -229,39 +235,55 @@ class MapPageState extends State<MapPage> {
 
 
 
-  /// Color the NWM (US) reaches on screen by flood condition: classify only the
-  /// ones we haven't seen yet, accumulate, and paint. Best-effort.
+  /// Paint the US reaches from the daily precomputed file.
   ///
-  /// Skipped when zoomed out past [AppConfig.minZoomForVectorTiles]. NWM
-  /// coloring is per-reach and capped at 800 ids per pass — against 2.78M
-  /// reaches that can't meaningfully fill a regional view, so out there it is
-  /// all cost (a large source query, an 800-id round trip, and a re-encode of
-  /// an ever-growing match expression) for no visible payoff. GEOGLOWS keeps
-  /// running at every zoom because it resolves a whole VPU at once.
-  Future<void> _maybeColorVisibleNwm() async {
-    if (!_colorByCondition || _nwmInFlight) return;
+  /// Replaces classifying whatever was on screen on every map idle: that sent
+  /// up to 800 reach ids to the backend per pan and made US views the slowest
+  /// part of the map. One download now covers the country.
+  ///
+  /// Like GEOGLOWS, the basin under the viewport is painted first and the rest
+  /// follows, because applying the expression is what costs time and it scales
+  /// with entry count (ADR 0005).
+  Future<void> _loadNwmConditions() async {
+    if (_haveNwmConditions || !_colorByCondition) return;
+    final byBasin = await (_nwmConditionsFetch ??=
+        _conditionsService.fetchNwmConditionsByBasin());
+    if (!mounted) return;
+    if (byBasin.isEmpty) {
+      // The precomputed file is missing or not published yet. Fall back to
+      // classifying what is on screen — slow, but better than a US map with no
+      // colour at all. Deliberately not marked as loaded, so a later attempt
+      // can still pick the file up.
+      await _colorVisibleNwmFallback();
+      return;
+    }
 
+    _haveNwmConditions = true;
+    for (final basin in byBasin.values) {
+      _appliedNwmConditions.addAll(basin);
+    }
+    await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
+  }
+
+  /// Legacy per-viewport classification, kept only as a fallback for when the
+  /// precomputed US file is unavailable. This is what every US pan used to do:
+  /// pull up to 800 reach ids out of the tiles and ask the backend to classify
+  /// them. It is slow and it competes with rendering, which is why it is no
+  /// longer the normal path.
+  Future<void> _colorVisibleNwmFallback() async {
     final zoom = await _vectorTilesService.getCurrentZoom();
     if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) return;
 
     final ids = await _vectorTilesService.visibleNwmStationIds();
     final unresolved =
-        ids.where((id) => !_resolvedNwmIds.contains(id)).toList();
+        ids.where((id) => !_appliedNwmConditions.containsKey(id)).toList();
     if (unresolved.isEmpty || !mounted) return;
 
-    _nwmInFlight = true;
-    try {
-      final conditions =
-          await _conditionsService.fetchNwmByStations(unresolved);
-      if (!mounted) return;
-      _resolvedNwmIds.addAll(unresolved);
-      if (conditions.isNotEmpty) {
-        _appliedNwmConditions.addAll(conditions);
-        await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
-      }
-    } finally {
-      _nwmInFlight = false;
-    }
+    final conditions =
+        await _conditionsService.fetchNwmByStations(unresolved);
+    if (!mounted || conditions.isEmpty) return;
+    _appliedNwmConditions.addAll(conditions);
+    await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
   }
 
   /// Turn condition coloring on/off — persist the choice, then either paint the
@@ -280,7 +302,7 @@ class MapPageState extends State<MapPage> {
         await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
       }
       await _maybeColorVisibleRegion();
-      await _maybeColorVisibleNwm();
+      await _loadNwmConditions();
     } else {
       await _vectorTilesService.clearGeoglowsConditions();
       await _vectorTilesService.clearNwmConditions();
@@ -474,7 +496,7 @@ class MapPageState extends State<MapPage> {
     // Color whatever the user just settled on (no-op if already colored or no
     // streams are in view) — GEOGLOWS by region, NWM by visible reach.
     unawaited(_maybeColorVisibleRegion());
-    unawaited(_maybeColorVisibleNwm());
+    unawaited(_loadNwmConditions());
   }
 
 
