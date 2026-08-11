@@ -74,6 +74,16 @@ class _ConditionLegendState extends State<ConditionLegend> {
               ],
             ),
             if (_expanded) ...[
+              // What the colours actually mean. Without this the legend states
+              // a severity but not a period, and "Major" is meaningless without
+              // knowing whether it is happening now or sometime this week.
+              // Hawaii and Puerto Rico are the exception — NOAA publishes no
+              // 5-day product for them, only 48-hour.
+              const SizedBox(height: 6),
+              Text(
+                'Peak risk in the next 5 days',
+                style: TextStyle(fontSize: 11, color: secondary),
+              ),
               const SizedBox(height: 8),
               for (final (label, color) in ConditionLegend._entries)
                 Padding(
@@ -97,6 +107,13 @@ class _ConditionLegendState extends State<ConditionLegend> {
                     ],
                   ),
                 ),
+              // NOAA's terms require their material to be identified and not
+              // presented as our own; GEOGLOWS asks to be credited likewise.
+              const SizedBox(height: 2),
+              Text(
+                'NOAA NWM · GEOGLOWS',
+                style: TextStyle(fontSize: 10, color: secondary),
+              ),
             ],
           ],
         ),

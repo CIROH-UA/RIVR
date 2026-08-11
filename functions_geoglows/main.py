@@ -59,6 +59,10 @@ _NWM_MAX_IDS = 800
 _FORECAST_ZARR = "geoglows-v2-forecasts/{date}00.zarr"
 _RETURN_PERIODS_ZARR = "geoglows-v2/retrospective/return-periods.zarr"
 
+# GEOGLOWS publishes hourly steps for the first 240 hours, so 5 days is the
+# first 120. Matches NOAA's 5-day product so both halves of the map agree.
+_GEOGLOWS_5DAY_STEPS = 120
+
 # Bundled VPU -> [i0, i1) slice into the (contiguous) river ordering, so we can
 # read one region's forecast + return periods without loading the 240 MB model
 # table at runtime. Generated offline from the model table; see git history.
@@ -313,11 +317,20 @@ def _conditions_for_vpu(vpu: str, date: str) -> str:
     n = i1 - i0
 
     # Forecast peak per reach, streamed in blocks to bound memory.
+    #
+    # Only the first 5 days are considered, even though GEOGLOWS publishes
+    # ~15 (280 steps: hourly for 240 h, then 3-hourly — measured 2026-08-11).
+    # The US half of the map comes from NOAA's 5-day product, and a colour has
+    # to mean the same thing on both sides of the border (ADR 0002): without
+    # this, the same purple meant "worst in a fortnight" globally and "worst in
+    # five days" in the US. Truncating costs nothing — the chunk covers all 280
+    # steps either way, so this only narrows which ones the max is taken over.
+    steps_5day = min(_GEOGLOWS_5DAY_STEPS, fz["Qout"].shape[1])
     peak = np.empty(n, dtype="f4")
     block = 4000
     for s in range(0, n, block):
         e = min(s + block, n)
-        q = fz["Qout"][:, :, i0 + s : i0 + e]  # [ensemble, time, block]
+        q = fz["Qout"][:, :steps_5day, i0 + s : i0 + e]  # [ensemble, time, block]
         peak[s:e] = np.nanmax(np.median(q, axis=0), axis=0)
 
     years = rp["return_period"][:].tolist()
