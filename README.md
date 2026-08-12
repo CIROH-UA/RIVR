@@ -280,6 +280,19 @@ RIVR integrates with reliable, authoritative data sources:
 
 The National Water Model represents a significant advancement in hydrologic prediction, providing high-resolution forecasts across all river reaches in the continental United State makes this sophisticated forecasting technology accessible to everyday users in an intuitive mobile interface.
 
+## Credits
+
+RIVR was conceived, designed, and funded by **Dr. Dan Ames** (Brigham Young University
+and HydroMap LLC), who also directs its ongoing development.
+
+| | |
+|---|---|
+| **Dr. Dan Ames** | Project lead — concept, scope, design, and funding. Brigham Young University Hydroinformatics Laboratory and HydroMap LLC. Active contributor to the current codebase. |
+| **Jerson Garcia** | Lead developer — designed and built the great majority of the application as it exists today, including the architecture, the forecast and mapping systems, and the current interface. |
+| **Travis Tyler** | Original proof of concept — built the first trial version of the mobile app that established the idea. |
+
+Development on the current version was assisted by Claude (Anthropic).
+
 ## Contributing
 
 We welcome contributions to Rivr! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.

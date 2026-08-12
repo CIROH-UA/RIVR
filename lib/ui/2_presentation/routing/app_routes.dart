@@ -14,5 +14,6 @@ class AppRoutes {
   static const notificationsSettings = '/notifications-settings';
   static const weeklyOutlook = '/weekly-outlook';
   static const sponsors = '/sponsors';
+  static const about = '/about';
   static const account = '/account';
 }

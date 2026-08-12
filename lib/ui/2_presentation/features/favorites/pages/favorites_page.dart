@@ -1123,6 +1123,11 @@ class _FavoritesPageState extends State<FavoritesPage>
                     Navigator.pop(context);
                     AppRouter.pushSponsors(context);
                   }),
+                  _buildMenuDivider(),
+                  _buildMenuOption('About', CupertinoIcons.info_circle, () {
+                    Navigator.pop(context);
+                    AppRouter.pushAbout(context);
+                  }),
                 ],
               ),
             ),
