@@ -753,11 +753,10 @@ def geoglows_conditions_publish_global(event: scheduler_fn.ScheduledEvent) -> No
     region="us-west1",  # same region as the bucket, so the read is a local hop
     memory=options.MemoryOption.MB_512,
     timeout_sec=60,
-    # Keep one instance alive. Scale-to-zero costs the first user of every idle
-    # period a ~7.5s cold start (measured) versus ~0.5s warm — and since this is
-    # the very first thing the map asks for, that cold start IS the user's
-    # experience of the feature. A single always-on 512 MB instance removes it.
-    min_instances=1,
+    # Scale to zero — no idle cost. A warm instance removes a ~7.5s cold start
+    # (measured) and is worth ~$3/month when the app is in use, but it bills
+    # continuously whether anyone opens the map or not. Turned off 2026-08-16 at
+    # Jerson's request to stop spend; set back to 1 before any real usage.
 )
 def geoglows_conditions_latest(req: https_fn.Request) -> https_fn.Response:
     """Serve the precomputed world file.
@@ -966,7 +965,7 @@ def nwm_conditions_refresh(event: scheduler_fn.ScheduledEvent) -> None:
     region="us-west1",
     memory=options.MemoryOption.MB_512,
     timeout_sec=60,
-    min_instances=1,  # same reasoning as geoglows_conditions_latest
+    # Scale to zero — see geoglows_conditions_latest. Off 2026-08-16 to stop spend.
 )
 def nwm_conditions_latest(req: https_fn.Request) -> https_fn.Response:
     """Serve the precomputed NWM file (private bucket, see ADR 0005)."""
