@@ -24,8 +24,6 @@ import 'package:rivr/services/4_infrastructure/map/map_vector_tiles_service.dart
 import 'package:rivr/services/4_infrastructure/map/map_reach_selection_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_marker_service.dart';
 import 'package:rivr/services/4_infrastructure/map/map_service_factory.dart';
-import 'package:rivr/services/4_infrastructure/map/stream_conditions_service.dart';
-import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
@@ -42,47 +40,6 @@ class MapPageState extends State<MapPage> {
   late final MapReachSelectionService _reachSelectionService;
   late final MapMarkerService _markerService;
   late final MapControlsService _controlsService;
-  final StreamConditionsService _conditionsService = StreamConditionsService();
-
-  // Flood-condition coloring, resolved from whatever region is on screen.
-  // [_appliedConditions] accumulates station-id -> category across the VPUs the
-  // user visits (so panning back keeps colors); [_appliedVpus] tracks which
-  // regions we've already fetched; [_stationVpu] caches a reach -> VPU so a
-  // known reach never triggers a second lookup.
-  final Map<int, int> _appliedConditions = {};
-  final Set<int> _appliedVpus = {};
-  final Map<int, int> _stationVpu = {};
-  bool _conditionsInFlight = false;
-  bool _colorByCondition = MapPreferenceService.colorByConditionDefault;
-
-  // True once the daily world file has loaded. It contains every above-normal
-  // reach on earth, so there is nothing left to resolve per region — panning
-  // stops triggering fetches entirely. Only if that file is unavailable does
-  // the map fall back to asking about one region at a time.
-  bool _haveGlobalConditions = false;
-
-  // The world-file download, started in initState rather than after the map
-  // style loads. The two are independent — one is a network fetch, the other is
-  // Mapbox building its layers — so running them in series just added the
-  // download to the user's wait. Measured before this change: streams appeared
-  // at ~2.3s and colours ~4s later. Starting it up front lets the data be ready
-  // by the time there is anything to paint it onto.
-  Future<Map<int, Map<int, int>>>? _globalConditionsFetch;
-
-  // Regions already painted, so a pan back does not repaint them.
-  final Set<int> _paintedVpus = {};
-
-  // NWM (US) coloring is per-reach (no region concept): classify the reaches on
-  // screen, accumulating results so panning only ever asks about new reaches.
-  final Map<int, int> _appliedNwmConditions = {};
-  bool _haveNwmConditions = false;
-
-  // The US conditions download, started alongside the global one in initState.
-  // NWM used to be classified per pan — the reaches on screen were sent to the
-  // backend on every map idle — which is why US views were the slowest on the
-  // map. It is now the same precomputed-file path GEOGLOWS uses.
-  Future<Map<String, Map<int, int>>>? _nwmConditionsFetch;
-
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
@@ -103,255 +60,16 @@ class MapPageState extends State<MapPage> {
     _controlsService = factory.createControlsService();
     _setupSelectionCallbacks();
     _initializeCacheService();
-    // Start the conditions download immediately — do not wait for the map.
-    _globalConditionsFetch = _conditionsService.fetchGlobalConditionsByRegion();
-    _nwmConditionsFetch = _conditionsService.fetchNwmConditionsByBasin();
     _loadSavedCamera();
     _loadStreamLayerPrefs();
-  }
-
-  /// Re-apply any colors we've already computed (a style reload wipes the
-  /// layers), then make sure conditions are loaded.
-  Future<void> _refreshConditionsAfterLoad() async {
-    if (!_colorByCondition) return;
-    // A style reload rebuilds the layers at full opacity — re-dim them.
-    await _vectorTilesService.setBaseStreamsDimmed(true);
-    if (_appliedConditions.isNotEmpty) {
-      await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
-    }
-    if (_appliedNwmConditions.isNotEmpty) {
-      await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
-    }
-    await _loadGlobalConditions();
-    await _maybeColorVisibleRegion();
-    await _loadNwmConditions();
-  }
-
-  /// Load the daily world file once per session and paint all of it.
-  ///
-  /// This is the whole point of precomputing: one static download replaces the
-  /// per-region fetches, so every above-normal river on earth is already
-  /// colored before the user pans anywhere. Best-effort — if the file isn't
-  /// published, [_maybeColorVisibleRegion] still handles things region by
-  /// region, just slowly.
-  Future<void> _loadGlobalConditions() async {
-    if (_haveGlobalConditions) return;
-    final byRegion = await (_globalConditionsFetch ??=
-        _conditionsService.fetchGlobalConditionsByRegion());
-    if (byRegion.isEmpty || !mounted) return;
-
-    _haveGlobalConditions = true;
-
-    // Paint the region under the viewport first. Applying all ~85k reaches in
-    // one go takes 8-12s on device; a single region takes about three, and the
-    // difference is entirely the size of the expression handed to Mapbox. The
-    // rest is filled in afterwards, so the map is useful immediately and
-    // complete a moment later.
-    final visible = await _visibleVpu(byRegion);
-    final paintedRegionFirst =
-        visible != null && byRegion.containsKey(visible);
-    if (paintedRegionFirst) {
-      await _paintRegions({visible: byRegion[visible]!});
-    }
-    if (!mounted) return;
-
-    // Then, once the map has settled, apply everything in one pass.
-    //
-    // Deliberately not chunked: a Mapbox `match` expression cannot be appended
-    // to, so every chunk would have to re-send all the reaches accumulated so
-    // far. Chunking would make the total work worse, not better, and the final
-    // chunk would still carry all 85k. One late full application costs the same
-    // 8-12s it always did — but it now happens after the user can already see
-    // their region, instead of before.
-    // Only defer if something is already on screen. When no region resolved —
-    // inside the US, say, where GEOGLOWS base streams are masked out so the
-    // probe finds nothing — there is nothing painted yet, and waiting would
-    // just make the user wait longer for their first colour.
-    if (paintedRegionFirst) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-    }
-    if (!mounted) return;
-    final all = <int, int>{};
-    for (final region in byRegion.values) {
-      all.addAll(region);
-    }
-    _appliedConditions.addAll(all);
-    _paintedVpus.addAll(byRegion.keys);
-    await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
-  }
-
-
-  /// Add [regions] to what is already painted and re-apply.
-  Future<void> _paintRegions(Map<int, Map<int, int>> regions) async {
-    if (regions.isEmpty) return;
-    for (final e in regions.entries) {
-      _paintedVpus.add(e.key);
-      _appliedConditions.addAll(e.value);
-    }
-    await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
-  }
-
-  /// Which region the camera is over, resolved locally.
-  ///
-  /// Deliberately does NOT call the per-region endpoint. That endpoint computes
-  /// a region on demand and takes 15-300s cold — calling it here would reinstate
-  /// exactly the wait this whole change exists to remove. Instead each region's
-  /// id range is derived from the file we already downloaded, and the visible
-  /// reach is matched against those ranges. GEOGLOWS ids are allocated per
-  /// region, so the ranges do not interleave.
-  ///
-  /// Null when nothing is under the probe, or when the reach belongs to a
-  /// region with no elevated water today — in which case there is nothing to
-  /// paint first anyway.
-  int? _vpuForStation(int stationId, Map<int, Map<int, int>> byRegion) {
-    for (final entry in byRegion.entries) {
-      var lo = 0, hi = 0;
-      var first = true;
-      for (final id in entry.value.keys) {
-        if (first) {
-          lo = hi = id;
-          first = false;
-        } else if (id < lo) {
-          lo = id;
-        } else if (id > hi) {
-          hi = id;
-        }
-      }
-      if (!first && stationId >= lo && stationId <= hi) return entry.key;
-    }
-    return null;
-  }
-
-  Future<int?> _visibleVpu(Map<int, Map<int, int>> byRegion) async {
-    if (!mounted) return null;
-    final size = MediaQuery.of(context).size;
-    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId(
-      screenWidth: size.width,
-      screenHeight: size.height,
-    );
-    if (sid == null) return null;
-    return _vpuForStation(sid, byRegion);
-  }
-
-
-
-  /// Paint the US reaches from the daily precomputed file.
-  ///
-  /// Replaces classifying whatever was on screen on every map idle: that sent
-  /// up to 800 reach ids to the backend per pan and made US views the slowest
-  /// part of the map. One download now covers the country.
-  ///
-  /// Like GEOGLOWS, the basin under the viewport is painted first and the rest
-  /// follows, because applying the expression is what costs time and it scales
-  /// with entry count (ADR 0005).
-  Future<void> _loadNwmConditions() async {
-    if (_haveNwmConditions || !_colorByCondition) return;
-    final byBasin = await (_nwmConditionsFetch ??=
-        _conditionsService.fetchNwmConditionsByBasin());
-    if (!mounted) return;
-    if (byBasin.isEmpty) {
-      // The precomputed file is missing or not published yet. Fall back to
-      // classifying what is on screen — slow, but better than a US map with no
-      // colour at all. Deliberately not marked as loaded, so a later attempt
-      // can still pick the file up.
-      await _colorVisibleNwmFallback();
-      return;
-    }
-
-    _haveNwmConditions = true;
-    for (final basin in byBasin.values) {
-      _appliedNwmConditions.addAll(basin);
-    }
-    await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
-  }
-
-  /// Legacy per-viewport classification, kept only as a fallback for when the
-  /// precomputed US file is unavailable. This is what every US pan used to do:
-  /// pull up to 800 reach ids out of the tiles and ask the backend to classify
-  /// them. It is slow and it competes with rendering, which is why it is no
-  /// longer the normal path.
-  Future<void> _colorVisibleNwmFallback() async {
-    final zoom = await _vectorTilesService.getCurrentZoom();
-    if (zoom != null && zoom < AppConfig.minZoomForVectorTiles) return;
-
-    final ids = await _vectorTilesService.visibleNwmStationIds();
-    final unresolved =
-        ids.where((id) => !_appliedNwmConditions.containsKey(id)).toList();
-    if (unresolved.isEmpty || !mounted) return;
-
-    final conditions =
-        await _conditionsService.fetchNwmByStations(unresolved);
-    if (!mounted || conditions.isEmpty) return;
-    _appliedNwmConditions.addAll(conditions);
-    await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
-  }
-
-  /// Turn condition coloring on/off — persist the choice, then either paint the
-  /// current region or reset the streams to their base color.
-  Future<void> _setColorByCondition(bool enabled) async {
-    setState(() => _colorByCondition = enabled);
-    await MapPreferenceService.saveColorByCondition(enabled);
-    // Hold the normal network back while coloring is on so elevated reaches
-    // read as foreground; restore full opacity when it's off.
-    await _vectorTilesService.setBaseStreamsDimmed(enabled);
-    if (enabled) {
-      if (_appliedConditions.isNotEmpty) {
-        await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
-      }
-      if (_appliedNwmConditions.isNotEmpty) {
-        await _vectorTilesService.applyNwmConditions(_appliedNwmConditions);
-      }
-      await _maybeColorVisibleRegion();
-      await _loadNwmConditions();
-    } else {
-      await _vectorTilesService.clearGeoglowsConditions();
-      await _vectorTilesService.clearNwmConditions();
-    }
-  }
-
-  /// Color the region currently on screen: resolve its VPU from a visible reach,
-  /// fetch that region's flood conditions once, and paint them. Accumulates
-  /// across regions so revisiting is instant. Best-effort — silent on failure.
-  Future<void> _maybeColorVisibleRegion() async {
-    if (!_colorByCondition || _conditionsInFlight || !mounted) return;
-    // The daily world file already covers every region, so there is nothing
-    // left to resolve and no reason to fetch on pan. This path is now the
-    // fallback for when that file hasn't published.
-    if (_haveGlobalConditions) return;
-    final size = MediaQuery.of(context).size;
-    final sid = await _vectorTilesService.firstVisibleGeoglowsStationId(
-      screenWidth: size.width,
-      screenHeight: size.height,
-    );
-    if (sid == null || !mounted) return;
-
-    // Already know this reach's region and have it painted? Nothing to do.
-    final knownVpu = _stationVpu[sid];
-    if (knownVpu != null && _appliedVpus.contains(knownVpu)) return;
-
-    _conditionsInFlight = true;
-    try {
-      final res = await _conditionsService.fetchByStation(sid);
-      if (res == null || !mounted) return;
-      _stationVpu[sid] = res.vpu;
-      if (!_appliedVpus.add(res.vpu)) return; // region already applied
-      _appliedConditions.addAll(res.conditions);
-      await _vectorTilesService.applyGeoglowsConditions(_appliedConditions);
-    } finally {
-      _conditionsInFlight = false;
-    }
   }
 
   /// Load the persisted stream-network toggles for the modal's initial state.
   /// The authoritative apply-to-map happens in [_loadLayersAfterStyleReady].
   Future<void> _loadStreamLayerPrefs() async {
     final layers = await MapPreferenceService.loadStreamLayers();
-    final colorByCondition = await MapPreferenceService.loadColorByCondition();
     if (mounted) {
-      setState(() {
-        _streamLayers = layers;
-        _colorByCondition = colorByCondition;
-      });
+      setState(() => _streamLayers = layers);
     }
   }
 
@@ -445,16 +163,6 @@ class MapPageState extends State<MapPage> {
           ),
         ),
 
-        // Flood-risk color key — shown whenever coloring is on. Streams render
-        // at every zoom now, so this stays up when zoomed out too, where the
-        // regional GEOGLOWS coloring is most worth explaining.
-        if (_colorByCondition)
-          Positioned(
-            left: 16,
-            bottom: 96,
-            child: SafeArea(child: const ConditionLegend()),
-          ),
-
         if (_isLoading) _buildLoadingOverlay(),
       ],
     );
@@ -488,15 +196,10 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Save camera position when the map stops moving, then color what the user
-  /// settled on. Streams no longer show/hide with zoom, so there is no
-  /// visibility to reconcile here.
+  /// Save camera position when the map stops moving. Streams no longer show or
+  /// hide with zoom, so there is no visibility to reconcile here.
   void _onMapIdle(MapIdleEventData data) {
     _controlsService.saveLastCameraPosition();
-    // Color whatever the user just settled on (no-op if already colored or no
-    // streams are in view) — GEOGLOWS by region, NWM by visible reach.
-    unawaited(_maybeColorVisibleRegion());
-    unawaited(_loadNwmConditions());
   }
 
 
@@ -642,11 +345,6 @@ class MapPageState extends State<MapPage> {
         geoglowsUs: streamLayers.geoglowsUs,
       );
 
-      // Pre-color GEOGLOWS streams by current flood condition. Fetched off the
-      // critical path (the backend read can take up to ~90s cold) — streams
-      // render immediately and recolor when the conditions arrive.
-      unawaited(_refreshConditionsAfterLoad());
-
       // Initialize markers on top of vector tiles (correct z-ordering).
       //
       // Guarded rather than force-unwrapped: onStyleLoaded can fire before
@@ -724,8 +422,6 @@ class MapPageState extends State<MapPage> {
     showStreamSourceModal(
       context,
       initial: _streamLayers,
-      colorByCondition: _colorByCondition,
-      onColorByConditionChanged: _setColorByCondition,
       onChanged: (layers) async {
         setState(() => _streamLayers = layers);
         await _vectorTilesService.applyStreamVisibility(

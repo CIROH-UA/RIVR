@@ -30,29 +30,13 @@ class MapReachSelectionService {
   /// the tap path and the visible-streams path used to keep their own copies,
   /// which is exactly the kind of pair that drifts.
   ///
-  /// Includes the `-hl-` condition-highlight layers: those draw above-normal
-  /// reaches on top and wider than the base curve, so a tap on the widened
-  /// part would otherwise land outside the base layer and miss. Source routing
-  /// still works off the `geoglows` prefix (see [ForecastSource.fromLayerIds]).
+  /// Kept in sync with [MapVectorTilesService.allLayerIds] — one layer per
+  /// network since the styling reset. Source routing still works off the
+  /// `geoglows` prefix (see [ForecastSource.fromLayerIds]).
   static const List<String> _streamLayerIds = [
-    'streams2-order-1-2', // Small streams (NWM)
-    'streams2-order-3-4', // Medium streams (NWM)
-    'streams2-order-5-plus', // Large rivers (NWM)
-    'geoglows-order-1-2', // GEOGLOWS outside the US
-    'geoglows-order-3-4',
-    'geoglows-order-5-plus',
-    'geoglows-us-order-1-2', // GEOGLOWS inside the US (Compare/Global modes)
-    'geoglows-us-order-3-4',
-    'geoglows-us-order-5-plus',
-    'streams2-hl-order-1-2', // Above-normal reaches, drawn on top
-    'streams2-hl-order-3-4',
-    'streams2-hl-order-5-plus',
-    'geoglows-hl-order-1-2',
-    'geoglows-hl-order-3-4',
-    'geoglows-hl-order-5-plus',
-    'geoglows-us-hl-order-1-2',
-    'geoglows-us-hl-order-3-4',
-    'geoglows-us-hl-order-5-plus',
+    'nwm-streams',
+    'geoglows-streams',
+    'geoglows-us-streams',
   ];
   bool _lineHighlightAdded = false;
   // A category color that arrived before the highlight was on the map; applied

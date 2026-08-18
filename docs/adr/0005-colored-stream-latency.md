@@ -499,6 +499,528 @@ to zoom 0, so US streams can render there. Three ways round it, none built:
    works at any zoom, and arguably the honest picture at world scale where an
    individual river is far below one pixel.
 
+### Why NWM streams render as broken stripes below zoom 8 (2026-08-17)
+
+Jerson reported that `nwm-channels` looks progressively wrong from z7 down to
+z0 — vertical strips of stream fragments rather than a river network — and asked
+whether Mapbox could thin the network at low zoom instead. Measured by fetching
+live tiles from the Vector Tiles API and decoding them with GDAL's MVT driver
+(one tile per zoom, centred 39.4N 98.3W, Kansas):
+
+**Tile bytes are pinned at a ceiling below z8.**
+
+| Zoom | `nwm-channels` bytes | features | `geoglows-world` bytes | features |
+|---|---|---|---|---|
+| 3 | 613,029 | 16,302 | 81,515 | 4,612 |
+| 4 | 655,987 | 16,924 | 167,203 | 8,199 |
+| 5 | 678,173 | 19,396 | 213,977 | 8,468 |
+| 6 | 690,210 | 21,344 | 336,749 | 11,553 |
+| 7 | 706,353 | 21,548 | 144,889 | 3,950 |
+| 8 | **317,195** | 8,546 | 60,927 | 1,076 |
+
+NWM sits at 613-706 KB for z3-z7 then halves at z8 — a plateau, i.e. the tiler
+was discarding features to fit a byte budget at every zoom below 8. z8 is the
+first zoom that fits, and z8 is exactly where the render looks correct. GEOGLOWS
+never exceeds 337 KB and so never hits the ceiling.
+
+**The primary defect: no order-aware thinning. NWM's stream-order mix is
+identical at every zoom.**
+
+| Zoom | order ≤2 | order ≥5 |
+|---|---|---|
+| 3 | 76.2% | 6.7% |
+| 4 | 75.2% | 7.4% |
+| 5 | 73.6% | 7.0% |
+| 6 | 73.4% | 7.6% |
+| 7 | 75.0% | 7.2% |
+| 8 | 75.4% | 6.1% |
+
+Frozen across five zoom levels. A z3 tile spends three-quarters of its byte
+budget on order-1 and order-2 headwater creeks that are far below one pixel at
+that scale, and discards most of the network to afford them. What renders is a
+uniform ~0.6% sample of the smallest streams — noise, not a river network. **This
+is the cause of "looks broken", independent of the striping.**
+
+**Secondary: strong longitude density banding at low zoom.** Vertex counts per
+longitude bin, tile-edge bins excluded:
+
+| Zoom | bin width | max/min density | band period | as % of tile width |
+|---|---|---|---|---|
+| 3 | 0.5° | 44× | ~2.03° | 4.5% |
+| 5 | 0.125° | 65× | ~0.49° | 4.4% |
+| 6 | 0.0625° | 14× | ~0.23° | 4.1% |
+
+GEOGLOWS at z4 for comparison: **3×**, i.e. essentially uniform. A 44× density
+swing on a ~2° period is what reads visually as vertical stripes.
+
+**What is NOT established:** which build setting produced the banding. The band
+period is a roughly constant *fraction* of tile width (4-4.5%) at every zoom
+rather than a fixed number of degrees, which **disproves the earlier guess that
+the bands are longitude bundle seams** — a fixed longitude split would give a
+constant period. It is consistent with tippecanoe's density-based feature
+dropping operating on a per-zoom grid, and with `geoglows-world` having been
+built with `--drop-densest-as-needed` (uniform result) while NWM was assembled
+from bundles without it. Not reproduced; do not state as fact.
+
+**Conclusion.** The fix for both problems is the same and it is a build-time
+filter, not a render-time one: include a feature only from the zoom at which it
+is visible (e.g. order ≥8 from z0, ≥6 from z5, ≥5 from z7, all from z9). Then no
+low-zoom tile is ever over budget, so nothing is dropped, so there is no banding
+and no creek-dominated sample. Render-time `streamOrder` filters in the app
+cannot fix this — the feature must survive into the tile before a style filter
+can act on it.
+
+**Sizing estimate (Estimated, not measured):** order ≥7 is 2.9% of the z3
+sample. Because dropping is order-blind and proportional, that ratio should
+hold for the full population, giving ~78,000 order-≥7 reaches nationally out of
+2.7M — comparable to the elevated-reach set, which tiles comfortably.
+
+### Build cost is driven by max zoom, from the account's own billing (2026-08-17)
+
+Read off the Mapbox tileset pages for the byu-hydroinformatics org:
+
+| Tileset | Zoom extent | File size | **Compute units** |
+|---|---|---|---|
+| `geoglows-world` | 3-12 | 7.2 GB | **0.92** |
+| `nwm-channels` | 0-16 | 3.3 GB | **77.55** |
+
+NWM cost **84× the CU of GEOGLOWS while carrying half the data**. The
+distinguishing variable is max zoom (16 vs 12). At $0.90/CU beyond the 20 free
+per month, `nwm-channels` is a ~$52 rebuild and `geoglows-world` is free. This
+is the measured basis for capping every new tileset at z12.
+
+Free tiers as of this billing period: **0/20 CU, 0/10,000 processing MB, 64/750
+tileset hosting days**, Vector Tiles API 5,984/200,000 requests.
+
+### Where the geometry can be sourced (2026-08-17)
+
+Checked because rebuilding needs source linework, and **no NWM geometry exists on
+this machine** (searched `~/Developer`, `~/Downloads`, `~/Documents`,
+`~/Desktop`; the `~/Developer/geoglows-tiles` workdir from July is gone). 1.2 TB
+free, so capacity is not a constraint.
+
+- **Elevated reaches, US — solved, geometry included.** The NWM high-flow
+  services on `https://maps.water.noaa.gov/server/rest/services/nwm` return
+  `esriGeometryPolyline` with `returnGeometry=true&outSR=4326`, alongside
+  `feature_id`, `strm_order`, `huc6`, `recur_cat_5day`, and the 2/5/10/25/50-year
+  thresholds. `maxRecordCount` is **2,000** and `supportsPagination` is true.
+  Measured: one 2,000-feature page with geometry = **3.1 MB in 1.29s**.
+  Counts on 2026-08-17: CONUS 5-day **89,383**, CONUS analysis 74,465, Alaska
+  5-day **40,156**, Hawaii 48hr **1,541**, PRVI 48hr **95**. The four 5-day/48hr
+  services total ~131,000 features ≈ 66 requests ≈ under two minutes.
+  Note `recur_cat_5day` uses NOAA's own ladder (`2,4,10,20,50,>50`), not RIVR's
+  2/5/10/25 (ADR 0002) — a mapping is required, not a passthrough.
+- **Full CONUS network — available, public, no auth.**
+  `https://dmap-data-commons-ow.s3.amazonaws.com/NHDPlusV21/Data/NationalData/NHDPlusV21_NationalData_Seamless_Geodatabase_Lower48_07.7z`,
+  **7.81 GB**. NWM CONUS `feature_id` is the NHDPlus V2 COMID, so this is the
+  correct key space. Hawaii/PR/VI/Pacific:
+  `..._Seamless_Geodatabase_HI_PR_VI_PI_03.7z`, 104.8 MB.
+  **Needs `brew install p7zip` — no 7z extractor on this machine.**
+- **Ruled out.** There is no full channel-network geometry service at NOAA:
+  `maps.water.noaa.gov/.../nwm` publishes only high-flow, anomaly, inundation
+  and arrival-time products (all elevated-reach subsets); `nwm/nwm_channels`
+  under both `mapservices.weather.noaa.gov/static` and `/eventdriven` returns a
+  404 **in a HTTP 200 body** — an earlier probe that checked only the status code
+  wrongly reported these as present.
+- **Ruled out.** `lynker-spatial` hydrofabric v2.2/v2.3/v3.0 — the bucket
+  *listing* is public but every object returns `AccessDenied` (403) over plain
+  HTTPS on both `s3.amazonaws.com` and `s3-us-west-2.amazonaws.com`. Likely
+  requester-pays; would need AWS credentials.
+- **Open gap.** Alaska is not in NHDPlus V2. The NWM v3 Alaska domain uses a
+  separate fabric and no source for its 40,156-reach linework has been
+  identified. Alaska base-network coverage is therefore unresolved.
+
+### HydroShare gdb vs NHDPlus — the HydroShare file wins for CONUS (2026-08-17)
+
+Jerson supplied the HydroShare resource the current tileset was built from
+(`hydroshare.org/resource/35f3fd9bb2f64c36bb52c2f0ef8775e3`, downloaded as
+`~/Downloads/ee992dff-c005-4562-a4ff-842a6b98e8a1.zip`, 965 MB → inner
+`NWM_app_data.zip` → `nwm_app.gdb`, **3.3 GB extracted**, dated **2018-01-09**).
+
+**It is provably the source of the live `nwm-channels` tileset.** Layer
+`channels`, and every identifying number matches the tileset page exactly:
+
+| | HydroShare gdb | live tileset |
+|---|---|---|
+| Features | 2,699,225 | OBJECTID 1 – 2.7m |
+| `station_id` range | 101 – 1,170,023,962 | 101 – 1.2b |
+| `streamOrder` range | 1 – 10 | 1 – 10 |
+| Fields | station_id, streamOrder, Shape_Length, OBJECTID | same four |
+| Extent | -124.724424, 24.874269, -66.988396, 52.864521 | -124.73, 24.87, -66.98, 52. |
+
+SRS is NAD83 (EPSG:4269); other layers present are `grid_land`, `reservoirs`,
+`usgs_gauge`.
+
+**Not stale, and not simplified.** Sampled 6,000 `feature_id`s from NOAA's live
+CONUS 5-day high-flow service: **6,000/6,000 present in the 2018 gdb.** Then
+compared vertex counts for eight reaches between NOAA's service geometry and the
+gdb: **identical for all eight** (35/35, 383/383, 114/114, 2/2, 8/8, 5/5, 4/4,
+2/2). NOAA is serving the same linework this file holds.
+
+**Coverage by region** — sampled service ids tested for membership:
+
+| Region | Source that has it | Match |
+|---|---|---|
+| CONUS | HydroShare `nwm_app.gdb` (2,699,225) | **6,000/6,000 (100%)** |
+| Hawaii | NHDPlus V21 HI_PR_VI_PI, layer `NHDFlowline_Network` (33,273) | **1,343/1,343 (100%)** |
+| PR/VI | same file | **95/95 (100%)** |
+| Alaska | **neither** | **0/4,000 (0%)** |
+
+Alaska's NWM ids are 14-digit (`19020190000003`…`75005400047345`) — a different
+key space from NHDPlus COMID entirely. Hawaii/PRVI ids sit in the 800M–921M
+COMID band that the NHDPlus island file covers. `NHDFlowline_Network` carries
+both `ComID` and `StreamOrde` in one layer, so no VAA join is needed there
+either.
+
+**Consequence for the plan: the 7.81 GB NHDPlus V21 Lower48 seamless download is
+unnecessary.** Cancelled. The HydroShare gdb is already pre-filtered to the NWM
+channel network, pre-joined (station_id + streamOrder on the feature), pre-named
+to RIVR's attribute contract, and verified id-identical to what NOAA publishes.
+Only the 105 MB `NHDPlusV21_NationalData_Seamless_Geodatabase_HI_PR_VI_PI_03.7z`
+is still wanted, to add Hawaii and Puerto Rico. `p7zip` installed 2026-08-17.
+
+### Exact stream-order histogram for the ladder (2026-08-17)
+
+Counted directly from `nwm_app.gdb` — these replace the earlier estimate.
+
+| Order | Count | Share | Cumulative ≥ |
+|---|---|---|---|
+| 1 | 1,420,615 | 52.6% | 2,699,225 |
+| 2 | 597,944 | 22.2% | 1,278,610 |
+| 3 | 316,551 | 11.7% | 680,666 |
+| 4 | 174,148 | 6.5% | 364,115 |
+| 5 | 95,990 | 3.6% | 189,967 |
+| 6 | 54,512 | 2.0% | 93,977 |
+| 7 | 26,195 | 0.97% | 39,465 |
+| 8 | 9,451 | 0.35% | 13,270 |
+| 9 | 3,267 | 0.12% | 3,819 |
+| 10 | 552 | 0.02% | 552 |
+
+**Correction.** An earlier entry estimated order ≥7 at 2.9% ≈ 78,000 reaches,
+extrapolated from the z3 tile sample. The true figure is **1.46% = 39,465** —
+roughly half. High orders are over-represented in the z3 tile relative to the
+population, which also means the tiler's dropping was not perfectly order-blind,
+only close to it. The ladder sizing below uses the counted values.
+
+At the proposed ladder, features per zoom band: z0-3 → 13,270; z4-5 → 39,465;
+z6 → 93,977; z7 → 189,967; z8 → 364,115; z9 → 680,666; z10-12 → 2,699,225.
+z0-3 carrying 13,270 lines nationally is roughly 0.5% of what the current z3
+tile tries to hold.
+
+### `nwm-channels-v2` built and published — the ladder works (2026-08-17)
+
+Phase 0 (local proof on one basin) and Phases 1-2 (national build + publish)
+executed. Workdir `~/Developer/rivr-tiles/`.
+
+**Phase 0, controlled experiment.** Same 409,112 reaches (Missouri/Mississippi
+confluence, bbox -100 36 -88 44), tiled twice at z0-12 with `-r1` (dropping
+disabled) so any overflow surfaces as an error rather than silent loss.
+
+- *Without* the ladder — the current recipe — **the build fails at zoom 2**:
+  `tile 2/1/1 size is 843949 with detail 12, >500000`,
+  `tile 2/0/1 has 197515 (estimated 263214) features, >200000`,
+  `*** NOTE TILES ONLY COMPLETE THROUGH ZOOM 1 ***`. At 409k features, not 2.7M.
+- *With* the ladder — exit 0, **zero size warnings**, tilestats count 409,112 =
+  source count exactly, max tile 60 KB.
+
+This is the direct evidence that the original tileset's damage was forced: the
+recipe cannot produce low zooms without discarding features.
+
+**The ladder** (tippecanoe `-J` feature filter on `$zoom`):
+z0-3 → order ≥8; z4-5 → ≥7; z6 → ≥6; z7 → ≥5; z8 → ≥4; z9 → ≥3; z10-12 → all.
+
+**Phase 2 national build.** 2,729,961 features, `-Z0 -z12 -r1`, **2m20s**,
+675 MB, **zero warnings**. Uploaded via the Mapbox Uploads API (staged in 70s,
+processed in 227s).
+
+**Cost: 0.5151 CU** — read from `GET /tilesets/v1/byu-hydroinformatics`. Against
+the 20 free CU/month with 0 used, this was **free**.
+
+| Tileset | Zoom | Features | Size | **CU** |
+|---|---|---|---|---|
+| `nwm-channels` (old) | 0-16 | 2,699,225 | 3.3 GB | **77.55** |
+| `nwm-channels-v2` | 0-12 | 2,729,961 | 675 MB | **0.5151** |
+
+**150× cheaper.** Confirms max zoom, not feature count, is the CU driver — the
+new tileset carries *more* features than the old one.
+
+**Live verification** — same tile coordinates fetched from the Vector Tiles API
+for both tilesets, Kansas 39.4N 98.3W:
+
+| z | old bytes | old feats | old ≤order2 | new bytes | new feats | new min order |
+|---|---|---|---|---|---|---|
+| 0 | 564,379 | 22,124 | 80.7% | **27,177** | 2,758 | 8 |
+| 1 | 586,347 | 22,093 | 80.3% | **47,630** | 4,821 | 8 |
+| 2 | 618,320 | 21,768 | 78.3% | **63,644** | 6,010 | 8 |
+| 3 | 613,029 | 16,302 | 76.2% | **56,563** | 4,539 | 8 |
+| 4 | 655,987 | 16,924 | 75.2% | **147,010** | 11,051 | 7 |
+| 5 | 678,173 | 19,396 | 73.6% | **93,296** | 6,547 | 7 |
+| 6 | 690,210 | 21,344 | 73.4% | **62,103** | 3,890 | 6 |
+| 7 | 706,353 | 21,548 | 75.0% | **41,099** | 1,913 | 5 |
+| 8 | 317,195 | 8,546 | 75.4% | **29,815** | 988 | 4 |
+
+Every zoom respects its ladder floor; no tile exceeds 147 KB against the 500 KB
+limit. Decoding four live z3 tiles and rendering them yields 9,539 segments
+forming a recognisable Mississippi/Missouri/Ohio/Columbia/Colorado network —
+the thing that was previously impossible below z8.
+
+**New coverage.** Bounds are now `-160.247034, 17.673740, -64.565196,
+52.864521`: Hawaii (15,223) and Puerto Rico/VI (15,513) are included for the
+first time. Sourced from NHDPlus V21 HI_PR_VI_PI `NHDFlowline_Network`, filtered
+to those two regions only (Guam/CNMI 1,180 and American Samoa 1,357 excluded —
+NWM publishes no products for them). Zero id collisions with the CONUS set,
+verified before merging; the COMID ranges overlap numerically so this mattered.
+
+**Attribute contract preserved:** layer `channels`, fields `station_id` and
+`streamOrder`, both Number. `Shape_Length` and `OBJECTID` were dropped as unused.
+
+**Traps hit, for the next build.** (1) On these geodatabases the **SQLite
+dialect returns `"geometry":null`** — use the default OGR dialect with `-spat`
+for spatial filtering instead of `-dialect SQLITE` with a `WHERE`. (2)
+`-overwrite` does **not** truncate a GeoJSONSeq output file; it appends. Both
+were caught by the null-geometry/count gates, not after tiling.
+
+**Not yet done:** the app still points at `byu-hydroinformatics.nwm-channels`.
+`config.dart`'s `vectorTilesetId` is a one-line change once the new tileset is
+reviewed on device. The new tileset's `visibility` is **private**, same as the
+others; the app's `pk` token reads it fine.
+
+### `geoglows-world-v2` built and published — zoom 0 now exists (2026-08-17)
+
+**Global stream-order histogram**, counted from `geoglowsv2` in the
+map-optimized GDB (6,838,900 total). It behaves nothing like NWM, so NWM's
+ladder could not be reused:
+
+| Order | Count | Share | Cumulative ≥ |
+|---|---|---|---|
+| 1 | 219,290 | 3.2% | 6,838,900 |
+| 2 | 2,979,846 | 43.6% | 6,619,610 |
+| 3 | 1,829,210 | 26.7% | 3,639,764 |
+| 4 | 967,973 | 14.2% | 1,810,554 |
+| 5 | 481,181 | 7.0% | 842,581 |
+| 6 | 225,259 | 3.3% | 361,400 |
+| 7 | 89,060 | 1.3% | 136,141 |
+| 8 | 32,060 | 0.47% | 47,081 |
+| 9 | 14,041 | 0.21% | 15,021 |
+| 10 | 980 | 0.014% | 980 |
+
+Order 1 is 3.2% here versus 52.6% in NWM — TDX-Hydro prunes headwaters, so the
+mass sits at order 2-3.
+
+**GEOGLOWS' own pmtiles embeds Riley's recipe** (read from the PMTiles v3
+metadata block of `s3://geoglows-v2/hydrography-global/streams.pmtiles`):
+`-Z0 -z12 --drop-densest-as-needed --simplification=10` with
+`-j '{"*":["any",[">=","strahlerOrder",6],["all",[">=","strahlerOrder",4],[">=","$zoom",6]],[">=","$zoom",8]]}'`.
+So GEOGLOWS independently arrived at a stream-order ladder — external
+corroboration of the approach. Not copied, for two reasons: they tiled **50
+regions separately then `tile-join --no-tile-size-limit`** (the architecture that
+banded NWM), and they left `--drop-densest-as-needed` on, which must be firing
+at z0 with 361,400 order-≥6 features. Their fields are `riverId`/`strahlerOrder`
+in a layer named `streams`, and PMTiles is unreadable by the Flutter Mapbox SDK,
+so it is not a drop-in either.
+
+**Zoom-0 probe before committing.** Extracted the 47,081 order-≥8 reaches alone
+and tiled z0-3: **z0 = 211.5 KB**, zero warnings. The full build later produced
+**exactly 211.5 KB** at z0, so the cheap probe was an exact predictor — worth
+repeating for future tilesets.
+
+**Ladder used** (identical shape to NWM's): z0-3 → ≥8; z4-5 → ≥7; z6 → ≥6;
+z7 → ≥5; z8 → ≥4; z9 → ≥3; z10-12 → all.
+
+**Both gates passed.** Feature count **6,838,900 exact**; no tile over 500 KB at
+any zoom; 3,081,641 tiles; bounds `-171.592466,-55.387306,178.490028,80.325887`
+(global, and **no antimeridian wrap** despite the EPSG:3857 → 4326 reprojection).
+
+| Zoom | tiles | max KB |
+|---|---|---|
+| 0 | 1 | 211.5 |
+| 1 | 4 | 188.5 |
+| 2 | 10 | 165.1 |
+| 4 | 70 | 111.3 |
+| 9 | 39,578 | 42.5 |
+| 12 | 2,280,082 | 8.2 |
+
+**Cost: 0.752 CU**, 6.66 GB published.
+
+| Tileset | Zoom | Size | CU |
+|---|---|---|---|
+| `geoglows-world` (old) | 3-12 | 7.74 GB | 0.9187 |
+| `geoglows-world-v2` | **0-12** | 6.66 GB | **0.752** |
+| `nwm-channels` (old) | 0-16 | 3.54 GB | 77.5468 |
+| `nwm-channels-v2` | 0-12 | 0.68 GB | 0.5151 |
+
+(Sizes read from `GET /tilesets/v1/byu-hydroinformatics`; an earlier entry quoted
+`nwm-channels` as 3.3 GB from the Studio screenshot — the API says **3.54 GB**.)
+
+**Live verification, old vs new, same tile coordinates:**
+
+| Site | z0 old | z0 new | z2 old | z2 new |
+|---|---|---|---|---|
+| Amazon | 404 | 200 / 216,537 b | 404 | 200 / 57,881 b |
+| Congo | 404 | 200 / 216,537 b | 404 | 200 / 35,018 b |
+| Ganges | 404 | 200 / 216,537 b | 404 | 200 / 169,016 b |
+| Mekong | 404 | 200 / 216,537 b | 404 | 200 / 83,146 b |
+| Danube | 404 | 200 / 216,537 b | 404 | 200 / 169,016 b |
+| Patagonia | 404 | 200 / 216,537 b | 404 | 200 / 57,881 b |
+
+Zooms 0-2 went from **404 everywhere** to served. At z4 the new tiles are also
+*smaller* than the old ones (Ganges 324,905 → 83,534 b; Danube 170,644 →
+34,961 b) because the ladder removes sub-pixel streams instead of paying to
+carry then discard them.
+
+**THE BUILD TRAP THAT ALMOST SHIPPED A BROKEN TILESET.** `ogr2ogr` reading the
+whole 6.8M-feature GDB in one pass **silently stops at ~680,000 features** —
+twice, reproducibly (680,778 writing to a file, 679,108 through a pipe). **Exit
+code 0, empty log, no warning.** The resulting tileset built cleanly with zero
+tippecanoe warnings and contained **only VPUCodes 101-110 — Africa**, bounds
+`-7.0,-34.8,54.4,30.2`. It is **not corrupt data**: VPU 111, past the failure
+point, reads 114,294/114,294 on its own.
+
+Fix: **export each of the 125 VPUs separately with a per-region count check
+against a manifest, then feed all 125 files to ONE tippecanoe pass.** Per-region
+*export* is safe; per-region *tiling* is what caused the NWM banding. All 125
+matched exactly; concatenated total 6,838,900. 69 GB of intermediate GeoJSONSeq.
+
+**The only defence against this class of failure is the feature-count gate.**
+Exit status and absence of warnings proved nothing. Never publish without
+comparing tilestats `count` to the known source count.
+
+**Operational note:** long builds must run under **tmux**, not `nohup … &` in a
+harness background task. Three separate long jobs were killed mid-run when their
+watcher task was stopped; `setsid` does not exist on macOS. `tmux new-session
+-d -s <name>` survived everything. Timings: NWM 2,729,961 features → 2m20s;
+GEOGLOWS 6,838,900 → 61 min (z0 alone took ~20 min single-threaded before
+parallelism engaged at z6+).
+
+**Not yet done:** the app still points at `geoglows-world` and `nwm-channels`.
+`config.dart` needs `vectorTilesetId` → `byu-hydroinformatics.nwm-channels-v2`
+and `geoglowsTilesetId` → `byu-hydroinformatics.geoglows-world-v2`. Field
+contract is unchanged (`channels` / `station_id` / `streamOrder`, plus `VPUCode`
+on GEOGLOWS), so no service code changes. `geoglows-us` has **not** been rebuilt
+— Gwen's CONUS-border clip and the lake-crossing decision are still open.
+
+### Flood-flagged reach counts by flow threshold (2026-08-17)
+
+Counted from `mrf_nbm_5day_max_high_flow_magnitude` (CONUS) with
+`returnCountOnly`, to decide whether the 17.66 cfs minimum-flow floor is set
+sensibly. Service total that day: 89,383.
+
+| Flow threshold | Reaches flagged |
+|---|---|
+| any | 85,801 |
+| ≥ 1 cfs | 55,209 |
+| ≥ 5 cfs | 39,396 |
+| **≥ 17.66 cfs (current floor)** | **29,575** |
+| ≥ 50 cfs | 21,933 |
+| ≥ 100 cfs | 17,918 |
+| ≥ 500 cfs | 11,511 |
+| ≥ 1,000 cfs | 9,388 |
+| ≥ 5,000 cfs | 5,298 |
+
+**Correction.** An earlier claim in this session — that the 17.66 cfs floor is
+what reduces NOAA's ~89k flagged reaches to the ~4,000 our pipeline publishes —
+is **wrong**. The floor accounts for roughly 3× (85,801 → 29,575), not 20×.
+**Some other step removes a further ~25,000 reaches and has not been
+identified.** Do not build the daily flooded tileset on the current pipeline
+output until that is explained.
+
+**Sizing is not a constraint.** Even 85,801 reaches would tile comfortably —
+GEOGLOWS' 47,081 order-≥8 reaches produced a 211 KB zoom-0 tile against the
+500 KB limit. The floor is therefore a *meaning* decision, not a cost one.
+
+### RESOLVED — the "missing 25,000 reaches" (2026-08-17)
+
+**There are two filters in `_classify_nwm_row` (`functions_geoglows/main.py`),
+not one, and the second is the large one.** Counts from NOAA's own service, same
+day:
+
+| Filter | Reaches remaining |
+|---|---|
+| NOAA's flagged set | 85,801 |
+| …flow ≥ 17.66 cfs | 29,575 |
+| …**and flow ≥ its own `flow_2yr`** | **5,459** |
+
+`5,459` matches the ~4,000 the pipeline publishes, allowing for a different day
+plus the Alaska/Hawaii/PRVI services. **Not a bug — deliberate**, and already
+documented in that function: NOAA's `recur_cat_5day` includes anything above a
+regional *high-water* threshold, which sits below a 2-year event; RIVR's ladder
+starts at the 2-year mark (ADR 0002), so a river coloured on the map reads
+"Action" or worse when tapped.
+
+Also dropped: **3,110 reaches with a null or zero `flow_2yr`** — a degenerate
+return-period curve that cannot be classified.
+
+**Correction to the entry above.** The recommendation of "~5 cfs → 39,396
+reaches" was wrong: 39,396 is the count *without* the 2-year gate. Applied
+together with it, the floor options are:
+
+| Floor (with 2-year gate) | Reaches |
+|---|---|
+| 17.66 cfs | 5,459 |
+| **5 cfs** | **8,130** |
+
+For reference, relaxing the *gate* instead: no floor + 2-year gate = 21,720;
+floor only, no gate = 29,575; everything NOAA flags = 85,801.
+
+### DECIDED — flood inclusion rules (2026-08-17)
+
+- **Minimum flow floor lowered from 17.66 cfs to 5 cfs.** 17.66 was a round
+  metric number (0.5 m³/s), not a hazard threshold; flash flooding on small
+  creeks is what NWM is uniquely good at. 5 cfs still removes trickles — a
+  sampled row showed a 2-year event on a reach flowing 1.06 cfs.
+- **The 2-year gate stays.** Consistency with RIVR's own ladder (ADR 0002)
+  matters more than volume: dropping it would colour rivers the app's own
+  forecast gauge calls Normal.
+
+Net effect: ~5,459 → ~8,130 coloured US reaches.
+
+### DECIDED — horizon labelling (2026-08-17)
+
+GEOGLOWS is 15-day, NOAA CONUS 5-day, Hawaii/PR 48-hour: one tileset, three
+horizons. Jerson's decision:
+
+1. **The legend stays vague and honest** — it already reads "Peak risk in the
+   days ahead", which is true for all three. No work.
+2. **Tap gives the truth** — the reach detail sheet shows that reach's actual
+   window ("next 5 days" / "next 15 days" / "next 48 hours"). One line.
+
+Rejected: varying the legend text by camera position. It flickers when panning
+across a border and is simply wrong when two regions are on screen at once.
+
+### DECIDED — daily tileset identity and freshness (2026-08-17)
+
+- **One dated tileset per day**, `rivr-flooded-YYYYMMDD`. Mapbox caches tiles
+  for 12 hours on device and states the CDN cache cannot be broken; a new ID
+  each day has no cache history, so yesterday's colours cannot leak through.
+- **Retention 3 days**, then delete. Bounds hosting days and bounds how far the
+  app can fall back.
+- **Firebase Remote Config is the source of truth** for the current ID plus the
+  data date, written by the build job as its **last** step, after Mapbox
+  confirms processing — so the note never points at a half-published tileset.
+  Chosen over deriving the ID on-device because it keeps control after release:
+  kill switch, renaming, staged rollout, no App Store round trip (which matters
+  while the Apple account is locked out).
+- **On-device date arithmetic is the fallback** if Remote Config is
+  unreachable: compute today's ID, step back up to 3 days.
+- **Show the data date** above the legend whenever it is not today's, e.g.
+  "Conditions from 16 Aug".
+
+### DECIDED — where the daily build runs (2026-08-17)
+
+**Cloud Scheduler → Cloud Run job.** Jerson's earlier "no Cloud Functions"
+constraint applies to *painting* streams at request time — the path that sat
+between the user and seeing colour — not to an unattended nightly build, where
+ten minutes costs nobody anything.
+
+It must be **Cloud Run rather than a Cloud Function** for a concrete reason:
+the build needs **tippecanoe**, a compiled binary, which the managed Functions
+runtime cannot host. Cloud Run takes a custom container. The Mapbox secret
+token moves from `~/.config/rivr/mapbox_sk.token` into Secret Manager.
+
+Not a scale problem: the flooded set is ~220k reaches, and Phase 0 tiled
+409,112 in 90 seconds, so the 30-minute scheduled-job ceiling that forced the
+old conditions fan-out is not in play.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
