@@ -40,13 +40,54 @@ class MapVectorTilesService {
   static const String nwmLayerId = 'nwm-streams';
   static const String geoglowsLayerId = 'geoglows-streams';
   static const String geoglowsUsLayerId = 'geoglows-us-streams';
+  static const String floodLayerId = 'flooded-streams';
 
-  /// Every layer this service owns, in draw order.
+  /// Every layer this service owns, in draw order — flood last, on top.
   static const List<String> allLayerIds = [
     nwmLayerId,
     geoglowsLayerId,
     geoglowsUsLayerId,
+    floodLayerId,
   ];
+
+  /// The validated 5-band flood palette (ADR 0005). `cat` 1-4; anything not in
+  /// the flood tileset is Normal by definition and simply isn't drawn here.
+  static const int _catAction = 0xFFFFC400;
+  static const int _catModerate = 0xFFFF8C00;
+  static const int _catMajor = 0xFFE53935;
+  static const int _catExtreme = 0xFF8E24AA;
+
+  /// Colour straight from the tile — no runtime `match` over tens of thousands
+  /// of ids, which is the whole reason the tileset is pre-coloured.
+  static List<Object> _floodColorExpression() => [
+    'match',
+    ['get', 'cat'],
+    1, _hex(_catAction),
+    2, _hex(_catModerate),
+    3, _hex(_catMajor),
+    4, _hex(_catExtreme),
+    _hex(_streamColor),
+  ];
+
+  /// Deliberately wider than the base network. Two reasons: the flood geometry
+  /// is simplified to 10 m in the index (phase 4a) so it does not trace the
+  /// base line exactly, and drawing it wider on top hides that divergence.
+  ///
+  /// Keyed on zoom, not stream order — the flood tileset carries only
+  /// `station_id` and `cat`. Widest when zoomed out, where an elevated reach is
+  /// acting as a symbol ("flooding here") rather than as geometry.
+  static List<Object> _floodWidthExpression() => [
+    'interpolate',
+    ['linear'],
+    ['zoom'],
+    0, 2.5,
+    5, 3.0,
+    10, 3.5,
+    14, 4.0,
+  ];
+
+  static String _hex(int argb) =>
+      '#${(argb & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
 
   /// Width straight from the reach's Strahler order — a headwater creek is a
   /// hairline, a continental river is heavy. No zoom term: the tilesets already
@@ -141,9 +182,16 @@ class MapVectorTilesService {
         url: AppConfig.getGeoglowsTileSourceUrl(),
       ),
     );
+    await map.style.addSource(
+      VectorSource(
+        id: AppConfig.floodSourceId,
+        url: AppConfig.getFloodTileSourceUrl(),
+      ),
+    );
     AppLogger.info(
       'MapVectorTilesService',
-      'Sources added: ${AppConfig.vectorSourceId}, ${AppConfig.geoglowsSourceId}',
+      'Sources added: ${AppConfig.vectorSourceId}, ${AppConfig.geoglowsSourceId}, '
+          '${AppConfig.floodSourceId}',
     );
   }
 
@@ -182,6 +230,20 @@ class MapVectorTilesService {
         lineOpacity: _lineOpacity,
         lineWidthExpression: _widthExpression(),
         filter: _insideUs,
+      ),
+    );
+
+    // Pre-coloured flood reaches, drawn above everything. Colour comes from the
+    // tile's own `cat` field, so there is no runtime expression carrying tens
+    // of thousands of ids — the cost that made colouring take 8-12s before.
+    await map.style.addLayer(
+      LineLayer(
+        id: floodLayerId,
+        sourceId: AppConfig.floodSourceId,
+        sourceLayer: AppConfig.floodSourceLayer,
+        lineColorExpression: _floodColorExpression(),
+        lineWidthExpression: _floodWidthExpression(),
+        lineOpacity: 0.95,
       ),
     );
   }
@@ -273,6 +335,7 @@ class MapVectorTilesService {
     for (final sourceId in [
       AppConfig.vectorSourceId,
       AppConfig.geoglowsSourceId,
+      AppConfig.floodSourceId,
     ]) {
       try {
         await map.style.removeStyleSource(sourceId);

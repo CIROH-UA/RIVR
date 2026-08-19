@@ -1021,6 +1021,321 @@ Not a scale problem: the flooded set is ~220k reaches, and Phase 0 tiled
 409,112 in 90 seconds, so the 30-minute scheduled-job ceiling that forced the
 old conditions fan-out is not in play.
 
+### Phase 4a DONE — GEOGLOWS geometry index (2026-08-18)
+
+The daily flood job needs to turn a GEOGLOWS reach id into a drawable line.
+NOAA ships geometry alongside its US flood data; GEOGLOWS ships ids only, and
+its geometry source is a 2 GB geodatabase no job should carry. Hence a
+pre-built, sharded index.
+
+**Sizing experiment** (VPU 709, 52,728 reaches, 528 MB source):
+
+| Format | Size |
+|---|---|
+| Full geometry, GeoJSONSeq | 526.7 MB |
+| Simplified 10 m, GeoJSONSeq | 87.2 MB |
+| Simplified 10 m, gzipped | 22.6 MB |
+| **Simplified 10 m, FlatGeobuf** | **26.4 MB** |
+
+Full geometry for all 6.8M reaches would be a ~69 GB index — unusable daily.
+FlatGeobuf chosen: binary, read natively by GDAL, supports attribute and
+spatial filters without loading the whole file.
+
+**Simplification tolerance 10 m (0.0001 deg) is deliberate and has a
+consequence:** the flood line will not trace the base network exactly at high
+zoom. Acceptable *only* because the flood layer draws wider and on top, hiding
+the divergence — the same trick the old highlight layers used. If the two must
+ever align exactly, the index has to carry full geometry and returns to ~69 GB.
+
+**Result — published and verified:**
+
+| | |
+|---|---|
+| Location | `gs://ciroh-rivr-app-conditions/geometry/geoglows/vpu-NNN.fgb` |
+| Shards | **125 / 125**, every count matched to source |
+| Features | **6,838,900** — exact |
+| Size | 8.72 GB in bucket (~65 MB/shard) |
+| Fields | `station_id` + geometry, layer `reaches` |
+| Spot check | `vpu-709.fgb` 61,073,928 bytes remote = byte-identical to local |
+| Round-trip | reach `740353213` returns geometry starting `-82.0694016 44.6946194`, matching source |
+
+**THREE SILENT FAILURES, all exit code 0.** None would have been caught by
+checking exit status; all were caught only by comparing feature counts to the
+source.
+
+1. **`-sql "SELECT station_id FROM streams"` on a GeoPackage returns every
+   feature with `"geometry":null`.** Exit 0, file looks fine, 3.7 MB instead of
+   527 MB. **Use `-select station_id`** — it keeps geometry. (Second time this
+   trap hit today; the islands export this morning was the first, on a
+   different driver.)
+2. **`-simplify` aborts translation mid-run**: *"Terminating translation
+   prematurely after failed translation of layer v101"* at feature 8,451 of
+   38,173. Cause: simplifying a single-part MultiLineString yields a
+   LineString, and FlatGeobuf's layer geometry type is fixed. **Adding
+   `-skipfailures` makes it worse, not better** — it then writes 9,170 of
+   38,173 and exits 0. Fix: **`-nlt PROMOTE_TO_MULTI`**, which restored the
+   full 38,173.
+3. A verification command using `ogrinfo -q -so <file> <layer>` prints no
+   Feature Count at all, reporting `got=0` for every shard. Correct form is
+   **`ogrinfo -al -so <file>`**.
+
+**Operational note — macOS resolver.** Verification of the upload was blocked
+for ~7 hours by a wedged `mDNSResponder` (running 5 days). Signature: `dig`
+and `nslookup` succeed while `curl`, `python`, and `gcloud` fail instantly with
+`nodename nor servname provided` and `dns=0.000000s`; already-connected
+processes are unaffected, so the machine appears online. `killall -HUP` does
+**not** clear it — `sudo killall -9 mDNSResponder` does. Unrelated to any of
+the tiling work, but it cost hours and looked like a cloud problem.
+
+### No precomputed GEOGLOWS forecast statistics exist (2026-08-18)
+
+Checked before committing to a ~2-hour daily read. The forecast zarr
+`geoglows-v2-forecasts/{date}00.zarr` contains only `Qout`, `ensemble`,
+`rivid`, `time` — the raw 52-member ensemble, nothing derived.
+`geoglows-v2/retrospective/` has plenty of derived products (`daily`, `doy`,
+`fdc`, `maximums`, `return-periods`, monthly/yearly) but all are **historical**,
+not forecast. `hydrosos/` and `transformers/` are unrelated. The
+`geoglows-v2-retrospective` bucket is permission-denied and `geoglows-scratch`
+does not exist.
+
+**Conclusion: consumers must reduce the ensemble themselves.** The 52-member
+read is unavoidable for an ensemble median.
+
+### Measured cost of the GEOGLOWS classification (2026-08-18)
+
+Timed against the live 20260818 forecast, VPU 101 (38,173 rivers, 0.6% of the
+world). `Qout` shape `(52, 280, 6838900)`, chunks `(52, 280, 686)`, float32.
+
+| Step | Time |
+|---|---|
+| Forecast read + peak (median over ensemble, max over time) | **38.6 s** (~2.22 GB) |
+| Return periods | 0.8 s |
+| Classify | 0.2 s |
+
+Extrapolated by river count: **~115 minutes and ~400 GB** for the whole world,
+which corroborates the ~120 min figure from the Cloud Function era — that number
+was not an artefact of the old fan-out architecture.
+
+**DECIDED: keep the ensemble median and accept the two hours.** Reading a single
+member instead would cut the transfer ~50× (minutes, not hours) but changes what
+a colour *means* — one possible future rather than the expected one — and would
+let a river show elevated on the map while the app's own forecast chart, which
+plots the median with uncertainty bands, looks unremarkable. Same consistency
+argument as the 2-year gate. At ~2 hours of overnight Cloud Run in us-west1
+(next to the bucket, so egress is free) this costs a couple of dollars a month.
+
+### DECIDED — daily run time (2026-08-18)
+
+Measured publish times rather than assumed:
+
+| Input | Published (UTC) | Evidence |
+|---|---|---|
+| GEOGLOWS forecast | **09:52 – 10:38** | zarr `.zmetadata` write times for 16/17/18 Aug — only 3 samples |
+| NOAA 5-day product | **~6.5 h after cycle time** | `reference_time` 12:00 UTC vs `update_time` 18:30 UTC; so 00z lands ~06:30 |
+
+**Schedule 11:00 UTC**, finishing ~13:00 UTC (4 AM → 6 AM Pacific, 7 AM → 9 AM
+Eastern). Freshest NOAA cycle available at that hour is 00z.
+
+**Do not rely on the clock alone.** ~20 minutes of margin over the latest
+observed GEOGLOWS publish is thin. The job must **poll for today's forecast**,
+retrying for up to an hour, and fall back to yesterday's if it never appears —
+so a late GEOGLOWS run delays the build rather than breaking it.
+
+Accepted trade-off: 13:00 UTC is midday in Europe, afternoon in Asia, so those
+users spend their morning on yesterday's colours. Unavoidable while GEOGLOWS
+publishes once daily at ~10:00 UTC.
+
+### DECIDED — always show the data date (2026-08-18)
+
+Supersedes the earlier "show the date only when it is not today's".
+
+**Always display the date**, not just when stale. If the label appears only
+sometimes, its absence has to be *inferred* as "this is current", and an
+intermittent label reads as a warning that something is wrong rather than as
+information. Always-on is simpler (no conditional) and honest by default.
+
+**Which date, given the tileset mixes two sources:** GEOGLOWS publishes once a
+day; NOAA's US half comes from whichever cycle was latest at run time. Normally
+the same calendar day, but they diverge whenever GEOGLOWS falls back to
+yesterday.
+
+**Show the older of the two.** One date, and it never overstates freshness.
+Rejected: showing both (clutters the legend for a distinction almost nobody
+needs) and showing the build date (that is when we made it, not what the data
+describes — precisely the misleading one).
+
+Exact per-source timestamps can live on the reach detail sheet, alongside the
+per-reach horizon, for anyone who taps.
+
+### Phase 4b DONE — daily build script, proven end to end (2026-08-19)
+
+`~/Developer/rivr-tiles/daily/build_flooded.py`. One linear script; the old
+four-function Pub/Sub fan-out is not rebuilt, because it existed solely to work
+around the 30-minute scheduled-function ceiling that Cloud Run does not have.
+
+**First full run published `byu-hydroinformatics.rivr-flooded-20260819`:**
+
+| | |
+|---|---|
+| Reaches | **105,824** — 91,869 GEOGLOWS + 13,955 NWM |
+| Size | 98.1 MB |
+| **Cost** | **0.4318 CU** |
+| data_date | 20260818 (both sources agreed) |
+| Zoom 0 | serving, 283,277 bytes |
+
+**At 0.43 CU/day → ~13 CU/month against 20 free. The daily tileset costs $0-3
+per month, not the ~$9 estimated when speccing.**
+
+**Measured stage timings:**
+
+| Stage | Time |
+|---|---|
+| GEOGLOWS classify, 125 regions | ~110 min |
+| GEOGLOWS geometry join from 4a shards | ~90 s |
+| NWM fetch + classify (4 services) | ~50 s |
+| Tiling z0-12 | 12 s |
+| Upload + Mapbox processing | ~2.5 min |
+
+**US counts on the day** (5 cfs floor + 2-year gate): CONUS 5,509, Alaska
+7,808, Hawaii 612, PR/VI 26. **Alaska routinely exceeds CONUS** — melt season,
+and a genuine result rather than a bug. Note Alaska has no base network in the
+app, so those colours draw over empty map; the flood tileset carries its own
+geometry so they render regardless.
+
+**Gates that ran (all passed):** feature count 105,824 = input exactly; zoom 0
+283,277 < 500,000; both networks non-zero; total inside the 2,000-200,000 band.
+
+**THREE BUGS THE RUN CAUGHT — the reason it was run locally, not in Cloud Run.**
+
+1. **The tippecanoe guard was wrong and failed a healthy build.** It treated any
+   `tile z/x/y size is N with detail D` line as fatal. That message is
+   tippecanoe **recovering**: it re-encodes an oversized tile at lower detail
+   and continues. Measured: `0/0/0 size is 505154` and `1/1/0 size is 528078`
+   at detail 12, both then landing at 276 KB / 324 KB **with the feature count
+   intact**. Only `ONLY COMPLETE THROUGH` (real truncation) is fatal; the
+   feature-count gate is the authoritative check. Size warnings are now logged
+   as notes.
+2. **`boto3` was absent from the functions venv**, so the upload died *after*
+   the two-hour read had already succeeded. Added `--resume`, which reruns
+   tiling + gates + upload off the existing merged GeoJSONSeq in ~20 s.
+3. **Installing `boto3` silently broke `s3fs`.** It pulled `botocore` 1.43.74,
+   which `aiobotocore` rejects (`<1.43.57`), and `s3fs` is how GEOGLOWS is
+   read — so the *next* run would have failed at step one for a reason
+   unrelated to anything changed that day. **Pin `boto3==1.43.56` and
+   `botocore==1.43.56`**; both stacks verified together afterwards. This pin
+   must carry into the 4c container image.
+
+**Interface for 4c/4d:** the script writes `work/manifest.json` with
+`tileset`, `data_date`, `geoglows_date`, `nwm_reference_time` and per-network
+counts. That is what 4d publishes to Remote Config, and `data_date` is the
+label 4e shows.
+
+### Lake-crossing reaches — measured on both networks (2026-08-19)
+
+**Why this became urgent.** With the flood tileset live (4b) the map showed
+Lakes Superior, Michigan and Huron as large purple "Extreme" masses. A tap
+returned reach `740547923`, order 7, at 47.63/-86.85 — open water. These are
+the routing network's plumbing: straight lines drawn through a lake to connect
+the real rivers above and below it (Dr. Ames, 2026-07-08). Real reaches, real
+ids, real forecasts — but a lake connector carries the whole lake's throughflow,
+so it lands in the top category and dominates the map.
+
+**Both networks are affected, at the same rate:**
+
+| Network | Lake reaches | Of total | Share |
+|---|---|---|---|
+| GEOGLOWS | **224,776** | 6,838,900 | 3.3% |
+| NWM (CONUS) | **94,422** | 2,693,449 | 3.5% |
+
+Two independently-built datasets agreeing at 3.3% / 3.5% is corroborating.
+Sanity check: Gwen's reported reach `740353213` is in the list.
+
+**Method.** `ST_Within` (reach entirely inside a lake) against GEOGLOWS'
+`hydrography-global/global_lakes.gpkg`, used for **both** networks. Verified
+89% precision on each — 89% of lake-*touching* reaches are wholly inside, the
+remaining 11% being real rivers entering lakes, which must not be tagged.
+
+**THE OPTIMISATION THAT MADE IT FEASIBLE.** The naive join ran at ~33
+reaches/second — ~80 hours for both networks. Cause: the lake outlines carry
+**102,245,841 vertices across 9,050 polygons** (mean 11,300, worst 536,032),
+and every containment test walks them.
+
+Simplifying the lake outlines to 0.001 deg (~100 m) cuts them to **3,618,233
+vertices — 28x fewer — in 45 seconds**, and changes the answer by **0.1%**
+(13,653 vs 13,669 lake reaches on VPU 709). Containment is insensitive at that
+tolerance: a river either runs through a lake or it does not.
+
+Result: one region went from **20+ minutes to 160 seconds**. Whole job, 8-way
+parallel on the Mac: **GEOGLOWS 47 min, NWM ~10 min.** The planned ~$10 Cloud
+Run job was unnecessary.
+
+Second optimisation: clip the global lakes to each shard's bounding box first
+(~1 s, 9,050 polygons down to a few hundred), so a reach only ever tests
+against nearby lakes. This is why the 1.65 GB global file is no slower than the
+72 MB regional one.
+
+**FOUR SILENT FAILURES IN ONE NIGHT — all exited 0, all caught only by counting
+outputs.** Every one was the same root cause: `set -e` treating "found nothing"
+as fatal inside a backgrounded worker.
+
+1. `ogr2ogr` on `nwm_app.gdb` **without naming a layer** tries to convert all
+   four layers and dies on `grid_land`. The NWM sharding stopped after the
+   first longitude band, having written one valid shard — so the run reported
+   "done" with **1/12 of the country**. Fix: name the layer (`... "$GDB"
+   channels ...`).
+2. Regions with **no lakes at all** (VPU 113 Sahara, 115, 125) killed their
+   worker instead of writing "0". They looked like failures; zero is the
+   correct answer. Fix: drop `set -e`, and `|| echo 0` on every count.
+3. The first run's verification used `ogrinfo -q -so <file> <layer>`, which
+   prints no Feature Count, reporting `got=0` for all 125 shards.
+   Correct form: `ogrinfo -al -so <file>`.
+4. (4a, same night) `-simplify` aborting FlatGeobuf writes without
+   `-nlt PROMOTE_TO_MULTI`.
+
+**Rule this establishes: never trust exit status or a "done" message from these
+pipelines. Count the outputs against a known expected number.** That gate has
+caught every one of these; nothing else has caught any.
+
+**Known gap:** the HydroShare gdb is CONUS-only, so **Hawaii and Puerto Rico
+were not scanned** for lake reaches. Few lakes there, but it is an untested
+hole, not a verified zero.
+
+### DECIDED — tag lake reaches, never delete them (2026-08-19)
+
+Jerson's reasoning, which changed the design: **RIVR is also a tool for the NWM
+and GEOGLOWS teams to see how their models behave. Hiding artefacts hides
+diagnostic signal — you cannot fix what you cannot see.**
+
+So the decision is to **tag, not remove**:
+
+- Tagging is *labelling*, not hiding. Today a purple line across Lake Superior
+  is visually identical to one on the Ohio River; a developer cannot tell them
+  apart without knowing the geography. A tag makes the distinction legible.
+- It enables things deletion forecloses: styling artefacts distinctly (same
+  colours, different stroke), counting them ("1,247 Extreme reaches lie inside
+  lakes" is more useful than a purple smear), filtering to *only* lake reaches
+  as a diagnostic view, and per-audience defaults.
+- **It keeps a switch.** Tagged reaches can be shown or hidden with a one-line
+  layer filter — and driven from Remote Config (4d), flipped for every user in
+  seconds with no App Store release. Deleting them means a rebuild to undo.
+
+**Display policy:** default hidden for the public; a distinct style rather than
+a hard hide is the preferred end state, so model developers see artefacts *and*
+real events in one view.
+
+**Where the tag goes.** Two separate fixes, often confused:
+
+| Symptom | Fixed by |
+|---|---|
+| Purple "Extreme" over the Great Lakes | **the daily flood build (4b)** filtering/tagging from these ID lists |
+| Thin grey lines drawn across lakes in the base network | rebuilding `geoglows-world-v3` / `nwm-channels-v3` with an `overLake` field |
+
+The base rebuilds are **not on the critical path** — the base lake lines are
+thin and unremarkable; the purple blobs are what is wrong with the map.
+
+**Artefacts produced:** `~/Developer/rivr-tiles/lakes/lake_reaches_geoglows.txt`
+and `lake_reaches_nwm.txt`. Not yet uploaded to GCS.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,

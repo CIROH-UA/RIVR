@@ -66,40 +66,51 @@ functions/                               -- Firebase Cloud Functions (TypeScript
   src/notification-service.ts            -- Push notification logic
   src/noaa-client.ts                     -- Server-side NOAA API client
 functions_geoglows/                      -- Firebase Cloud Functions (Python, "geoglows" codebase)
-  main.py                                -- GEOGLOWS forecast/coords, GEOGLOWS & NWM stream-condition
-                                            proxies, and the daily conditions precompute
+  main.py                                -- GEOGLOWS forecast/coords proxies (conditions functions deleted;
+                                            flood colours now come from a daily tileset)
   vpu_slices.json                        -- bundled VPU -> river-slice index (stream conditions)
 ```
 
-### Daily flood-conditions precompute
+### Flood colours — current design (superseded the Cloud Function pipeline)
 
-Flood colours used to be computed when the user panned, which cost 15-300s per
-region and could not finish at all for the largest ones. They are now computed
-once a day and served as a static file. Four functions in the `geoglows`
-codebase, all us-west1:
+**The four `geoglows_conditions_*` Cloud Functions are DELETED.** They ran a
+Pub/Sub fan-out to precompute conditions as JSON, which the app then painted
+onto the map at runtime. That path is gone for two reasons: it was still slow
+(applying ~85k reaches via a Mapbox `match` expression cost 8-12s on device),
+and the functions were removed to stop idle billing.
 
-| Function | Trigger | Purpose |
-|---|---|---|
-| `geoglows_conditions_refresh` | daily 11:00 UTC | Fans out one Pub/Sub message per VPU. Reads nothing itself. |
-| `geoglows_conditions_worker` | Pub/Sub `geoglows-conditions-vpu` | Computes one region, writes its blob. `concurrency=1`, `max_instances=20`. |
-| `geoglows_conditions_publish_global` | daily 11:30 UTC | Merges the regions into one world file, grouped by VPU. |
-| `geoglows_conditions_latest` | HTTPS | Serves that file to the app. `min_instances=1`. |
+**Colours are now baked into a daily vector tileset**, so the app draws them
+straight from the tile with no runtime painting.
 
-- **Storage:** `gs://ciroh-rivr-app-conditions`, paths
-  `conditions/geoglows/{YYYYMMDD}/vpu-{code}.json`, `.../global.json`, and a
-  stable `conditions/geoglows/latest.json`.
-- **The bucket is private** — an org policy on this project forbids public
-  buckets, which is why the app reads through a function rather than the CDN.
-- **Schedule rationale:** the GEOGLOWS daily run lands ~10:15-10:30 UTC
-  (measured). The whole world takes ~120 min of compute, over the 30-min
-  ceiling for scheduled functions, so it must fan out; the largest single VPU
-  is ~302s, inside the 540s Pub/Sub ceiling.
-- **`min_instances=1` on the serving function is deliberate** and raises the
-  bill by roughly $3/month. Without it the first request after an idle period
-  pays a ~7.5s cold start, and that request is the user opening the map.
+| | |
+|---|---|
+| Daily tileset | `byu-hydroinformatics.rivr-flooded-YYYYMMDD` |
+| Contents | only reaches at or above their own 2-year return period |
+| Fields | `station_id`, `cat` (1-4 = Action/Moderate/Major/Extreme) |
+| Zoom | 0-12 |
+| Retention | 3 days, older ones pruned |
+| Cost | ~0.43 CU/day → ~13 of the 20 free CU/month |
 
-See `docs/adr/0005-colored-stream-latency.md` for the measurements behind all
-of the above.
+**Build script:** `~/Developer/rivr-tiles/daily/build_flooded.py` (not in this
+repo — it carries no secrets but needs the local GEOGLOWS venv and tippecanoe).
+Classifies GEOGLOWS from the forecast zarr (~110 min, the dominant cost),
+joins geometry from a sharded index in GCS, adds the US half from NOAA's
+high-flow services (geometry included), tiles, gates, uploads, prunes.
+
+**Supporting artefact:** `gs://ciroh-rivr-app-conditions/geometry/geoglows/vpu-NNN.fgb`
+— 125 FlatGeobuf shards, `station_id` + geometry simplified to 10 m. GEOGLOWS
+publishes ids without geometry, and its source is a 2 GB geodatabase, so this
+index is how a flood id becomes a drawable line.
+
+**Still to build:** Cloud Run job + Scheduler (4c), Remote Config publishing
+the current tileset id and data date (4d), and the app-side layer proper (4e).
+Until then the tileset id is pinned in `config.dart`. See
+`docs/adr/0005-colored-stream-latency.md` for every decision and measurement.
+
+**Non-negotiable when working on any of this:** these pipelines fail *silently*
+— five separate operations have exited 0 while producing wrong or partial data.
+Always compare the output feature count to a known expected number. Exit status
+and "done" messages have never caught any of them.
 
 ### Key Patterns
 
@@ -306,9 +317,8 @@ cd functions && npm run build         # Build Cloud Functions
 firebase deploy --only functions:default              # Deploy TypeScript functions
 firebase deploy --only functions:geoglows             # Deploy Python functions (functions_geoglows/)
 firebase deploy --only functions:geoglows:<name>      # Deploy one Python function (e.g. nwm_stream_conditions)
-firebase deploy --only functions:geoglows:geoglows_conditions_latest --force   # --force needed: min_instances raises the bill
-gcloud scheduler jobs run firebase-schedule-geoglows_conditions_refresh-us-west1 --location=us-west1        # run the daily precompute now
-gcloud scheduler jobs run firebase-schedule-geoglows_conditions_publish_global-us-west1 --location=us-west1 # re-merge the world file now
+# NOTE: the geoglows_conditions_* functions and their schedulers are DELETED.
+# Flood colours come from the daily rivr-flooded-YYYYMMDD tileset instead.
 ```
 
 **Python venv:** `firebase.json` declares no runtime, so the CLI infers it from

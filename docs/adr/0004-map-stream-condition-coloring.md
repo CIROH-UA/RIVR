@@ -1,6 +1,14 @@
 # ADR 0004 — Pre-coloring map streams by flood condition
 
-- **Status:** Accepted — GEOGLOWS (phases 0–4) + NWM (phase 3) delivered and verified on device 2026-07-24/25; merged to `development` 2026-07-25.
+- **Status:** SUPERSEDED by ADR 0005 (2026-08-19). The runtime `match`-expression
+  colouring described here was measured at 8-12s on device for ~85k reaches and
+  has been removed from the app entirely; the nine highlight layers and every
+  condition API were deleted in the styling reset. Colours are now baked into a
+  daily tileset. This decision in particular did not survive: "Reuse the existing
+  self-hosted vector tiles — re-tiling daily to bake in a status attribute is
+  heavy and slow." Re-tiling daily measured **12 seconds** and **0.43 compute
+  units**. Kept for the reasoning and the palette work.
+- **Original status:** Accepted — GEOGLOWS (phases 0–4) + NWM (phase 3) delivered and verified on device 2026-07-24/25; merged to `development` 2026-07-25.
 - **Date:** 2026-07-25
 - **Deciders:** Jerson Garcia (lead)
 - **Relates to:** `geoglows-data-architecture.md`, ADR 0002 (`0002-canonical-derived-value-layer.md`, the flood-category ladder), `project_map_stream_conditions` (memory)
