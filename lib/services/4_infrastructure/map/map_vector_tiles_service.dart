@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/0_config/shared/config.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/services/4_infrastructure/map/us_boundary_mask.dart';
 
 /// Draws the NWM and GEOGLOWS stream networks from their vector tilesets.
@@ -26,8 +27,17 @@ import 'package:rivr/services/4_infrastructure/map/us_boundary_mask.dart';
 /// one layer per network, one colour, one width expression driven by
 /// `streamOrder`, and the per-network visibility toggles.
 class MapVectorTilesService {
+  MapVectorTilesService({FloodTilesetService? floodTilesets})
+      : _floodTilesets = floodTilesets ?? FloodTilesetService();
+
+  final FloodTilesetService _floodTilesets;
+
   MapboxMap? _mapboxMap;
   bool _isLoaded = false;
+
+  /// The flood tileset currently on the map. Tracked so [refreshFloodTileset]
+  /// can tell whether anything actually changed.
+  String? _floodTilesetId;
 
   /// The one colour every stream draws in. Shared by both networks on purpose:
   /// source is surfaced on tap and in the Stream Data sheet, not by hue.
@@ -182,10 +192,11 @@ class MapVectorTilesService {
         url: AppConfig.getGeoglowsTileSourceUrl(),
       ),
     );
+    _floodTilesetId = _floodTilesets.tilesetId;
     await map.style.addSource(
       VectorSource(
         id: AppConfig.floodSourceId,
-        url: AppConfig.getFloodTileSourceUrl(),
+        url: AppConfig.getFloodTileSourceUrl(_floodTilesetId!),
       ),
     );
     AppLogger.info(
@@ -233,9 +244,16 @@ class MapVectorTilesService {
       ),
     );
 
-    // Pre-coloured flood reaches, drawn above everything. Colour comes from the
-    // tile's own `cat` field, so there is no runtime expression carrying tens
-    // of thousands of ids — the cost that made colouring take 8-12s before.
+    await _addFloodLayer();
+  }
+
+  /// Pre-coloured flood reaches, drawn above everything. Colour comes from the
+  /// tile's own `cat` field, so there is no runtime expression carrying tens of
+  /// thousands of ids — the cost that made colouring take 8-12s before.
+  Future<void> _addFloodLayer() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    _showLakeReaches = _floodTilesets.showLakeReaches;
     await map.style.addLayer(
       LineLayer(
         id: floodLayerId,
@@ -244,8 +262,83 @@ class MapVectorTilesService {
         lineColorExpression: _floodColorExpression(),
         lineWidthExpression: _floodWidthExpression(),
         lineOpacity: 0.95,
+        filter: _lakeFilter(_showLakeReaches),
       ),
     );
+  }
+
+  /// Whether reaches inside lakes are drawn. Off by default: a lake connector
+  /// carries the whole lake's throughflow, so it classifies as a top-category
+  /// flood and renders the Great Lakes as solid purple.
+  ///
+  /// They are tagged rather than removed from the tileset precisely so this can
+  /// be a switch. Phase 4d moves it to Remote Config, so it can be flipped for
+  /// every user in seconds without an App Store release — which matters for the
+  /// NWM and GEOGLOWS teams, who need to *see* model artefacts to fix them.
+  bool _showLakeReaches = false;
+
+  /// Point the flood layer at whatever tileset is current, if it has changed.
+  ///
+  /// A Mapbox vector source's URL is fixed once created, so following a new
+  /// daily tileset means removing the layer and source and re-adding them.
+  /// No-op when the id is unchanged, which is the common case.
+  Future<void> refreshFloodTileset() async {
+    final map = _mapboxMap;
+    if (map == null || !_isLoaded) return;
+    final wanted = _floodTilesets.tilesetId;
+    if (wanted == _floodTilesetId) return;
+
+    AppLogger.info(
+      'MapVectorTilesService',
+      'flood tileset $_floodTilesetId -> $wanted',
+    );
+    try {
+      try {
+        await map.style.removeStyleLayer(floodLayerId);
+      } catch (_) {/* not added yet */}
+      try {
+        await map.style.removeStyleSource(AppConfig.floodSourceId);
+      } catch (_) {/* not added yet */}
+
+      _floodTilesetId = wanted;
+      await map.style.addSource(
+        VectorSource(
+          id: AppConfig.floodSourceId,
+          url: AppConfig.getFloodTileSourceUrl(wanted),
+        ),
+      );
+      await _addFloodLayer();
+    } catch (e) {
+      AppLogger.error('MapVectorTilesService', 'refreshFloodTileset failed', e);
+    }
+  }
+
+  bool get showLakeReaches => _showLakeReaches;
+
+  /// `overLake` is 1 on reaches lying entirely inside a lake (ADR 0005).
+  /// Older flood tilesets predate the field; `!= 1` keeps those visible rather
+  /// than silently blanking the map when the field is absent.
+  static List<Object>? _lakeFilter(bool show) =>
+      show ? null : ['!=', ['get', 'overLake'], 1];
+
+  /// Show or hide lake reaches. Safe to call before the layer exists.
+  Future<void> setLakeReachesVisible(bool visible) async {
+    _showLakeReaches = visible;
+    final map = _mapboxMap;
+    if (map == null || !_isLoaded) return;
+    try {
+      await map.style.setStyleLayerProperty(
+        floodLayerId,
+        'filter',
+        json.encode(_lakeFilter(visible) ?? <Object>['all']),
+      );
+      AppLogger.info(
+        'MapVectorTilesService',
+        'Lake reaches ${visible ? 'shown' : 'hidden'}',
+      );
+    } catch (e) {
+      AppLogger.warning('MapVectorTilesService', 'setLakeReachesVisible: $e');
+    }
   }
 
   /// Master show/hide. When showing, each network returns to its own state —

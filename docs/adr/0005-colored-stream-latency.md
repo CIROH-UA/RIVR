@@ -1336,6 +1336,222 @@ thin and unremarkable; the purple blobs are what is wrong with the map.
 **Artefacts produced:** `~/Developer/rivr-tiles/lakes/lake_reaches_geoglows.txt`
 and `lake_reaches_nwm.txt`. Not yet uploaded to GCS.
 
+### Lake tagging shipped end to end — verified on device (2026-08-19)
+
+`build_flooded.py` now writes `overLake` (0/1) on every feature from the ID
+lists, and `map_vector_tiles_service.dart` filters the flood layer on
+`['!=', ['get','overLake'], 1]`.
+
+**Live rebuild, today's data:**
+
+| | |
+|---|---|
+| Total | **100,220** (88,100 GEOGLOWS + 12,120 NWM) |
+| Tagged `overLake` | **7,039** — 6,841 GEOGLOWS + 198 NWM |
+| Share | **7.0% of the whole flood map was lake artefact** |
+| Cost | 0.4318 CU |
+| Gates | all four passed |
+
+**GEOGLOWS contributes 35x more lake artefacts than NWM** (6,841 vs 198),
+which is why the Great Lakes were almost entirely GEOGLOWS purple.
+
+**Verified visually**, same region as the failing screenshot: lakes clean,
+flood colours only on land. Confirmed the field is queryable from the tileset
+metadata (`overLake` min 0 max 1), not merely present in a log.
+
+**Two separate problems, only one fixed.** Navy *base-network* lines still
+cross Lake Superior. Those come from `geoglows-world-v2` / `nwm-channels-v2`,
+which carry no `overLake` field. Fixing them means the v3 rebuilds (L2) — thin
+grey lines across a lake are clutter; purple "Extreme" was a false alarm, so
+this was correctly deprioritised.
+
+**Filter detail:** `!= 1` rather than `== 0`, so a flood tileset predating the
+field stays visible instead of the map silently blanking.
+
+### Zoom 0 is close to its ceiling (2026-08-19)
+
+The flood tileset's z0 tile measured **488,878 bytes against the 500,000
+limit** — 98%. It passed, but a wetter day will fail the gate and block
+publishing.
+
+**Excluding lake reaches does not solve it.** Measured: z0 with lake reaches
+490,358 bytes, without them 450,110 — only **8% smaller**. The tile is nearly
+full of legitimate flood reaches.
+
+Capping the tileset's max zoom is **irrelevant** — z0 size is set by how many
+features exist at z0, not by the maximum zoom. (Reasoning from how tiles are
+built; not separately measured.)
+
+**Unverified fix:** apply a stream-order ladder to the flood tileset the way
+the base networks got one — larger rivers only at z0-2, everything from z3.
+Cheapest test is building z0 that way and measuring. Not yet done.
+
+### Phase 4c — Cloud Run, in progress (2026-08-19)
+
+**Why Cloud Run and not a Cloud Function:** the build needs **tippecanoe**, a
+compiled binary the managed Functions runtime cannot host. Cloud Run takes a
+custom container, so tippecanoe is built from source in the image (no Debian or
+Ubuntu package exists).
+
+Jerson's earlier "no Cloud Functions" constraint was about *painting* streams at
+request time — the path between the user and seeing colour. An unattended
+nightly build is a different thing.
+
+| Piece | State |
+|---|---|
+| APIs (run, build, artifactregistry, scheduler, secretmanager) | already enabled |
+| Lake ID lists → `gs://ciroh-rivr-app-conditions/lakes/` | done, 224,776 + 94,422 |
+| Mapbox token → Secret Manager `mapbox-secret-token` | done, verified 106 bytes, `sk.eyJ` |
+| Artifact Registry `rivr` (us-west1) | created |
+| Container image | building |
+| Cloud Run job | not yet |
+| Cloud Scheduler 11:00 UTC | not yet |
+
+**Region us-west1 is not optional** — it sits next to the GEOGLOWS S3 buckets
+in us-west-2, and the classification reads ~400 GB per run. Elsewhere that is
+both slow and billable.
+
+**IAM note.** `roles/editor` does **not** include `secretmanager.versions.access`;
+secret payload reads are deliberately excluded. Creating a secret works, reading
+it back does not. Rather than granting the Cloud Run service account
+project-wide accessor (which would also expose `NWM_API_KEY`), granted
+`roles/secretmanager.admin` to the operator and bound the compute service
+account to **the Mapbox secret only**.
+
+**Container design:** lake lists are fetched from GCS at start-up rather than
+baked in, so they can be regenerated without rebuilding the image. The 8.7 GB
+geometry index is read **in place** through GDAL's `/vsigs/` — far too large to
+ship in an image or download per run. **`/vsigs/` access from the container is
+UNVERIFIED**; it depends on the service account's storage permissions reaching
+GDAL, and will be tested on the first run rather than assumed.
+
+**The boto3/botocore pin is load-bearing** and is pinned in the Dockerfile for
+the reason recorded under 4b: a newer boto3 pulls a botocore that aiobotocore
+rejects, silently breaking `s3fs` — which is how GEOGLOWS is read.
+
+### Phase 4c DONE — the build runs itself (2026-08-19)
+
+Cloud Scheduler → Cloud Run job, verified end to end. No laptop involved.
+
+| Resource | Value |
+|---|---|
+| Image | `us-west1-docker.pkg.dev/ciroh-rivr-app/rivr/flood-builder:latest` |
+| Job | `flood-builder`, us-west1, 8 GiB, 4 vCPU, 4 h timeout, 1 retry |
+| Schedule | `flood-builder-daily`, `0 11 * * *` UTC |
+| Secret | `mapbox-secret-token` → `MAPBOX_SECRET_TOKEN` |
+| Source | `~/Developer/rivr-tiles/cloudrun/` (Dockerfile, entrypoint.sh) |
+
+**`/vsigs/` WORKS — this was the one unverified assumption.** The container
+reads the 8.7 GB geometry index in place from GCS through GDAL rather than
+downloading it. Confirmed in a real cloud execution.
+
+**Base image: `python:3.12-slim-bookworm`, not an osgeo/gdal image.** Two
+attempts failed first:
+1. `pip install --break-system-packages` — that flag needs pip 23+; the GDAL
+   image shipped an older pip.
+2. `zarr==3.3.0` — needs Python 3.11+; `osgeo/gdal:ubuntu-small-3.6.3` is
+   Ubuntu 22.04 with Python 3.10, **and Docker Hub's osgeo/gdal ubuntu-small
+   tags stop at 3.6.3** (newer images moved to ghcr.io).
+
+Only GDAL's *command line* tools are needed — the script shells out to
+`ogr2ogr`/`ogrinfo` and never imports `osgeo` — so Debian's `gdal-bin` is
+enough. tippecanoe is built from source; no Debian/Ubuntu package exists.
+
+**The image self-verifies at build time:**
+`RUN ogr2ogr --version && tippecanoe --version && python -c "import geoglows,
+s3fs, zarr, xarray, boto3"`. A missing tool fails the build loudly instead of
+surfacing at 11:00 UTC.
+
+**IAM.** `roles/editor` does not include `secretmanager.versions.access` —
+creating a secret works, reading it back does not. Rather than granting the
+compute service account project-wide accessor (which would also expose
+`NWM_API_KEY`), granted the operator `roles/secretmanager.admin` and bound the
+service account to the Mapbox secret **only**. Also needed
+`roles/run.invoker` (project) and `roles/storage.objectAdmin` on the bucket.
+
+**Scheduler URI must be REGIONAL.**
+`https://us-west1-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/ciroh-rivr-app/jobs/flood-builder:run`.
+The global `run.googleapis.com` host returns **status code 5 (NOT_FOUND)** and
+the scheduler job still reports `ENABLED` — creation succeeding proves nothing.
+**Always check `status.code` after triggering; empty means success.**
+
+**Gate change.** The plausibility band (2,000-200,000 reaches) correctly failed
+a `--vpu 101` smoke test that produced 2 reaches. It now applies only to full
+runs, and a restricted run logs `(restricted run: plausibility band not
+applied)` — visible rather than silent. Rationale: if a deliberate test always
+fails the gate, the gate gets ignored, and it is the only check that has caught
+any of the silent failures in this project.
+
+**Verified in cloud:** lake lists from GCS, GEOGLOWS forecast from S3, geometry
+via `/vsigs/`, `overLake` tagging, tippecanoe, all gates, manifest — then a
+scheduler-triggered full production run.
+
+### First fully autonomous production run (2026-08-19)
+
+Cloud Scheduler triggered it, Cloud Run executed it, Mapbox received it. No
+laptop at any point. `Container called exit(0)`, published
+`rivr-flooded-20260819`.
+
+**Measured cloud timings** — the numbers to plan the schedule against:
+
+| Stage | Cloud | Local (Mac) |
+|---|---|---|
+| GEOGLOWS classification, 125 regions | **94 min** (58 s/region) | ~110 min (53 s/region) |
+| Geometry join via `/vsigs/` | **~14 min** | ~90 s |
+| US fetch + tile + gates | ~2 min | ~1 min |
+| Upload + Mapbox processing | ~3 min | ~4 min |
+| **Total** | **~2 h 27 min** | ~2 h |
+
+**The geometry join is ~9x slower in the cloud** — reading index shards through
+`/vsigs/` from GCS rather than off local SSD. Not worth fixing: an 11:00 UTC
+start still finishes ~13:30 UTC, before the US morning. But it means the
+2-hour figure quoted while speccing was optimistic; **2.5 hours is the real
+window.**
+
+Classification itself is slightly *faster* in the cloud despite 4 vCPUs, because
+the job sits next to the GEOGLOWS buckets in us-west-2.
+
+### Phase 4d — job side DONE (2026-08-19)
+
+The build's final step writes Firebase Remote Config, after Mapbox confirms
+processing, so the config can never point at a half-published tileset.
+
+**Verified live** — template went from 0 parameters to exactly:
+
+| Parameter | Value |
+|---|---|
+| `flood_tileset_id` | `byu-hydroinformatics.rivr-flooded-20260819` |
+| `flood_data_date` | `2026-08-19` |
+| `flood_show_lake_reaches` | `false` |
+
+**Role is `roles/cloudconfig.admin`** ("Firebase Remote Config Admin"), *not*
+`roles/firebaseremoteconfig.admin`, which is not a valid project-level role and
+fails with `INVALID_ARGUMENT`.
+
+**The publish edits the template, never replaces it.** Remote Config uses ETag
+optimistic concurrency: GET the template, modify, PUT with `If-Match`. A blind
+PUT would delete every other parameter. The template is empty today (verified),
+so this is precautionary — but it stops being precautionary the first time
+someone adds a parameter by hand.
+
+**`flood_show_lake_reaches` is written with `setdefault`** — created once, never
+overwritten. A value flipped in the Firebase console to expose lake artefacts
+survives every subsequent build. The tileset id and date *are* overwritten each
+run.
+
+**Publish failure is non-fatal**, logged as a warning. By that point the tileset
+is live and the app can still derive the id from the date, so a config hiccup
+degrades rather than breaks.
+
+**Gotcha for laptop testing:** reading the Remote Config REST API with local
+user credentials needs an `X-Goog-User-Project: ciroh-rivr-app` header, or it
+fails with an Application Default Credentials error. The Cloud Run job is
+unaffected — it uses the service account directly.
+
+**Still to build (4e):** the app must read these values. Today
+`floodTilesetId` is pinned in `config.dart`, so **the nightly job publishes
+tilesets the app never looks at.**
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,

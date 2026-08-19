@@ -1,6 +1,8 @@
 // lib/main.dart
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -8,6 +10,7 @@ import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
 import 'package:rivr/services/5_injection/dependency_container.dart';
 import 'package:provider/provider.dart';
@@ -75,6 +78,12 @@ Future<void> main() async {
 
   // Register all services with dependency injection
   setupDependencies();
+
+  // Which flood tileset to draw. Deliberately not awaited: a new tileset is
+  // published nightly and the user should get it immediately, but startup must
+  // never wait on the network. Remote Config serves its cached value meanwhile,
+  // and the service falls back to deriving the id from today's date.
+  unawaited(GetIt.I<FloodTilesetService>().initialize());
 
   // Catch Flutter framework errors (widget build failures, layout errors, etc.)
   FlutterError.onError = (FlutterErrorDetails details) {

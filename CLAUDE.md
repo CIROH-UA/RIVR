@@ -102,10 +102,53 @@ high-flow services (geometry included), tiles, gates, uploads, prunes.
 publishes ids without geometry, and its source is a 2 GB geodatabase, so this
 index is how a flood id becomes a drawable line.
 
-**Still to build:** Cloud Run job + Scheduler (4c), Remote Config publishing
-the current tileset id and data date (4d), and the app-side layer proper (4e).
-Until then the tileset id is pinned in `config.dart`. See
+**Lake artefacts are tagged, not deleted.** Both routing networks draw straight
+lines through lakes to connect the rivers above and below them; those reaches
+carry the whole lake's throughflow and classify as top-category floods. 7,039 of
+100,220 flood reaches (7%) are such artefacts. Each carries `overLake` 0/1 and
+the app filters them out by default — tagged rather than dropped so the NWM and
+GEOGLOWS teams can still see their models' behaviour. Reach ID lists live in
+`gs://ciroh-rivr-app-conditions/lakes/`.
+
+**It runs itself.** Cloud Scheduler `flood-builder-daily` (`0 11 * * *` UTC)
+triggers Cloud Run job `flood-builder` in us-west1. Region is not optional — it
+sits next to the GEOGLOWS S3 buckets in us-west-2 and the run reads ~400 GB.
+
+```bash
+gcloud run jobs execute flood-builder --region=us-west1                      # run now
+gcloud run jobs executions list --job=flood-builder --region=us-west1        # history
+gcloud scheduler jobs describe flood-builder-daily --location=us-west1   --format="value(status.code)"                                             # empty = OK
+gcloud logging read 'resource.type=cloud_run_job' --limit=30 --freshness=2h
+```
+
+Container source is `~/Developer/rivr-tiles/cloudrun/` (not in this repo).
+Rebuild with `gcloud builds submit --tag us-west1-docker.pkg.dev/ciroh-rivr-app/rivr/flood-builder:latest`.
+
+**The job publishes Firebase Remote Config** as its last step, after Mapbox
+confirms processing:
+
+| Parameter | Meaning |
+|---|---|
+| `flood_tileset_id` | which tileset the app should load |
+| `flood_data_date` | the date shown above the legend |
+| `flood_show_lake_reaches` | lake-artefact switch; set once, never overwritten |
+
+Flipping `flood_show_lake_reaches` in the Firebase console changes every user's
+map within seconds and survives subsequent builds — which matters because the
+Apple account lockout makes app releases slow.
+
+A full cloud run takes **~2.5 hours** (94 min classification, ~14 min geometry
+join, the rest tiling and upload), so an 11:00 UTC start lands ~13:30 UTC.
+
+**Still to build (4e):** the app must actually read those values — today
+`floodTilesetId` is pinned in `config.dart`, so **the nightly job publishes
+tilesets the app never looks at.** Also pending: data date above the legend and
+per-reach horizon on the detail sheet. See
 `docs/adr/0005-colored-stream-latency.md` for every decision and measurement.
+
+**Known limit:** the flood tileset's zoom-0 tile is at 98% of Mapbox's 500 KB
+ceiling. A wetter day will fail the build gate. Excluding lake reaches only buys
+8% — the fix is a stream-order ladder on the flood tileset, not yet built.
 
 **Non-negotiable when working on any of this:** these pipelines fail *silently*
 — five separate operations have exited 0 while producing wrong or partial data.

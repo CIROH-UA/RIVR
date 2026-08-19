@@ -27,6 +27,7 @@ import 'package:rivr/services/4_infrastructure/map/map_service_factory.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
+import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -335,6 +336,17 @@ class MapPageState extends State<MapPage> {
 
       // Load vector tiles
       await _vectorTilesService.loadRiverReaches();
+
+      // The flood source is built from whatever tileset id the service knew at
+      // style-load time. On a cold start Remote Config is usually still in
+      // flight then, so the source may have been created from the date-derived
+      // fallback. Re-check once it has landed and swap the source if the
+      // published id differs — a no-op in the common case.
+      unawaited(
+        GetIt.I<FloodTilesetService>()
+            .initialize()
+            .then((_) => _vectorTilesService.refreshFloodTileset()),
+      );
 
       // Restore the saved stream-network toggles onto the freshly loaded layers.
       final streamLayers = await MapPreferenceService.loadStreamLayers();
