@@ -114,7 +114,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        _notificationBannerDismissed = prefs.getBool(_bannerDismissedKey) ?? false;
+        _notificationBannerDismissed =
+            prefs.getBool(_bannerDismissedKey) ?? false;
       });
     }
   }
@@ -142,9 +143,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       final userId = authProvider.currentUser?.uid;
 
       if (userId != null) {
-        final userSettings = await GetIt.I<IUserSettingsService>().getUserSettings(
-          userId,
-        );
+        final userSettings = await GetIt.I<IUserSettingsService>()
+            .getUserSettings(userId);
         if (userSettings != null && mounted) {
           setState(() {
             _selectedFlowUnit = userSettings.preferredFlowUnit.displayLabel;
@@ -176,39 +176,53 @@ class _FavoritesPageState extends State<FavoritesPage>
         navigationBar: _buildNavigationBar(),
         child: Stack(
           children: [
-            // Main content
-            Consumer<FavoritesProvider>(
-              builder: (context, favoritesProvider, child) {
-                if (favoritesProvider.isLoading) {
-                  return _buildLoadingState();
-                }
+            // Banner above the list, not over it. It used to be a
+            // Positioned(top: 0) in this Stack — which, despite the old
+            // comment, overlaid the first favourite rather than pinning below
+            // anything. In the column it takes real height and pushes the list
+            // down, so nothing is ever hidden behind it.
+            //
+            // One SafeArea around the whole column, not one per child. The
+            // scaffold's nav bar is translucent, so this child starts at y=0
+            // behind it and something must clear it. Wrapping here consumes the
+            // inset once and hands descendants a zeroed MediaQuery, which makes
+            // the SafeArea already inside each content state a no-op — as
+            // siblings they would each apply the full inset and open a gap
+            // under the banner.
+            SafeArea(
+              top: true,
+              bottom: false,
+              child: Column(
+                children: [
+                  const OfflineBanner(),
+                  Expanded(
+                    child: Consumer<FavoritesProvider>(
+                      builder: (context, favoritesProvider, child) {
+                        if (favoritesProvider.isLoading) {
+                          return _buildLoadingState();
+                        }
 
-                if (favoritesProvider.isEmpty &&
-                    favoritesProvider.errorMessage != null) {
-                  return _buildInitErrorState(favoritesProvider.errorMessage!);
-                }
+                        if (favoritesProvider.isEmpty &&
+                            favoritesProvider.errorMessage != null) {
+                          return _buildInitErrorState(
+                            favoritesProvider.errorMessage!,
+                          );
+                        }
 
-                if (favoritesProvider.isEmpty) {
-                  return _buildEmptyState();
-                }
+                        if (favoritesProvider.isEmpty) {
+                          return _buildEmptyState();
+                        }
 
-                // Trigger Phase A coach marks when favorites are loaded
-                if (!_hasShownFavoritesTour && !_isTourActive) {
-                  _maybeShowFavoritesTour(favoritesProvider);
-                }
+                        // Trigger Phase A coach marks when favorites are loaded
+                        if (!_hasShownFavoritesTour && !_isTourActive) {
+                          _maybeShowFavoritesTour(favoritesProvider);
+                        }
 
-                return _buildFavoritesList(favoritesProvider);
-              },
-            ),
-
-            // Offline connectivity banner (pinned below nav bar)
-            const Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: SafeArea(
-                bottom: false,
-                child: OfflineBanner(),
+                        return _buildFavoritesList(favoritesProvider);
+                      },
+                    ),
+                  ),
+                ],
               ),
             ),
 
@@ -226,14 +240,21 @@ class _FavoritesPageState extends State<FavoritesPage>
       leading: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: () => AppRouter.pushWeeklyOutlook(context),
-        child: const Icon(CupertinoIcons.calendar,
-            semanticLabel: "This week's outlook"),
+        child: const Icon(
+          CupertinoIcons.calendar,
+          semanticLabel: "This week's outlook",
+        ),
       ),
       trailing: CupertinoButton(
-        key: (_isTourActive || !_hasShownFavoritesTour) ? _settingsButtonKey : null,
+        key: (_isTourActive || !_hasShownFavoritesTour)
+            ? _settingsButtonKey
+            : null,
         padding: EdgeInsets.zero,
         onPressed: _showSettingsMenu,
-        child: const Icon(CupertinoIcons.ellipsis, semanticLabel: 'Settings menu'),
+        child: const Icon(
+          CupertinoIcons.ellipsis,
+          semanticLabel: 'Settings menu',
+        ),
       ),
     );
   }
@@ -333,55 +354,53 @@ class _FavoritesPageState extends State<FavoritesPage>
           // Empty state content — offset upward to balance whitespace
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(
-                  left: 32, right: 32, bottom: 100),
+              padding: const EdgeInsets.only(left: 32, right: 32, bottom: 100),
               child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Empty state illustration
-                    Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: CupertinoColors.systemBlue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(60),
-                      ),
-                      child: const Icon(
-                        CupertinoIcons.heart,
-                        size: 60,
-                        color: CupertinoColors.systemBlue,
-                        semanticLabel: 'No favorites',
-                      ),
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Empty state illustration
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.systemBlue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(60),
                     ),
-
-                    const SizedBox(height: 24),
-
-                    // Title
-                    const Text(
-                      'No Favorite Rivers Yet',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                        color: CupertinoColors.label,
-                      ),
-                      textAlign: TextAlign.center,
+                    child: const Icon(
+                      CupertinoIcons.heart,
+                      size: 60,
+                      color: CupertinoColors.systemBlue,
+                      semanticLabel: 'No favorites',
                     ),
+                  ),
 
-                    const SizedBox(height: 12),
+                  const SizedBox(height: 24),
 
-                    // Description
-                    Text(
-                      'Tap the + button below to explore the map and add your first river.',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: CupertinoColors.systemGrey2
-                          ..resolveFrom(context),
-                        height: 1.4,
-                      ),
-                      textAlign: TextAlign.center,
+                  // Title
+                  const Text(
+                    'No Favorite Rivers Yet',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                      color: CupertinoColors.label,
                     ),
-                  ],
-                ),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Description
+                  Text(
+                    'Tap the + button below to explore the map and add your first river.',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: CupertinoColors.systemGrey2..resolveFrom(context),
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -446,8 +465,10 @@ class _FavoritesPageState extends State<FavoritesPage>
                 Consumer<AuthProvider>(
                   builder: (context, authProvider, _) {
                     final notificationsEnabled =
-                        authProvider.currentUserSettings?.enableNotifications ?? false;
-                    if (!notificationsEnabled && !_notificationBannerDismissed) {
+                        authProvider.currentUserSettings?.enableNotifications ??
+                        false;
+                    if (!notificationsEnabled &&
+                        !_notificationBannerDismissed) {
                       return SliverToBoxAdapter(
                         child: NotificationPromptBanner(
                           onDismiss: _dismissNotificationBanner,
@@ -516,7 +537,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                   _maybeShowSearchTip(favoritesProvider);
                 }
                 return CupertinoButton(
-                  key: (_isTourActive || !_hasShownSearchTip) ? _searchIconKey : null,
+                  key: (_isTourActive || !_hasShownSearchTip)
+                      ? _searchIconKey
+                      : null,
                   padding: EdgeInsets.zero,
                   onPressed: _toggleSearch,
                   child: Icon(
@@ -524,7 +547,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                         ? CupertinoIcons.xmark_circle_fill
                         : CupertinoIcons.search,
                     color: CupertinoColors.systemBlue,
-                    semanticLabel: _showSearch ? 'Close search' : 'Search favorites',
+                    semanticLabel: _showSearch
+                        ? 'Close search'
+                        : 'Search favorites',
                   ),
                 );
               }
@@ -610,7 +635,9 @@ class _FavoritesPageState extends State<FavoritesPage>
       itemBuilder: (context, index) {
         final favorite = favorites[index];
         return FavoriteRiverCard(
-          key: index == 0 && (_isTourActive || !_hasShownFavoritesTour) ? _firstCardKey : ValueKey(favorite.reachId),
+          key: index == 0 && (_isTourActive || !_hasShownFavoritesTour)
+              ? _firstCardKey
+              : ValueKey(favorite.reachId),
           favorite: favorite,
           cardIndex: index,
           onTap: () => _navigateToForecast(
@@ -890,10 +917,8 @@ class _FavoritesPageState extends State<FavoritesPage>
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0.0, end: 1.0),
             duration: const Duration(milliseconds: 200),
-            builder: (context, opacity, child) => Opacity(
-              opacity: opacity,
-              child: child,
-            ),
+            builder: (context, opacity, child) =>
+                Opacity(opacity: opacity, child: child),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(
@@ -902,10 +927,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               ),
               child: const Text(
                 'Press back again to exit',
-                style: TextStyle(
-                  color: CupertinoColors.white,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: CupertinoColors.white, fontSize: 14),
               ),
             ),
           ),
@@ -954,11 +976,14 @@ class _FavoritesPageState extends State<FavoritesPage>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildMenuOption('Account', CupertinoIcons.person_crop_circle,
-                      () {
-                    Navigator.pop(context);
-                    AppRouter.pushAccount(context);
-                  }),
+                  _buildMenuOption(
+                    'Account',
+                    CupertinoIcons.person_crop_circle,
+                    () {
+                      Navigator.pop(context);
+                      AppRouter.pushAccount(context);
+                    },
+                  ),
                   _buildMenuDivider(),
                   _buildMenuOption('Notifications', CupertinoIcons.bell, () {
                     Navigator.pop(context);
@@ -1158,5 +1183,4 @@ class _FavoritesPageState extends State<FavoritesPage>
       ),
     );
   }
-
 }
