@@ -139,6 +139,16 @@ class MapVectorTilesService {
 
   static List<Object> get _insideUs => ['within', _usMaskGeometry];
 
+  /// Combine a geography filter with the lake filter. `overLake` exists on the
+  /// v3 base tilesets; `!= 1` rather than `== 0` so a v2 tileset without the
+  /// field stays visible instead of the network silently vanishing.
+  static List<Object>? _baseFilter(List<Object>? geography, bool showLakes) {
+    final lake = _lakeFilter(showLakes);
+    if (geography == null) return lake;
+    if (lake == null) return geography;
+    return ['all', geography, lake];
+  }
+
   /// Set the MapboxMap instance
   void setMapboxMap(MapboxMap map) {
     _mapboxMap = map;
@@ -217,6 +227,7 @@ class MapVectorTilesService {
         lineColor: _streamColor,
         lineOpacity: _lineOpacity,
         lineWidthExpression: _widthExpression(),
+        filter: _baseFilter(null, _showLakeReaches),
       ),
     );
 
@@ -228,7 +239,7 @@ class MapVectorTilesService {
         lineColor: _streamColor,
         lineOpacity: _lineOpacity,
         lineWidthExpression: _widthExpression(),
-        filter: _outsideUs,
+        filter: _baseFilter(_outsideUs, _showLakeReaches),
       ),
     );
 
@@ -240,7 +251,7 @@ class MapVectorTilesService {
         lineColor: _streamColor,
         lineOpacity: _lineOpacity,
         lineWidthExpression: _widthExpression(),
-        filter: _insideUs,
+        filter: _baseFilter(_insideUs, _showLakeReaches),
       ),
     );
 
@@ -327,6 +338,20 @@ class MapVectorTilesService {
     final map = _mapboxMap;
     if (map == null || !_isLoaded) return;
     try {
+      // Both halves of the problem move together: the flood layer's purple
+      // "Extreme" over open water, and the base network's thin lines drawn
+      // across lakes. One switch, or the map is half-fixed.
+      for (final (layerId, geography) in <(String, List<Object>?)>[
+        (nwmLayerId, null),
+        (geoglowsLayerId, _outsideUs),
+        (geoglowsUsLayerId, _insideUs),
+      ]) {
+        await map.style.setStyleLayerProperty(
+          layerId,
+          'filter',
+          json.encode(_baseFilter(geography, visible) ?? <Object>['all']),
+        );
+      }
       await map.style.setStyleLayerProperty(
         floodLayerId,
         'filter',

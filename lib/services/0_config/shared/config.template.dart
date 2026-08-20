@@ -77,22 +77,39 @@ class AppConfig {
   static const String mapboxStyleUrl = 'mapbox://styles/mapbox/standard';
 
   // Vector Tiles Infrastructure
-  static const String vectorTilesetId = 'byu-hydroinformatics.nwm-channels';
+  //
+  // Both base tilesets are `-v3`: built z0-12 with a stream-order ladder (low
+  // zooms carry only the big rivers) and an `overLake` flag on reaches whose
+  // geometry lies inside a lake polygon. The ladder is what makes low zooms
+  // legible — the pre-v3 tilesets were pinned at the 500 KB tile ceiling and
+  // rendered as broken stripes below z8. Do not point these at the older ids.
+  static const String vectorTilesetId = 'byu-hydroinformatics.nwm-channels-v3';
   static const String vectorSourceId = 'streams2-source';
   static const String vectorSourceLayer = 'channels';
   static const String vectorLayerId = 'streams2-layer';
 
-  // GEOGLOWS stream tileset (global, non-US). NOTE: currently the Rhône TEST
-  // tileset — swap for the production global (VPU-bundled) tileset when ready.
+  // GEOGLOWS stream tileset (global, non-US).
   // Layer ids must keep the `geoglows` prefix so tap source-routing works.
   static const String geoglowsTilesetId =
-      'byu-hydroinformatics.geoglows-rhone-test';
+      'byu-hydroinformatics.geoglows-world-v3';
   static const String geoglowsSourceId = 'geoglows-source';
   static const String geoglowsSourceLayer = 'channels';
+
+  // Daily flood-condition tileset. The full id is `<prefix>-YYYYMMDD` and is
+  // resolved at runtime by FloodTilesetService (Firebase Remote Config, with a
+  // date-derived fallback) — never hardcode a dated id here. The date stamp is
+  // required, not cosmetic: Mapbox caches tiles for 12 hours on device and the
+  // CDN cache cannot be broken, so reusing one id would serve yesterday's
+  // colours to anyone who already had them.
+  static const String floodTilesetPrefix = 'byu-hydroinformatics.rivr-flooded';
+  static const String floodSourceId = 'flooded-source';
+  static const String floodSourceLayer = 'flooded';
 
   // Helper methods for Vector Tiles Infrastructure
   static String getVectorTileSourceUrl() => 'mapbox://$vectorTilesetId';
   static String getGeoglowsTileSourceUrl() => 'mapbox://$geoglowsTilesetId';
+  static String getFloodTileSourceUrl(String tilesetId) =>
+      'mapbox://$tilesetId';
 
   // Default Settings
   static const String defaultDisplayUnit = 'cfs';
