@@ -1,5 +1,6 @@
 // lib/models/1_domain/features/map/selected_reach.dart
 
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 
 /// Lightweight model for river reach selections from vector tiles
@@ -20,6 +21,18 @@ class SelectedReach {
   final String? city; // geocoded location context
   final String? state; // geocoded location context
 
+  // The flood category the MAP is painting this reach, read straight off the
+  // daily flood tileset at the tap point — an index into [kFloodCategories],
+  // so 2 means the line is drawn "Moderate". Null when the reach carries no
+  // colour, either because it is below the 2-year gate or because the flood
+  // layer is off.
+  //
+  // This is the peak over the forecast window, while the sheet's own flow is
+  // right now, which is why the two can legitimately disagree. Taking it from
+  // the tile rather than recomputing it means the sheet can never explain a
+  // colour the map is not actually showing.
+  final int? mapFloodCategoryIndex;
+
   // Selection metadata
   final DateTime selectedAt;
 
@@ -32,6 +45,7 @@ class SelectedReach {
     this.riverName,
     this.city,
     this.state,
+    this.mapFloodCategoryIndex,
     required this.selectedAt,
   });
 
@@ -41,6 +55,7 @@ class SelectedReach {
     required double latitude,
     required double longitude,
     ForecastSource source = ForecastSource.nwm,
+    int? mapFloodCategoryIndex,
   }) {
     return SelectedReach(
       reachId: properties['station_id'].toString(),
@@ -48,6 +63,7 @@ class SelectedReach {
       latitude: latitude,
       longitude: longitude,
       source: source,
+      mapFloodCategoryIndex: mapFloodCategoryIndex,
       selectedAt: DateTime.now(),
     );
   }
@@ -63,6 +79,7 @@ class SelectedReach {
       riverName: riverName,
       city: city,
       state: state,
+      mapFloodCategoryIndex: mapFloodCategoryIndex,
       selectedAt: selectedAt,
     );
   }
@@ -78,8 +95,33 @@ class SelectedReach {
       riverName: riverName,
       city: city ?? this.city,
       state: state ?? this.state,
+      mapFloodCategoryIndex: mapFloodCategoryIndex,
       selectedAt: selectedAt,
     );
+  }
+
+  /// Update with the flood category the map is painting.
+  SelectedReach withMapFloodCategory(int? index) {
+    return SelectedReach(
+      reachId: reachId,
+      streamOrder: streamOrder,
+      latitude: latitude,
+      longitude: longitude,
+      source: source,
+      riverName: riverName,
+      city: city,
+      state: state,
+      mapFloodCategoryIndex: index,
+      selectedAt: selectedAt,
+    );
+  }
+
+  /// Name of the category the map is painting, e.g. `'Moderate'`; null when the
+  /// reach is not coloured or the tile carried an index outside the ladder.
+  String? get mapFloodCategory {
+    final i = mapFloodCategoryIndex;
+    if (i == null || i < 1 || i >= kFloodCategories.length) return null;
+    return kFloodCategories[i];
   }
 
   // Helper properties

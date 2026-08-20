@@ -1613,9 +1613,75 @@ Island reaches are identified by COMID range **800,000,000-921,999,999**
 (NHDPlus HI/PR/VI), because NOAA publishes only a 48-hour product for Hawaii
 and Puerto Rico — there is no 5-day variant.
 
+### BUILT — the peak strip (2026-08-20)
+
+The sheet now leads with a coloured strip whenever the map's category
+outranks current flow: *"Forecast peak: Moderate — the map colours rivers
+by their highest forecast flow, not their flow right now. This one is
+running normal today."* Above everything else in the sheet, because the
+problem was hierarchy: the eye lands on the 28pt "Normal" and concludes
+the map is broken.
+
+**The category comes from the tile, not from a recomputation.** A second
+`queryRenderedFeatures` against `flooded-streams` at the tap point reads
+`cat` off the same feature that painted the line. Two consequences worth
+keeping: the sheet can never describe a colour the map is not showing,
+and it costs no network — the tiles are already in memory, so the tap
+stays instant.
+
+Matching on `station_id` is not optional. The query box is 24pt wide and
+routinely contains a neighbouring coloured river; inheriting *its* colour
+would manufacture the exact contradiction this removes.
+
+`cat` 1-4 turns out to be exactly `kFloodCategories` indices 1-4 — the
+pipeline and the app already shared one ladder without either referencing
+the other. That alignment is now pinned by a test, because reordering
+either side would mislabel every coloured river with no error anywhere.
+
+**The undesigned edge case, decided:** when current flow has *outrun* the
+map, the strip stays silent. The sheet is the newer of the two sources and
+is simply right; the legend already carries the map's data date. An
+apology on every such tap is noise on the common case.
+
+**Not visually confirmed on device.** `shouldShowPeakStrip` is covered by
+22 tests over every branch, and the tap path compiles and analyses clean,
+but the strip has not been *seen*. Synthetic clicks driven through
+cliclick reach Flutter's own widgets — the search field, the FAB — and are
+ignored by the Mapbox view's gesture recogniser, so no reach could be
+selected programmatically. Three techniques tried (click, timed
+double-click, press-and-release). A human tap on a coloured reach is still
+outstanding.
+
+### Streams "missing at high zoom" was DNS, not the tilesets (2026-08-20)
+
+Reported mid-session and worth recording, because the symptom points
+squarely at the thing this ADR is about and the cause was nowhere near it.
+
+Measured rather than assumed:
+
+| check | result |
+|---|---|
+| `dig api.mapbox.com` | resolves, 143.204.1.33 |
+| `socket.gethostbyname` | **fails** |
+| ladder top tier | `$zoom >= 10`, no order restriction |
+| `nwm-channels-v3` TileJSON | minzoom 0, maxzoom 12 |
+| z8/z10/z11/z12 tiles over Provo | 9,392 / 13,880 / 1,999 / 1,063 bytes |
+
+mDNSResponder was wedged, so the Simulator could not resolve
+`api.mapbox.com` and no new tiles loaded; what remained on screen was
+cache, which is why zooming in "lost" streams. `sudo killall -9
+mDNSResponder` fixed it, and Provo then rendered every order at z14.
+
+Second occurrence in a week. **When streams vanish, check the resolver
+before the tilesets** — `dig` succeeding while `gethostbyname` fails is
+the signature, and a tileset can be exonerated in one request by fetching
+its TileJSON and a tile at the zoom in question.
+
 ### OPEN — map and detail sheet appear to contradict each other
 
-Raised by Jerson 2026-08-19, **not yet designed or built.**
+**Superseded by "BUILT — the peak strip" above.** Kept for the reasoning.
+
+Raised by Jerson 2026-08-19.
 
 The map colours by **peak over the forecast window**; the detail sheet leads
 with **flow right now**. A river painted orange can legitimately read "Normal"
@@ -1643,6 +1709,40 @@ more common question).
 11:00 UTC, while the sheet fetches a live forecast. They can legitimately
 disagree when conditions ease after the build, leaving an orange line with no
 explanation. Staying silent versus explaining the staleness is unresolved.
+
+### The pipeline ran unattended, on schedule (2026-08-20)
+
+The first run nobody started. Cloud Scheduler fired at **11:00:04 UTC**,
+execution `flood-builder-4pxrn` succeeded, published
+`rivr-flooded-20260820`, and wrote `flood_data_date = 2026-08-20` into
+Remote Config. The app was opened hours later and the legend read
+"Conditions from 20 Aug" without anyone touching it.
+
+Every link ran itself: schedule → Cloud Run → GEOGLOWS classification →
+geometry join → NOAA fetch → lake tagging → tiling → plausibility gates →
+Mapbox upload → Remote Config publish → device. The 2026-08-19 run was
+launched by hand to prove the path; this one proves the schedule.
+
+The `--dry-run` guard added after the incident did not interfere with a
+full unrestricted run, which was the thing worth confirming — a guard that
+blocks the real job is worse than no guard.
+
+### Base networks switched to v3 (2026-08-20)
+
+`nwm-channels-v3` and `geoglows-world-v3` are live in the app. The v2
+tilesets had no `overLake` flag, so the navy base network still drew
+across Superior, Michigan, Huron and Erie after the flood layer had
+stopped — the map contradicted itself, clean colour laid over lines that
+should not have existed. Verified on device: all four lakes clear of both
+base lines and flood colour, with colour appearing only on land.
+
+**`config.template.dart` was stale and would have broken a fresh clone.**
+It still named the original `nwm-channels` (the 77.55 CU build that
+renders as broken stripes below z8) and `geoglows-rhone-test`, and never
+mentioned the flood tileset. A new machine set up from it would have
+reproduced exactly the bug this ADR exists to document. Now corrected,
+with the reasoning inline so the next person does not "simplify" the
+dated flood id back into a static one.
 
 ### Remote Config was 403 on every mobile device (2026-08-19)
 

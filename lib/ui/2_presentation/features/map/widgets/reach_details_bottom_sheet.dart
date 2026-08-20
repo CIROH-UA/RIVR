@@ -22,6 +22,36 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_act
 /// 2. Load return periods in parallel (small, fast request)
 /// 3. Update flow classification as soon as return periods arrive
 /// 4. Cache return periods separately for future use
+/// Whether to explain that the map's colour is a forecast peak rather than the
+/// flow the sheet is about to show.
+///
+/// [peakIndex] is what the map is painting (an index into [kFloodCategories],
+/// straight off the flood tileset); [currentCategory] is how the river is
+/// flowing now. Free function so the decision — which is all edge cases — can
+/// be tested without a Mapbox view, a repository or a live tap.
+///
+/// Shows only when the peak genuinely outranks the present. Deliberately
+/// silent in every other direction:
+///  * no colour on the map, nothing to reconcile;
+///  * current flow already at or above the map's category, in which case the
+///    sheet is simply the newer of the two and the legend's data date already
+///    says the map is from a build;
+///  * classification still loading, where a strip that appears and then
+///    changes its mind is worse than one that arrives a moment late;
+///  * an unknown current category, which gives no honest comparison to draw.
+bool shouldShowPeakStrip({
+  required int? peakIndex,
+  required String? currentCategory,
+  required bool isClassifying,
+}) {
+  if (peakIndex == null || peakIndex < 1) return false;
+  if (peakIndex >= kFloodCategories.length) return false;
+  if (isClassifying || currentCategory == null) return false;
+  final now = kFloodCategories.indexOf(currentCategory);
+  if (now < 0) return false;
+  return peakIndex > now;
+}
+
 class ReachDetailsBottomSheet extends StatefulWidget {
   final SelectedReach selectedReach;
   final VoidCallback? onViewForecast;
@@ -225,11 +255,84 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: [
+          // Above everything, because the problem it solves is one of hierarchy:
+          // the eye lands on the 28pt "Normal" first and concludes the map is
+          // wrong (ADR 0005).
+          if (_showsPeakStrip) _buildPeakStrip(),
           _buildBasicInfo(),
           if (_errorMessage != null) _buildErrorCard(),
           if (_currentFlow != null) _buildCurrentFlowCard(),
           if (_currentFlow == null && !_isLoadingFlow && _errorMessage == null)
             _buildNoFlowDataCard(),
+        ],
+      ),
+    );
+  }
+
+  /// Whether the map is painting this river a higher category than it is
+  /// flowing at right now — the case where the two screens look like they
+  /// disagree.
+  ///
+  /// The map colours by the **peak** across the forecast window; this sheet
+  /// leads with flow **now**. An orange river reading "Normal" on tap is both
+  /// correct, and indistinguishable from a bug unless it is explained.
+  ///
+  /// Deliberately silent in the other direction. When the map shows no colour
+  /// and the river is flowing normally there is nothing to reconcile, and when
+  /// current flow has outrun the map's category the sheet is simply newer —
+  /// the legend already carries the map's data date, and an apology on every
+  /// tap would be noise on the common case.
+  bool get _showsPeakStrip => shouldShowPeakStrip(
+        peakIndex: widget.selectedReach.mapFloodCategoryIndex,
+        currentCategory: _flowCategory,
+        isClassifying: _isLoadingClassification,
+      );
+
+  Widget _buildPeakStrip() {
+    final peakName = widget.selectedReach.mapFloodCategory!;
+    final base = AppConstants.getFlowCategoryColor(peakName);
+    final peakColor = CupertinoDynamicColor.maybeResolve(base, context) ?? base;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: peakColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: peakColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(CupertinoIcons.chart_bar_alt_fill, color: peakColor, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Forecast peak: $peakName',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: CupertinoColors.label.resolveFrom(context),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'The map colours rivers by their highest forecast flow, '
+                  'not their flow right now. This one is running '
+                  '${_flowCategory!.toLowerCase()} today.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.3,
+                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

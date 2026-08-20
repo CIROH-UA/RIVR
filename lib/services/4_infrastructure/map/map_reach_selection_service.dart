@@ -38,6 +38,11 @@ class MapReachSelectionService {
     'geoglows-streams',
     'geoglows-us-streams',
   ];
+
+  /// The daily flood tileset's layer. Queried separately from the base layers
+  /// because its features carry `cat` but no `streamOrder`, so they cannot
+  /// satisfy [SelectedReach.fromVectorTile].
+  static const String _floodLayerId = 'flooded-streams';
   bool _lineHighlightAdded = false;
   // A category color that arrived before the highlight was on the map; applied
   // once the layers exist.
@@ -614,7 +619,16 @@ class MapReachSelectionService {
               tapPoint,
             );
             if (selectedReach != null) {
-              return selectedReach;
+              // What colour is the map actually painting here? Read it off the
+              // flood layer rather than deriving it later, so the sheet can
+              // never describe a colour that is not on screen.
+              final cat = await _floodCategoryAt(
+                queryBox,
+                selectedReach.reachId,
+              );
+              return cat == null
+                  ? selectedReach
+                  : selectedReach.withMapFloodCategory(cat);
             }
           } catch (e) {
             AppLogger.warning('MapReachSelectionService', 'Error processing streams2 feature: $e');
@@ -627,6 +641,44 @@ class MapReachSelectionService {
       AppLogger.error('MapReachSelectionService', 'Error querying features', e);
       return null;
     }
+  }
+
+  /// The flood category the map is painting for [reachId], or null when this
+  /// reach carries no colour.
+  ///
+  /// A second rendered-feature query over the same box. It is a local lookup
+  /// against tiles already in memory — no network, nothing that can make the
+  /// tap feel slower. Matching on station id matters: the box is 24pt wide and
+  /// routinely contains a neighbouring coloured river, and inheriting *its*
+  /// colour would produce exactly the contradiction this is meant to remove.
+  Future<int?> _floodCategoryAt(
+    RenderedQueryGeometry queryBox,
+    String reachId,
+  ) async {
+    if (_mapboxMap == null) return null;
+    try {
+      final result = await _mapboxMap!.queryRenderedFeatures(
+        queryBox,
+        RenderedQueryOptions(layerIds: const [_floodLayerId]),
+      );
+      for (final queried in result) {
+        if (queried == null) continue;
+        final raw = queried.queriedFeature.feature['properties'];
+        if (raw is! Map) continue;
+        final props = Map<String, dynamic>.from(raw);
+        if (props['station_id']?.toString() != reachId) continue;
+        final cat = props['cat'];
+        if (cat is int) return cat;
+        if (cat is num) return cat.toInt();
+        return int.tryParse(cat.toString());
+      }
+    } catch (e) {
+      // A missing layer is the normal case when flood colouring is off or the
+      // day's tileset has not published. Not being able to say "peaks higher
+      // later" is a smaller failure than not opening the sheet.
+      AppLogger.debug('MapReachSelectionService', 'No flood category at tap: $e');
+    }
+    return null;
   }
 
   /// Create SelectedReach from vector tile feature
