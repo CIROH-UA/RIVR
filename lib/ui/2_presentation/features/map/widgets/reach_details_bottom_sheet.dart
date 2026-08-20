@@ -117,16 +117,12 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   }
 
   Widget _buildHeader() {
+    // No bottom divider. It made sense when the content below was flat rows
+    // that could scroll under it; every block is now a bordered card, so the
+    // rule was just a second hairline at the same weight sitting hard against
+    // the tiles. The 16pt bottom padding is the separation.
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: CupertinoColors.systemGrey5.resolveFrom(context),
-            width: 0.5,
-          ),
-        ),
-      ),
       child: Row(
         children: [
           // Stream order icon
