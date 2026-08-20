@@ -1,6 +1,7 @@
 // lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/flow_range_bar.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -145,20 +146,8 @@ class FlowRangeBar extends StatelessWidget {
   }
 
   /// Get Cupertino color for flow category
-  Color _getColorForCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getColorForCategory(String? category) =>
+      AppConstants.getFlowCategoryColor(category);
 }
 
 /// Enhanced flow range bar with additional visual indicators

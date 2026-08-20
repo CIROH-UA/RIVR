@@ -1,6 +1,7 @@
 // lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/hourly_display/flow_value_indicator.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 
 /// A circular indicator that displays the flow value for a selected hour
 ///
@@ -196,22 +197,8 @@ class FlowValueIndicator extends StatelessWidget {
   }
 
   /// Get color for flow category
-  Color _getColorForCategory(String? category) {
-    if (category == null) return CupertinoColors.systemGrey;
-
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getColorForCategory(String? category) =>
+      AppConstants.getFlowCategoryColor(category);
 
   /// Get responsive text size for flow value
   double _getFlowTextSize() {

@@ -571,39 +571,6 @@ void main() {
       });
     });
 
-    group('categoryColor', () {
-      test('returns correct color for each category', () {
-        // Just ensure they don't throw and return distinct colors
-        final normal = createForecast(flowCategory: 'Normal');
-        final elevated = createForecast(flowCategory: 'Elevated');
-        final high = createForecast(flowCategory: 'High');
-        final floodRisk = createForecast(flowCategory: 'Flood Risk');
-        final unknown = createForecast(flowCategory: 'Something Else');
-
-        // Each should return a non-null color
-        expect(normal.categoryColor, isNotNull);
-        expect(elevated.categoryColor, isNotNull);
-        expect(high.categoryColor, isNotNull);
-        expect(floodRisk.categoryColor, isNotNull);
-        expect(unknown.categoryColor, isNotNull);
-      });
-    });
-
-    group('categoryIcon', () {
-      test('returns an icon for each category', () {
-        final normal = createForecast(flowCategory: 'Normal');
-        final elevated = createForecast(flowCategory: 'Elevated');
-        final high = createForecast(flowCategory: 'High');
-        final floodRisk = createForecast(flowCategory: 'Flood Risk');
-        final unknown = createForecast(flowCategory: 'Unknown');
-
-        expect(normal.categoryIcon, isNotNull);
-        expect(elevated.categoryIcon, isNotNull);
-        expect(high.categoryIcon, isNotNull);
-        expect(floodRisk.categoryIcon, isNotNull);
-        expect(unknown.categoryIcon, isNotNull);
-      });
-    });
 
     group('hasHourlyData / hourlyDataCount', () {
       test('true when hourly data is present', () {

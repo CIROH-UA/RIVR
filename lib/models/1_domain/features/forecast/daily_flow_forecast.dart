@@ -1,6 +1,5 @@
 // lib/models/1_domain/features/forecast/daily_flow_forecast.dart
 
-import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 
@@ -104,39 +103,11 @@ class DailyFlowForecast {
     }
   }
 
-  /// Get the color associated with this day's flow category
-  /// Uses RIVR's standard Cupertino color scheme
-  Color get categoryColor {
-    switch (flowCategory.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
-
-  /// Get appropriate icon for this day's flow category
-  /// Uses RIVR's standard Cupertino icons
-  IconData get categoryIcon {
-    switch (flowCategory.toLowerCase()) {
-      case 'normal':
-        return CupertinoIcons.checkmark_circle_fill;
-      case 'elevated':
-        return CupertinoIcons.arrow_up_circle;
-      case 'high':
-        return CupertinoIcons.arrow_up_circle_fill;
-      case 'flood risk':
-        return CupertinoIcons.exclamationmark_triangle_fill;
-      default:
-        return CupertinoIcons.question_circle;
-    }
-  }
+  // categoryColor / categoryIcon used to live here, switching on an
+  // 'Elevated'/'High'/'Flood Risk' ladder the classifier no longer produces —
+  // so every real category fell through to grey and a question mark. They were
+  // unused in production, and a domain entity owning Cupertino colours inverted
+  // the layering besides. Presentation reads AppConstants instead (ADR 0007).
 
   /// Check if this forecast has hourly data available
   bool get hasHourlyData => hourlyData.isNotEmpty;

@@ -177,10 +177,12 @@ class _Chip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: const TextStyle(
+        // Paired ink, not hardcoded white: white on the Action yellow measures
+        // 1.6:1 and on Moderate 2.3:1.
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          color: CupertinoColors.white,
+          color: AppConstants.getFlowCategoryOnColor(label),
         ),
       ),
     );

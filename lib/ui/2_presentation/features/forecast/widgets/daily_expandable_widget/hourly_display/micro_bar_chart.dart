@@ -1,6 +1,7 @@
 // lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/hourly_display/micro_bar_chart.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -143,45 +144,14 @@ class MicroBarChart extends StatelessWidget {
       return _getColorForCategory(category);
     } else {
       // Fallback to gradient based on relative value
-      return _getGradientColor(flow);
+      return AppConstants.unknownCategoryColor;
     }
   }
 
   /// Get color for flow category
-  Color _getColorForCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getColorForCategory(String? category) =>
+      AppConstants.getFlowCategoryColor(category);
 
-  /// Get gradient color based on relative flow value
-  Color _getGradientColor(double flow) {
-    if (maxValue <= minValue) return CupertinoColors.systemBlue;
-
-    final normalizedValue = ((flow - minValue) / (maxValue - minValue)).clamp(
-      0.0,
-      1.0,
-    );
-
-    if (normalizedValue < 0.25) {
-      return CupertinoColors.systemBlue;
-    } else if (normalizedValue < 0.5) {
-      return CupertinoColors.systemGreen;
-    } else if (normalizedValue < 0.75) {
-      return CupertinoColors.systemOrange;
-    } else {
-      return CupertinoColors.systemRed;
-    }
-  }
 }
 
 /// Custom painter for the micro bar chart
@@ -297,45 +267,15 @@ class _MicroBarChartPainter extends CustomPainter {
       final category = reach!.getFlowCategory(flow, currentUnit, unitService);
       return _getColorForCategory(category);
     } else {
-      return _getGradientColor(flow);
+      return AppConstants.unknownCategoryColor;
     }
   }
 
   /// Get color for category
-  Color _getColorForCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getColorForCategory(String? category) =>
+      AppConstants.getFlowCategoryColor(category);
 
   /// Get gradient color based on value
-  Color _getGradientColor(double flow) {
-    if (maxValue <= minValue) return CupertinoColors.systemBlue;
-
-    final normalizedValue = ((flow - minValue) / (maxValue - minValue)).clamp(
-      0.0,
-      1.0,
-    );
-
-    if (normalizedValue < 0.25) {
-      return CupertinoColors.systemBlue;
-    } else if (normalizedValue < 0.5) {
-      return CupertinoColors.systemGreen;
-    } else if (normalizedValue < 0.75) {
-      return CupertinoColors.systemOrange;
-    } else {
-      return CupertinoColors.systemRed;
-    }
-  }
 
   @override
   bool shouldRepaint(_MicroBarChartPainter oldDelegate) {

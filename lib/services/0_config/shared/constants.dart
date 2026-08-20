@@ -5,6 +5,7 @@
 //
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'package:rivr/services/4_infrastructure/map/map_preference_service.dart';
 
@@ -135,26 +136,83 @@ class AppConstants {
   }
 
   // MARK: - Flow Category Styling
+  //
+  // THE flood palette. Every surface — gauge, favourites card, hourly bars,
+  // map sheet, map tiles, legend — takes its colours from here. Do not
+  // reimplement a category-to-colour switch anywhere else: doing so is how the
+  // medium-range hourly bars ended up grey for every category above Normal,
+  // switching on a vocabulary the classifier had stopped producing (ADR 0007).
+  //
+  // Fixed hex, deliberately, not CupertinoColors. The map hands ARGB ints to
+  // Mapbox and cannot resolve a dynamic colour against a BuildContext, so a
+  // system-colour palette could never be the shared one.
+  //
+  // NOTE: `#191970` midnight navy is NOT in this palette. That is the colour of
+  // the stream network itself on the map — geometry, not status — and belongs
+  // to the map layers alone. The flood tileset only ever paints categories 1-4;
+  // a river with no flood is simply the base network.
 
-  /// Get flow category color for consistent styling
-  static Color getFlowCategoryColor(String? flowCategory) {
-    switch (flowCategory?.toLowerCase()) {
-      case 'extreme':
-        return CupertinoColors
-            .systemPurple; // Matches returnPeriodExtremeBg theme
-      case 'major':
-        return CupertinoColors.systemRed; // Matches returnPeriodMajorBg theme
-      case 'moderate':
-        return CupertinoColors
-            .systemOrange; // Matches returnPeriodModerateBg theme
-      case 'action':
-        return CupertinoColors
-            .systemYellow; // Matches returnPeriodActionBg theme
-      case 'normal':
-        return CupertinoColors.systemBlue; // Safe/normal condition
-      default:
-        return CupertinoColors.systemGrey;
+  /// Indexed to match [kFloodCategories]: 0 Normal … 4 Extreme.
+  static const List<Color> floodCategoryColors = [
+    Color(0xFF0A84FF), // Normal   — calm, and legible as a fill
+    Color(0xFFFFC400), // Action   — > 2-yr
+    Color(0xFFFF8C00), // Moderate — > 5-yr
+    Color(0xFFE53935), // Major    — > 10-yr
+    Color(0xFF8E24AA), // Extreme  — > 25-yr
+  ];
+
+  /// Shown when a flow cannot be classified at all — no return periods
+  /// published for the reach, or the value is still loading. Distinct from
+  /// every ladder colour on purpose: "unknown" must not resemble "fine".
+  static const Color unknownCategoryColor = CupertinoColors.systemGrey;
+
+  /// Colour for a ladder index. Out-of-range falls back to unknown rather than
+  /// throwing — a future 6th category should look unstyled, not crash.
+  static Color floodColorForIndex(int? index) {
+    if (index == null || index < 0 || index >= floodCategoryColors.length) {
+      return unknownCategoryColor;
     }
+    return floodCategoryColors[index];
+  }
+
+  /// Get flow category color for consistent styling.
+  ///
+  /// Resolves through [kFloodCategories] rather than a local switch, so a
+  /// category name the ladder does not contain can only ever come back as
+  /// unknown — it cannot silently match nothing and fall through to a default
+  /// that looks deliberate.
+  static Color getFlowCategoryColor(String? flowCategory) {
+    if (flowCategory == null) return unknownCategoryColor;
+    final i = kFloodCategories.indexWhere(
+      (c) => c.toLowerCase() == flowCategory.toLowerCase(),
+    );
+    return floodColorForIndex(i < 0 ? null : i);
+  }
+
+  /// Ink to sit ON a filled category swatch.
+  ///
+  /// Picks whichever of white or near-black actually contrasts better, rather
+  /// than guessing from a luminance threshold. The guess is what fails: the
+  /// warm rungs sit right around any cutoff you choose, and white on Moderate
+  /// `#FF8C00` measures 2.3:1 — worse than the Action yellow everyone expects
+  /// to be the problem.
+  static Color getFlowCategoryOnColor(String? flowCategory) {
+    final bg = getFlowCategoryColor(flowCategory);
+    return _contrast(bg, _darkInk) >= _contrast(bg, CupertinoColors.white)
+        ? _darkInk
+        : CupertinoColors.white;
+  }
+
+  /// Warm near-black, so dark ink on the yellow/orange rungs reads as part of
+  /// the swatch rather than as a separate black label dropped on top.
+  static const Color _darkInk = Color(0xFF3D2E00);
+
+  static double _contrast(Color a, Color b) {
+    final la = a.computeLuminance();
+    final lb = b.computeLuminance();
+    final hi = la > lb ? la : lb;
+    final lo = la > lb ? lb : la;
+    return (hi + 0.05) / (lo + 0.05);
   }
 
   /// Get flow category icon for consistent iconography

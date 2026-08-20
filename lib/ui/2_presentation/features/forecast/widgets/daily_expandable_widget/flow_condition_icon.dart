@@ -1,14 +1,16 @@
 // lib/ui/2_presentation/features/forecast/widgets/daily_expandable_widget/flow_condition_icon.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 
 /// Simple icon widget that displays an appropriate icon based on flow category
 ///
 /// Uses RIVR's standard Cupertino design system with consistent colors and icons
 /// for flow condition visualization across the app.
 class FlowConditionIcon extends StatelessWidget {
-  /// The flow category to display an icon for
-  /// Expected values: 'Normal', 'Elevated', 'High', 'Flood Risk', 'Unknown'
+  /// The flow category to display an icon for.
+  /// Expected values: the [kFloodCategories] ladder — 'Normal', 'Action',
+  /// 'Moderate', 'Major', 'Extreme' — or 'Unknown'.
   final String flowCategory;
 
   /// Size of the icon in logical pixels
@@ -55,38 +57,18 @@ class FlowConditionIcon extends StatelessWidget {
     return icon;
   }
 
-  /// Get the appropriate Cupertino icon for a flow category
-  IconData _getIconForCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoIcons.checkmark_circle_fill;
-      case 'elevated':
-        return CupertinoIcons.arrow_up_circle;
-      case 'high':
-        return CupertinoIcons.arrow_up_circle_fill;
-      case 'flood risk':
-        return CupertinoIcons.exclamationmark_triangle_fill;
-      default:
-        return CupertinoIcons.question_circle;
-    }
-  }
+  /// Get the appropriate Cupertino icon for a flow category.
+  ///
+  /// Was a local switch on 'elevated' / 'high' / 'flood risk' — a ladder the
+  /// classifier stopped producing, so every real category fell through to the
+  /// question mark (ADR 0007).
+  IconData _getIconForCategory(String category) =>
+      AppConstants.getFlowCategoryIcon(category);
 
   /// Get the appropriate Cupertino color for a flow category
   /// Uses RIVR's standard color scheme
-  Color _getColorForCategory(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'elevated':
-        return CupertinoColors.systemGreen;
-      case 'high':
-        return CupertinoColors.systemOrange;
-      case 'flood risk':
-        return CupertinoColors.systemRed;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  Color _getColorForCategory(String? category) =>
+      AppConstants.getFlowCategoryColor(category);
 }
 
 /// Specialized version with preset styling for daily forecast rows

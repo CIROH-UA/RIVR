@@ -1,6 +1,8 @@
 // lib/ui/2_presentation/features/map/widgets/condition_legend.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 
 /// Compact, collapsible key explaining the flood-condition stream colors. The
 /// swatch colors must match the map exactly (see
@@ -18,13 +20,22 @@ class ConditionLegend extends StatefulWidget {
   /// freshness (ADR 0005).
   final String? dataDate;
 
-  // (label, color) from calm to severe. "Normal" is the base stream color.
-  static const List<(String, Color)> _entries = [
-    ('Normal', Color(0xFF191970)), // midnight blue — shared base, both sources
-    ('Action', Color(0xFFFFC400)), // yellow  — > 2-yr
-    ('Moderate', Color(0xFFFF8C00)), // orange — > 5-yr
-    ('Major', Color(0xFFE53935)), // red      — > 10-yr
-    ('Extreme', Color(0xFF8E24AA)), // purple  — > 25-yr
+  /// The base stream colour, which is what an un-flooded river actually looks
+  /// like on this map. Not a flood category and not in the shared palette — it
+  /// is the network's geometry colour, and the legend's job here is to explain
+  /// the map rather than to restate the ladder.
+  static const Color _streamColor = Color(0xFF191970); // midnight navy
+
+  /// (label, colour) from calm to severe.
+  ///
+  /// Rungs 1-4 come from the shared palette; only the "Normal" swatch is local,
+  /// because on the map a normal river is drawn as base network rather than
+  /// painted by the flood tileset. Previously all five were hand-copied hex
+  /// that happened to match the map service's hand-copied hex (ADR 0007).
+  static List<(String, Color)> get _entries => [
+    ('Normal', _streamColor),
+    for (var i = 1; i < kFloodCategories.length; i++)
+      (kFloodCategories[i], AppConstants.floodCategoryColors[i]),
   ];
 
   @override

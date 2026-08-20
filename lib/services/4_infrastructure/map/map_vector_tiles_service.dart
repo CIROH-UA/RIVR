@@ -1,6 +1,7 @@
 // lib/services/4_infrastructure/map/map_vector_tiles_service.dart
 
 import 'dart:convert';
+import 'package:rivr/services/0_config/shared/constants.dart';
 
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:rivr/services/0_config/shared/config.dart';
@@ -60,12 +61,20 @@ class MapVectorTilesService {
     floodLayerId,
   ];
 
-  /// The validated 5-band flood palette (ADR 0005). `cat` 1-4; anything not in
-  /// the flood tileset is Normal by definition and simply isn't drawn here.
-  static const int _catAction = 0xFFFFC400;
-  static const int _catModerate = 0xFFFF8C00;
-  static const int _catMajor = 0xFFE53935;
-  static const int _catExtreme = 0xFF8E24AA;
+  /// The flood palette, from the one place that owns it (ADR 0007). `cat` is
+  /// 1-4; anything not in the flood tileset is Normal by definition and is
+  /// simply drawn as the base network, so index 0 never appears here.
+  ///
+  /// These were hand-copied hex literals that happened to match the legend's
+  /// hand-copied hex literals. Agreement by coincidence is not agreement.
+  static int get _catAction =>
+      AppConstants.floodCategoryColors[1].toARGB32();
+  static int get _catModerate =>
+      AppConstants.floodCategoryColors[2].toARGB32();
+  static int get _catMajor =>
+      AppConstants.floodCategoryColors[3].toARGB32();
+  static int get _catExtreme =>
+      AppConstants.floodCategoryColors[4].toARGB32();
 
   /// Colour straight from the tile — no runtime `match` over tens of thousands
   /// of ids, which is the whole reason the tileset is pre-coloured.

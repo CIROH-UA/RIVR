@@ -1,6 +1,6 @@
 # 0007 — One source of truth for flood category colours
 
-**Status:** Proposed — spec only, nothing built
+**Status:** Accepted, shipped 2026-08-20
 **Raised by:** Jerson, 2026-08-20, from the NWM medium-range expandable rows
 **Related:** ADR 0002 (canonical derived values), ADR 0005 (map flood colours)
 
@@ -137,3 +137,60 @@ Moderate `#FF8C00` are the closest pair in the ramp and the hardest to tell
 apart, particularly for red-green colour blindness. Every surface currently
 labels as well as colours, so nothing depends on hue alone — worth revisiting,
 but separately from unifying.
+
+
+---
+
+## What shipped
+
+`AppConstants` now owns the palette, as fixed hex, indexed to
+`kFloodCategories`. Jerson's call on the two open questions: **midnight navy
+stays on the map's stream geometry only**, and **Normal becomes `#0A84FF`**, the
+hex of iOS systemBlue.
+
+That decision resolved a conflation carried into the spec above: navy was never
+a flood category. The flood tileset only ever paints `cat` 1-4, so a river with
+no flood is simply the base network. Separating "stream geometry" from "Normal
+status" is what made a single palette possible — the map legend keeps a local
+navy swatch because it is explaining the map, not restating the ladder.
+
+Removed: five private `_getColorForCategory` switches, one icon switch, and two
+`_getGradientColor` fallbacks that coloured bars by position within the visible
+range — colour implying flood state without ever consulting the ladder.
+
+### Two things found while doing it
+
+**`DailyFlowForecast` carried its own `categoryColor` and `categoryIcon`**, on
+the same dead vocabulary. Unused in production; the only coverage was
+`expect(..., isNotNull)`, which passes for grey and would have stayed green
+through the entire bug. Both getters deleted along with those assertions — and
+with them the domain model's dependency on `flutter/cupertino` entirely, which
+had inverted the layering.
+
+**The ink pairing needed measuring, not guessing.** A luminance cutoff picked
+white for Moderate `#FF8C00` at **2.3:1** — worse than the Action yellow everyone
+expects to be the problem. `getFlowCategoryOnColor` now picks whichever of white
+or warm near-black actually contrasts better:
+
+| Rung | white | dark | picks | result |
+|---|---|---|---|---|
+| Normal `#0A84FF` | 3.65 | 3.62 | white | 3.65 |
+| Action `#FFC400` | 1.60 | 8.27 | dark | **8.27** |
+| Moderate `#FF8C00` | 2.33 | 5.67 | dark | **5.67** |
+| Major `#E53935` | 4.23 | 3.13 | white | 4.23 |
+| Extreme `#8E24AA` | 7.04 | 1.88 | white | 7.04 |
+
+Normal and Major sit between the 3.0 UI-component floor and full AA, and no ink
+fixes them — the colours themselves are mid-tone. Both accepted: Normal is the
+pairing Apple ships on every filled button, Major is already baked into the
+published tileset, and every surface writes the category out in words beside the
+swatch. Pinned to exact values in tests so changing either forces a conscious
+decision.
+
+### Not verified on device
+
+The reported symptom needs a river above Normal to see, and every reach is
+Normal today. 13 palette tests assert the thing that was actually broken —
+every ladder name resolving to a real colour, and the retired vocabulary
+resolving to unknown — which is firmer than a screenshot of a Normal river
+would have been. 833 tests green.
