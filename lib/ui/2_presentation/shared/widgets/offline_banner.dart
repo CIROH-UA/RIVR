@@ -29,7 +29,7 @@ class OfflineBanner extends StatelessWidget {
           // goes, so the content below is pushed rather than covered.
           transitionBuilder: (child, animation) => SizeTransition(
             sizeFactor: animation,
-            axisAlignment: -1,
+            alignment: Alignment.topCenter,
             child: FadeTransition(opacity: animation, child: child),
           ),
           child: conn.isOffline
