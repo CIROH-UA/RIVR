@@ -29,6 +29,7 @@ import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/map_offline_notice.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -147,6 +148,26 @@ class MapPageState extends State<MapPage> {
             backgroundColor: CupertinoColors.white.withValues(alpha: 0.95),
             iconColor: CupertinoColors.systemBlue,
             margin: const EdgeInsets.only(top: 8, left: 16),
+          ),
+        ),
+
+        // Why the map has stopped filling in. Centred in the band between the
+        // back button and the control stack — the one strip of chrome-free
+        // space up top — and width-capped so it cannot grow into either.
+        Positioned(
+          top: 30,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: const MapOfflineNotice(),
+                ),
+              ),
+            ),
           ),
         ),
 
