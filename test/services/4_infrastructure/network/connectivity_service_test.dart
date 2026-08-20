@@ -15,6 +15,7 @@ http.Client respondWith(int status, {String body = ''}) =>
     MockClient((_) async => http.Response(body, status));
 
 void main() {
+  _escapeChecks();
   final service = ConnectivityService.instance;
 
   tearDown(() => service.debugSetClient(http.Client()));
@@ -121,5 +122,41 @@ void main() {
       await service.offlineFor(_wifi);
       expect(calls, 2, reason: 'must re-probe after a drop');
     });
+  });
+}
+
+// Does anything inside offlineFor actually escape?
+//
+// The `await` in isCurrentlyOffline was added because CI's analyzer flagged
+// unawaited_return_in_try_block. That lint is right in principle — a bare
+// return hands the future back before the try closes — but it is worth knowing
+// whether any real path could exercise it, rather than assuming one does.
+void _escapeChecks() {
+  final service = ConnectivityService.instance;
+
+  group('offlineFor is total — nothing escapes it', () {
+    tearDown(() => service.debugSetClient(http.Client()));
+
+    test('a throwing client does not propagate', () async {
+      service.debugSetClient(
+        MockClient((_) async => throw http.ClientException('boom')),
+      );
+      await expectLater(service.offlineFor(_wifi), completion(isTrue));
+    });
+
+    // Dart's bare `catch (_)` catches Error as well as Exception, so even a
+    // programming error inside the probe is absorbed.
+    test('a thrown Error does not propagate either', () async {
+      service.debugSetClient(MockClient((_) async => throw StateError('bad')));
+      await expectLater(service.offlineFor(_wifi), completion(isTrue));
+    });
+
+    test('a timeout does not propagate', () async {
+      service.debugSetClient(MockClient((_) async {
+        await Future<void>.delayed(const Duration(seconds: 30));
+        return http.Response('', 204);
+      }));
+      await expectLater(service.offlineFor(_wifi), completion(isTrue));
+    }, timeout: const Timeout(Duration(seconds: 20)));
   });
 }

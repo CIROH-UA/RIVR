@@ -51,9 +51,18 @@ class ConnectivityService {
   Future<bool> get isCurrentlyOffline async {
     try {
       final results = await Connectivity().checkConnectivity();
-      // `await`, not a bare return: returning the future would hand it back
-      // before this try block closes, so a failure inside offlineFor — the
-      // probe timing out, say — would escape the catch below entirely.
+      // `await`, not a bare return: a bare return hands the future back
+      // before this try block closes, so the catch below would not cover it.
+      //
+      // MEASURED: today nothing actually escapes. _canReachInternet wraps the
+      // whole probe in its own `catch (_)`, which in Dart catches Error as
+      // well as Exception, so timeouts, DNS and TLS failures are all absorbed
+      // there; _hasNoInterface is pure list work. offlineFor is total on every
+      // current path, and there are tests asserting exactly that.
+      //
+      // The await is kept because that totality is an internal detail one
+      // refactor away from changing, and the cost of being wrong is a crash
+      // where the design promise is "never claim offline on a hiccup".
       return await offlineFor(results);
     } catch (_) {
       // Neither a platform channel failure nor a failed probe is evidence of
