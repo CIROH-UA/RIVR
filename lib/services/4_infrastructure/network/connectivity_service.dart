@@ -51,10 +51,13 @@ class ConnectivityService {
   Future<bool> get isCurrentlyOffline async {
     try {
       final results = await Connectivity().checkConnectivity();
-      return offlineFor(results);
+      // `await`, not a bare return: returning the future would hand it back
+      // before this try block closes, so a failure inside offlineFor — the
+      // probe timing out, say — would escape the catch below entirely.
+      return await offlineFor(results);
     } catch (_) {
-      // A platform channel failure is not evidence of being offline, and
-      // claiming so would show a banner over a working app.
+      // Neither a platform channel failure nor a failed probe is evidence of
+      // being offline, and claiming so would show a banner over a working app.
       return false;
     }
   }
