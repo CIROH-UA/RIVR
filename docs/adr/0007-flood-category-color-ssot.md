@@ -187,10 +187,26 @@ published tileset, and every surface writes the category out in words beside the
 swatch. Pinned to exact values in tests so changing either forces a conscious
 decision.
 
-### Not verified on device
+### Verified on device (2026-08-20)
 
-The reported symptom needs a river above Normal to see, and every reach is
-Normal today. 13 palette tests assert the thing that was actually broken —
-every ladder name resolving to a real colour, and the retired vocabulary
-resolving to unknown — which is firmer than a screenshot of a Normal river
-would have been. 833 tests green.
+Found a live case: **Silver Creek, Picabo ID** — 92 ft³/s, Action now, Major
+expected within 5 days. Expanding its "Today" row shows the hourly micro-bar
+chart drawn **yellow**, with the value indicator reading `89.0 ft³/s · 1 PM ·
+Action`. That is the reported symptom, gone.
+
+Everything on that one screen now takes its colour from the shared ladder: the
+gauge arc and needle, PEAK·RANGE, the 10-day trend line, the hourly bars, the
+value ring, the per-day range bars (blue→yellow on Action days, blue on Normal)
+and the condition icons.
+
+13 palette tests cover the mechanism; 833 tests green overall.
+
+### OPEN — a reach with no forecast data (2026-08-20)
+
+Provo River (10376596) renders the forecast page as **"0-Day Forecast / No
+Forecast Data"**, with PEAK·RANGE and TREND blank and the 10-day trend stuck
+spinning. Silver Creek on the same build loads normally, so this is
+reach-specific rather than a broken page.
+
+Not diagnosed. Cheapest next step: fetch the NWM medium-range series for 10376596
+directly and see whether the API returns an empty set or the app drops it.

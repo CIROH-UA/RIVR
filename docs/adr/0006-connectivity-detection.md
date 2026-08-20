@@ -113,3 +113,25 @@ Two consequences worth acting on before a release:
   `axisAlignment` deprecation infos introduced here cannot be cleared without
   upgrading. They are infos, and CI runs `--no-fatal-infos`, so they do not
   block today.
+
+
+## UNRESOLVED — the upgrade migrated iOS to Swift Package Manager
+
+`flutter build ios` on 3.47.1 rewrote the Xcode project to use Swift Package
+Manager, which is the default in this release. Measured: `ios/Podfile.lock`
+went from **294 pods to 20**, and `project.pbxproj` gained
+`XCLocalSwiftPackageReference` / `XCSwiftPackageProductDependency` sections
+pointing at `Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage`.
+
+The debug simulator build works — the app running today was built this way.
+**Nothing has exercised `make release-ios`**, which is the path that matters
+for the imminent release.
+
+Left uncommitted pending a decision, because changing the iOS dependency
+manager days before cutting a version is not a change to make silently:
+
+- **Commit it** — local, CI and release all move to SPM together. Modern, and
+  where Flutter is going. Requires a release build to prove it first.
+- **Disable it** — `flutter config --no-enable-swift-package-manager`, revert
+  these three files, ship the release on the known-good CocoaPods path, and
+  revisit after.

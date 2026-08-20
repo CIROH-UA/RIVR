@@ -1719,6 +1719,22 @@ Two implementation notes worth keeping:
 Verified on device in all three states (calm, rising, details expanded)
 via the locked-screen capture route below. 799 tests pass.
 
+### OPEN — the map ignores its saved camera (2026-08-20)
+
+`map_camera_lat/lng/zoom` were written into the app's SharedPreferences and
+verified present in the live container, yet the map still opened at Provo z10
+on two consecutive launches.
+
+Hypothesis, untested: `_loadSavedCamera()` resolves after `MapWidget` has been
+built, and `cameraOptions` only applies at widget creation — so the later
+`setState` updates `_savedCamera` but never moves the camera.
+
+Cheapest test: log the value inside `_buildMap` and compare it against the
+`_loadSavedCamera` completion, or set the camera imperatively via `setCamera`
+once the map is created rather than through `cameraOptions`.
+
+Worth fixing: "reopen where I left off" silently does nothing today.
+
 ### CLOSED — residual lake lines are accepted (2026-08-20)
 
 Utah Lake still shows base-network lines crossing it. The Great Lakes are
