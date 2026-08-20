@@ -1,6 +1,7 @@
 # RIVR Release Build Makefile
 #
 # Usage:
+#   make version           — stamps pubspec version as <year>.<major>.<minor>+<commits>
 #   make release-android   — builds signed release AAB with obfuscation
 #   make release-ios       — builds release IPA with obfuscation
 #   make analyze           — runs flutter analyze
@@ -17,7 +18,33 @@
 
 DEBUG_INFO_DIR := build/debug-info
 
-.PHONY: release-android release-ios analyze test clean
+.PHONY: version release-android release-ios analyze test clean
+
+# Version scheme
+# --------------
+# <year>.<major>.<minor>+<commit count>, e.g. 2026.0.0+521
+#
+# The build number is the repository's commit count, so it is derived rather
+# than remembered — there is no number to forget to increment, and it always
+# rises. Both stores require a strictly increasing build number and silently
+# reject a repeat, which is the failure this removes.
+#
+# Run this on `main` at release time, after merging. Commit counts differ per
+# branch, and a feature branch can report FEWER commits than main; stamping
+# from one would produce a number the stores refuse.
+#
+# The +1 accounts for the commit that carries the stamp itself, so the number
+# in pubspec matches the commit it ships as.
+#
+# YEAR/MAJOR/MINOR are set by hand: bump MAJOR for a release users would
+# notice, MINOR for fixes, YEAR when the calendar does.
+YEAR  ?= 2026
+MAJOR ?= 0
+MINOR ?= 0
+
+version:
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); 	if [ "$$BRANCH" != "main" ]; then 		echo "refusing to stamp from '$$BRANCH' — commit counts are branch-specific."; 		echo "run this on main, after merging development."; exit 1; 	fi; 	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then 		echo "refusing to stamp a dirty tree — commit or stash first."; exit 1; 	fi; 	BUILD=$$(( $$(git rev-list --count HEAD) + 1 )); 	NEW="$(YEAR).$(MAJOR).$(MINOR)+$$BUILD"; 	OLD=$$(grep '^version:' pubspec.yaml | awk '{print $$2}'); 	OLD_BUILD=$$(echo "$$OLD" | sed 's/.*+//'); 	if [ "$$BUILD" -le "$$OLD_BUILD" ]; then 		echo "refusing to go backwards: $$OLD -> $$NEW"; exit 1; 	fi; 	sed -i '' "s/^version: .*/version: $$NEW/" pubspec.yaml; 	echo "$$OLD  ->  $$NEW"; 	echo "now: commit pubspec.yaml + app_releases.md, then make release-ios"
+
 
 release-android:
 	flutter build appbundle --release \

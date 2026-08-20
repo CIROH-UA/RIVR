@@ -2,6 +2,22 @@
 
 Release history for RIVR. Update this file whenever you bump the version or build number in `pubspec.yaml`.
 
+## Versioning
+
+`<year>.<major>.<minor>+<commit count>` — e.g. `2026.0.0+521`.
+
+Stamp it with `make version` on `main` after merging, never by hand. The build
+number is the repository's commit count, so it is derived rather than
+remembered: there is no counter to forget, and it can only rise. Both stores
+require a strictly increasing build number and reject a repeat, which is the
+mistake this removes.
+
+`YEAR`/`MAJOR`/`MINOR` are deliberate — MAJOR for a release users would notice,
+MINOR for fixes, YEAR when the calendar does: `make version MAJOR=1`.
+
+Adopted 2026-08-20, replacing semver `1.2.0+8`. Note this is one-way: both
+stores enforce increasing versions, so there is no going back to `1.x`.
+
 ## Releases
 
 | Version | Date | Commit | Summary |
