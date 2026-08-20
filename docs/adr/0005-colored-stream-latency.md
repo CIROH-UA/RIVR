@@ -1664,12 +1664,60 @@ apology on every such tap is noise on the common case.
 it Moderate. The strip renders above the info card and well above the 28pt
 current-flow figure, which was the whole point.
 
-**The visual design is rejected and provisional.** Jerson: *"I don't like
-the banner at all. But leave as is for now. We will design that sheet
-better later."* The behaviour — when it speaks, what it says, where the
-category comes from — is settled and tested; the presentation is not.
-Whoever redesigns this sheet should treat `_buildPeakStrip` as
-throwaway and `shouldShowPeakStrip` as the part to keep.
+**The banner was rejected and has since been replaced** (see below). The
+behaviour it encoded survived; only the drawing changed.
+
+### The sheet redesign — paired tiles (2026-08-20)
+
+The text banner is gone. Current flow and the days ahead now sit side by
+side as equal tiles over the flood ladder, and reach metadata is collapsed
+behind a Details disclosure. Chosen by Jerson from five mocked layouts
+(paired tiles, stage ladder, hydrograph, arc gauge, threshold bar), then
+from four treatments of the quiet case and four of the Details control.
+
+Three problems, all structural rather than verbal:
+
+1. The banner explained in three lines what the gap between two coloured
+   tiles says instantly.
+2. Current flow took the full sheet width — the widest element on screen
+   for a single number, with dead space beside it.
+3. Reach ID, stream order and coordinates sat *above* current flow at
+   equal weight, so the sheet answered "which reach is this" before "is
+   the river high".
+
+**The peak tile names a category, not a discharge.** The mock showed
+"310 CFS · Thu"; the tile carries `cat` and nothing else — no peak flow,
+no peak time — so a number there would have to be fetched or invented.
+Naming the category is what the data actually supports. Adding the figure
+means fetching the forecast series, which costs the tap its instant feel.
+
+**Four states, not two** (`peakOutlookFor`): *rising* when the peak
+outranks now; *calm* when Normal with nothing above the 2-year gate;
+*steady* when already elevated and not climbing; *unknown* while
+classifying. The `steady` case is the one worth guarding — a river sitting
+at Major with no higher peak must never be told "no flooding expected",
+which a naive two-state version would do.
+
+**Absence of a tileset category is information, not a gap.** The flood
+tileset only holds reaches at or above their own 2-year return period, so
+a null category *is* the all-clear, and the calm tile is derived from it
+without any extra request.
+
+Return-period thresholds are deliberately not shown yet: `ReachDetailsData`
+documents them as native units while `currentFlow` arrives converted, and
+nothing else in the app reads them, so rendering them through the sheet's
+formatter would risk printing CMS labelled CFS.
+
+Two implementation notes worth keeping:
+
+- `CrossAxisAlignment.stretch` in a Row inside a Column asserts on
+  unbounded height. `IntrinsicHeight` is what makes the two tiles match.
+- The disclosure uses `AnimatedSize` over a conditional child rather than
+  `AnimatedCrossFade`, which keeps both children mounted — collapsed
+  metadata would still have been in the tree for VoiceOver to read.
+
+Verified on device in all three states (calm, rising, details expanded)
+via the locked-screen capture route below. 799 tests pass.
 
 ### CLOSED — residual lake lines are accepted (2026-08-20)
 
