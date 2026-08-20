@@ -35,18 +35,30 @@ class _ConditionLegendState extends State<ConditionLegend> {
   bool _expanded = true;
 
   static const List<String> _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
   ];
 
-  /// `2026-08-19` -> `19 Aug`. Null when unknown, so the row is omitted rather
-  /// than showing a placeholder the user has to interpret.
+  /// `2026-08-20` -> `As of August 20th`. Null when unknown, so the row is
+  /// omitted rather than showing a placeholder the user has to interpret.
   String? get _formattedDate {
     final raw = widget.dataDate;
     if (raw == null || raw.isEmpty) return null;
     final parsed = DateTime.tryParse(raw);
     if (parsed == null) return null;
-    return '${parsed.day} ${_months[parsed.month - 1]}';
+    return 'As of ${_months[parsed.month - 1]} ${_ordinal(parsed.day)}';
+  }
+
+  /// 1 -> `1st`, 22 -> `22nd`, 13 -> `13th`. The teens are all `th` regardless
+  /// of their last digit, which is the case a naive lookup gets wrong.
+  static String _ordinal(int day) {
+    if (day >= 11 && day <= 13) return '${day}th';
+    return switch (day % 10) {
+      1 => '${day}st',
+      2 => '${day}nd',
+      3 => '${day}rd',
+      _ => '${day}th',
+    };
   }
 
   @override
@@ -99,22 +111,17 @@ class _ConditionLegendState extends State<ConditionLegend> {
               ],
             ),
             if (_expanded) ...[
-              // The colours are a forecast peak, and the window depends on
-              // which model covers the area: GEOGLOWS publishes 15 days
-              // outside the US, NOAA 5 days across CONUS and Alaska, and only
-              // 48 hours for Hawaii and Puerto Rico. Saying "in the days
-              // ahead" is vague on purpose — it is true everywhere, where any
-              // specific number would be wrong somewhere. Stating the exact
-              // window per region is still open (ADR 0005).
-              const SizedBox(height: 6),
-              Text(
-                'Peak risk in the days ahead',
-                style: TextStyle(fontSize: 11, color: secondary),
-              ),
+              // One line, not two. The forecast window this covers is not
+              // stated here on purpose: it depends on which model covers the
+              // area — GEOGLOWS publishes 15 days outside the US, NOAA 5 days
+              // across CONUS and Alaska, and only 48 hours for Hawaii and
+              // Puerto Rico — so any number would be wrong somewhere. The
+              // exact window for one river belongs in its detail sheet, where
+              // it can be specific (ADR 0005).
               if (_formattedDate != null) ...[
-                const SizedBox(height: 2),
+                const SizedBox(height: 6),
                 Text(
-                  'Conditions from $_formattedDate',
+                  _formattedDate!,
                   style: TextStyle(fontSize: 11, color: secondary),
                 ),
               ],

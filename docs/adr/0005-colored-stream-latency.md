@@ -1167,6 +1167,22 @@ describes — precisely the misleading one).
 Exact per-source timestamps can live on the reach detail sheet, alongside the
 per-reach horizon, for anyone who taps.
 
+### Legend wording simplified to one line (2026-08-20)
+
+Two lines became one: "Peak risk in the days ahead" + "Conditions from 20
+Aug" → **"As of August 20th"**. Jerson's call.
+
+The dropped half was the honest-but-vague horizon language. It is no loss
+here: the window genuinely varies by model (15 days / 5 days / 48 hours),
+so the legend could only ever be vague about it, while the detail sheet
+already states the real window for the one river the user asked about.
+Vagueness that has a precise home elsewhere does not need to sit on the
+map.
+
+Covered by 11 widget tests, including the ordinal suffixes — 11th/12th/13th
+take "th" despite ending in 1/2/3, the case a lookup table gets wrong three
+days a month, and 21st/31st which must not be caught by that same rule.
+
 ### Phase 4b DONE — daily build script, proven end to end (2026-08-19)
 
 `~/Developer/rivr-tiles/daily/build_flooded.py`. One linear script; the old
