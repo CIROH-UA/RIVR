@@ -52,6 +52,11 @@ class MapPageState extends State<MapPage> {
   // Which stream networks are drawn (persisted; Auto default until loaded).
   StreamLayerVisibility _streamLayers = StreamLayerVisibility.defaults;
 
+  // The date the flood colours describe. Empty until Remote Config lands —
+  // which happens *after* first build, so it must live in state or the legend
+  // renders once with no date and never updates.
+  String _floodDataDate = '';
+
   @override
   void initState() {
     super.initState();
@@ -172,7 +177,7 @@ class MapPageState extends State<MapPage> {
           bottom: 96,
           child: SafeArea(
             child: ConditionLegend(
-              dataDate: GetIt.I<FloodTilesetService>().dataDate,
+              dataDate: _floodDataDate,
             ),
           ),
         ),
@@ -356,9 +361,13 @@ class MapPageState extends State<MapPage> {
       // fallback. Re-check once it has landed and swap the source if the
       // published id differs — a no-op in the common case.
       unawaited(
-        GetIt.I<FloodTilesetService>()
-            .initialize()
-            .then((_) => _vectorTilesService.refreshFloodTileset()),
+        GetIt.I<FloodTilesetService>().initialize().then((_) async {
+          await _vectorTilesService.refreshFloodTileset();
+          final date = GetIt.I<FloodTilesetService>().dataDate;
+          if (mounted && date != _floodDataDate) {
+            setState(() => _floodDataDate = date);
+          }
+        }),
       );
 
       // Restore the saved stream-network toggles onto the freshly loaded layers.

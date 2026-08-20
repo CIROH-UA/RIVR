@@ -1644,6 +1644,40 @@ more common question).
 disagree when conditions ease after the build, leaving an orange line with no
 explanation. Staying silent versus explaining the staleness is unresolved.
 
+### Remote Config was 403 on every mobile device (2026-08-19)
+
+**Verified on device: `Conditions from 19 Aug` renders, and the app reads back
+exactly what the Cloud Run job published** (`activated=true`,
+`id=byu-hydroinformatics.rivr-flooded-20260819`, `date=2026-08-19`,
+`status=success`). Two bugs had to be fixed first, and **neither was visible
+from code review, `flutter analyze`, or 754 passing tests.**
+
+**1. The mobile API keys did not permit Remote Config.** Firebase's
+auto-created **iOS and Android** keys were restricted to five APIs —
+`firestore`, `fcmregistrations`, `identitytoolkit`, `securetoken`,
+`firebaseinstallations`. **Remote Config was not among them**, so
+`fetchAndActivate()` returned
+`[firebase_remote_config/unknown] Internal Error. Status code: 403`.
+
+The **Browser** key *did* include `firebaseremoteconfig` — so this would have
+worked on web and failed on every phone. Shipping it would have meant the app
+silently using date-derived ids forever, and the Remote Config kill switch —
+the thing that matters most while the Apple account is locked out — not
+existing.
+
+Fixed by adding `firebaseremoteconfig.googleapis.com` and
+`firebaseremoteconfigrealtime.googleapis.com` to both mobile keys. **Any new
+Firebase client API needs the same check**; the auto-created keys do not grow
+restrictions as features are added.
+
+**2. The legend never rebuilt.** It read `dataDate` during `build()`, but
+Remote Config resolves *after* first paint, and nothing called `setState`. The
+value now lives in `MapPageState` and is set when the fetch completes.
+
+Both are the same shape of mistake: reading a value once and assuming it is
+final. Worth remembering that the on-device check was the only thing that
+caught either.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
