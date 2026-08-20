@@ -127,11 +127,17 @@ The debug simulator build works — the app running today was built this way.
 **Nothing has exercised `make release-ios`**, which is the path that matters
 for the imminent release.
 
-Left uncommitted pending a decision, because changing the iOS dependency
-manager days before cutting a version is not a change to make silently:
+**RESOLVED — kept, after proving the release path.** `flutter build ios
+--release --no-codesign --obfuscate` succeeds on the migrated project: 95.0 MB
+`Runner.app` in 91s. The question was never whether debug worked, it was
+whether the release build did, and it does.
 
-- **Commit it** — local, CI and release all move to SPM together. Modern, and
-  where Flutter is going. Requires a release build to prove it first.
-- **Disable it** — `flutter config --no-enable-swift-package-manager`, revert
-  these three files, ship the release on the known-good CocoaPods path, and
-  revisit after.
+It is a *hybrid*, not a full migration. Four plugins do not support SPM yet and
+stay on CocoaPods, which is why 20 pods remain rather than zero:
+
+    flutter_image_compress_common · flutter_local_notifications
+    flutter_secure_storage · permission_handler_apple
+
+Flutter warns these "will become an error in a future version". Not urgent —
+but if one of those plugins goes unmaintained it becomes a forced migration,
+so it is worth knowing before it is discovered during a release.
