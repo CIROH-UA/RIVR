@@ -115,6 +115,14 @@ GEOGLOWS teams can still see their models' behaviour. Reach ID lists live in
 triggers Cloud Run job `flood-builder` in us-west1. Region is not optional — it
 sits next to the GEOGLOWS S3 buckets in us-west-2 and the run reads ~400 GB.
 
+**Never run a partial build against production.** `--only` / `--vpu` now force
+`--dry-run` and an isolated work dir, because a `--vpu 101` test once replaced
+the live tileset with 2 reaches in Tanzania and the plausibility gate that would
+have caught it is the one restricted runs relax.
+
+To check a published tileset quickly, fetch it at every zoom and count features
+per tile — `z0 → 2 features, z1+ → 404` diagnosed that incident in seconds.
+
 ```bash
 gcloud run jobs execute flood-builder --region=us-west1                      # run now
 gcloud run jobs executions list --job=flood-builder --region=us-west1        # history

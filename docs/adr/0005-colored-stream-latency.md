@@ -1678,6 +1678,56 @@ Both are the same shape of mistake: reading a value once and assuming it is
 final. Worth remembering that the on-device check was the only thing that
 caught either.
 
+### INCIDENT — a test build replaced the live tileset (2026-08-19)
+
+**Jerson caught this, not any automated check.** He reported colours visible at
+zoom 0 that vanished on zooming in. The published tileset was **2 features
+covering Tanzania**, 40 KB, bounds `32.3,-10.3 → 40.3,-7.9`. The real one is
+100,220 features and ~95 MB.
+
+**Cause.** The Remote Config verification run was launched as
+`--vpu 101 --only geoglows` **without `--dry-run`**. It built East Africa's two
+flooded reaches, uploaded them over the live `rivr-flooded-20260819`, and
+pointed Remote Config at 40 KB of Tanzania.
+
+**Why nothing caught it.** The plausibility gate rejects a total outside
+[2,000, 200,000] — 2 is wildly outside it. But that gate had been relaxed for
+restricted runs hours earlier, precisely so smoke tests would not fail on small
+counts. Relaxing the check and permitting publication were allowed to coexist.
+The build reported success, every remaining gate passed, and Remote Config
+published cleanly.
+
+**Diagnosis method that found it:** fetch the published tileset at every zoom
+and count features per tile. `z0 → 2 features, z1-z9 → 404` is unambiguous, and
+took seconds. Worth reaching for before driving the UI.
+
+**Three guards added, each proven by test:**
+
+1. **A restricted run cannot publish.** `--only` or `--vpu` forces `--dry-run`;
+   not a warning, not overridable. Verified: the exact command that caused this
+   now uploads nothing.
+2. **A restricted run cannot damage shared state.** It writes to
+   `work/restricted/`. Found because the fix-verification run *itself* clobbered
+   the merged 100,220-feature file that `--resume` depends on — the same class
+   of mistake, twice in one hour.
+3. **The gates still catch corrupt resume state.** Verified against the
+   clobbered file: `network gate FAILED: one source contributed nothing`.
+
+**Recovery:** `--resume` rebuilt and republished from the intact merged file in
+~4 minutes rather than 2.5 hours, as `rivr-flooded-20260820`. Verified: every
+zoom 0-8 serves tiles, `cat 1` correctly absent below z3 and present from z3.
+
+**Local Remote Config publishing needs ADC**, which had expired
+(`Reauthentication is needed`). `gcloud auth login` is *not* sufficient —
+client libraries use Application Default Credentials, a separate store. The
+workaround that worked without re-auth: `gcloud auth print-access-token` with
+`X-Goog-User-Project` and **`If-Match: *`** — the GET returns no `ETag` header
+in practice, so the read-modify-write flow cannot be completed locally as
+written. **The Cloud Run job is unaffected** (service account credentials).
+
+**The lesson worth keeping:** every automated check passed while the map was
+broken. A person looking at the product found it.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
