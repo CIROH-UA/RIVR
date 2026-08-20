@@ -1552,6 +1552,98 @@ unaffected — it uses the service account directly.
 `floodTilesetId` is pinned in `config.dart`, so **the nightly job publishes
 tilesets the app never looks at.**
 
+### Zoom-0 headroom FIXED — low-zoom category ladder (2026-08-19)
+
+The flood tileset's z0 tile was at **488,878 of Mapbox's 500,000 byte ceiling
+(98%)** — one wet day from failing the build gate and blocking publication.
+
+Measured options on a 100,220-reach day:
+
+| z0 contents | Features | Bytes | % of ceiling |
+|---|---|---|---|
+| Everything | 100,220 | 488,878 | 98% |
+| Drop lake reaches | 93,181 | 450,110 | 90% |
+| **cat ≥ 2 (Moderate+)** | 25,840 | **117,701** | **24%** |
+| cat ≥ 3 (Major+) | 17,687 | 78,784 | 16% |
+
+**Adopted: `cat >= 2` at zooms 0-2, everything from z3.** Implemented as a
+tippecanoe `-J` filter on `$zoom` (`LOW_ZOOM_MAX = 2`, `LOW_ZOOM_MIN_CAT = 2`).
+**Live result: 117,332 bytes — 23% of the ceiling, ~4x headroom.**
+
+A stream-order ladder like the base networks' is **not possible here** — the
+flood tileset carries only `station_id`, `cat` and `overLake`; `streamOrder` is
+not in it. Category is the available axis, and it is arguably the better one:
+at z0 a reach is far below one pixel, so the colour is a smear meaning
+"something is happening here", and the mildest band should not drive it.
+
+**Dropping lake reaches does not solve this** — only 8% smaller, because the
+tile is nearly all legitimate flood reaches. **Capping max zoom is irrelevant**:
+z0 size depends on how many features exist at z0, not on the tileset's maximum
+zoom.
+
+**The feature-count gate still reads 100,220 = 100,220.** The ladder withholds
+mild reaches from z0-2 only; every feature is still present from z3 up, so
+tilestats is unchanged and the gate that has caught every silent failure keeps
+working.
+
+**Bug found while testing:** on a `--resume` run the manifest reported
+`over_lake: 0/0`, because it trusted a `resume.json` written before lake
+tagging existed. The features were correctly tagged — only the report was
+wrong. Now recounts from the file when the resume state lacks the numbers;
+verified back to `6,841 + 198`.
+
+### Phase 4e DONE — the app explains itself (2026-08-19)
+
+**The legend shows the data date, always.** `Conditions from 19 Aug`, rendered
+whenever known rather than only when stale. If the label appeared only
+sometimes its absence would have to be *inferred* as "this is current", and an
+intermittent label reads as a warning rather than as information. The value is
+`flood_data_date` from Remote Config — the older of the two source dates, so it
+never overstates freshness.
+
+The legend was also **restored to the map**; it had been removed in the styling
+reset and never put back.
+
+**The reach detail sheet shows the real forecast window** — `Next 15 days`,
+`Next 5 days` or `Next 48 hours` per reach. The legend stays deliberately vague
+because no single number is true everywhere; once a user asks about one
+specific river, an exact answer is possible.
+
+Island reaches are identified by COMID range **800,000,000-921,999,999**
+(NHDPlus HI/PR/VI), because NOAA publishes only a 48-hour product for Hawaii
+and Puerto Rico — there is no 5-day variant.
+
+### OPEN — map and detail sheet appear to contradict each other
+
+Raised by Jerson 2026-08-19, **not yet designed or built.**
+
+The map colours by **peak over the forecast window**; the detail sheet leads
+with **flow right now**. A river painted orange can legitimately read "Normal"
+when tapped, because its peak is days away. To a user that looks like the two
+screens disagree.
+
+**Feasible with data already fetched.** `WeeklyOutlookRow` already carries
+`peakFlow`, `peakTime` and a peak flood category, and forecast points carry
+`validTime`. No tileset, pipeline or network change is required — this is
+presentation only.
+
+**Proposed (not accepted):** a status strip at the top of the sheet carrying
+the map's colour, leading with the peak and naming current flow in the same
+breath — e.g. *"Moderate flooding expected · peaks Thu 25 Aug · flowing
+normally now"* — shown **only when peak and current categories differ**, so its
+presence itself means "this changes". Plus marking the peak on the forecast
+chart.
+
+**Rejected:** adding a "Peak" row beside Reach ID and Coordinates (the problem
+is hierarchy, not missing information — the user still reads "Normal" first, in
+larger type); and leading with the peak instead of current flow (demotes the
+more common question).
+
+**Undesigned edge case:** the map colour comes from the daily tileset built at
+11:00 UTC, while the sheet fetches a live forecast. They can legitimately
+disagree when conditions ease after the build, leaving an orange line with no
+explanation. Staying silent versus explaining the staleness is unresolved.
+
 ### Project configuration
 
 `firebase.json` declares `firestore` and `functions` (codebases `default`,

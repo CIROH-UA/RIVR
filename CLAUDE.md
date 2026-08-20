@@ -87,7 +87,8 @@ straight from the tile with no runtime painting.
 | Daily tileset | `byu-hydroinformatics.rivr-flooded-YYYYMMDD` |
 | Contents | only reaches at or above their own 2-year return period |
 | Fields | `station_id`, `cat` (1-4 = Action/Moderate/Major/Extreme) |
-| Zoom | 0-12 |
+| Zoom | 0-12; **only `cat >= 2` at z0-2** so the world tile stays well under
+Mapbox's 500 KB ceiling (23% vs 98% before) |
 | Retention | 3 days, older ones pruned |
 | Cost | ~0.43 CU/day → ~13 of the 20 free CU/month |
 
@@ -140,11 +141,17 @@ Apple account lockout makes app releases slow.
 A full cloud run takes **~2.5 hours** (94 min classification, ~14 min geometry
 join, the rest tiling and upload), so an 11:00 UTC start lands ~13:30 UTC.
 
-**Still to build (4e):** the app must actually read those values — today
-`floodTilesetId` is pinned in `config.dart`, so **the nightly job publishes
-tilesets the app never looks at.** Also pending: data date above the legend and
-per-reach horizon on the detail sheet. See
-`docs/adr/0005-colored-stream-latency.md` for every decision and measurement.
+**The app follows it.** `FloodTilesetService` reads Remote Config on launch
+(3s timeout, never blocks startup) and falls back to deriving the id from
+today's UTC date. The legend shows the data date; the reach detail sheet shows
+that reach's real forecast window (15 days / 5 days / 48 hours).
+
+**Phase 4 is complete.** Remaining work is tracked in
+`docs/adr/0005-colored-stream-latency.md`:
+- `geoglows-world-v3` / `nwm-channels-v3` — base networks still draw lines
+  across lakes; the reach ID lists exist, the recipe is proven, ~2 h each
+- Map and detail sheet appear to contradict each other: the map colours by
+  forecast *peak*, the sheet leads with flow *now*. Designed but not built.
 
 **Known limit:** the flood tileset's zoom-0 tile is at 98% of Mapbox's 500 KB
 ceiling. A wetter day will fail the build gate. Excluding lake reaches only buys

@@ -6,7 +6,17 @@ import 'package:flutter/cupertino.dart';
 /// swatch colors must match the map exactly (see
 /// `MapVectorTilesService` category colors + the GEOGLOWS base color).
 class ConditionLegend extends StatefulWidget {
-  const ConditionLegend({super.key});
+  const ConditionLegend({super.key, this.dataDate});
+
+  /// The date the colours describe, `YYYY-MM-DD`, from Remote Config.
+  ///
+  /// Always shown when known, not only when stale. If the date appeared only
+  /// sometimes its absence would have to be *inferred* as "this is current",
+  /// and an intermittent label reads as a warning rather than as information.
+  /// It is the OLDER of the two source dates — the tileset mixes GEOGLOWS'
+  /// daily run with whichever NOAA cycle was latest — so it never overstates
+  /// freshness (ADR 0005).
+  final String? dataDate;
 
   // (label, color) from calm to severe. "Normal" is the base stream color.
   static const List<(String, Color)> _entries = [
@@ -23,6 +33,21 @@ class ConditionLegend extends StatefulWidget {
 
 class _ConditionLegendState extends State<ConditionLegend> {
   bool _expanded = true;
+
+  static const List<String> _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  /// `2026-08-19` -> `19 Aug`. Null when unknown, so the row is omitted rather
+  /// than showing a placeholder the user has to interpret.
+  String? get _formattedDate {
+    final raw = widget.dataDate;
+    if (raw == null || raw.isEmpty) return null;
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    return '${parsed.day} ${_months[parsed.month - 1]}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +111,13 @@ class _ConditionLegendState extends State<ConditionLegend> {
                 'Peak risk in the days ahead',
                 style: TextStyle(fontSize: 11, color: secondary),
               ),
+              if (_formattedDate != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Conditions from $_formattedDate',
+                  style: TextStyle(fontSize: 11, color: secondary),
+                ),
+              ],
               const SizedBox(height: 8),
               for (final (label, color) in ConditionLegend._entries)
                 Padding(

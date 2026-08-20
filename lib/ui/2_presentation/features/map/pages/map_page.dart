@@ -28,6 +28,7 @@ import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 // UPDATED: Import the optimized bottom sheet
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -160,6 +161,18 @@ class MapPageState extends State<MapPage> {
                 is3DEnabled: _controlsService.is3DEnabled,
                 is3DAvailable: _controlsService.supports3D,
               ),
+            ),
+          ),
+        ),
+
+        // Flood-risk key. Always visible: the flood layer is always on, and
+        // the colours mean nothing without it.
+        Positioned(
+          left: 16,
+          bottom: 96,
+          child: SafeArea(
+            child: ConditionLegend(
+              dataDate: GetIt.I<FloodTilesetService>().dataDate,
             ),
           ),
         ),

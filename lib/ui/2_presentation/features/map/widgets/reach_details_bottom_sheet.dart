@@ -257,6 +257,8 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
           _buildInfoRow('Stream Order', '${widget.selectedReach.streamOrder}'),
           const SizedBox(height: 8),
           _buildInfoRow('Coordinates', widget.selectedReach.coordinatesString),
+          const SizedBox(height: 8),
+          _buildInfoRow('Forecast window', _forecastHorizon),
           if (_formattedLocation?.isNotEmpty == true) ...[
             const SizedBox(height: 8),
             _buildInfoRow('Location', _formattedLocation!),
@@ -617,6 +619,26 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     final base = AppConstants.getFlowCategoryColor(_flowCategory);
     final resolved = CupertinoDynamicColor.maybeResolve(base, context) ?? base;
     cb(resolved.toARGB32());
+  }
+
+  /// How far ahead the flood colour for this reach looks.
+  ///
+  /// One tileset, three horizons — GEOGLOWS publishes 15 days outside the US,
+  /// NOAA 5 days across CONUS and Alaska, and only 48 hours for Hawaii and
+  /// Puerto Rico. The legend stays deliberately vague ("in the days ahead")
+  /// because no single number is true everywhere; the exact window belongs
+  /// here, where someone has asked about one specific river (ADR 0005).
+  String get _forecastHorizon {
+    if (widget.selectedReach.source.isGeoglows) return 'Next 15 days';
+
+    // NOAA's Hawaii and Puerto Rico products are 48-hour only; there is no
+    // 5-day variant for them. Both use NHDPlus COMIDs in the 800M-921M band,
+    // which is how a US reach is identified as an island one.
+    final id = int.tryParse(widget.selectedReach.reachId);
+    if (id != null && id >= 800000000 && id <= 921999999) {
+      return 'Next 48 hours';
+    }
+    return 'Next 5 days';
   }
 
   Widget _buildInfoRow(String label, String value) {
