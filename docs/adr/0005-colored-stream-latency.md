@@ -1741,6 +1741,27 @@ Verified on device, both paths: with a simulated Seattle fix the map opened on
 downtown Seattle; with location cleared and permission revoked it opened on
 Provo.
 
+### MEASURED — the conditions functions are dormant, not billing (2026-08-20)
+
+CLAUDE.md states the `*_conditions_*` Cloud Functions were deleted. They were
+not; four are still deployed and ACTIVE. Checked rather than assumed, because
+"still deployed" was initially mistaken for "still costing money":
+
+| | |
+|---|---|
+| `minInstanceCount` | **0** on all four — scales to zero, no warm instances |
+| invocations, last 30 days | **0** |
+| regions | `nwm_stream_conditions` is us-east1; the other three us-west1 |
+
+So the cost is nil and commit `3c95e052` ("Scale the conditions endpoints to
+zero to stop idle billing") did what it claimed. The earlier suspicion of idle
+billing was **Disproven**.
+
+What is real is dead code on both sides: `stream_conditions_service.dart` and
+three `config.dart` URLs still point at endpoints the map stopped using when
+flood colours moved into the daily tileset. Hygiene, not urgency — either
+delete both sides or correct the doc, and note the region split if deleting.
+
 ### CLOSED — residual lake lines are accepted (2026-08-20)
 
 Utah Lake still shows base-network lines crossing it. The Great Lakes are
