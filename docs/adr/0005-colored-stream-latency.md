@@ -1659,14 +1659,57 @@ map, the strip stays silent. The sheet is the newer of the two sources and
 is simply right; the legend already carries the map's data date. An
 apology on every such tap is noise on the common case.
 
-**Not visually confirmed on device.** `shouldShowPeakStrip` is covered by
-22 tests over every branch, and the tap path compiles and analyses clean,
-but the strip has not been *seen*. Synthetic clicks driven through
-cliclick reach Flutter's own widgets — the search field, the FAB — and are
-ignored by the Mapbox view's gesture recogniser, so no reach could be
-selected programmatically. Three techniques tried (click, timed
-double-click, press-and-release). A human tap on a coloured reach is still
-outstanding.
+**Verified on device 2026-08-20**, with real data: Provo River (reach
+10376596), 74.2 CFS, Normal, 5-day window, shown as if the map had painted
+it Moderate. The strip renders above the info card and well above the 28pt
+current-flow figure, which was the whole point.
+
+**The visual design is rejected and provisional.** Jerson: *"I don't like
+the banner at all. But leave as is for now. We will design that sheet
+better later."* The behaviour — when it speaks, what it says, where the
+category comes from — is settled and tested; the presentation is not.
+Whoever redesigns this sheet should treat `_buildPeakStrip` as
+throwaway and `shouldShowPeakStrip` as the part to keep.
+
+### CLOSED — residual lake lines are accepted (2026-08-20)
+
+Utah Lake still shows base-network lines crossing it. The Great Lakes are
+clean; the tagging pass caught the large lakes and measured 89% precision,
+and the remainder is a long tail across every lake on Earth.
+
+Jerson's call, and it is the right one: *"We can not baby seat every
+single line on the lakes all over the earth. We already reduced most of
+them and that's the end of it."*
+
+**Do not reopen this to chase individual lakes.** If it ever comes back it
+should be as one systematic pass over a better global lake polygon set,
+justified by something other than a screenshot.
+
+### Capturing app state while the Mac is locked (2026-08-20)
+
+Worth keeping, because it cost most of a session to work out and the
+symptom looks like a broken app.
+
+When the screen is locked (`CGSSessionScreenIsLocked: true`), the
+Simulator has **no window at all**: `System Events` reports "Invalid
+index", `screencapture` returns solid black, and every synthetic click —
+cliclick or the macOS harness — silently goes nowhere. Nothing is wrong
+with the app.
+
+`xcrun simctl io <device> screenshot` renders the device directly rather
+than through the window server, so **captures still work while input does
+not**. To verify a UI state that normally needs a tap, drive the app to it
+in code instead: temporarily point `home:` at the page and open the target
+sheet from a load hook with a synthetic argument, build, capture, revert.
+The reach ids for real data are sitting in the simulator container at
+`Library/Caches/rivr_forecast_cache/*.json` — that is how this session got
+a genuinely Normal-flowing reach to demonstrate the peak strip.
+
+Check the lock state first, before blaming the app:
+
+```bash
+python3 -c "import Quartz;print(Quartz.CGSessionCopyCurrentDictionary().get('CGSSessionScreenIsLocked'))"
+```
 
 ### Streams "missing at high zoom" was DNS, not the tilesets (2026-08-20)
 

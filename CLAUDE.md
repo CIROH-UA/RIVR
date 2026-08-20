@@ -154,16 +154,27 @@ join, the rest tiling and upload), so an 11:00 UTC start lands ~13:30 UTC.
 today's UTC date. The legend shows the data date; the reach detail sheet shows
 that reach's real forecast window (15 days / 5 days / 48 hours).
 
-**Phase 4 is complete.** Remaining work is tracked in
-`docs/adr/0005-colored-stream-latency.md`:
-- `geoglows-world-v3` / `nwm-channels-v3` — base networks still draw lines
-  across lakes; the reach ID lists exist, the recipe is proven, ~2 h each
-- Map and detail sheet appear to contradict each other: the map colours by
-  forecast *peak*, the sheet leads with flow *now*. Designed but not built.
+**Phase 4 is complete and the pipeline runs itself** — the 2026-08-20 build
+fired on schedule, published, and updated Remote Config with nobody watching.
 
-**Known limit:** the flood tileset's zoom-0 tile is at 98% of Mapbox's 500 KB
-ceiling. A wetter day will fail the build gate. Excluding lake reaches only buys
-8% — the fix is a stream-order ladder on the flood tileset, not yet built.
+The app draws both base networks from the `-v3` tilesets (z0-12 stream-order
+ladder + `overLake`), so one Remote Config switch hides lake artefacts on the
+base networks and the flood layer together.
+
+Tapping a coloured river whose peak outranks its current flow shows a strip
+explaining that the map colours by forecast peak. `shouldShowPeakStrip` in
+`reach_details_bottom_sheet.dart` is the settled, tested part; **the strip's
+visual design is rejected and provisional** — the sheet is due a redesign, so
+treat `_buildPeakStrip` as throwaway.
+
+**Closed, do not reopen:** residual base-network lines across smaller lakes
+(Utah Lake and similar). The big lakes are clean and the tail is not worth
+chasing lake by lake.
+
+**Known limit:** on a much wetter day the flood tileset's zoom-0 tile could
+still approach Mapbox's 500 KB ceiling and fail the build gate. The low-zoom
+category ladder (`cat >= 2` at z0-2) took it from 98% to 23%, so there is real
+headroom now; a stream-order ladder on the flood tileset is the next lever.
 
 **Non-negotiable when working on any of this:** these pipelines fail *silently*
 — five separate operations have exited 0 while producing wrong or partial data.
