@@ -47,8 +47,6 @@ class MapPageState extends State<MapPage> {
   String? _errorMessage;
   MapboxMap? _mapboxMap;
 
-  // Restored camera position (loaded before first build)
-  ({double lat, double lng, double zoom})? _savedCamera;
 
   // Which stream networks are drawn (persisted; Auto default until loaded).
   StreamLayerVisibility _streamLayers = StreamLayerVisibility.defaults;
@@ -68,7 +66,6 @@ class MapPageState extends State<MapPage> {
     _controlsService = factory.createControlsService();
     _setupSelectionCallbacks();
     _initializeCacheService();
-    _loadSavedCamera();
     _loadStreamLayerPrefs();
   }
 
@@ -81,18 +78,8 @@ class MapPageState extends State<MapPage> {
     }
   }
 
-  /// Load last camera position from storage before first build
-  Future<void> _loadSavedCamera() async {
-    final saved = await MapControlsService.loadLastCameraPosition();
-    if (saved != null && mounted) {
-      setState(() => _savedCamera = saved);
-    }
-  }
-
   @override
   void dispose() {
-    // Save camera position before tearing down (fire-and-forget)
-    _controlsService.saveLastCameraPosition();
     _vectorTilesService.dispose();
     _markerService.dispose();
     _controlsService.dispose();
@@ -216,16 +203,25 @@ class MapPageState extends State<MapPage> {
   }
 
   Widget _buildMap() {
-    final cam = _savedCamera;
+    // The map always opens somewhere predictable rather than wherever it was
+    // last left. Reopening onto an arbitrary previous view is disorienting —
+    // the user has usually come back to look at *here*, not to resume a pan
+    // from days ago.
+    //
+    // This is the fallback, used when location is unavailable or refused.
+    // Once the map exists, [_onMapCreated] recentres on the device location if
+    // one can be obtained; that has to happen imperatively because
+    // cameraOptions is only read at widget creation, long before a location
+    // fix arrives.
     return MapWidget(
       cameraOptions: CameraOptions(
         center: Point(
           coordinates: Position(
-            cam?.lng ?? AppConfig.defaultLongitude,
-            cam?.lat ?? AppConfig.defaultLatitude,
+            AppConfig.defaultLongitude,
+            AppConfig.defaultLatitude,
           ),
         ),
-        zoom: cam?.zoom ?? AppConfig.defaultZoom,
+        zoom: AppConfig.defaultZoom,
       ),
       styleUri: AppConstants.defaultMapboxStyleUrl,
       textureView: true,
@@ -236,11 +232,9 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Save camera position when the map stops moving. Streams no longer show or
-  /// hide with zoom, so there is no visibility to reconcile here.
-  void _onMapIdle(MapIdleEventData data) {
-    _controlsService.saveLastCameraPosition();
-  }
+  /// Nothing to do when the map settles. The camera is deliberately not
+  /// persisted — see [_buildMap].
+  void _onMapIdle(MapIdleEventData data) {}
 
 
   Widget _buildLoadingOverlay() {
@@ -317,11 +311,18 @@ class MapPageState extends State<MapPage> {
       AppLogger.debug('MapPage', 'Services initialized, waiting for style to load...');
 
       // Start location initialization (does not depend on style being loaded)
+      // Centre on the user whenever a location is available, on every open —
+      // not just the first. Without a fix (permission refused, or no signal)
+      // the map simply stays on the configured default.
       _controlsService.initializeLocation().then((position) {
-        // On first visit (no saved camera), fly to device location
-        if (_savedCamera == null && position != null && mounted) {
+        if (position != null && mounted) {
           _controlsService.recenterToDeviceLocation();
-          AppLogger.info('MapPage', 'First visit — centered on device location');
+          AppLogger.info('MapPage', 'Centered on device location');
+        } else {
+          AppLogger.info(
+            'MapPage',
+            'No location available — staying on default view',
+          );
         }
       });
 

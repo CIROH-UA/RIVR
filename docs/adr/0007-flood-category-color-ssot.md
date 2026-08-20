@@ -201,12 +201,9 @@ and the condition icons.
 
 13 palette tests cover the mechanism; 833 tests green overall.
 
-### OPEN — a reach with no forecast data (2026-08-20)
+### Not a bug — a reach with no forecast data (2026-08-20)
 
-Provo River (10376596) renders the forecast page as **"0-Day Forecast / No
-Forecast Data"**, with PEAK·RANGE and TREND blank and the 10-day trend stuck
-spinning. Silver Creek on the same build loads normally, so this is
-reach-specific rather than a broken page.
-
-Not diagnosed. Cheapest next step: fetch the NWM medium-range series for 10376596
-directly and see whether the API returns an empty set or the app drops it.
+Provo River renders "0-Day Forecast / No Forecast Data" while Silver Creek
+loads normally on the same build. Raised as a possible defect and **corrected
+by Jerson: the NWM API simply does not return values for every reach, every
+cycle.** The empty state is the app reporting that accurately. No action.

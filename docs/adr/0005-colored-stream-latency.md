@@ -1719,21 +1719,27 @@ Two implementation notes worth keeping:
 Verified on device in all three states (calm, rising, details expanded)
 via the locked-screen capture route below. 799 tests pass.
 
-### OPEN — the map ignores its saved camera (2026-08-20)
+### RESOLVED — the map no longer restores a saved camera (2026-08-20)
 
-`map_camera_lat/lng/zoom` were written into the app's SharedPreferences and
-verified present in the live container, yet the map still opened at Provo z10
-on two consecutive launches.
+The saved camera never applied: `_loadSavedCamera()` resolved after
+`MapWidget` was built, and `cameraOptions` is only read at widget creation, so
+the later `setState` updated the field and moved nothing.
 
-Hypothesis, untested: `_loadSavedCamera()` resolves after `MapWidget` has been
-built, and `cameraOptions` only applies at widget creation — so the later
-`setState` updates `_savedCamera` but never moves the camera.
+Rather than repair it, the behaviour was **changed on Jerson's call**: the map
+should not reopen wherever it was last left. It now opens on the user's
+location when one is available, and on the configured Provo default otherwise.
 
-Cheapest test: log the value inside `_buildMap` and compare it against the
-`_loadSavedCamera` completion, or set the camera imperatively via `setCamera`
-once the map is created rather than through `cameraOptions`.
+Persistence is gone entirely — `saveLastCameraPosition`,
+`loadLastCameraPosition` and the three `map_camera_*` preference keys are
+removed. Storing a camera nothing reads is a trap for the next reader.
 
-Worth fixing: "reopen where I left off" silently does nothing today.
+The location recentre now runs on **every** open, not only the first. It has to
+happen imperatively via `recenterToDeviceLocation()` after the map exists,
+because a location fix arrives long after `cameraOptions` has been read.
+
+Verified on device, both paths: with a simulated Seattle fix the map opened on
+downtown Seattle; with location cleared and permission revoked it opened on
+Provo.
 
 ### CLOSED — residual lake lines are accepted (2026-08-20)
 
