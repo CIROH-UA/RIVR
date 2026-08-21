@@ -58,7 +58,32 @@ MAJOR ?= 0
 MINOR ?= 0
 
 version:
-	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); 	if [ "$$BRANCH" != "main" ]; then 		echo "refusing to stamp from '$$BRANCH' — commit counts are branch-specific."; 		echo "run this on main, after merging development."; exit 1; 	fi; 	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then 		echo "refusing to stamp a dirty tree — commit or stash first."; exit 1; 	fi; 	BUILD=$$(( $$(git rev-list --count HEAD) + 1 )); 	NEW="$(YEAR).$(MAJOR).$(MINOR)+$$BUILD"; 	OLD=$$(grep '^version:' pubspec.yaml | awk '{print $$2}'); 	OLD_BUILD=$$(echo "$$OLD" | sed 's/.*+//'); 	if [ "$$BUILD" -le "$$OLD_BUILD" ]; then 		echo "refusing to go backwards: $$OLD -> $$NEW"; exit 1; 	fi; 	sed -i '' "s/^version: .*/version: $$NEW/" pubspec.yaml; 	echo "$$OLD  ->  $$NEW"; 	echo "now: commit pubspec.yaml + app_releases.md, then make release-ios"
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$BRANCH" != "main" ]; then \
+		echo "refusing to stamp from '$$BRANCH' — commit counts are branch-specific."; \
+		echo "run this on main, after merging development."; exit 1; \
+	fi; \
+	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
+		echo "refusing to stamp a dirty tree — commit or stash first."; exit 1; \
+	fi; \
+	BUILD=$$(( $$(git rev-list --count HEAD) + 1 )); \
+	NEW_VER="$(YEAR).$(MAJOR).$(MINOR)"; \
+	NEW="$$NEW_VER+$$BUILD"; \
+	OLD=$$(grep '^version:' pubspec.yaml | awk '{print $$2}'); \
+	OLD_BUILD=$$(echo "$$OLD" | sed 's/.*+//'); \
+	OLD_VER=$$(echo "$$OLD" | sed 's/+.*//'); \
+	if [ "$$BUILD" -le "$$OLD_BUILD" ]; then \
+		echo "refusing to go backwards: $$OLD -> $$NEW"; exit 1; \
+	fi; \
+	LOWEST=$$(printf '%s\n%s\n' "$$OLD_VER" "$$NEW_VER" | sort -t. -k1,1n -k2,2n -k3,3n | head -1); \
+	if [ "$$NEW_VER" != "$$OLD_VER" ] && [ "$$LOWEST" = "$$NEW_VER" ]; then \
+		echo "refusing to go backwards: $$OLD -> $$NEW"; \
+		echo "MAJOR and MINOR both default to 0 — pass both, e.g. make version MAJOR=1 MINOR=1"; \
+		exit 1; \
+	fi; \
+	sed -i '' "s/^version: .*/version: $$NEW/" pubspec.yaml; \
+	echo "$$OLD  ->  $$NEW"; \
+	echo "now: commit pubspec.yaml + app_releases.md, then make release-ios"
 
 
 release-android:
