@@ -218,8 +218,8 @@ class _FakeNotificationSettings extends Fake implements NotificationSettings {
 void main() {
   // Preserve original enum / interface tests
   group('NotificationPermissionResult', () {
-    test('has all four expected values', () {
-      expect(NotificationPermissionResult.values, hasLength(4));
+    test('has all five expected values', () {
+      expect(NotificationPermissionResult.values, hasLength(5));
       expect(
         NotificationPermissionResult.values,
         containsAll([
@@ -227,8 +227,20 @@ void main() {
           NotificationPermissionResult.denied,
           NotificationPermissionResult.permanentlyDenied,
           NotificationPermissionResult.error,
+          NotificationPermissionResult.notDetermined,
         ]),
       );
+    });
+
+    // notDetermined is not denied, and the difference is expensive to get
+    // wrong: iOS grants exactly one system prompt per install. Treating
+    // "never asked" as "denied" would send the user to Settings when the
+    // prompt was still available; the reverse burns the prompt silently.
+    test('notDetermined is distinct from denied', () {
+      expect(NotificationPermissionResult.notDetermined,
+          isNot(NotificationPermissionResult.denied));
+      expect(NotificationPermissionResult.notDetermined,
+          isNot(NotificationPermissionResult.permanentlyDenied));
     });
 
     test('granted is distinct from denied states', () {

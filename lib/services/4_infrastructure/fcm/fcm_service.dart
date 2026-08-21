@@ -137,6 +137,29 @@ class FCMService implements IFCMService {
     }
   }
 
+  /// The OS permission on THIS device, read without prompting.
+  ///
+  /// `getNotificationSettings()` reports the current state and never shows a
+  /// dialog, so it is safe to call on every build of the settings page.
+  @override
+  Future<NotificationPermissionResult> osPermissionStatus() async {
+    try {
+      final s = await _messaging.getNotificationSettings();
+      switch (s.authorizationStatus) {
+        case AuthorizationStatus.authorized:
+        case AuthorizationStatus.provisional:
+          return NotificationPermissionResult.granted;
+        case AuthorizationStatus.denied:
+          return NotificationPermissionResult.permanentlyDenied;
+        case AuthorizationStatus.notDetermined:
+          return NotificationPermissionResult.notDetermined;
+      }
+    } catch (e) {
+      AppLogger.warning('FcmService', 'Could not read permission status: $e');
+      return NotificationPermissionResult.error;
+    }
+  }
+
   /// Request notification permissions
   @override
   Future<bool> requestPermission() async {

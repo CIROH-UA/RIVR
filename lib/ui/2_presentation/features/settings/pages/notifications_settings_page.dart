@@ -30,6 +30,16 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   bool _isUpdating = false;
   UserSettings? _userSettings;
 
+  /// The OS permission on THIS device. A stored preference is not permission:
+  /// settings sync through Firestore, so a second device can render both
+  /// toggles ON having never been asked. Read on every load so the UI reports
+  /// what the device can actually do, not what the account prefers.
+  NotificationPermissionResult? _osPermission;
+
+  bool get _osBlocked =>
+      _osPermission == NotificationPermissionResult.permanentlyDenied ||
+      _osPermission == NotificationPermissionResult.notDetermined;
+
   /// True when the user wants at least one notification type — drives whether
   /// the device-status and monitoring sections are shown.
   bool get _anyEnabled => _notificationsEnabled || _weeklyOutlookEnabled;
@@ -38,6 +48,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   void initState() {
     super.initState();
     _loadUserSettings();
+    _refreshOsPermission();
   }
 
   Future<void> _loadUserSettings() async {
@@ -111,6 +122,8 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       }
 
       // Refresh local state from Firestore (enable/disable already wrote the flag)
+      await _refreshOsPermission();
+
       final refreshedSettings =
           await _userSettingsService.getUserSettings(userId);
 
@@ -302,12 +315,58 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
                   // DIGEST — weekly outlook (independent toggle)
                   _buildDigestSection(),
 
-                  // Shared context — shown when either type is on
-                  if (_anyEnabled) _buildRegistrationStatusSection(),
+                  // Shared context — shown when either type is on.
+                  // The OS check comes first: a registered token means nothing
+                  // if this device is not allowed to post notifications.
+                  if (_anyEnabled && _osBlocked) _buildOsBlockedSection(),
+                  if (_anyEnabled && !_osBlocked)
+                    _buildRegistrationStatusSection(),
                   if (_anyEnabled) _buildMonitoringSection(),
                 ],
               ),
       ),
+    );
+  }
+
+  Future<void> _refreshOsPermission() async {
+    final p = await _fcmService.osPermissionStatus();
+    if (mounted) setState(() => _osPermission = p);
+  }
+
+  /// Shown when the account wants notifications but this device cannot post
+  /// them. Without it the app claims "registered" for a device the OS silently
+  /// drops every message from — measured on Android, where POST_NOTIFICATIONS
+  /// was denied while both toggles were green and a token was registered.
+  Widget _buildOsBlockedSection() {
+    final denied = _osPermission == NotificationPermissionResult.permanentlyDenied;
+    return CupertinoListSection.insetGrouped(
+      header: const Text('DEVICE STATUS'),
+      footer: Text(denied
+          ? 'Notifications are turned off for RIVR in your device settings. '
+              'Alerts will not appear on this device until you turn them on there.'
+          : 'This device has not been asked yet. Turn a notification type off '
+              'and on again to be prompted.'),
+      children: [
+        CupertinoListTile(
+          leading: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemRed.resolveFrom(context),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Icon(CupertinoIcons.bell_slash_fill,
+                color: CupertinoColors.white, size: 17),
+          ),
+          title: Text(denied
+              ? 'Blocked in device settings'
+              : 'Permission not requested'),
+          trailing: denied
+              ? const CupertinoListTileChevron()
+              : null,
+          onTap: denied ? () => openAppSettings() : null,
+        ),
+      ],
     );
   }
 

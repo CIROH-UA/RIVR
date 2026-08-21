@@ -15,6 +15,10 @@ enum NotificationPermissionResult {
 
   /// An error occurred while requesting permission
   error,
+
+  /// The OS has not been asked yet — no prompt has been shown on this device.
+  /// Distinct from [denied]: the one system prompt is still available.
+  notDetermined,
 }
 
 /// Interface for Firebase Cloud Messaging operations
@@ -25,6 +29,18 @@ abstract class IFCMService {
 
   Future<bool> initialize();
   Future<bool> requestPermission();
+
+  /// The OS-level notification permission **on this device**, read without
+  /// showing a prompt.
+  ///
+  /// This exists because a stored preference is not permission. Settings sync
+  /// through Firestore, so signing in on a second device renders the toggles
+  /// ON while that device has never been asked — and since the app only
+  /// requests permission when a toggle is *switched* on, it never asks. The
+  /// user then sees "enabled" on a device the OS will not let post anything.
+  /// Measured on Android: `POST_NOTIFICATIONS granted=false` with both toggles
+  /// green and a registered FCM token (tokens do not require the permission).
+  Future<NotificationPermissionResult> osPermissionStatus();
 
   /// Set up notification tap listeners and clear the iOS badge.
   /// Call on every app launch for users with notifications enabled.

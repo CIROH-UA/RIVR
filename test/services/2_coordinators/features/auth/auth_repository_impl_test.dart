@@ -253,6 +253,11 @@ class _StubFcmService implements IFCMService {
   Future<bool> initialize() async => false;
   @override
   Future<bool> requestPermission() async => false;
+
+  @override
+  Future<NotificationPermissionResult> osPermissionStatus() async =>
+      NotificationPermissionResult.granted;
+
   @override
   void setupNotificationListeners() {}
   @override
