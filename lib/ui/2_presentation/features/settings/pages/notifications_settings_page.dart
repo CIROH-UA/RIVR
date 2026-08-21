@@ -19,7 +19,8 @@ class NotificationsSettingsPage extends StatefulWidget {
       _NotificationsSettingsPageState();
 }
 
-class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
+class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
+    with WidgetsBindingObserver {
   final IUserSettingsService _userSettingsService = GetIt.I<IUserSettingsService>();
   final IFCMService _fcmService = GetIt.I<IFCMService>();
 
@@ -40,6 +41,12 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
       _osPermission == NotificationPermissionResult.permanentlyDenied ||
       _osPermission == NotificationPermissionResult.notDetermined;
 
+  /// The OS has refused. Distinct from "not asked yet": nothing can be
+  /// delivered to this device until the user changes it in system settings,
+  /// and no in-app prompt can reach them.
+  bool get _osDenied =>
+      _osPermission == NotificationPermissionResult.permanentlyDenied;
+
   /// True when the user wants at least one notification type — drives whether
   /// the device-status and monitoring sections are shown.
   bool get _anyEnabled => _notificationsEnabled || _weeklyOutlookEnabled;
@@ -47,6 +54,11 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   @override
   void initState() {
     super.initState();
+    // The only route out of a denied state is system settings, which happens
+    // outside the app. Watching resume is how we notice the user came back
+    // having said yes — otherwise the page keeps showing "blocked" until it is
+    // reopened (ADR 0009, phase 3).
+    WidgetsBinding.instance.addObserver(this);
     _loadUserSettings().then((_) => _reconcileDevice());
   }
 
@@ -327,6 +339,37 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
     );
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _onReturnedFromSystemSettings();
+  }
+
+  /// Re-read the OS permission on resume and, if it has just been granted,
+  /// register this device without making the user tap anything else. They have
+  /// already expressed the intent twice — once via the preference, once in
+  /// system settings.
+  Future<void> _onReturnedFromSystemSettings() async {
+    final before = _osPermission;
+    await _refreshOsPermission();
+    if (!mounted) return;
+    final now = _osPermission;
+    final justGranted = before != NotificationPermissionResult.granted &&
+        now == NotificationPermissionResult.granted;
+    if (!justGranted) return;
+
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null || !_anyEnabled) return;
+    await _fcmService.reconcileDevice(userId, wantsAny: true);
+    if (mounted) await _loadUserSettings();
+  }
+
   Future<void> _refreshOsPermission() async {
     final p = await _fcmService.osPermissionStatus();
     if (mounted) setState(() => _osPermission = p);
@@ -467,8 +510,12 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           trailing: _isUpdating
               ? const CupertinoActivityIndicator()
               : CupertinoSwitch(
-                  value: _notificationsEnabled,
-                  onChanged: _toggleNotifications,
+                  // Off and inert while the OS refuses. Showing the account
+                  // preference here would promise delivery this device cannot
+                  // make; accepting a tap would persist a preference for a
+                  // device that stays silent (ADR 0009, phase 3).
+                  value: _osDenied ? false : _notificationsEnabled,
+                  onChanged: _osDenied ? null : _toggleNotifications,
                 ),
         ),
       ],
@@ -504,11 +551,11 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
           trailing: _isUpdating
               ? const CupertinoActivityIndicator()
               : CupertinoSwitch(
-                  value: _weeklyOutlookEnabled,
-                  onChanged: _toggleWeeklyOutlook,
+                  value: _osDenied ? false : _weeklyOutlookEnabled,
+                  onChanged: _osDenied ? null : _toggleWeeklyOutlook,
                 ),
         ),
-        if (_weeklyOutlookEnabled)
+        if (_weeklyOutlookEnabled && !_osDenied)
           const CupertinoListTile(
             leading: SizedBox(width: 32),
             title: Text('Delivered'),
