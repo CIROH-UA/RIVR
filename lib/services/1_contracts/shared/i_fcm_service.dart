@@ -16,6 +16,11 @@ enum NotificationPermissionResult {
   /// An error occurred while requesting permission
   error,
 
+  /// Permission is fine, but no device token could be obtained — APNs not
+  /// ready, or a failed write. The device cannot receive anything, so the
+  /// caller must NOT persist a preference on the strength of this.
+  tokenUnavailable,
+
   /// The OS has not been asked yet — no prompt has been shown on this device.
   /// Distinct from [denied]: the one system prompt is still available.
   notDetermined,
@@ -63,7 +68,6 @@ abstract class IFCMService {
   /// Set up notification tap listeners and clear the iOS badge.
   /// Call on every app launch for users with notifications enabled.
   void setupNotificationListeners();
-  Future<String?> getAndSaveToken(String userId);
   /// Enable/disable Flood Alerts (threshold pushes).
   Future<NotificationPermissionResult> enableNotifications(String userId);
   Future<void> disableNotifications(String userId);

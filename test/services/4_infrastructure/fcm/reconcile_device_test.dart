@@ -42,6 +42,7 @@ class ReconcileHarness {
       case NotificationPermissionResult.permanentlyDenied:
       case NotificationPermissionResult.denied:
       case NotificationPermissionResult.error:
+      case NotificationPermissionResult.tokenUnavailable:
         return osStatus;
     }
   }

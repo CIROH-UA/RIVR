@@ -176,6 +176,7 @@ class FCMService implements IFCMService {
         return os;
 
       case NotificationPermissionResult.error:
+      case NotificationPermissionResult.tokenUnavailable:
         return os;
     }
   }
@@ -297,36 +298,23 @@ class FCMService implements IFCMService {
     }
   }
 
-  /// Get FCM token and save to user settings
-  @override
-  Future<String?> getAndSaveToken(String userId) async {
-    try {
-      AppLogger.debug('FcmService', 'Getting FCM token for user: $userId');
-
-      final token = await _getToken();
-      if (token == null || token == 'pending') return token;
-
-      // Save token to user settings
-      await _saveTokenToUserSettings(userId, token);
-
-      return token;
-    } catch (e) {
-      AppLogger.error('FcmService', 'Error getting token: $e', e);
-      ErrorService.logError('FCMService.getAndSaveToken', e);
-      return null;
-    }
-  }
-
   /// Save FCM token to UserSettings via partial Firestore update
-  Future<void> _saveTokenToUserSettings(String userId, String token) async {
+  /// Returns whether the token actually landed.
+  ///
+  /// This used to swallow failures, which made a failed write indistinguishable
+  /// from success — the caller then persisted `enableNotifications: true` for a
+  /// device with no address, and every surface reported health (ADR 0008).
+  Future<bool> _saveTokenToUserSettings(String userId, String token) async {
     try {
       await _userSettingsService.updateUserSettings(userId, {
         'fcmTokens': FieldValue.arrayUnion([token]),
       });
       AppLogger.info('FcmService', 'Token saved to user settings');
+      return true;
     } catch (e) {
       AppLogger.error('FcmService', 'Error saving token to settings: $e', e);
       ErrorService.logError('FCMService._saveTokenToUserSettings', e);
+      return false;
     }
   }
 
@@ -450,14 +438,20 @@ class FCMService implements IFCMService {
     if (token == null) return NotificationPermissionResult.error;
 
     if (token == 'pending') {
-      // iOS simulator / APNS not ready: preference is saved by the caller; the
-      // token registers on a later launch via refreshTokenIfNeeded.
-      AppLogger.info('FcmService', 'Token pending — will register on a real device');
-    } else {
-      await _userSettingsService.updateUserSettings(userId, {
-        'fcmTokens': FieldValue.arrayUnion([token]),
-      });
+      // No device token: APNs was not ready in time, or this is a simulator.
+      // Reporting `granted` here is what let the caller persist
+      // `enableNotifications: true` for a device that could receive nothing —
+      // the state four users sat in for months (ADR 0008). Say so instead.
+      AppLogger.warning(
+        'FcmService',
+        'Permission granted but no device token — not registering',
+      );
+      return NotificationPermissionResult.tokenUnavailable;
     }
+
+    final saved = await _saveTokenToUserSettings(userId, token);
+    if (!saved) return NotificationPermissionResult.tokenUnavailable;
+
     return NotificationPermissionResult.granted;
   }
 
@@ -601,13 +595,18 @@ class FCMService implements IFCMService {
         final oldToken = _cachedToken;
         _cachedToken = freshToken;
 
-        // Remove old token and add new one atomically
-        if (oldToken != null) {
+        // Add the new token BEFORE removing the old one. Firestore refuses
+        // arrayRemove and arrayUnion on the same field in one write, so this
+        // cannot be a single atomic update — which leaves an ordering choice.
+        // Remove-then-add loses the only token if the add fails; add-then-remove
+        // leaves a stale extra, which is harmless and is pruned on the next
+        // UNREGISTERED send. Never leave the user with none.
+        final saved = await _saveTokenToUserSettings(userId, freshToken);
+        if (saved && oldToken != null) {
           await _userSettingsService.updateUserSettings(userId, {
             'fcmTokens': FieldValue.arrayRemove([oldToken]),
           });
         }
-        await _saveTokenToUserSettings(userId, freshToken);
       } else {
         AppLogger.debug('FcmService', 'FCM token unchanged');
       }
@@ -618,12 +617,13 @@ class FCMService implements IFCMService {
         final oldToken = _cachedToken;
         _cachedToken = newToken;
 
-        if (oldToken != null) {
+        // Same ordering rule as above: never leave the user tokenless.
+        final saved = await _saveTokenToUserSettings(userId, newToken);
+        if (saved && oldToken != null) {
           await _userSettingsService.updateUserSettings(userId, {
             'fcmTokens': FieldValue.arrayRemove([oldToken]),
           });
         }
-        await _saveTokenToUserSettings(userId, newToken);
       });
     } catch (e) {
       AppLogger.error('FcmService', 'Error refreshing token: $e', e);

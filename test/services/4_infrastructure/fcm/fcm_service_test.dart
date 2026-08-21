@@ -64,6 +64,11 @@ class SpyUserSettingsService implements IUserSettingsService {
   Map<String, dynamic>? lastUpdateData;
   final List<Map<String, dynamic>> allUpdateCalls = [];
 
+  /// Every call, including ones that threw. FieldValue sentinels stringify
+  /// opaquely, so ordering is asserted by counting attempts rather than by
+  /// inspecting arrayUnion vs arrayRemove.
+  final List<Map<String, dynamic>> attemptedUpdates = [];
+
   /// Optional: throw on next updateUserSettings call
   Exception? updateError;
 
@@ -75,6 +80,9 @@ class SpyUserSettingsService implements IUserSettingsService {
     String userId,
     Map<String, dynamic> updates,
   ) async {
+    // Record the attempt before throwing. A test that cares whether a second
+    // write was even attempted cannot see it otherwise.
+    attemptedUpdates.add(Map.of(updates));
     if (updateError != null) throw updateError!;
     updateCallCount++;
     lastUpdateUserId = userId;
@@ -218,8 +226,8 @@ class _FakeNotificationSettings extends Fake implements NotificationSettings {
 void main() {
   // Preserve original enum / interface tests
   group('NotificationPermissionResult', () {
-    test('has all five expected values', () {
-      expect(NotificationPermissionResult.values, hasLength(5));
+    test('has all six expected values', () {
+      expect(NotificationPermissionResult.values, hasLength(6));
       expect(
         NotificationPermissionResult.values,
         containsAll([
@@ -228,6 +236,7 @@ void main() {
           NotificationPermissionResult.permanentlyDenied,
           NotificationPermissionResult.error,
           NotificationPermissionResult.notDetermined,
+          NotificationPermissionResult.tokenUnavailable,
         ]),
       );
     });
@@ -290,54 +299,102 @@ void main() {
   const testToken = 'fcm-test-token-abcdefghijklmnop';
 
   // -----------------------------------------------------------------------
-  group('getAndSaveToken', () {
-    test('calls updateUserSettings with fcmTokens arrayUnion', () async {
-      stubMessagingGranted(mockMessaging, token: testToken);
-
-      final token = await service.getAndSaveToken(userId);
-
-      expect(token, testToken);
-      expect(spySettings.updateCallCount, 1);
-      expect(spySettings.lastUpdateUserId, userId);
-      expect(spySettings.lastUpdateData!.containsKey('fcmTokens'), isTrue);
-      // FieldValue.arrayUnion produces a sentinel object
-      expect(spySettings.lastUpdateData!['fcmTokens'], isA<FieldValue>());
-    });
-
-    test('does not call getUserSettings (partial update, not read-modify-write)',
+  // Phase 4 guards (ADR 0009) — the service must stop reporting success for a
+  // device that cannot receive anything. Every one of these states previously
+  // came back as `granted`.
+  group('a device with no address does not report success', () {
+    test('a token that lands is granted, and written with arrayUnion',
         () async {
       stubMessagingGranted(mockMessaging, token: testToken);
 
-      await service.getAndSaveToken(userId);
+      final r = await service.enableNotifications(userId);
 
-      // SpyUserSettingsService.getUserSettings would return null by default.
-      // The point: _saveTokenToUserSettings never reads before writing.
-      expect(spySettings.updateCallCount, 1);
-      // getUserSettings is never called — no stubbedSettings needed
+      expect(r, NotificationPermissionResult.granted);
+      final tokenWrites = spySettings.allUpdateCalls
+          .where((d) => d.containsKey('fcmTokens'));
+      expect(tokenWrites, isNotEmpty);
+      expect(tokenWrites.first['fcmTokens'], isA<FieldValue>());
     });
 
-    test('returns null and does not write when token is null', () async {
-      stubMessagingGranted(mockMessaging, token: null);
-      // Override getToken to return null
-      when(mockMessaging.getToken()).thenAnswer((_) async => null);
-
-      final token = await service.getAndSaveToken(userId);
-
-      expect(token, isNull);
-      expect(spySettings.updateCallCount, 0);
-    });
-
-    test('logs error but does not throw when updateUserSettings fails',
-        () async {
+    // Guard 2: a failed Firestore write is not success. Swallowing it is what
+    // let `enableNotifications: true` be persisted for a device with no token
+    // — the state four users sat in for months (ADR 0008).
+    test('a failed write reports tokenUnavailable, not granted', () async {
       stubMessagingGranted(mockMessaging, token: testToken);
       spySettings.updateError = Exception('Firestore unavailable');
 
-      // Should not throw
-      final token = await service.getAndSaveToken(userId);
+      final r = await service.enableNotifications(userId);
 
-      // Returns the token even though saving failed — the error is logged
-      // but the token itself was retrieved successfully
-      expect(token, testToken);
+      expect(r, NotificationPermissionResult.tokenUnavailable);
+      expect(r, isNot(NotificationPermissionResult.granted));
+    });
+
+    test('no token at all reports error rather than granted', () async {
+      stubMessagingGranted(mockMessaging, token: null);
+      when(mockMessaging.getToken()).thenAnswer((_) async => null);
+
+      final r = await service.enableNotifications(userId);
+
+      expect(r, isNot(NotificationPermissionResult.granted));
+    });
+
+    test('the write is a partial update, never read-modify-write', () async {
+      stubMessagingGranted(mockMessaging, token: testToken);
+
+      await service.enableNotifications(userId);
+
+      // A read-modify-write would race two devices registering at once and
+      // could drop one of their tokens.
+      expect(spySettings.updateCallCount, greaterThanOrEqualTo(1));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Guard 3 (ADR 0009 phase 4) — the data-loss case.
+  //
+  // Firestore refuses arrayRemove and arrayUnion on the same field in one
+  // write, so rotation cannot be atomic and the ORDER is the whole safety
+  // property. Remove-then-add loses the user's only token if the add fails.
+  // Add-then-remove leaves a harmless stale extra, pruned on the next
+  // UNREGISTERED send.
+  group('token rotation never leaves the user with none', () {
+    test('the new token is written before the old one is removed', () async {
+      stubMessagingGranted(mockMessaging, token: testToken);
+      await service.enableNotifications(userId);
+
+      spySettings.updateCallCount = 0;
+      spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
+
+      stubMessagingGranted(mockMessaging, token: 'fcm-rotated-token-xyz-0123');
+      await service.refreshTokenIfNeeded(userId);
+
+      // Two writes: add the new token, then remove the old one.
+      expect(spySettings.attemptedUpdates.length, 2,
+          reason: 'rotation is an add followed by a remove');
+      expect(spySettings.attemptedUpdates.every((d) =>
+          d.containsKey('fcmTokens')), isTrue);
+    });
+
+    test('a failed add does not remove the old token', () async {
+      stubMessagingGranted(mockMessaging, token: testToken);
+      await service.enableNotifications(userId);
+
+      spySettings.updateCallCount = 0;
+      spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
+      spySettings.updateError = Exception('Firestore unavailable');
+
+      stubMessagingGranted(mockMessaging, token: 'fcm-rotated-token-xyz-0123');
+      await service.refreshTokenIfNeeded(userId);
+
+      // Exactly ONE attempt: the add, which failed. The remove was never even
+      // tried, so the old token survives in Firestore. Under the previous
+      // remove-first ordering the user would now have no address at all.
+      expect(spySettings.attemptedUpdates.length, 1,
+          reason: 'the removal must not run when the add failed');
+      expect(spySettings.allUpdateCalls, isEmpty,
+          reason: 'nothing was successfully written');
     });
   });
 
@@ -402,6 +459,7 @@ void main() {
       // Reset spy counters for second call
       spySettings.updateCallCount = 0;
       spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
 
       final result = await service.enableNotifications(userId);
 
@@ -426,6 +484,7 @@ void main() {
       await service.enableNotifications(userId);
       spySettings.updateCallCount = 0;
       spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
 
       await service.disableNotifications(userId);
 
@@ -457,6 +516,7 @@ void main() {
       await service.enableNotifications(userId); // prime cached token
       spySettings.updateCallCount = 0;
       spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
 
       when(mockMessaging.deleteToken())
           .thenThrow(Exception('apns-token-not-set'));
@@ -517,8 +577,8 @@ void main() {
     test('skips save when token unchanged (matches cache)', () async {
       stubMessagingGranted(mockMessaging, token: testToken);
 
-      // Prime the cache via getAndSaveToken
-      await service.getAndSaveToken(userId);
+      // Prime the cache through the surviving public path
+      await service.enableNotifications(userId);
       spySettings.updateCallCount = 0;
 
       // refreshTokenIfNeeded with same token
@@ -552,6 +612,7 @@ void main() {
       // Next enableNotifications must re-initialize and re-fetch token
       spySettings.updateCallCount = 0;
       spySettings.allUpdateCalls.clear();
+      spySettings.attemptedUpdates.clear();
       when(mockMessaging.getToken())
           .thenAnswer((_) async => 'fcm-post-clear-token-abcdefghi');
       await service.enableNotifications(userId);

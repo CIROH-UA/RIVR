@@ -268,8 +268,6 @@ class _StubFcmService implements IFCMService {
   @override
   void setupNotificationListeners() {}
   @override
-  Future<String?> getAndSaveToken(String userId) async => null;
-  @override
   Future<NotificationPermissionResult> enableNotifications(String userId) async =>
       NotificationPermissionResult.granted;
   @override
