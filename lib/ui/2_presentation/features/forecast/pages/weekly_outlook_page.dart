@@ -1,5 +1,7 @@
 // lib/ui/2_presentation/features/forecast/pages/weekly_outlook_page.dart
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
@@ -45,23 +47,72 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
+  /// Held so the listener can be removed in dispose without a context lookup.
+  FavoritesProvider? _favoritesProvider;
+
+  /// Set once the outlook has been built, so a later notification from the
+  /// provider does not rebuild it.
+  bool _outlookBuilt = false;
+
+  /// Falls back to the empty state if favourites never arrive.
+  Timer? _emptyStateFallback;
+
+  /// How long to wait for favourites before believing there are none.
+  static const _favouritesGracePeriod = Duration(seconds: 8);
+
   @override
   void initState() {
     super.initState();
+    final provider = context.read<FavoritesProvider>();
+    _favoritesProvider = provider;
+    provider.addListener(_onFavoritesChanged);
     _load();
   }
 
+  @override
+  void dispose() {
+    _favoritesProvider?.removeListener(_onFavoritesChanged);
+    _emptyStateFallback?.cancel();
+    super.dispose();
+  }
+
+  /// Favourites finished loading after this page was already on screen.
+  void _onFavoritesChanged() {
+    if (_outlookBuilt || !mounted) return;
+    if (_favoritesProvider?.favorites.isNotEmpty ?? false) _load();
+  }
+
   Future<void> _load() async {
+    if (_outlookBuilt) return;
     try {
-      final favorites = context.read<FavoritesProvider>().favorites;
+      final favorites =
+          (_favoritesProvider ?? context.read<FavoritesProvider>()).favorites;
       _favoriteCount = favorites.length;
+
+      // A notification tap opens this page during launch, before
+      // FavoritesProvider has loaded from Firestore. `context.read` does not
+      // subscribe, so rendering the empty state here left "Add favorite rivers
+      // to get your weekly outlook" on screen permanently for someone with
+      // three favourites — and skipped _recordOutlookOpen, so the digest
+      // back-off counter never reset either.
+      //
+      // Hold the spinner instead and let _onFavoritesChanged retry. The timer
+      // is the floor: an account that genuinely has no favourites still gets
+      // the empty state, just not instantly.
       if (favorites.isEmpty) {
-        setState(() {
-          _rows = const [];
-          _loading = false;
+        _emptyStateFallback ??= Timer(_favouritesGracePeriod, () {
+          if (!mounted || _outlookBuilt) return;
+          setState(() {
+            _rows = const [];
+            _loading = false;
+          });
         });
         return;
       }
+
+      _outlookBuilt = true;
+      _emptyStateFallback?.cancel();
+
       final rows = await _service.buildOutlook(favorites);
       if (!mounted) return;
       setState(() {
