@@ -201,23 +201,23 @@ success while nothing was delivered.
 
 ---
 
-## Open question for Jerson — provisional authorization
+## DECIDED — hard ask, per device, all or nothing
 
-`requestPermission(provisional: false)` today, i.e. always the hard ask.
+`provisional` was considered and **rejected**. Jerson: *"A hard ask on individual
+devices even if using the same account that enables all notifications is simpler
+and best. They either accept to get all the notifications or not."*
 
-iOS also offers **provisional**: notifications are delivered **quietly to
-Notification Center with no prompt at all**, and the user is offered "Keep" or
-"Turn Off" after seeing a real one. The prompt is never spent.
+So `requestPermission(provisional: false)` stays, and one grant covers both
+notification types. Consequences to hold to:
 
-It fits the Weekly Outlook unusually well — a calm Friday summary is exactly the
-kind of thing that argues for itself once seen. A candidate split:
-
-- **Weekly Outlook** → provisional, no prompt, arrives quietly
-- **Flood alerts** → hard ask, because a flood warning must break through
-
-The cost is that provisional notifications are quiet by default: they do not
-appear on the lock screen or make a sound until promoted. **Decide before
-Phase 2**, since it changes what the priming card offers.
+- **No per-type permission.** The priming card offers everything or nothing, and
+  its copy must say so — promising only flood alerts and then also sending a
+  weekly digest would be a bait-and-switch.
+- **The single iOS prompt matters more, not less.** With no provisional fallback
+  there is no second route in, which makes the Phase 2 guard — "Not now" issues
+  zero OS requests — the most important guard in this document.
+- **Denied is genuinely terminal** until the user visits Settings, so Phase 3
+  carries the whole recovery story.
 
 ## Sequencing
 
