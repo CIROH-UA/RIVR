@@ -194,6 +194,13 @@ class _MockFCMService implements IFCMService {
       NotificationPermissionResult.granted;
 
   @override
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  }) async =>
+      NotificationPermissionResult.granted;
+
+  @override
   void setupNotificationListeners() {}
   @override
   Future<String?> getAndSaveToken(String userId) async => 'mock-token';

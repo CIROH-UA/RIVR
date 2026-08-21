@@ -47,8 +47,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   @override
   void initState() {
     super.initState();
-    _loadUserSettings();
-    _refreshOsPermission();
+    _loadUserSettings().then((_) => _reconcileDevice());
   }
 
   Future<void> _loadUserSettings() async {
@@ -331,6 +330,21 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage> {
   Future<void> _refreshOsPermission() async {
     final p = await _fcmService.osPermissionStatus();
     if (mounted) setState(() => _osPermission = p);
+  }
+
+  /// Ask this device for permission if the account already wants notifications
+  /// but the OS has never been asked (ADR 0009, phase 1).
+  ///
+  /// Runs when this page opens rather than at launch: the user is looking at
+  /// notification settings, so a permission prompt is the least surprising
+  /// thing that could happen. The service asks at most once per session and
+  /// never when denied, so calling this on every open is safe.
+  Future<void> _reconcileDevice() async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+    if (!_anyEnabled) return;
+    await _fcmService.reconcileDevice(userId, wantsAny: true);
+    await _refreshOsPermission();
   }
 
   /// Shown when the account wants notifications but this device cannot post

@@ -137,6 +137,49 @@ class FCMService implements IFCMService {
     }
   }
 
+  /// Set once we have spent this session's reconciliation attempt. iOS grants a
+  /// single system prompt per install, so a retry loop would burn it and then
+  /// keep asking a question the OS has stopped answering.
+  bool _reconciledThisSession = false;
+
+  @override
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  }) async {
+    // The account does not want notifications — nothing to reconcile, and
+    // asking would be asking for something the user has not requested.
+    if (!wantsAny) return NotificationPermissionResult.notDetermined;
+
+    final os = await osPermissionStatus();
+
+    switch (os) {
+      case NotificationPermissionResult.granted:
+        // Permission is fine; the token may still be missing — a device can be
+        // authorised and unregistered, which looks identical to the user.
+        await refreshTokenIfNeeded(userId);
+        return NotificationPermissionResult.granted;
+
+      case NotificationPermissionResult.notDetermined:
+        if (_reconciledThisSession) return os;
+        _reconciledThisSession = true;
+        AppLogger.info(
+          'FcmService',
+          'Preference is on but this device was never asked — requesting',
+        );
+        return _ensureRegistered(userId);
+
+      case NotificationPermissionResult.permanentlyDenied:
+      case NotificationPermissionResult.denied:
+        // Asking again cannot succeed and, on iOS, cannot even be shown. The
+        // UI routes the user to system settings instead.
+        return os;
+
+      case NotificationPermissionResult.error:
+        return os;
+    }
+  }
+
   /// The OS permission on THIS device, read without prompting.
   ///
   /// `getNotificationSettings()` reports the current state and never shows a

@@ -42,6 +42,24 @@ abstract class IFCMService {
   /// green and a registered FCM token (tokens do not require the permission).
   Future<NotificationPermissionResult> osPermissionStatus();
 
+  /// Bring THIS device into line with the account's preference.
+  ///
+  /// Preferences sync through Firestore; permissions do not. A device signing
+  /// in to an account that already wants notifications inherits the preference
+  /// with a blank permission, and because the app only asks when a toggle is
+  /// *switched*, an inherited "on" is never asked about. This closes that gap.
+  ///
+  /// [wantsAny] is the account preference — true when either notification type
+  /// is on. Call from a context where a permission prompt makes sense to the
+  /// user; never at cold launch.
+  ///
+  /// Asks at most **once per app session** and never when already denied, so it
+  /// is safe to call on every build.
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  });
+
   /// Set up notification tap listeners and clear the iOS badge.
   /// Call on every app launch for users with notifications enabled.
   void setupNotificationListeners();

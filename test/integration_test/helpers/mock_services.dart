@@ -638,6 +638,13 @@ class MockFCMService implements IFCMService {
   @override
   Future<NotificationPermissionResult> osPermissionStatus() async =>
       NotificationPermissionResult.granted;
+
+  @override
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  }) async =>
+      NotificationPermissionResult.granted;
   @override
   void setupNotificationListeners() {}
 
