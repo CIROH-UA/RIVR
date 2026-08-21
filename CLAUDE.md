@@ -379,16 +379,48 @@ flutter analyze                       # Static analysis
 flutter test                          # Run tests
 flutter build apk --debug             # Debug Android build
 flutter build ios --no-codesign       # Debug iOS build (no signing)
+make version                          # Stamp <year>.<major>.<minor>+<commits> — run on main only
 make release-android                  # Signed release AAB with obfuscation (requires android/key.properties)
 make release-ios                      # Release IPA with obfuscation
+make upload-symbols                   # iOS dSYMs -> Crashlytics (run right after release-ios)
 cd functions && npm install           # Install Cloud Functions deps (TypeScript "default" codebase)
 cd functions && npm run build         # Build Cloud Functions
 firebase deploy --only functions:default              # Deploy TypeScript functions
 firebase deploy --only functions:geoglows             # Deploy Python functions (functions_geoglows/)
 firebase deploy --only functions:geoglows:<name>      # Deploy one Python function (e.g. nwm_stream_conditions)
-# NOTE: the geoglows_conditions_* functions and their schedulers are DELETED.
-# Flood colours come from the daily rivr-flooded-YYYYMMDD tileset instead.
+# NOTE: the geoglows_conditions_* schedulers are gone and flood colours come
+# from the daily rivr-flooded-YYYYMMDD tileset. Four *_conditions_* functions
+# are still deployed but dormant — minInstances 0, no invocations in 30 days,
+# so they cost nothing. Docs previously claimed they were deleted (ADR 0005).
 ```
+
+### iOS release — three things that have each cost a build
+
+**Versioning is `<year>.<major>.<minor>+<commit count>`**, stamped by
+`make version` on `main` after merging. Never edit `pubspec.yaml` by hand: both
+stores reject a repeated build number outright, and a derived one cannot be
+forgotten. `make version MAJOR=1` / `MINOR=2` for the human part.
+
+**Inspect the IPA, never the archive.** `flutter build ipa` re-signs during
+export, so the archive reports `aps-environment: development` even when the
+shipped artifact is correct. Push notifications were dead for six months partly
+because of this. After every release build:
+
+```bash
+unzip -q build/ios/ipa/RIVR.ipa -d /tmp/ipa && \
+codesign -d --entitlements :- /tmp/ipa/Payload/Runner.app \
+  | plutil -convert xml1 -o - - | grep -A1 aps-environment
+```
+
+Expect **`production`**. Anything else means Xcode picked a development
+provisioning profile — usually because no Apple Distribution certificate exists
+for HydroMap LLC (Xcode → Settings → Apple Accounts → Manage Certificates).
+
+**Crashlytics wants dSYMs, not the Dart symbol map.** `build/debug-info/` is
+Dart's obfuscation map for `flutter symbolize`; Crashlytics will not take it, and
+`firebase crashlytics:symbols:upload` is for Android NDK and fails on iOS either
+way. Use `make upload-symbols`, which runs the Crashlytics binary from the SPM
+checkout — it only exists after a build, so run it before `flutter clean`.
 
 **Python venv:** `firebase.json` declares no runtime, so the CLI infers it from
 `functions_geoglows/venv`. Rebuild it with **Python 3.13** — a 3.12 venv
