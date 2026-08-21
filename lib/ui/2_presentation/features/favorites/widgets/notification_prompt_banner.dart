@@ -1,24 +1,47 @@
 import 'package:flutter/cupertino.dart';
-import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 
-/// Banner prompting users to enable flood alert notifications.
-/// Shown on the favorites page when user has favorites but notifications disabled.
+/// The soft ask, shown after a user adds their first favourite.
+///
+/// This is **our** UI, not the system prompt, and that distinction is the whole
+/// point. iOS grants exactly one notification prompt per install and RIVR has
+/// no provisional fallback (ADR 0009), so the real prompt must only ever be
+/// spent on someone who has already said yes here. "Not now" costs nothing and
+/// leaves the prompt available; only "Enable" spends it.
+///
+/// The copy names the river the user just saved. "Get alerts for White River?"
+/// is a concrete promise about something they just chose; "Enable
+/// Notifications" is a request for a permission. The first is answerable.
+///
+/// One grant covers both notification types, so the card says so — offering
+/// only flood alerts and then also sending a weekly digest would be a
+/// bait-and-switch.
 class NotificationPromptBanner extends StatelessWidget {
-  final VoidCallback onDismiss;
+  const NotificationPromptBanner({
+    super.key,
+    required this.riverName,
+    required this.onEnable,
+    required this.onDismiss,
+  });
 
-  const NotificationPromptBanner({super.key, required this.onDismiss});
+  /// The favourite that prompted this, named in the copy.
+  final String riverName;
+
+  /// Spends the OS prompt. Only reached from an explicit tap on Enable.
+  final VoidCallback onEnable;
+
+  /// "Not now" — must not touch the OS.
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
+    final blue = CupertinoColors.systemBlue.resolveFrom(context);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemBlue.withValues(alpha: 0.08),
+        color: blue.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: CupertinoColors.systemBlue.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: blue.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -26,19 +49,15 @@ class NotificationPromptBanner extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                CupertinoIcons.bell_fill,
-                color: CupertinoColors.systemBlue,
-                size: 20,
-                semanticLabel: 'Notification alert',
-              ),
+              Icon(CupertinoIcons.bell_fill,
+                  color: blue, size: 20, semanticLabel: 'Notifications'),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Enable Flood Alerts',
+                      'Get alerts for $riverName?',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -47,48 +66,56 @@ class NotificationPromptBanner extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Get notified when your rivers exceed flood thresholds.',
+                      "We'll tell you when it's forecast to flood, and send a "
+                      'calm weekly summary each Friday.',
                       style: TextStyle(
                         fontSize: 14,
-                        color: CupertinoColors.secondaryLabel
-                            .resolveFrom(context),
+                        height: 1.3,
+                        color:
+                            CupertinoColors.secondaryLabel.resolveFrom(context),
                       ),
                     ),
                   ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
               CupertinoButton(
-                padding: EdgeInsets.zero,
-                minimumSize: const Size.square(24),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                minimumSize: Size.zero,
                 onPressed: onDismiss,
-                child: Icon(
-                  CupertinoIcons.xmark,
-                  size: 16,
-                  color:
-                      CupertinoColors.secondaryLabel.resolveFrom(context),
-                  semanticLabel: 'Dismiss notification prompt',
+                child: Text(
+                  'Not now',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              CupertinoButton(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                color: blue,
+                borderRadius: BorderRadius.circular(8),
+                minimumSize: Size.zero,
+                onPressed: onEnable,
+                child: const Text(
+                  'Enable',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: CupertinoColors.white,
+                  ),
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: CupertinoColors.systemBlue,
-              borderRadius: BorderRadius.circular(8),
-              minimumSize: Size.zero,
-              onPressed: () => AppRouter.pushNotificationsSettings(context),
-              child: const Text(
-                'Set Up Notifications',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: CupertinoColors.white,
-                ),
-              ),
-            ),
           ),
         ],
       ),
