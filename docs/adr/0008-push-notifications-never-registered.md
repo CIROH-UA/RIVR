@@ -102,10 +102,25 @@ exists, since it only requests a device token and iOS shows nothing until
 The first FCM token RIVR has ever issued to a real device, after roughly six
 months in which `notification_logs` stayed empty and 17 of 18 users had none.
 
-Tap routing is also measured, not assumed: the digest sends
-`data: {type: "weekly_outlook"}`, `notificationRoute` maps that to
-`AppRoutes.weeklyOutlook`, and 6 tests cover it including precedence over a
-`reachId` in the same payload.
+Tap routing was claimed here as "measured, not assumed". **That was wrong**, and
+Jerson caught it: the digest arrived on build 547 and tapping it returned him to
+whatever screen he last had open.
+
+The payload, the mapping and the tests were all verified and all correct. The
+integration was not. `AppDelegate.userNotificationCenter(didReceive:)` overrode
+the tap handler, logged the payload and called `completionHandler()` itself,
+never calling `super` — so with `FirebaseAppDelegateProxyEnabled=false` and
+nothing to swizzle, FlutterFire never saw the tap, `onMessageOpenedApp` never
+fired, and `notificationRoute` was never invoked.
+
+Verifying every component and calling that an integration test is the same
+mistake this ADR documents at every other layer. Fixed by forwarding to `super`.
+
+**Unverified:** the sibling `willPresent` handler also does not forward, which is
+defensible — it deliberately overrides presentation options so notifications show
+while the app is open — but it means FlutterFire may not emit `onMessage` in the
+foreground. Cheapest test: trigger a digest with the app open and see whether the
+banner appears once, twice, or not at all.
 
 ## Still unverified
 

@@ -85,13 +85,24 @@ import UserNotifications
     completionHandler([[.alert, .sound, .badge]])
   }
 
-  // Handle notification tap
+  // Handle notification tap.
+  //
+  // MUST forward to super. Info.plist sets FirebaseAppDelegateProxyEnabled=false,
+  // so Firebase does not swizzle this method and depends on the delegate chain
+  // to reach it. This override previously logged the payload and called
+  // completionHandler() itself, which swallowed the tap: FlutterFire never saw
+  // it, onMessageOpenedApp never fired, and notificationRoute — correct, and
+  // covered by tests — was simply never invoked. Tapping a notification put the
+  // user back on whatever screen they last had open.
+  //
+  // Do not call completionHandler() here as well; super owns it, and calling it
+  // twice is undefined behaviour.
   override func userNotificationCenter(_ center: UNUserNotificationCenter,
                                      didReceive response: UNNotificationResponse,
                                      withCompletionHandler completionHandler: @escaping () -> Void) {
-    let userInfo = response.notification.request.content.userInfo
-    print("Notification tapped: \(userInfo)")
-
-    completionHandler()
+    print("Notification tapped: \(response.notification.request.content.userInfo)")
+    super.userNotificationCenter(center,
+                                 didReceive: response,
+                                 withCompletionHandler: completionHandler)
   }
 }
