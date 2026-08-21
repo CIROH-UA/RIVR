@@ -297,6 +297,31 @@ every observed symptom and is confirmed upstream, but nothing has been run on a
 device. Test: install the next build, tap a digest, expect the Weekly Outlook
 page — cold and backgrounded.
 
+### Verifying the new plugin actually shipped in the IPA
+
+Worth recording because the first attempt was a false positive. Grepping the app
+binary for `scene:willConnectToSession:options:` returns a hit — but it returns
+the same hit in **build 551**, which carried the old plugin. That string comes
+from the Flutter engine's own `FlutterSceneDelegate`, so it proves nothing about
+firebase_messaging.
+
+The discriminating test is a differential on selectors that exist **only** in
+16.5.0's `FLTFirebaseMessagingPlugin.m` (obtained by diffing the method lists of
+the two versions in `~/.pub-cache`):
+
+| selector | 551 | 555 |
+|---|---|---|
+| `configureNotificationCenterDelegate` | 0 | 1 |
+| `markInitialNotificationGatheredAfterDelay` | 0 | 1 |
+| `setupNotificationHandlingWithRemoteNotification:` | 0 | 2 |
+| `configureWithFlutterMethodChannel:` | 0 | 1 |
+
+`nm` is useless here — release builds are stripped and obfuscated, so symbol
+tables are empty and `strings` is the only route in.
+
+Same lesson as "inspect the IPA, never the archive": a check that passes on both
+the fixed and the broken artifact is not a check.
+
 ## Latent: a weekly-only user never gets tap routing at all
 
 **Measured.** `AuthProvider._loadUserSettings` (`auth_provider.dart:155`) gates
