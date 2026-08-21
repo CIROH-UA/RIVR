@@ -15,6 +15,15 @@ enum NotificationPermissionResult {
 
   /// An error occurred while requesting permission
   error,
+
+  /// Permission is fine, but no device token could be obtained — APNs not
+  /// ready, or a failed write. The device cannot receive anything, so the
+  /// caller must NOT persist a preference on the strength of this.
+  tokenUnavailable,
+
+  /// The OS has not been asked yet — no prompt has been shown on this device.
+  /// Distinct from [denied]: the one system prompt is still available.
+  notDetermined,
 }
 
 /// Interface for Firebase Cloud Messaging operations
@@ -26,10 +35,39 @@ abstract class IFCMService {
   Future<bool> initialize();
   Future<bool> requestPermission();
 
+  /// The OS-level notification permission **on this device**, read without
+  /// showing a prompt.
+  ///
+  /// This exists because a stored preference is not permission. Settings sync
+  /// through Firestore, so signing in on a second device renders the toggles
+  /// ON while that device has never been asked — and since the app only
+  /// requests permission when a toggle is *switched* on, it never asks. The
+  /// user then sees "enabled" on a device the OS will not let post anything.
+  /// Measured on Android: `POST_NOTIFICATIONS granted=false` with both toggles
+  /// green and a registered FCM token (tokens do not require the permission).
+  Future<NotificationPermissionResult> osPermissionStatus();
+
+  /// Bring THIS device into line with the account's preference.
+  ///
+  /// Preferences sync through Firestore; permissions do not. A device signing
+  /// in to an account that already wants notifications inherits the preference
+  /// with a blank permission, and because the app only asks when a toggle is
+  /// *switched*, an inherited "on" is never asked about. This closes that gap.
+  ///
+  /// [wantsAny] is the account preference — true when either notification type
+  /// is on. Call from a context where a permission prompt makes sense to the
+  /// user; never at cold launch.
+  ///
+  /// Asks at most **once per app session** and never when already denied, so it
+  /// is safe to call on every build.
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  });
+
   /// Set up notification tap listeners and clear the iOS badge.
   /// Call on every app launch for users with notifications enabled.
   void setupNotificationListeners();
-  Future<String?> getAndSaveToken(String userId);
   /// Enable/disable Flood Alerts (threshold pushes).
   Future<NotificationPermissionResult> enableNotifications(String userId);
   Future<void> disableNotifications(String userId);

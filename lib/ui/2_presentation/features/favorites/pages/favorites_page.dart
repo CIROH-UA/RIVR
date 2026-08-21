@@ -23,6 +23,7 @@ import 'package:rivr/ui/2_presentation/features/favorites/widgets/notification_p
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 
@@ -46,6 +47,11 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   static const _bannerDismissedKey = 'notification_banner_dismissed';
 
+  /// The OS permission on this device. The card is only worth showing when the
+  /// system prompt is still available — asking someone who already granted is
+  /// noise, and asking someone the OS has refused is a button that cannot work.
+  NotificationPermissionResult? _osPermission;
+
   // Coach mark keys
   final GlobalKey _settingsButtonKey = GlobalKey();
   final GlobalKey _firstCardKey = GlobalKey();
@@ -65,6 +71,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       _initializeFavorites();
       _loadUserFlowUnitPreference();
       _loadBannerDismissalState();
+      _loadOsPermission();
       _checkAndShowCoachMarks();
     });
   }
@@ -110,22 +117,63 @@ class _FavoritesPageState extends State<FavoritesPage>
     context.read<FavoritesProvider>().refreshAllFavorites();
   }
 
+  /// "Not now" is not "never". A permanent dismissal meant one distracted tap
+  /// cost the user notifications forever, with no way back except finding the
+  /// settings page. The ask returns after this window (ADR 0009, phase 2).
+  static const Duration _dismissalWindow = Duration(days: 30);
+
+  Future<void> _loadOsPermission() async {
+    final p = await GetIt.I<IFCMService>().osPermissionStatus();
+    if (mounted) setState(() => _osPermission = p);
+  }
+
   Future<void> _loadBannerDismissalState() async {
     final prefs = await SharedPreferences.getInstance();
+    final ms = prefs.getInt(_bannerDismissedKey);
+    // Legacy bool from builds before the window existed — treat as dismissed
+    // now, so those users get asked again in 30 days rather than never.
+    final legacy = prefs.getBool('${_bannerDismissedKey}_legacy') ??
+        (ms == null ? prefs.getBool(_bannerDismissedKey) ?? false : false);
+    final dismissedAt = ms != null
+        ? DateTime.fromMillisecondsSinceEpoch(ms)
+        : (legacy ? DateTime.now() : null);
+    if (dismissedAt != null && ms == null) {
+      await prefs.remove(_bannerDismissedKey);
+      await prefs.setInt(
+          _bannerDismissedKey, dismissedAt.millisecondsSinceEpoch);
+    }
     if (mounted) {
       setState(() {
-        _notificationBannerDismissed =
-            prefs.getBool(_bannerDismissedKey) ?? false;
+        _notificationBannerDismissed = dismissedAt != null &&
+            DateTime.now().difference(dismissedAt) < _dismissalWindow;
       });
     }
   }
 
+  /// "Not now" — records the time and touches nothing else. Critically it must
+  /// not reach the OS: the single iOS prompt has to survive this tap.
   Future<void> _dismissNotificationBanner() async {
-    setState(() {
-      _notificationBannerDismissed = true;
-    });
+    setState(() => _notificationBannerDismissed = true);
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_bannerDismissedKey, true);
+    await prefs.setInt(
+        _bannerDismissedKey, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// "Enable" — the only path in this file allowed to spend the OS prompt.
+  /// One grant covers both notification types, as the card promises.
+  Future<void> _enableFromPrompt() async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+    setState(() => _notificationBannerDismissed = true);
+
+    final fcm = GetIt.I<IFCMService>();
+    final result = await fcm.enableNotifications(userId);
+    if (result == NotificationPermissionResult.granted) {
+      await fcm.enableWeeklyOutlook(userId);
+    }
+    if (mounted) {
+      await context.read<AuthProvider>().refreshUserSettings();
+    }
   }
 
   Future<void> _initializeFavorites() async {
@@ -467,10 +515,31 @@ class _FavoritesPageState extends State<FavoritesPage>
                     final notificationsEnabled =
                         authProvider.currentUserSettings?.enableNotifications ??
                         false;
+
+                    // The soft ask, at the moment of expressed interest — the
+                    // user has just saved their first river (ADR 0009, ph 2).
+                    //
+                    // Every clause is load-bearing:
+                    //   first favourite  — asking before that is asking cold
+                    //   notDetermined    — the prompt must still be available;
+                    //                      granted needs no ask, denied cannot
+                    //                      be reached by one
+                    //   not dismissed    — "not now" is respected for 30 days
+                    //   preference off   — nothing to ask about otherwise
+                    final favs =
+                        context.read<FavoritesProvider>().favorites;
+                    final isFirstFavorite = favs.length == 1;
+                    final canStillAsk = _osPermission ==
+                        NotificationPermissionResult.notDetermined;
+
                     if (!notificationsEnabled &&
-                        !_notificationBannerDismissed) {
+                        !_notificationBannerDismissed &&
+                        isFirstFavorite &&
+                        canStillAsk) {
                       return SliverToBoxAdapter(
                         child: NotificationPromptBanner(
+                          riverName: favs.first.displayName,
+                          onEnable: _enableFromPrompt,
                           onDismiss: _dismissNotificationBanner,
                         ),
                       );

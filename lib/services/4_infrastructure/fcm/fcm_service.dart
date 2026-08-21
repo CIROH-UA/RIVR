@@ -137,6 +137,73 @@ class FCMService implements IFCMService {
     }
   }
 
+  /// Set once we have spent this session's reconciliation attempt. iOS grants a
+  /// single system prompt per install, so a retry loop would burn it and then
+  /// keep asking a question the OS has stopped answering.
+  bool _reconciledThisSession = false;
+
+  @override
+  Future<NotificationPermissionResult> reconcileDevice(
+    String userId, {
+    required bool wantsAny,
+  }) async {
+    // The account does not want notifications — nothing to reconcile, and
+    // asking would be asking for something the user has not requested.
+    if (!wantsAny) return NotificationPermissionResult.notDetermined;
+
+    final os = await osPermissionStatus();
+
+    switch (os) {
+      case NotificationPermissionResult.granted:
+        // Permission is fine; the token may still be missing — a device can be
+        // authorised and unregistered, which looks identical to the user.
+        await refreshTokenIfNeeded(userId);
+        return NotificationPermissionResult.granted;
+
+      case NotificationPermissionResult.notDetermined:
+        if (_reconciledThisSession) return os;
+        _reconciledThisSession = true;
+        AppLogger.info(
+          'FcmService',
+          'Preference is on but this device was never asked — requesting',
+        );
+        return _ensureRegistered(userId);
+
+      case NotificationPermissionResult.permanentlyDenied:
+      case NotificationPermissionResult.denied:
+        // Asking again cannot succeed and, on iOS, cannot even be shown. The
+        // UI routes the user to system settings instead.
+        return os;
+
+      case NotificationPermissionResult.error:
+      case NotificationPermissionResult.tokenUnavailable:
+        return os;
+    }
+  }
+
+  /// The OS permission on THIS device, read without prompting.
+  ///
+  /// `getNotificationSettings()` reports the current state and never shows a
+  /// dialog, so it is safe to call on every build of the settings page.
+  @override
+  Future<NotificationPermissionResult> osPermissionStatus() async {
+    try {
+      final s = await _messaging.getNotificationSettings();
+      switch (s.authorizationStatus) {
+        case AuthorizationStatus.authorized:
+        case AuthorizationStatus.provisional:
+          return NotificationPermissionResult.granted;
+        case AuthorizationStatus.denied:
+          return NotificationPermissionResult.permanentlyDenied;
+        case AuthorizationStatus.notDetermined:
+          return NotificationPermissionResult.notDetermined;
+      }
+    } catch (e) {
+      AppLogger.warning('FcmService', 'Could not read permission status: $e');
+      return NotificationPermissionResult.error;
+    }
+  }
+
   /// Request notification permissions
   @override
   Future<bool> requestPermission() async {
@@ -231,36 +298,23 @@ class FCMService implements IFCMService {
     }
   }
 
-  /// Get FCM token and save to user settings
-  @override
-  Future<String?> getAndSaveToken(String userId) async {
-    try {
-      AppLogger.debug('FcmService', 'Getting FCM token for user: $userId');
-
-      final token = await _getToken();
-      if (token == null || token == 'pending') return token;
-
-      // Save token to user settings
-      await _saveTokenToUserSettings(userId, token);
-
-      return token;
-    } catch (e) {
-      AppLogger.error('FcmService', 'Error getting token: $e', e);
-      ErrorService.logError('FCMService.getAndSaveToken', e);
-      return null;
-    }
-  }
-
   /// Save FCM token to UserSettings via partial Firestore update
-  Future<void> _saveTokenToUserSettings(String userId, String token) async {
+  /// Returns whether the token actually landed.
+  ///
+  /// This used to swallow failures, which made a failed write indistinguishable
+  /// from success — the caller then persisted `enableNotifications: true` for a
+  /// device with no address, and every surface reported health (ADR 0008).
+  Future<bool> _saveTokenToUserSettings(String userId, String token) async {
     try {
       await _userSettingsService.updateUserSettings(userId, {
         'fcmTokens': FieldValue.arrayUnion([token]),
       });
       AppLogger.info('FcmService', 'Token saved to user settings');
+      return true;
     } catch (e) {
       AppLogger.error('FcmService', 'Error saving token to settings: $e', e);
       ErrorService.logError('FCMService._saveTokenToUserSettings', e);
+      return false;
     }
   }
 
@@ -384,14 +438,20 @@ class FCMService implements IFCMService {
     if (token == null) return NotificationPermissionResult.error;
 
     if (token == 'pending') {
-      // iOS simulator / APNS not ready: preference is saved by the caller; the
-      // token registers on a later launch via refreshTokenIfNeeded.
-      AppLogger.info('FcmService', 'Token pending — will register on a real device');
-    } else {
-      await _userSettingsService.updateUserSettings(userId, {
-        'fcmTokens': FieldValue.arrayUnion([token]),
-      });
+      // No device token: APNs was not ready in time, or this is a simulator.
+      // Reporting `granted` here is what let the caller persist
+      // `enableNotifications: true` for a device that could receive nothing —
+      // the state four users sat in for months (ADR 0008). Say so instead.
+      AppLogger.warning(
+        'FcmService',
+        'Permission granted but no device token — not registering',
+      );
+      return NotificationPermissionResult.tokenUnavailable;
     }
+
+    final saved = await _saveTokenToUserSettings(userId, token);
+    if (!saved) return NotificationPermissionResult.tokenUnavailable;
+
     return NotificationPermissionResult.granted;
   }
 
@@ -535,13 +595,18 @@ class FCMService implements IFCMService {
         final oldToken = _cachedToken;
         _cachedToken = freshToken;
 
-        // Remove old token and add new one atomically
-        if (oldToken != null) {
+        // Add the new token BEFORE removing the old one. Firestore refuses
+        // arrayRemove and arrayUnion on the same field in one write, so this
+        // cannot be a single atomic update — which leaves an ordering choice.
+        // Remove-then-add loses the only token if the add fails; add-then-remove
+        // leaves a stale extra, which is harmless and is pruned on the next
+        // UNREGISTERED send. Never leave the user with none.
+        final saved = await _saveTokenToUserSettings(userId, freshToken);
+        if (saved && oldToken != null) {
           await _userSettingsService.updateUserSettings(userId, {
             'fcmTokens': FieldValue.arrayRemove([oldToken]),
           });
         }
-        await _saveTokenToUserSettings(userId, freshToken);
       } else {
         AppLogger.debug('FcmService', 'FCM token unchanged');
       }
@@ -552,12 +617,13 @@ class FCMService implements IFCMService {
         final oldToken = _cachedToken;
         _cachedToken = newToken;
 
-        if (oldToken != null) {
+        // Same ordering rule as above: never leave the user tokenless.
+        final saved = await _saveTokenToUserSettings(userId, newToken);
+        if (saved && oldToken != null) {
           await _userSettingsService.updateUserSettings(userId, {
             'fcmTokens': FieldValue.arrayRemove([oldToken]),
           });
         }
-        await _saveTokenToUserSettings(userId, newToken);
       });
     } catch (e) {
       AppLogger.error('FcmService', 'Error refreshing token: $e', e);

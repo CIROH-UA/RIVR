@@ -69,18 +69,61 @@ codesign -d --entitlements :- /tmp/ipa/Payload/Runner.app \
 Verified in build 529: `production`, iOS Team Store Provisioning Profile, signed
 by Apple Distribution: HydroMap LLC.
 
-## Unverified
+## The second cause — nothing ever registered for remote notifications
 
-**Whether a token is now actually issued on device.** The known blocker is gone,
-but nothing has demonstrated a successful registration. Cheapest test: install
-529, open notification settings, and read the DEVICE STATUS row — it is a direct
-readout of `UserSettings.fcmTokens` (`hasToken && !isPending` → green "Device
-registered"), so green means a token reached Firestore. Confirm with a query
-against `users/{uid}.fcmTokens`.
+529 shipped the production entitlement and **still failed**. The entitlement was
+necessary and not sufficient.
 
-**Whether a notification is then delivered.** Separate from registration, and
-needs a favourited reach above its 2-year threshold, or a manual invoke of
-`triggerAlertCheck` / the weekly digest topic.
+`Info.plist` sets `FirebaseAppDelegateProxyEnabled=false`, so Firebase does not
+swizzle the app delegate and will not register on the app's behalf. `AppDelegate`
+implements `didRegisterForRemoteNotificationsWithDeviceToken` and assigns
+`Messaging.apnsToken` correctly — but that callback only fires if registration
+was **requested**, and nothing in the iOS project ever called
+`registerForRemoteNotifications()`. The Dart `requestPermission()` asks the user;
+it does not start APNs registration.
+
+So permission was granted, registration never began, `apnsToken` stayed nil,
+`getAPNSToken()` returned nil forever, the 6-second poll expired, and no token
+was written. **Under no signing configuration could this app have obtained a
+token.** Fixed in 2026.0.2+533 by calling it at launch — safe before permission
+exists, since it only requests a device token and iOS shows nothing until
+`requestPermission()` runs.
+
+## Measured — registration and send both work (2026-08-21)
+
+| | |
+|---|---|
+| DEVICE STATUS row | green, "Device registered" |
+| `users/{uid}.fcmTokens` | **1 token**, written 17:39 UTC |
+| weekly digest triggered manually | function ok in 21.7s |
+| forecasts resolved | all 3 favourites — White, Provo, Dead River |
+| FCM outcome | `📲 Weekly digest sent to tOJIDsbkqgcNF03rXF1TVVchUI52` |
+
+The first FCM token RIVR has ever issued to a real device, after roughly six
+months in which `notification_logs` stayed empty and 17 of 18 users had none.
+
+Tap routing is also measured, not assumed: the digest sends
+`data: {type: "weekly_outlook"}`, `notificationRoute` maps that to
+`AppRoutes.weeklyOutlook`, and 6 tests cover it including precedence over a
+`reachId` in the same payload.
+
+## Still unverified
+
+**Physical delivery to the lock screen.** FCM accepting a message is FCM taking
+custody, not APNs presenting it. Only the device shows this. Cheapest test: look
+at the phone. If it does not arrive, check the function logs for a per-token
+rejection (`UNREGISTERED`, `SenderId mismatch`) — neither appeared on this run,
+which is consistent with success without proving it.
+
+**Flood alerts end to end.** Needs a favourited reach above its 2-year
+threshold. All three of Jerson's are Normal, so silence there is correct
+behaviour rather than a failure.
+
+## All five follow-ups are now done (2026-08-21)
+
+Items 1-4 shipped as phase 4 of ADR 0009; item 5 became the `aps-environment`
+verification step in the release flow. The original list is kept below for the
+record.
 
 ## Worth fixing regardless of the above
 
