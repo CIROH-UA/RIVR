@@ -21,6 +21,21 @@ import UserNotifications
     // Set notification delegate (permission deferred to Flutter side)
     UNUserNotificationCenter.current().delegate = self
 
+    // Ask iOS for an APNs token.
+    //
+    // Info.plist sets FirebaseAppDelegateProxyEnabled=false, so Firebase does
+    // NOT swizzle the app delegate and will not do this for us. Nothing else
+    // did either, so didRegisterForRemoteNotificationsWithDeviceToken below
+    // never fired, Messaging.apnsToken was never set, getAPNSToken() returned
+    // nil forever, and no FCM token was ever issued — see ADR 0008.
+    //
+    // This is safe to call before the user grants permission: it only asks the
+    // system for a device token. iOS still shows nothing until the Dart side
+    // calls requestPermission(), so it does not front-run the permission
+    // prompt. Registering early means the token is ready by the time the user
+    // opts in, rather than racing a 6-second poll.
+    application.registerForRemoteNotifications()
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
