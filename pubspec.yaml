@@ -37,7 +37,7 @@ dependencies:
   firebase_core: ^4.0.0
   firebase_auth: ^6.0.0
   cloud_firestore: ^6.0.0
-  firebase_messaging: ^16.0.0
+  firebase_messaging: ^16.5.0
   # Display push notifications while the app is in the foreground (Android does
   # not auto-display FCM notification payloads when the app is open).
   flutter_local_notifications: ^18.0.1
@@ -79,7 +79,7 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   mockito: ^5.4.4
   build_runner: ^2.4.13
-  fake_cloud_firestore: ^4.0.1
+  fake_cloud_firestore: ^4.2.0
   firebase_auth_mocks: ^0.15.1
   network_image_mock: ^2.1.1
   video_player_platform_interface: ^6.6.0
