@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Release ONLY. TestFlight and App Store builds register against Apple's
+	     production APNs; a build carrying "development" here is refused, so
+	     getAPNSToken() returns null forever and no FCM token is ever issued.
+	     Debug and Profile keep Runner.entitlements (development). -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>
