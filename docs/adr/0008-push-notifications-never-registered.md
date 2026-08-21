@@ -119,6 +119,12 @@ which is consistent with success without proving it.
 threshold. All three of Jerson's are Normal, so silence there is correct
 behaviour rather than a failure.
 
+## All five follow-ups are now done (2026-08-21)
+
+Items 1-4 shipped as phase 4 of ADR 0009; item 5 became the `aps-environment`
+verification step in the release flow. The original list is kept below for the
+record.
+
 ## Worth fixing regardless of the above
 
 1. `_ensureRegistered` returns `granted` when the token is `'pending'`, so the

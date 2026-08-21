@@ -1,6 +1,6 @@
 # 0009 — Notification permission lifecycle
 
-**Status:** Proposed — spec only
+**Status:** Phases 1–4 shipped 2026-08-21; phase 5 outstanding and gating
 **Related:** ADR 0008 (why push never worked)
 
 ## The shape of the problem
@@ -56,7 +56,7 @@ Measured consequences (2026-08-21):
 
 ---
 
-# Phase 1 — Reconcile inherited preferences
+# Phase 1 — Reconcile inherited preferences ✅ SHIPPED
 
 **Problem.** A device inheriting `enableNotifications: true` is never asked.
 
@@ -88,7 +88,7 @@ sense.
 
 ---
 
-# Phase 2 — Prime at first favourite
+# Phase 2 — Prime at first favourite ✅ SHIPPED
 
 **Problem.** New users are never asked at all unless they visit settings.
 
@@ -120,7 +120,7 @@ promise.
 
 ---
 
-# Phase 3 — Denied is a state, not a dead end
+# Phase 3 — Denied is a state, not a dead end ✅ SHIPPED
 
 **Problem.** Denied users see toggles they can flip that do nothing.
 
@@ -145,7 +145,7 @@ promise.
 
 ---
 
-# Phase 4 — Stop the service lying
+# Phase 4 — Stop the service lying ✅ SHIPPED
 
 Four defects from ADR 0008, all of which let a broken state look healthy.
 
@@ -172,7 +172,7 @@ Four defects from ADR 0008, all of which let a broken state look healthy.
 
 ---
 
-# Phase 5 — Prove it on real devices
+# Phase 5 — Prove it on real devices ⬜ OUTSTANDING
 
 Config review is not evidence. ADR 0008 exists because four layers each reported
 success while nothing was delivered.
@@ -225,3 +225,72 @@ notification types. Consequences to hold to:
 prevents new lies. Phase 2 is growth and should not ship before the states it
 produces are handled. Phase 4 is hygiene, best done while the call sites are
 open. Phase 5 gates the release.
+
+
+---
+
+# What shipped (2026-08-21)
+
+**44 guard tests across phases 1–4; 839 green overall.** Everything below is in
+`development`, unreleased at time of writing.
+
+## Phase 1
+
+`reconcileDevice()` on the settings page — not at cold launch, which is the
+reliable way to lose the permission permanently. Asks at most once per session
+and never when denied, so calling it on every page open is safe.
+
+**Guard 5 not met.** The device proof for `notDetermined` could not be taken:
+Android would not return to never-asked. `pm reset-permissions` leaves the
+user-set denial in place, so the OS reported `permanentlyDenied` and the code
+correctly declined to prompt — which is Guard 2 passing on hardware, not Guard 1.
+Reaching a genuine never-asked state needs `pm clear` or a reinstall, which signs
+the user out. **Folded into phase 5**, whose matrix requires a fresh install
+anyway.
+
+## Phase 2
+
+The existing banner was shown whenever notifications were off, routed to the
+settings page, used generic copy, and dismissed permanently. It is now the soft
+ask: names the river just saved, asks inline, Enable / Not now.
+
+**Dismissal now expires after 30 days.** One distracted tap should not cost
+someone notifications forever with no route back except finding the settings
+page. Legacy permanent dismissals are migrated to a timestamp so those users are
+asked again too.
+
+## Phase 3
+
+Verified on device in both directions. Denied: toggles off and inert, "Delivered
+Fridays" hidden, blocked row with a Settings route. Granted externally then
+resumed: toggles green, schedule back, "2 devices registered" — with no tap
+inside the app.
+
+Only the denied → granted *transition* registers, so ordinary app switching does
+not rewrite the token array.
+
+## Phase 4
+
+The rotation fix is **ordering, not atomicity**. Firestore refuses `arrayRemove`
+and `arrayUnion` on the same field in one write, so rotation cannot be atomic and
+the order is the whole safety property. The previous code's comment claimed
+"atomically" while doing remove-then-add — precisely backwards.
+
+**A guard that nearly wasn't real.** The first version asserted `arrayUnion` vs
+`arrayRemove` by stringifying the sentinel; both render as
+`FieldValue(Instance of MethodChannelFieldValue)`, so the test would have passed
+against the broken code. It now counts write *attempts*, with the spy recording
+even those that throw — which is what makes "the removal was never attempted"
+observable from outside at all.
+
+## Phase 5 — what is still needed
+
+Neither of these can be supplied from this machine:
+
+- **A fresh iOS install**, to reach a genuine `notDetermined` and exercise the
+  prime → Enable → granted path end to end.
+- **A real Android device**, or a `google_apis_playstore` AVD signed into a
+  Google account. The `google_apis` emulator used here obtains tokens and
+  accepts sends but never completes FCM's connection (`FcmRetry`,
+  `GCM_HB_ALARM`), so it cannot demonstrate delivery and is **not admissible
+  evidence**.
