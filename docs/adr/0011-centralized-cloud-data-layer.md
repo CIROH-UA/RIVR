@@ -94,6 +94,23 @@ answer does not matter.
     latest available; making that true is our job. A signal appears only when we
     *know* we are out of sync.
 13. **The map's coloured streams and legend are finished and out of scope.**
+14. **The store holds one canonical unit; conversion happens at read.** Today
+    `NwmDataSource.fetch` stamps the payload with `_unitService.currentFlowUnit`
+    — *the fetching user's* preference. A per-reach document shared between a
+    CFS user and a CMS user cannot carry one user's unit. `RiverDataEntry.unit`
+    already exists for exactly this ("read-time conversion goes from this to the
+    user's current unit"); the store must populate it with the upstream native
+    unit and never with a user preference.
+15. **Derived values are computed in exactly one place.** `weekly-digest.ts:242`
+    has `categoryIndexFor()` server-side while the client classifies
+    independently — two implementations of one rule, which is the drift ADR 0002
+    exists to prevent. Either the store carries the derived values and the client
+    renders them, or the client derives and the server reads the same code. It
+    cannot be both.
+16. **Cached payloads carry a schema version.** `RiverDataEntry` has key, window,
+    unit and payload — **no version**. Phase 3 changes the payload shape (storing
+    only `mean`), so an upgraded app would decode old entries against a new
+    reader. Entries without a recognised version are discarded, not parsed.
 
 ## Existing assets this builds on
 
@@ -238,6 +255,13 @@ would grow without bound.
 4. Favouriting a previously-browsed stream renders instantly from cache, with no
    fetch.
 5. A cold cache still works — no path assumes an entry exists.
+6. **Upgrading over an old install does not read stale-shaped entries.** Entries
+   without a recognised schema version are discarded and refetched, not parsed
+   optimistically. Test by installing over a build with the previous payload
+   shape — every user upgrading hits this path exactly once, and a decode failure
+   there is a crash on first launch.
+7. A unit-preference change re-renders from the same cached entry without a
+   refetch, converting at read.
 
 **You are done when** browsing hundreds of streams leaves the cache bounded,
 favourites survive eviction unconditionally, and a stream you looked at earlier
@@ -302,6 +326,16 @@ verifiable before any client depends on it.
    while producing wrong or partial data; exit status has never caught one.
 9. Favouriting a never-viewed reach produces a store document within seconds, not
    at the next hourly run.
+11. **Documents are stored in the upstream native unit**, never a user's
+    preference. Test: two users with opposite unit settings favourite one reach
+    and the document is byte-identical regardless of who triggered the fetch.
+    This is the guard that stops a shared store from being poisoned by whoever
+    happened to fetch first.
+12. **Overlapping runs cannot write backwards.** If a slow run is still going
+    when the next fires, a write carrying an older `referenceTime` must not
+    replace a newer one. Test by interleaving two runs deliberately.
+13. Every stored document carries a schema version, and a reader rejects an
+    unrecognised one rather than parsing it.
 10. Firestore reads and writes per day are **measured** against the documented
     free quota (50k reads / 20k writes) and recorded, so the scaling law —
     distinct reaches × cadence — is confirmed rather than assumed.
@@ -429,6 +463,12 @@ untouched.
    same document.
 4. No new run → no evaluation, no sends.
 5. Time from publication to alert is under one hour, versus up to six today.
+6. **The flood category a user sees and the one the alert fired on are produced
+   by the same code.** `categoryIndexFor()` in `weekly-digest.ts:242` and the
+   client's classification are two implementations of one rule; decision 15 says
+   pick one. Test: a reach near a threshold boundary classifies identically in
+   the notification body and on screen. Reading the same document is not
+   sufficient — identical inputs through different code can still disagree.
 
 **You are done when** an alert fires from data the app is already displaying,
 within an hour of the run that triggered it, and a user sitting above threshold
@@ -582,6 +622,19 @@ Recorded because each of these was wrong or missing in the first draft:
    alongside the repository — a second source of truth, which is the problem this
    ADR exists to solve. Added: a standing delete-as-you-go rule, cache deletion
    as a Phase 5 correctness guard, and Phase 9 as a sweep.
+
+8. **Four drift risks the plan did not cover** (raised by Jerson asking whether
+   it was actually complete). Storage unit was unspecified while `fetch` stamps
+   the *fetching user's* preference; derived values are implemented twice
+   (`categoryIndexFor()` server-side, classification client-side); cached entries
+   carry no schema version although Phase 3 changes the payload shape; and
+   overlapping server runs could write an older run over a newer one. All four
+   would have produced exactly the divergence this ADR exists to remove — three
+   of them silently. Added as decisions 14–16 with guards in Phases 2, 3 and 6.
+
+   *Checked and clear:* the map search widget displays place categories from
+   geocoding, not flow values, so it is not a value surface and needs no
+   migration.
 
 **Correction to an earlier claim.** During discussion it was suggested that
 routing through our cloud would move `nwmApiKey` out of the app. **It does not.**
