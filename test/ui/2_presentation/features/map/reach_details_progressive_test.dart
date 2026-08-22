@@ -210,23 +210,29 @@ void main() {
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
       await _settle(t);
 
-      expect(repo.requested, isNot(contains(ForecastProduct.mediumRange)),
-          reason: 'the sheet renders no forecast series — it must not fetch one');
-      expect(repo.requested, isNot(contains(ForecastProduct.reachSummary)),
+      // The distinction that matters is *blocking* vs *background*. The sheet's
+      // own reads — the ones first paint waits on — must be the three narrow
+      // products. reachSummary is warmed afterwards for the forecast page and
+      // is covered by guard 5.
+      final blocking = repo.requested.take(3).toSet();
+      expect(blocking, {
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      }, reason: 'first paint must not wait on the 156 KB bundle');
+      expect(blocking, isNot(contains(ForecastProduct.mediumRange)));
+      expect(blocking, isNot(contains(ForecastProduct.reachSummary)),
           reason: 'reachSummary drags medium range in behind it');
-      expect(repo.requested, contains(ForecastProduct.reachMetadata));
-      expect(repo.requested, contains(ForecastProduct.analysisAssimilation));
-      expect(repo.requested, contains(ForecastProduct.returnPeriods));
     });
   });
 
-  group('guard 5 — no speculative fetch rides along with the sheet', () {
+  group('guard 5 — the sheet warms what the next screen reads, nothing else', () {
     // The prefetch this guard used to describe was removed: it warmed
     // ForecastProduct.longRange, but reach_forecast_page reads `reachSummary`
     // and takes its long-range series from ReachDataProvider, so nothing ever
     // read the warmed entry. It was 63 KB and a 30.5 s median on every tap for
     // no benefit. See ADR 0011 Phase 1.
-    testWidgets('the sheet issues exactly its three reads and nothing else',
+    testWidgets('the sheet reads three products and warms only reachSummary',
         (t) async {
       final repo = _RecordingRepo();
       _register(repo);
@@ -234,12 +240,19 @@ void main() {
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
       await _settle(t);
 
-      expect(repo.requested.toSet(), {
-        ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
-        ForecastProduct.returnPeriods,
-      }, reason: 'a fourth read here is speculative cost on every stream tap');
-      expect(repo.requested, isNot(contains(ForecastProduct.longRange)));
+      expect(repo.requested, isNot(contains(ForecastProduct.longRange)),
+          reason: 'nothing reads that product — it was pure cost per tap');
+      expect(repo.requested, isNot(contains(ForecastProduct.mediumRange)));
+
+      // reachSummary IS warmed, because reach_forecast_page reads exactly that
+      // key. Before this phase the sheet read it directly, so "See forecast"
+      // was already warm; splitting into narrow products would otherwise have
+      // moved the whole bundled wait onto that tap.
+      expect(repo.requested, contains(ForecastProduct.reachSummary),
+          reason: '"See forecast" must not become slower than before Phase 1');
+      final own = repo.requested.take(3).toSet();
+      expect(own, isNot(contains(ForecastProduct.reachSummary)),
+          reason: 'the warm must not be one of the sheet\'s first-paint reads');
     });
   });
 
@@ -346,6 +359,31 @@ void main() {
 
       expect(find.textContaining('Failed to load'), findsOneWidget,
           reason: 'total failure must reach a terminal state, never a spinner');
+
+      // REGRESSION: the card used to say the same thing whatever broke, and
+      // offered no way out.
+      expect(find.textContaining('current flow'), findsOneWidget,
+          reason: 'the card must name what failed');
+      expect(find.text('Retry'), findsOneWidget,
+          reason: 'a terminal state with no way out is a dead end');
+    });
+
+    testWidgets('Retry re-issues the reads', (t) async {
+      final repo = _RecordingRepo(failures: {
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+      final before = repo.requested.length;
+
+      await t.tap(find.text('Retry'));
+      await _settle(t);
+
+      expect(repo.requested.length, greaterThan(before));
     });
   });
 }

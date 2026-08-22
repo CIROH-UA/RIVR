@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -21,12 +22,17 @@ import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_action_buttons.dart';
 
-/// OPTIMIZED Bottom sheet with efficient return periods loading
-/// Strategy: Progressive loading with immediate flow data enhancement
-/// 1. Load overview data (current flow) immediately
-/// 2. Load return periods in parallel (small, fast request)
-/// 3. Update flow classification as soon as return periods arrive
-/// 4. Cache return periods separately for future use
+/// Bottom sheet for a tapped stream, loaded progressively (ADR 0011 Phase 1).
+///
+/// Three narrow reads are issued together and each renders the moment it lands:
+/// identity (name/coords), current flow, and return-period thresholds. The
+/// flood category is derived once flow and thresholds have both arrived. They
+/// fail independently, so a river can be named when no flow exists anywhere —
+/// which is not hypothetical: on 2026-08-22 NOAA's `/streamflow` returned 504
+/// for every series while `/reaches/{id}` kept answering.
+///
+/// `reachSummary` is warmed in the background afterwards, because that is the
+/// key the forecast page reads.
 ///
 /// Layout: current flow and the days ahead sit side by side as equal tiles
 /// ([ReachFlowTiles]) over the flood ladder, and reach metadata is collapsed
@@ -68,6 +74,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   String? _flowCategory;
   double? _latitude;
   double? _longitude;
+
+  /// Which parts failed, so the error card can name them instead of saying
+  /// "Failed to load reach details" whatever went wrong.
+  final Set<String> _failedProducts = {};
 
   @override
   void initState() {
@@ -314,6 +324,9 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
             ],
           ),
           const SizedBox(height: 8),
+          // Named, not generic: which part failed changes what the user can do
+          // about it, and a sheet that always says the same thing whatever
+          // broke teaches people to ignore it.
           Text(
             _errorMessage!,
             style: TextStyle(
@@ -321,9 +334,31 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
               color: CupertinoColors.label.resolveFrom(context),
             ),
           ),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: CupertinoButton(
+              padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
+              onPressed: _retryLoad,
+              child: const Text('Retry', style: TextStyle(fontSize: 14)),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Re-run the load. The reads are cheap and independent, so retrying all
+  /// three is simpler than tracking which to repeat, and a user who taps Retry
+  /// wants the sheet to work — not a partial repair.
+  void _retryLoad() {
+    setState(() {
+      _errorMessage = null;
+      _isLoadingFlow = true;
+      _isLoadingClassification = true;
+    });
+    _loadDataProgressively();
   }
 
   Widget _buildNoFlowDataCard() {
@@ -433,9 +468,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     final started = DateTime.now();
     var anySucceeded = false;
     var settled = 0;
+    _failedProducts.clear();
 
     // Phase 0 guard 3's device timing, folded into this phase per the ADR.
-    void logTiming(String what, bool ok) => AppLogger.info(
+    void logTiming(String what, bool ok) => AppLogger.metric(
           'ReachDetailsSheet',
           'timing reach=$reachId product=$what ok=$ok '
               'elapsedMs=${DateTime.now().difference(started).inMilliseconds}',
@@ -450,7 +486,11 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       setState(() {
         _isLoadingFlow = false;
         _isLoadingClassification = false;
-        if (!anySucceeded) _errorMessage = 'Failed to load reach details';
+        if (!anySucceeded) {
+          _errorMessage = _failedProducts.isEmpty
+              ? 'Failed to load reach details'
+              : 'Failed to load ${_failedProducts.join(', ')}';
+        }
       });
     }
 
@@ -479,8 +519,14 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _latitude = m.latitude;
         _longitude = m.longitude;
       });
+      // The place name is decoration, so it is resolved after the title is
+      // already on screen rather than in front of it (ADR 0011 decision 7).
+      if (m.formattedLocation == null || m.formattedLocation!.isEmpty) {
+        _fillPlaceLabel(m.latitude, m.longitude);
+      }
     }).catchError((Object e) {
       logTiming('reachMetadata', false);
+      _failedProducts.add('name');
       AppLogger.warning('ReachDetailsSheet', 'Reach metadata failed: $e');
     }).whenComplete(markSettled));
 
@@ -505,6 +551,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       recomputeCategory();
     }).catchError((Object e) {
       logTiming('analysisAssimilation', false);
+      _failedProducts.add('current flow');
       AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
     }).whenComplete(markSettled));
 
@@ -519,8 +566,49 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       recomputeCategory();
     }).catchError((Object e) {
       logTiming('returnPeriods', false);
+      _failedProducts.add('flood risk');
       AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
     }).whenComplete(markSettled));
+
+    _warmForecastPage(reachId);
+  }
+
+  /// Resolve the place label after the sheet is already usable. Best-effort:
+  /// `GeocodingService` catches internally and yields null rather than throwing.
+  void _fillPlaceLabel(double? lat, double? lon) {
+    unawaited(GeocodingService.placeLabel(lat, lon).then((label) {
+      if (_isCancelled || !mounted || label == null || label.isEmpty) return;
+      setState(() => _formattedLocation = label);
+    }));
+  }
+
+  /// Warm `reachSummary` — the key `reach_forecast_page` actually reads — so
+  /// "See forecast" stays a cache hit.
+  ///
+  /// This is not a nicety. Before this phase the sheet read `reachSummary`
+  /// itself, so opening the forecast page was already warm. Splitting the sheet
+  /// into narrow products removed that side effect and would have moved the
+  /// whole bundled wait onto the "See forecast" tap — making that tap *slower*
+  /// than before the optimisation. Review caught it.
+  ///
+  /// Started after the sheet's own reads are issued and never awaited, so it
+  /// cannot delay first paint. Failures are silent: the forecast page fetches
+  /// for itself regardless.
+  void _warmForecastPage(String reachId) {
+    if (widget.selectedReach.source.isGeoglows) return;
+    unawaited(
+      GetIt.I<IRiverDataRepository>()
+          .read(RiverDataKey(
+            source: ForecastSource.nwm,
+            reachId: reachId,
+            product: ForecastProduct.reachSummary,
+          ))
+          .then((_) => null)
+          .catchError((Object e) {
+            AppLogger.debug('ReachDetailsSheet', 'Warm failed (harmless): $e');
+            return null;
+          }),
+    );
   }
 
   /// GEOGLOWS reach preview: current flow from the proxy (median of the latest

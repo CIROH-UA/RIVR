@@ -8,8 +8,6 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
-import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 
@@ -90,32 +88,17 @@ class NwmDataSource implements IRiverDataSource {
       case ForecastProduct.reachMetadata:
         // The cheap half of the old reachSummary: no flow data, no forecast
         // series. Lets a surface title itself in isolation.
-        var reach = await _forecastService.loadBasicReachInfo(key.reachId);
-
-        // `loadBasicReachInfo` does NOT geocode, but `loadOverviewData` — the
-        // path this replaced — did, and `formattedLocation` is empty unless
-        // both city and state are set. Without this the sheet's Location row
-        // and the share text silently lose the place name on a cold cache.
-        // Cheap in practice: this product is cached for 30 days, so the
-        // geocode happens about once a month per reach.
-        if (reach.city == null || reach.state == null) {
-          try {
-            final location = await GeocodingService.reverseGeocode(
-              reach.latitude,
-              reach.longitude,
-            );
-            reach = reach.copyWith(
-              city: location['city'],
-              state: location['state'],
-            );
-          } catch (e) {
-            // A missing place name is cosmetic; the river still has a name.
-            AppLogger.warning(
-              'NwmDataSource',
-              'Reverse geocode failed for ${key.reachId}: $e',
-            );
-          }
-        }
+        // Deliberately does NOT geocode. An earlier version did, to preserve
+        // the place name that `loadOverviewData` used to fill — but
+        // `GeocodingService.reverseGeocode` catches internally and returns a
+        // null map rather than throwing, so nothing bounded it except a 30 s
+        // HTTP timeout. That put a second, unbounded network hop in front of
+        // the one call this product exists to keep fast.
+        //
+        // The place name is decoration and is filled off the critical path by
+        // the consumer (ADR 0011 decision 7). `formattedLocation` here is
+        // whatever the reach already knew.
+        final reach = await _forecastService.loadBasicReachInfo(key.reachId);
 
         return SourceFetchResult(
           payload: ReachMetadataPayload.encode(

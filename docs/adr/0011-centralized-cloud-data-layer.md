@@ -302,9 +302,16 @@ value rather than a stopgap.
 **Guards.**
 1. The sheet is on screen in **under 500 ms** with a skeleton, before any network
    call completes. *The tile carries only `station_id` — `_riverName` comes from
-   the fetch (`reach_details_bottom_sheet.dart:434`), so the sheet cannot be
-   titled instantly.* `fetchReachInfo` is the cheapest call at ~0.5 s median and
-   0.5 KB; it must be prioritised so the title lands first.
+   the fetch, so the sheet cannot be titled instantly.*
+
+   **Open, and honestly unmet.** There is no test and no device measurement, and
+   "prioritised" is aspirational: the three reads are issued together with no
+   head start for `reachMetadata`. What *has* been fixed is the thing that
+   invalidated the guard's premise — an earlier attempt at the Location fix put
+   a serial `reverseGeocode` inside `reachMetadata`, and since that helper
+   catches internally and never throws, nothing bounded it but a 30 s HTTP
+   timeout. Geocoding now happens after the title is on screen. Closing this
+   guard needs the Phase 0 device capture.
 2. With four calls of 1s / 5s / 10s / 30s, every value appears as it lands —
    the 1s value is visible while the 30s call is outstanding.
 3. Medium range is **not** requested until the forecast section is reached.
@@ -313,20 +320,34 @@ value rather than a stopgap.
    not cost the river's name or its flow.
 5. **The sheet issues exactly its three reads and nothing else.**
 
-   *Corrected 2026-08-22, premise was wrong.* This guard originally required
-   prefetching `longRange` so "See forecast" would not wait twice. Review found
-   the forecast page never reads that product: it reads `reachSummary`, and
-   takes its long-range series from `ReachDataProvider`. The prefetch warmed an
-   entry nothing read — 63 KB and a 30.5 s median on every stream tap, for
-   nothing. It is removed. Prefetching returns in **Phase 5**, once the forecast
-   page reads through narrow products and there is something real to warm.
+   *Corrected twice, and the second correction matters more than the first.*
 
-   Ordering assertions are not sufficient here: review mutation-tested the
+   Originally this required prefetching `longRange`. Review found the forecast
+   page never reads that product — it reads `reachSummary` and takes its
+   long-range series from `ReachDataProvider` — so the prefetch warmed an entry
+   nothing read: 63 KB and a 30.5 s median per tap for nothing. Removed.
+
+   **But deleting it outright was also wrong, and review caught that too.**
+   Before this phase the sheet read `reachSummary` *itself*, which is the same
+   key the forecast page reads, on an hourly TTL — so "See forecast" was already
+   a warm hit. Splitting the sheet into narrow products silently removed that
+   side effect, which would have moved the entire bundled wait onto the "See
+   forecast" tap and made it **slower than before the optimisation**. A local
+   improvement that is a global regression.
+
+   The sheet therefore warms `reachSummary` in the background, after its own
+   reads are issued and never awaited. Guard: `reachSummary` is requested, but
+   is not among the three the first paint waits on.
+
+   Ordering assertions alone are not sufficient: review mutation-tested the
    original guard by moving the prefetch to start concurrently with first paint
    and it still passed, because it only checked position in a list recorded at
    call time.
 6. With the network black-holed, the sheet reaches a terminal, non-spinner state
-   naming what failed and offering retry.
+   **naming what failed** — "Failed to load current flow", not a constant
+   string — **and offering Retry**. A card that says the same thing whatever
+   broke teaches people to ignore it, and a terminal state with no way out is a
+   dead end.
 7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** tapping any stream on the map — favourite or not, on a cold

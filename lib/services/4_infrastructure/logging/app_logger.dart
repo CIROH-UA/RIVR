@@ -24,6 +24,15 @@ class AppLogger {
     }
   }
 
+  /// Timing/measurement lines — **always logs**, including release.
+  ///
+  /// [info] is `kDebugMode`-only, which silently defeats any measurement taken
+  /// on a release build. ADR 0011 Phase 0 needs warm/cold/degraded numbers from
+  /// a real device, so instrumentation uses this instead.
+  static void metric(String tag, String message) {
+    developer.log('METRIC: $message', name: tag, level: 800);
+  }
+
   /// Potential issues that don't prevent operation — always logs.
   static void warning(String tag, String message) {
     developer.log('WARNING: $message', name: tag, level: 900);
