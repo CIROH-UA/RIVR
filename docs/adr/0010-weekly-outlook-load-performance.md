@@ -1,6 +1,6 @@
 # 0010 — The Weekly Outlook takes minutes to load
 
-**Status:** Problem measured; six-phase plan with gates below; nothing implemented
+**Status:** Problem measured; six-phase plan with gates below; Option G (server-maintained favourites store) is the recommended destination; nothing implemented
 **Related:** ADR 0001 (river data layer SSOT), ADR 0008 (push notifications)
 
 ## Symptom
@@ -140,6 +140,130 @@ cold cache — which is precisely the case a Friday-morning digest creates.
 
 **B** is worth doing whenever the NWM path is touched, but is subsumed by A if
 the SSOT source already requests narrowly.
+
+## Option G — a server-maintained store for favourited reaches
+
+Raised by Jerson, 2026-08-21: *"why isn't it better to just have a place in the
+cloud where all the streams that are added as favorites are stored and recorded,
+and make the app read from there only and cache until the storage gets new
+values?"*
+
+This generalises option D from "a snapshot at digest time" to "the favourites
+data layer". The research below says it is the strongest option available, and
+that most of it already exists.
+
+### Measured — the fan-out already runs, and already throws the data away
+
+`checkRiverAlerts` runs **four times a day** — four Cloud Scheduler jobs at
+00/06/12/18 America/Denver — and calls `batchFetchReachData`, which per distinct
+favourited reach fetches, in parallel:
+
+- `getForecast` → **short range + medium range** (`ReachData.forecast`)
+- `getReturnPeriods`
+- `getRiverName`
+
+It evaluates alerts against that and **discards it**. Option G is not a new
+pipeline; it is persisting a fan-out that is already paid for.
+
+### Measured — the scale is bounded by favourites, not by the network
+
+Counted from Firestore, 2026-08-21:
+
+| | |
+|---|---|
+| users | 18 |
+| users with ≥1 favourite | 14 |
+| favourite rows | 36 |
+| **distinct reaches to fetch** | **29** |
+
+29 reaches × 4 runs/day ≈ **116 fetches/day, already happening**. Persisting adds
+roughly the same number of Firestore writes. Free quota is documented at 50,000
+reads and 20,000 writes per day, so the volume is ~170× below the write
+threshold. *(Caveat: that quota table is documented for projects without billing
+enabled and RIVR is on Blaze; the per-write list price could not be extracted —
+the pricing page truncates. The conclusion is insensitive to this, being three
+orders of magnitude clear.)*
+
+**The scaling law matters more than today's number:** cost grows with *distinct
+favourited reaches × cadence*, not with users and not with the 2.7M channel
+network. Overlap between users is free. This is the same economics as the flood
+tileset, which the project already runs successfully.
+
+### Measured — cadence: 4×/day is exactly right for the broken page
+
+NWM does not publish everything at one rate. From `NwmDataSource.validUntil`,
+which is the in-repo authority:
+
+| product | publishes | served from a 6-hourly store |
+|---|---|---|
+| **medium range** | every 6h (00/06/12/18Z) | **exact — no fresher data exists** |
+| long range | every 6h | exact |
+| return periods | static (30-day TTL) | trivially fine |
+| short range / analysis | **hourly** | up to 6h stale |
+
+**The Weekly Outlook reads medium range.** So for the page this ADR is about, a
+6-hourly server store is not a compromise — it matches the model's own cadence.
+Current flow on the favourites cards is the product that genuinely wants hourly,
+and should stay on-demand.
+
+### Corrected — the cron is aligned, contrary to a claim made earlier
+
+An earlier assertion in discussion — that the Denver-scheduled cron is offset
+from the UTC model cycles and would need re-aligning — is **wrong for most of the
+year**:
+
+| | cron fires (UTC) | vs cycles 00/06/12/18Z |
+|---|---|---|
+| Mar–Nov (MDT) | 06, 12, 18, 00 | **exactly on cycle** |
+| Nov–Mar (MST) | 07, 13, 19, 01 | one hour after |
+
+Eight months a year it is exactly aligned; the other four it fires one hour
+*late*, which is the safe direction — the cycle has certainly published. If
+anything the **MDT alignment is the riskier one**, since firing at cycle time
+races publication; the client adds a 5-minute skew for precisely this reason
+(`nwm_data_source.dart:34`). Any store built on this schedule should carry a
+similar skew rather than being re-aligned.
+
+### Trade-offs, stated honestly
+
+**For:** instant render; works offline; NOAA's 30s×3 retry ladder moves to a
+server where retries are free and invisible; one fetch serves every user sharing
+a reach; and the app and the digest agree **by construction** — which is exactly
+the class of divergence ADR 0002 exists to prevent.
+
+**Against:**
+1. **It cannot be the only path.** Users browse and search reaches they have not
+   favourited; the client fetch stays for those. Option G shrinks the hot path,
+   it does not delete it.
+2. **A newly-added favourite is not in the store** until the next cycle — needs
+   write-through on add, or the client path as fallback.
+3. **It makes the backend a dependency for viewing data**, not just for
+   notifications. A store outage must degrade to the client path, not to a blank
+   page.
+4. **Two computations of the same derived values** (category, trend, peak) unless
+   the client reads them rather than recomputing — ADR 0002's problem returning
+   in a new place.
+
+### Effect on the plan
+
+Option G does not invalidate the phases; it changes what they are for.
+
+- **Phase 5 stops being conditional** and becomes the destination.
+- **Phase 3 remains worth doing** — it is the fallback path when the store is
+  cold, missing, or the reach is not a favourite.
+- **Phases 1, 2 and 4 are unaffected.** Per-row rendering, a bounded wait and
+  off-critical-path geocoding are UI resilience and matter whatever feeds them.
+- **Phase 0 still comes first.** If measurement shows the medium-range fetch is
+  the dominant cost, Option G is the answer and Phase 3 is the safety net; if the
+  cost is elsewhere (geocode, parse, return periods), the ordering changes.
+
+**Measured — the retained payload is sufficient.** `ForecastData`
+(`notification-service.ts:45`) is `values: Array<{value, validTime}>` — the full
+point series, not extrema. Together with return periods and river name, that
+covers every field `OutlookRow` needs except `location`, which the app already
+persists as `favoriteLabels` on the user doc. So a store built from
+`batchFetchReachData`'s existing output requires **no additional fetching** — the
+sparkline and `peakTime` both derive from the series it already holds.
 
 ## What `_buildNwmRow` actually needs
 
