@@ -4,6 +4,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
+import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
 /// Read-side codecs for the two narrow NWM products the map detail sheet reads
 /// instead of the bundled `reachSummary` (ADR 0011 Phase 1).
@@ -36,7 +37,14 @@ class CurrentFlowPayload {
     try {
       final response = ForecastResponseDto.fromApiResponse(entry.payload);
       flow = forecastService.getCurrentFlow(response);
-    } catch (_) {
+    } catch (e) {
+      // Logged, not swallowed: a decode bug and "upstream had no data" look
+      // identical on screen, and review found exactly that hiding in a test
+      // fixture. Without this line nothing would ever notice.
+      AppLogger.warning(
+        'CurrentFlowPayload',
+        'Could not decode current flow for ${entry.key.storageKey}: $e',
+      );
       return null;
     }
     if (flow == null) return null;
@@ -70,7 +78,11 @@ class ReturnPeriodPayload {
     Map<int, double>? native;
     try {
       native = ReachDataDto.fromReturnPeriodApi(raw).toEntity().returnPeriods;
-    } catch (_) {
+    } catch (e) {
+      AppLogger.warning(
+        'ReturnPeriodPayload',
+        'Could not decode return periods for ${entry.key.storageKey}: $e',
+      );
       return null;
     }
     if (native == null || native.isEmpty) return null;

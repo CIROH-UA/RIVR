@@ -8,7 +8,8 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 /// Split out of `reachSummary` for ADR 0011 Phase 1. The map detail sheet used
 /// to wait on a single bundled read that fetched reach info, current flow,
 /// return periods *and* a 156 KB medium-range forecast serially before drawing
-/// anything — roughly 45 s at median. The forecast series was never rendered.
+/// anything. The forecast series was never rendered. (Per-call medians are in
+/// ADR 0011; the end-to-end total is not yet measured on device.)
 ///
 /// Nothing here is unit-dependent, so unlike the flow payloads there is no
 /// read-time conversion: a river's name and coordinates are the same in CFS and

@@ -3,6 +3,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
@@ -43,6 +44,24 @@ class _FakeNoaa implements INoaaApiService {
 
 class _FakeForecast implements IForecastService {
   int detailCalls = 0;
+  int basicCalls = 0;
+
+  @override
+  Future<ReachData> loadBasicReachInfo(String reachId) async {
+    basicCalls++;
+    // city/state already present, so the data source's geocode fallback is
+    // skipped — that path needs the network and is not what this test pins.
+    return ReachData(
+      reachId: reachId,
+      riverName: 'Test River',
+      latitude: 40.0,
+      longitude: -111.0,
+      city: 'Provo',
+      state: 'UT',
+      availableForecasts: const ['short_range'],
+      cachedAt: DateTime.utc(2026, 8, 22, 12),
+    );
+  }
 
   @override
   Future<ReachDetailsData> loadReachDetailsData(String reachId) async {
@@ -154,6 +173,34 @@ void main() {
         nwm.validUntil(ForecastProduct.returnPeriods, now),
         now.add(const Duration(days: 30)),
       );
+    });
+
+    test('validUntil: reach metadata is static (~30 days)', () {
+      // A river's name and coordinates do not change. Untested, this TTL was
+      // defended only by a comment.
+      final now = DateTime.utc(2026, 7, 10, 12, 0);
+      expect(
+        nwm.validUntil(ForecastProduct.reachMetadata, now),
+        now.add(const Duration(days: 30)),
+      );
+    });
+
+    test('reachMetadata is advertised as supported', () {
+      expect(nwm.supportedProducts, contains(ForecastProduct.reachMetadata));
+    });
+
+    test('reachMetadata uses the cheap reach-info call, not the full bundle',
+        () async {
+      final result = await nwm.fetch(const RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '23021904',
+        product: ForecastProduct.reachMetadata,
+      ));
+      expect(forecast.basicCalls, 1);
+      expect(forecast.detailCalls, 0,
+          reason: 'the whole point is avoiding loadReachDetailsData');
+      expect(result.payload['riverName'], 'Test River');
+      expect(result.payload['latitude'], 40.0);
     });
 
     test('validUntil throws for unsupported products', () {

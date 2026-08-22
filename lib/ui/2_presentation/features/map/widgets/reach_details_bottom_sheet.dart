@@ -413,8 +413,8 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   ///
   /// This replaced a single `reachSummary` read, which looked cheap at the call
   /// site and was not: building it fetched reach info, current flow, return
-  /// periods **and** a medium-range forecast *serially* — ~45 s at median, with
-  /// the 156 KB forecast series accounting for most of it. The sheet never
+  /// periods **and** a medium-range forecast *serially*, the 156 KB / 30.8 s
+  /// forecast series accounting for most of it. The sheet never
   /// rendered that series; the forecast peak it shows comes from the map tile
   /// (`selectedReach.mapFloodCategoryIndex`), not from a fetch. So it is not
   /// deferred here, it is simply not requested.
@@ -429,15 +429,47 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     RiverDataKey keyFor(ForecastProduct p) =>
         RiverDataKey(source: ForecastSource.nwm, reachId: reachId, product: p);
 
-    // Kicked off together — nothing here is ordered.
-    final metadataFuture = repo.read(keyFor(ForecastProduct.reachMetadata));
-    final flowFuture = repo.read(keyFor(ForecastProduct.analysisAssimilation));
-    final thresholdsFuture = repo.read(keyFor(ForecastProduct.returnPeriods));
-
+    final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    final started = DateTime.now();
     var anySucceeded = false;
+    var settled = 0;
 
-    // 1. Identity — cheapest call, so the sheet titles itself first.
-    unawaited(metadataFuture.then((entry) {
+    // Phase 0 guard 3's device timing, folded into this phase per the ADR.
+    void logTiming(String what, bool ok) => AppLogger.info(
+          'ReachDetailsSheet',
+          'timing reach=$reachId product=$what ok=$ok '
+              'elapsedMs=${DateTime.now().difference(started).inMilliseconds}',
+        );
+
+    // A read has finished, whatever the outcome. Only once all three have
+    // settled with nothing to show is this actually a failure — a named river
+    // with no flow is a usable sheet.
+    void markSettled() {
+      settled++;
+      if (settled < 3 || _isCancelled || !mounted) return;
+      setState(() {
+        _isLoadingFlow = false;
+        _isLoadingClassification = false;
+        if (!anySucceeded) _errorMessage = 'Failed to load reach details';
+      });
+    }
+
+    // Recomputed whenever either input lands, so whichever arrives second
+    // completes the category. Derived via FlowClassification — the single
+    // canonical classifier (ADR 0002); nothing re-implements it here.
+    Map<int, double>? thresholds;
+    void recomputeCategory() {
+      final flow = _currentFlow;
+      if (flow == null || thresholds == null) return;
+      setState(() => _flowCategory =
+          FlowClassification.category(flow, thresholds));
+      _notifyCategoryColor();
+    }
+
+    // 1. Identity — cheapest call, so the sheet titles itself first. During the
+    // 2026-08-22 outage this kept answering while every flow series 504'd.
+    unawaited(repo.read(keyFor(ForecastProduct.reachMetadata)).then((entry) {
+      logTiming('reachMetadata', entry != null);
       if (_isCancelled || !mounted || entry == null) return;
       final m = ReachMetadataPayload.decode(entry);
       anySucceeded = true;
@@ -448,101 +480,47 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _longitude = m.longitude;
       });
     }).catchError((Object e) {
+      logTiming('reachMetadata', false);
       AppLogger.warning('ReachDetailsSheet', 'Reach metadata failed: $e');
-    }));
+    }).whenComplete(markSettled));
 
-    // 2. Current flow, and 3. thresholds. The category needs both, so it is
-    // derived once they have each landed — via FlowClassification, which is the
-    // single canonical classifier (ADR 0002). Nothing re-implements it here.
-    try {
-      final results = await Future.wait([
-        flowFuture.catchError((Object e) {
-          AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
-          return null;
-        }),
-        thresholdsFuture.catchError((Object e) {
-          AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
-          return null;
-        }),
-      ]);
-      if (_isCancelled || !mounted) return;
-
-      final unitService = GetIt.I<IFlowUnitPreferenceService>();
-      final flowEntry = results[0];
-      final thresholdEntry = results[1];
-
-      double? flow;
-      if (flowEntry != null) {
-        flow = CurrentFlowPayload.decode(
-          flowEntry,
-          GetIt.I<IForecastService>(),
-          unitService,
-        );
-        anySucceeded = true;
-      }
-      Map<int, double>? thresholds;
-      if (thresholdEntry != null) {
-        thresholds = ReturnPeriodPayload.decode(thresholdEntry, unitService);
-        anySucceeded = true;
-      }
-
+    // 2. Current flow — rendered the moment it lands. It is deliberately NOT
+    // joined with the thresholds read: gating the headline number on a separate
+    // call means a slow threshold fetch hides a flow value that is ready.
+    unawaited(
+        repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
+      logTiming('analysisAssimilation', entry != null);
+      if (_isCancelled || !mounted || entry == null) return;
+      final flow = CurrentFlowPayload.decode(
+        entry,
+        GetIt.I<IForecastService>(),
+        unitService,
+      );
+      if (flow == null) return;
+      anySucceeded = true;
       setState(() {
         _currentFlow = flow;
-        _flowCategory = (flow != null && thresholds != null)
-            ? FlowClassification.category(flow, thresholds)
-            : null;
         _isLoadingFlow = false;
-        _isLoadingClassification = false;
       });
-      _notifyCategoryColor();
-    } finally {
-      // Wait for identity too before deciding the sheet failed outright — a
-      // named river with no flow is a usable sheet, not an error.
-      await metadataFuture.catchError((Object _) => null);
-      if (!_isCancelled && mounted && !anySucceeded) {
-        setState(() {
-          _errorMessage = 'Failed to load reach details';
-          _isLoadingFlow = false;
-          _isLoadingClassification = false;
-        });
-      }
-    }
+      recomputeCategory();
+    }).catchError((Object e) {
+      logTiming('analysisAssimilation', false);
+      AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
+    }).whenComplete(markSettled));
 
-    _prefetchLongRange(reachId);
-
-    AppLogger.info(
-      'ReachDetailsSheet',
-      'Details loaded, flow: $_currentFlow, category: $_flowCategory',
-    );
-  }
-
-  /// Warm the long-range forecast so "See forecast" does not make the user wait
-  /// a second time for a 63 KB / 30.5 s-median call they have already earned.
-  ///
-  /// Deliberately started only after the sheet's own reads have settled, so it
-  /// cannot compete for first paint. Failures are silent — 2 of 9 long-range
-  /// calls returned 504 while measuring, and a failed prefetch must cost the
-  /// user nothing: "See forecast" still fetches for itself.
-  void _prefetchLongRange(String reachId) {
-    if (widget.selectedReach.source.isGeoglows) return;
-    unawaited(
-      GetIt.I<IRiverDataRepository>()
-          .read(
-            RiverDataKey(
-              source: ForecastSource.nwm,
-              reachId: reachId,
-              product: ForecastProduct.longRange,
-            ),
-          )
-          .then((_) => null)
-          .catchError((Object e) {
-            AppLogger.debug(
-              'ReachDetailsSheet',
-              'Long-range prefetch failed (harmless): $e',
-            );
-            return null;
-          }),
-    );
+    // 3. Thresholds — only the flood category depends on these.
+    unawaited(repo.read(keyFor(ForecastProduct.returnPeriods)).then((entry) {
+      logTiming('returnPeriods', entry != null);
+      if (_isCancelled || !mounted || entry == null) return;
+      thresholds = ReturnPeriodPayload.decode(entry, unitService);
+      if (thresholds == null) return;
+      anySucceeded = true;
+      setState(() => _isLoadingClassification = false);
+      recomputeCategory();
+    }).catchError((Object e) {
+      logTiming('returnPeriods', false);
+      AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
+    }).whenComplete(markSettled));
   }
 
   /// GEOGLOWS reach preview: current flow from the proxy (median of the latest

@@ -22,9 +22,10 @@ enum ForecastProduct {
   ///
   /// **Heavy — prefer the narrow products below where a surface needs only part
   /// of this.** Building it fetches reach info, current flow, return periods AND
-  /// a medium-range forecast (156 KB, 30.8 s median as measured in ADR 0011),
-  /// serially. The map detail sheet paid all of that and rendered none of the
-  /// forecast series.
+  /// a medium-range forecast, serially. The medium-range call alone measured
+  /// 156 KB at a 30.8 s median (ADR 0011); the end-to-end total has not been
+  /// measured on device. The map detail sheet paid all of it and rendered none
+  /// of the forecast series.
   reachSummary,
 
   /// NWM reach identity: river name, coordinates, place label. Its own product
@@ -34,8 +35,8 @@ enum ForecastProduct {
   ///
   /// It also fails independently: during the 2026-08-22 outage NOAA's
   /// `/streamflow` returned 504 for every series while `/reaches/{id}` kept
-  /// answering in 0.4 s, so this is the one thing that can still be shown when
-  /// flow is unavailable.
+  /// answering in 0.4 s (ADR 0011, "Independently measured endpoints"), so this
+  /// is the one thing that can still be shown when flow is unavailable.
   reachMetadata,
 
   /// NWM short-range forecast (~18 h, hourly).

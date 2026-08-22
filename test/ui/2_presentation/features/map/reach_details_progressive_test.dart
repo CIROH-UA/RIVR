@@ -72,14 +72,27 @@ class _RecordingRepo implements IRiverDataRepository {
 
   final List<ForecastProduct> requested = [];
 
+  /// Wall-clock start of each read. Position in [requested] is not enough:
+  /// review proved a guard asserting only on order still passed when the
+  /// prefetch was moved to start concurrently with first paint.
+  final Map<ForecastProduct, DateTime> startedAt = {};
+
+  /// Products whose read had already completed when a given product started.
+  final Map<ForecastProduct, Set<ForecastProduct>> completedBefore = {};
+  final Set<ForecastProduct> _done = {};
+
   @override
   Future<RiverDataEntry?> read(RiverDataKey key) async {
     requested.add(key.product);
+    startedAt[key.product] = DateTime.now();
+    completedBefore[key.product] = {..._done};
     final d = delays[key.product];
     if (d != null) await Future<void>.delayed(d);
     if (failures.contains(key.product)) {
+      _done.add(key.product);
       throw Exception('simulated failure for ${key.product}');
     }
+    _done.add(key.product);
     return RiverDataEntry(
       key: key,
       window: _window(),
@@ -108,6 +121,24 @@ class _RecordingRepo implements IRiverDataRepository {
               'return_period_5': 200.0,
             },
           ],
+        };
+      case ForecastProduct.analysisAssimilation:
+        // Must be decodable: `fromApiResponse` reads json['reach'], and an
+        // empty map made it throw. Review found that every "passing" test was
+        // silently rendering "not available" instead of a flow value.
+        return {
+          // Mirrors the fields ReachDataDto.fromNoaaApi actually requires —
+          // reachId, name, latitude, longitude and a streamflow list. A
+          // fixture missing any of them throws, which review found was
+          // silently rendering "not available" in every green test.
+          'reach': {
+            'reachId': '9962444',
+            'name': 'White River',
+            'latitude': 40.2,
+            'longitude': -111.6,
+            'streamflow': ['short_range'],
+          },
+          'shortRange': <String, dynamic>{},
         };
       default:
         return <String, dynamic>{};
@@ -189,32 +220,32 @@ void main() {
     });
   });
 
-  group('guard 5 — the long-range prefetch never competes with first paint', () {
-    testWidgets('long range is requested, but only after the sheet\'s own reads',
+  group('guard 5 — no speculative fetch rides along with the sheet', () {
+    // The prefetch this guard used to describe was removed: it warmed
+    // ForecastProduct.longRange, but reach_forecast_page reads `reachSummary`
+    // and takes its long-range series from ReachDataProvider, so nothing ever
+    // read the warmed entry. It was 63 KB and a 30.5 s median on every tap for
+    // no benefit. See ADR 0011 Phase 1.
+    testWidgets('the sheet issues exactly its three reads and nothing else',
         (t) async {
-      final repo = _RecordingRepo(delays: {
-        ForecastProduct.reachMetadata: const Duration(milliseconds: 20),
-        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 30),
-        ForecastProduct.returnPeriods: const Duration(milliseconds: 10),
-      });
+      final repo = _RecordingRepo();
       _register(repo);
 
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
       await _settle(t);
 
-      expect(repo.requested, contains(ForecastProduct.longRange),
-          reason: '"See forecast" must not wait a second time');
-      final firstThree = repo.requested.take(3).toSet();
-      expect(firstThree, isNot(contains(ForecastProduct.longRange)),
-          reason: 'prefetch must start after the sheet\'s own reads, not with them');
+      expect(repo.requested.toSet(), {
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      }, reason: 'a fourth read here is speculative cost on every stream tap');
+      expect(repo.requested, isNot(contains(ForecastProduct.longRange)));
     });
   });
 
   group('guard 2 — values render as they land, not all at once', () {
-    testWidgets('the fast value is on screen while the slow one is outstanding',
-        (t) async {
+    testWidgets('the name appears while flow is still outstanding', (t) async {
       final repo = _RecordingRepo(delays: {
-        // Identity is quick; flow is deliberately glacial.
         ForecastProduct.reachMetadata: const Duration(milliseconds: 50),
         ForecastProduct.analysisAssimilation: const Duration(seconds: 30),
         ForecastProduct.returnPeriods: const Duration(seconds: 30),
@@ -222,8 +253,6 @@ void main() {
       _register(repo);
 
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
-
-      // Past identity, nowhere near the flow calls.
       await t.pump(const Duration(milliseconds: 200));
 
       expect(find.text('White River'), findsOneWidget,
@@ -232,21 +261,56 @@ void main() {
       await t.pump(const Duration(seconds: 31));
       await _settle(t);
     });
+
+    // REGRESSION: the first implementation joined flow and thresholds with
+    // Future.wait, so a slow threshold read hid a flow value that was ready.
+    // This is the guard that catches that.
+    testWidgets('the flow value renders even while thresholds are 30s away',
+        (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.reachMetadata: const Duration(milliseconds: 10),
+        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 20),
+        ForecastProduct.returnPeriods: const Duration(seconds: 30),
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump(const Duration(milliseconds: 200));
+
+      expect(find.textContaining('1.2K'), findsWidgets,
+          reason: 'flow must not wait on a separate threshold call');
+      expect(find.textContaining('not available'), findsNothing);
+
+      await t.pump(const Duration(seconds: 31));
+      await _settle(t);
+    });
+
+    // Review found every previously-"passing" test rendered "not available"
+    // because the fixture could not decode. Pin that a number really shows.
+    testWidgets('a real flow value reaches the screen', (t) async {
+      final repo = _RecordingRepo();
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(find.textContaining('1.2K'), findsWidgets);
+    });
   });
 
-  group('guard 4 — a failed prefetch is silent', () {
-    testWidgets('long-range failure surfaces no error and does not break the sheet',
+  group('guard 4 — one slow read never blocks the others', () {
+    testWidgets('thresholds failing outright still leaves name and flow',
         (t) async {
-      final repo = _RecordingRepo(failures: {ForecastProduct.longRange});
+      final repo = _RecordingRepo(failures: {ForecastProduct.returnPeriods});
       _register(repo);
 
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
       await _settle(t);
 
       expect(find.text('White River'), findsOneWidget);
+      expect(find.textContaining('1.2K'), findsWidgets);
       expect(find.textContaining('Failed to load'), findsNothing,
-          reason: '2 of 9 long-range calls 504d while measuring — a prefetch '
-              'failure must cost the user nothing');
+          reason: 'losing the flood category is not losing the sheet');
     });
   });
 

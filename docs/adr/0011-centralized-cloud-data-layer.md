@@ -32,6 +32,23 @@ The map detail sheet issues **four of these as separate `await`s** — reach inf
 current flow, return periods, medium range — for **~45 s at median** before it
 draws anything.
 
+### Independently measured endpoints
+
+Sampled 2026-08-22 alongside the table above. These are separate services and
+they fail separately, which the design relies on:
+
+| endpoint | latency | payload | notes |
+|---|---|---|---|
+| NOAA `/reaches/{id}` (metadata) | 0.30–1.11 s | ~0.54 KB | stayed **up** at 0.4 s through the full `/streamflow` outage |
+| CIROH `/return-period` | 1.0–9.1 s | 0.2 KB | separate host |
+| GEOGLOWS proxy | ~20 s | 24 KB | our own Cloud Function |
+
+**A full `/streamflow` outage was observed on 2026-08-22**: all five series
+returned HTTP 504 after exactly ~60 s, filtered and unfiltered alike, six
+consecutive attempts — while reach metadata, return periods and GEOGLOWS all
+answered normally. During that window the app could not show a flow value for
+any NWM river, because nothing renders from cache.
+
 ### The 0.3s entries are the tell
 
 Same URL, same reach, sometimes 0.3s and sometimes 60s. Upstream is fast when
@@ -292,10 +309,22 @@ value rather than a stopgap.
    the 1s value is visible while the 30s call is outstanding.
 3. Medium range is **not** requested until the forecast section is reached.
    Assert against a request-recording fake.
-4. A failed long-range prefetch surfaces **no** error, and "See forecast" still
-   works — falling back to its own progressive fetch.
-5. The prefetch starts only after the sheet's own calls resolve, so it cannot
-   compete for the first paint. Assert on request ordering.
+4. One read failing never blocks the others — losing the flood category must
+   not cost the river's name or its flow.
+5. **The sheet issues exactly its three reads and nothing else.**
+
+   *Corrected 2026-08-22, premise was wrong.* This guard originally required
+   prefetching `longRange` so "See forecast" would not wait twice. Review found
+   the forecast page never reads that product: it reads `reachSummary`, and
+   takes its long-range series from `ReachDataProvider`. The prefetch warmed an
+   entry nothing read — 63 KB and a 30.5 s median on every stream tap, for
+   nothing. It is removed. Prefetching returns in **Phase 5**, once the forecast
+   page reads through narrow products and there is something real to warm.
+
+   Ordering assertions are not sufficient here: review mutation-tested the
+   original guard by moving the prefetch to start concurrently with first paint
+   and it still passed, because it only checked position in a list recorded at
+   call time.
 6. With the network black-holed, the sheet reaches a terminal, non-spinner state
    naming what failed and offering retry.
 7. **Independent agent review passes** (see *The review gate*).
