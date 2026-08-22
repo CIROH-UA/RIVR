@@ -120,6 +120,20 @@ against the current code is not a guard — this repo has produced two of those
 (ADR 0009 phase 4, and a `strings` check that passed against both the fixed and
 broken IPA).
 
+**No legacy paths survive a phase.** Whatever a phase replaces, it deletes in the
+same phase — not later, not behind a flag, not "just in case". Work happens on
+`development` and every previously working version is committed on `main`, so
+deleted code is recoverable from history and does not need to be recoverable from
+the working tree. A dual path kept for comfort is a second source of truth, which
+is the problem this ADR exists to remove.
+
+The one exception is the Phase 4 kill switch, which is a deliberate, monitored,
+time-boxed fallback — and it is removed in Phase 9 once the store has proven
+itself.
+
+**Stale documentation is a defect.** Each phase updates the docs it invalidates
+as part of the phase, and Phase 9 sweeps whatever slipped through.
+
 Phases 1 and 2 are app-only. Phase 3 is server-only. They can proceed in
 parallel.
 
@@ -353,6 +367,16 @@ the repository and directly.
 `interactive_chart`, and the mixed paths in `favorites_provider` and
 `weekly_outlook_page`.
 
+**Delete `ForecastService`'s competing cache layer** — `_currentFlowCache`,
+`_flowCategoryCache`, `_recentResponseCache` and its `_forecastCacheService`
+writes. These are a second cache alongside the repository, with their own TTLs,
+and two caches holding different values for the same reach is precisely the
+divergence this ADR exists to eliminate. This is a correctness change, not
+cleanup.
+
+Whatever methods fall out of use go with them — `loadCompleteReachData` first,
+since Phase 4 removes its last caller.
+
 **Guards.**
 1. `grep -rn "NoaaApiService\|IForecastService" lib/ui/` returns nothing.
 2. Every surface showing the same reach shows the same value simultaneously —
@@ -360,6 +384,10 @@ the repository and directly.
 3. Two widgets mounting the same reach together issue **one** fetch.
 4. A unit flip repaints every surface without refetching.
 5. Full suite green; no surface silently loses data.
+6. **Exactly one cache holds forecast values.** `ForecastService`'s in-memory and
+   disk caches are gone; a reach cannot be represented twice with two different
+   TTLs.
+7. No method survives with zero callers — verified by search, not by intent.
 
 **You are done when** there is exactly one way for a value to reach the screen,
 and no widget can fetch on its own even if someone tries.
@@ -438,16 +466,70 @@ prove it rather than the impression.
 
 ---
 
+## Phase 9 — Sweep: kill the legacy, fix the docs
+
+**Why a phase and not an afterthought.** Every phase deletes as it goes, but
+cross-cutting leftovers only become visible once the whole thing is standing.
+This is affordable precisely because work happens on `development` and every
+working version is committed on `main` — nothing needs to be kept in the tree to
+be recoverable.
+
+**Build — code.**
+- **Remove the Phase 4 kill switch** and its Remote Config parameter, once the
+  store has run clean through Phase 8. A permanent fallback is a permanent second
+  source of truth.
+- Delete every method, provider and mixin left with no callers —
+  `reach_data_provider` and `reach_data_cache_mixin` are the likely candidates,
+  but the list is **derived at the time, not predicted here**.
+- Delete tests that only covered deleted paths; keep any that assert behaviour
+  still promised, rewritten against the new path.
+- Resolve the two server defects already logged in ADR 0008 rather than carrying
+  them: `arrayRemove(staleTokens)` passes an array to a varargs API in
+  `weekly-digest.ts:348` and `notification-service.ts:566`, so stale-token pruning
+  is a silent no-op; and `setupNotificationListeners()` is gated on
+  `enableNotifications` alone, so a weekly-only user never gets tap routing.
+
+**Build — documentation.**
+- **CLAUDE.md**: the architecture and data-flow sections describe an app that
+  fetches upstream directly. Rewrite, including the `ForecastService` phased-load
+  description, which will no longer be how data arrives.
+- **ADR 0001**: Step 7 (retire the `ForecastResponse` fork) is closed or narrowed
+  by Phase 5 — say which, with evidence.
+- **ADR 0002**: Stage 2b was gated on "the next detail-carrying source"; record
+  what actually triggered it.
+- **ADR 0003**: the back-off flaw is documented but unfixed — decide and record
+  whether the reset moves to tap.
+- **ADR 0010**: already marked superseded; confirm its Phases 1–2 landed inside
+  this ADR's Phase 1 or say why not.
+- **`app_releases.md` / `notifications_history.md`**: an entry per shipped phase.
+
+**Guards.**
+1. `grep -rn "loadCompleteReachData" lib/` returns nothing.
+2. No Remote Config parameter remains for the fallback, and no code reads one.
+3. `flutter analyze` reports zero unused-element warnings across touched files.
+4. Every ADR listed above is either updated or explicitly confirmed still
+   accurate, with a dated line saying so.
+5. A reader following CLAUDE.md alone would build the current architecture, not
+   the previous one. **Test this by reading it as if new** — every stale-doc
+   incident in this repo started with a doc that was true when written.
+6. Full suite green with no skipped tests carried forward.
+
+**You are done when** nothing in the tree describes or implements the old data
+path, the two known server defects are fixed rather than documented, and someone
+joining the project would not find a second way to fetch a river.
+
 ## Sequencing
 
 ```
 Phase 0 ──┬── Phase 1 ── Phase 2 ─────────────┐
-          └── Phase 3 ── Phase 4 ── Phase 5 ──┴── Phase 6 ── Phase 7 ── Phase 8
+          └── Phase 3 ── Phase 4 ── Phase 5 ──┴── Phase 6 ── Phase 7 ── Phase 8 ── Phase 9
 ```
 
 Phases 1–2 (app) and Phase 3 (server) run in parallel after Phase 0. Phase 4
 needs 3. Phase 5 needs 4. Phase 7 needs Phase 3's monitoring proven in
-production. Phase 8 closes.
+production. Phase 8 proves it on device. Phase 9 removes the kill switch and the
+last of the old path — it must come after 8, because the fallback has to survive
+until the store is proven.
 
 **Phases 1, 2, 3 and 6 each improve the product on their own** and are
 independently shippable.
@@ -479,6 +561,18 @@ Recorded because each of these was wrong or missing in the first draft:
 5. **No security rules and no cost guard.** Both added to Phase 3.
 6. **Access-distribution logging was listed as an open question but never
    built.** Added to Phase 0, so decision 6 rests on data.
+7. **No cleanup discipline and no doc review at all** (raised by Jerson). The
+   first draft would have left `ForecastService`'s three in-memory caches running
+   alongside the repository — a second source of truth, which is the problem this
+   ADR exists to solve. Added: a standing delete-as-you-go rule, cache deletion
+   as a Phase 5 correctness guard, and Phase 9 as a sweep.
+
+**Correction to an earlier claim.** During discussion it was suggested that
+routing through our cloud would move `nwmApiKey` out of the app. **It does not.**
+Non-favourite reaches keep the live path, and that path fetches return periods
+from `nwm-api.ciroh.org` with the key — so it stays client-side unless
+non-favourite return-period calls are also proxied, which is not currently
+proposed.
 
 ## Open and unverified
 
