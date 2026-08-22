@@ -543,7 +543,13 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         GetIt.I<IForecastService>(),
         unitService,
       );
-      if (flow == null) return;
+      if (flow == null) {
+        // Upstream answered but carried no usable value. That is a failure of
+        // this product, not a success — without this it is never named in the
+        // error card and never counted.
+        _failedProducts.add('current flow');
+        return;
+      }
       anySucceeded = true;
       setState(() {
         _currentFlow = flow;

@@ -5,8 +5,8 @@
 // What this exists to prevent: the sheet used to make ONE `reachSummary` read,
 // which looked cheap at the call site and was not. Building that payload fetched
 // reach info, current flow, return periods AND a medium-range forecast
-// serially — ~45 s at median, of which the 156 KB / 30.8 s medium-range call was
-// the bulk. The sheet never rendered a forecast series at all; its peak comes
+// serially, of which the 156 KB / 30.8 s medium-range call was the bulk. (The
+// end-to-end total has not been measured on device — the per-call medians have.) The sheet never rendered a forecast series at all; its peak comes
 // from the map tile.
 //
 // Guard 3 ("medium range is never requested") is the one that would catch a
@@ -237,8 +237,8 @@ void main() {
 
       // The distinction that matters is *blocking* vs *background*. The sheet's
       // own reads — the ones first paint waits on — must be the three narrow
-      // products. reachSummary is warmed afterwards for the forecast page and
-      // is covered by guard 5.
+      // products. No warm exists: the forecast page reads these same three
+      // keys, so it is warm without anyone warming it.
       final blocking = repo.requested.take(3).toSet();
       expect(blocking, {
         ForecastProduct.reachMetadata,

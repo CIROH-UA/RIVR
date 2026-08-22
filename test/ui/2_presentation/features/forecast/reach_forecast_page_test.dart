@@ -2,7 +2,7 @@
 //
 // Widget tests for the consolidated forecast page. Covers both source paths:
 //  - GEOGLOWS: reads geoglowsForecast from the repository; no ReachDataProvider.
-//  - NWM: reads reachSummary from the repository; a fake ReachDataProvider
+//  - NWM: reads the three narrow products from the repository (ADR 0011 Phase 1); a fake ReachDataProvider
 //    stands in for the (separate) forecast-series load.
 
 import 'package:flutter/cupertino.dart';
@@ -59,7 +59,13 @@ class _FakeRepo implements IRiverDataRepository {
   /// entry for every key would hand each read the wrong shape.
   final Map<ForecastProduct, Map<String, dynamic>> byProduct;
 
+  /// Which products the page asked for. Review proved this was unguarded:
+  /// reverting the page to the bundled `reachSummary` — reintroducing both the
+  /// 156 KB fetch and the two-entry divergence — left all 896 tests green.
+  final List<ForecastProduct> requested = [];
+
   RiverDataEntry? _forKey(RiverDataKey key) {
+    requested.add(key.product);
     final payload = byProduct[key.product];
     if (payload == null) return entry;
     return RiverDataEntry(
@@ -102,15 +108,16 @@ FreshnessWindow _window() => FreshnessWindow(
       validUntil: DateTime.utc(2026, 7, 12, 13),
     );
 
-void _registerRepo(
+_FakeRepo _registerRepo(
   RiverDataEntry entry, {
   Map<ForecastProduct, Map<String, dynamic>> byProduct = const {},
 }) {
   final sl = GetIt.instance;
-  sl.registerSingleton<IRiverDataRepository>(
-      _FakeRepo(entry, byProduct: byProduct));
+  final repo = _FakeRepo(entry, byProduct: byProduct);
+  sl.registerSingleton<IRiverDataRepository>(repo);
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   sl.registerSingleton<IForecastService>(_StubForecastService());
+  return repo;
 }
 
 Widget _wrap(Widget page) => CupertinoApp(
@@ -200,7 +207,9 @@ void main() {
       byProduct: {
         ForecastProduct.reachMetadata: {
           'riverName': details.riverName,
-          'formattedLocation': details.formattedLocation,
+          // Deliberately NO formattedLocation: production's reachMetadata does
+          // not geocode, so a fixture supplying it would make this test pass
+          // over a path that is broken in the app. Review caught exactly that.
           'latitude': 40.0,
           'longitude': -111.0,
         },
@@ -237,11 +246,74 @@ void main() {
     expect(find.text('640 ft³/s', findRichText: true), findsOneWidget);
     expect(find.text('NORMAL'), findsOneWidget);
     expect(find.text('Test River'), findsOneWidget);
-    expect(find.text('Testville, TS'), findsOneWidget);
+    // The place name now arrives from an async geocode after first paint, so
+    // it is absent here rather than bundled with the flow. Its arrival is not
+    // asserted: GeocodingService is a static that this test cannot inject.
+    // Marked as a known gap rather than faked green.
+    expect(find.text('Testville, TS'), findsNothing);
     // Range selector: Today + the two multi-day options (nominal while the
     // separate forecast series hasn't loaded in this fake).
     expect(find.text('Today'), findsOneWidget);
     expect(find.text('10D'), findsOneWidget);
     expect(find.text('30D'), findsOneWidget);
   });
+  // ADR 0011 Phase 1 — the page must read the same narrow products as the map
+  // sheet, not the bundled reachSummary.
+  //
+  // REGRESSION: reverting this page to reachSummary reintroduces two defects at
+  // once — the 156 KB medium-range fetch on the tap path, and the same current
+  // flow living in two independently-cached entries so the gauge and the sheet
+  // can disagree. Review proved the previous suite could not see either.
+  testWidgets('NWM: reads the narrow products, never the bundle', (tester) async {
+    final repo = _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '123',
+          product: ForecastProduct.reachSummary,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: const <String, dynamic>{},
+      ),
+      byProduct: {
+        ForecastProduct.reachMetadata: {
+          'riverName': 'Test River',
+          'latitude': 40.0,
+          'longitude': -111.0,
+        },
+        ForecastProduct.analysisAssimilation: {
+          'reach': {
+            'reachId': '123',
+            'name': 'Test River',
+            'latitude': 40.0,
+            'longitude': -111.0,
+            'streamflow': ['short_range'],
+          },
+          'shortRange': <String, dynamic>{},
+        },
+        ForecastProduct.returnPeriods: {
+          'returnPeriods': [
+            {'feature_id': '123', 'return_period_2': 1200.0},
+          ],
+        },
+      },
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '123',
+      source: ForecastSource.nwm,
+    )));
+    await _pumpLoaded(tester);
+
+    expect(repo.requested, isNot(contains(ForecastProduct.reachSummary)),
+        reason: 'the bundle pulls a 156 KB series this page never renders from '
+            'it, and splits current flow across two cache entries');
+    expect(repo.requested, containsAll([
+      ForecastProduct.reachMetadata,
+      ForecastProduct.analysisAssimilation,
+      ForecastProduct.returnPeriods,
+    ]));
+  });
+
 }

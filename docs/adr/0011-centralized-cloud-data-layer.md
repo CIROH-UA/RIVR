@@ -198,9 +198,13 @@ the newest available for most of the window.
 6. **Non-favourites keep the live path.** With millions of streams, two users
    hitting the same reach before it changes is effectively never, so caching them
    in the cloud is cost without return.
-7. **The detail sheet opens immediately and fills progressively**, issues its
-   calls in parallel, defers the 156 KB medium-range fetch, and prefetches long
-   range in the background so "See forecast" does not wait twice.
+7. **The detail sheet opens immediately and fills progressively**, issuing three
+   narrow reads in parallel. The 156 KB medium-range fetch is not deferred — it
+   is not requested at all, because the sheet renders no forecast series. "See
+   forecast" stays warm without any prefetch, because that page reads the same
+   three keys. *(Superseded twice: the original wording specified a long-range
+   prefetch, then a `reachSummary` warm; both are recorded under Phase 1
+   guard 5.)*
 8. **Device cache retains until superseded by a newer run**, with an LRU cap and
    favourites pinned.
 9. **No reference counting on unfavourite.** The work list is derived from the
@@ -390,15 +394,14 @@ surface. Non-favourites will always take the live path, so this is permanent
 value rather than a stopgap.
 
 **Build.**
-- Issue the detail sheet's four calls in **parallel** — nothing about them is
-  ordered.
-- **Defer medium range.** The headline is name, current flow, flood category. The
-  156 KB fetch exists for the forecast-peak strip and can wait until that section
-  is reached.
+- Issue the detail sheet's reads in **parallel** — nothing about them is ordered.
+- **Drop medium range entirely from this path.** The headline is name, current
+  flow, flood category; the sheet's forecast peak comes from the map tile, not a
+  fetch. So there is nothing to defer — the 156 KB call is simply not made.
 - **Draw progressively.** The sheet appears immediately with a skeleton naming
   the river; each value fills as it lands.
-- **Prefetch long range in the background** after the sheet's own calls complete,
-  so "See forecast" does not wait a second time. Failures are silent.
+- **No prefetch.** Migrating the forecast page to the same three keys makes it
+  warm by construction, which is strictly better than warming a second copy.
 
 **Guards.**
 1. The sheet is on screen in **under 500 ms** with a skeleton, before any network

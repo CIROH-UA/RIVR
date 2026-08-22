@@ -6,11 +6,13 @@
 // selector, and range-swappable detail widgets.
 //
 // STEP 4: sticky range selector + stat card (Peak / Time to peak / Return
-// period). The gauge reads reachSummary (NWM) or geoglowsForecast (GEOGLOWS);
+// period). The gauge reads the narrow NWM products (reachMetadata + analysisAssimilation + returnPeriods) or geoglowsForecast (GEOGLOWS);
 // peaks come from the range forecast series. Outlook + detail widgets + the
 // interactive chart land in later steps.
 
 import 'dart:ui' as ui;
+
+import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show mapEquals;
@@ -203,6 +205,16 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _unit = unitService.getDisplayUnit();
         _loading = false;
       });
+
+      // `reachMetadata` deliberately does not geocode, so `formattedLocation`
+      // is empty on a cold reach cache — the bundled `reachSummary` path this
+      // replaced reverse-geocoded before returning. Without this the header and
+      // the stream-map subtitle silently lose "Provo, UT". Filled after the
+      // page is already usable, never in front of it.
+      if (details.formattedLocation == null ||
+          details.formattedLocation!.isEmpty) {
+        _fillPlaceLabel(meta.latitude, meta.longitude);
+      }
     } catch (e) {
       if (!mounted) return;
       AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
@@ -211,6 +223,29 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _loading = false;
       });
     }
+  }
+
+  /// Resolve the place label after the page is usable. Best-effort:
+  /// `GeocodingService.placeLabel` catches internally and yields null rather
+  /// than throwing, so this can only ever add information.
+  void _fillPlaceLabel(double? lat, double? lon) {
+    unawaited(GeocodingService.placeLabel(lat, lon).then((label) {
+      if (!mounted || label == null || label.isEmpty) return;
+      final current = _details;
+      if (current == null) return;
+      setState(() {
+        _details = ReachDetailsData(
+          riverName: current.riverName,
+          formattedLocation: label,
+          currentFlow: current.currentFlow,
+          flowCategory: current.flowCategory,
+          latitude: current.latitude,
+          longitude: current.longitude,
+          isClassificationAvailable: current.isClassificationAvailable,
+          returnPeriods: current.returnPeriods,
+        );
+      });
+    }));
   }
 
   Future<void> _loadGeoglows() async {
@@ -1217,7 +1252,7 @@ class _DetailLoading extends StatelessWidget {
   }
 }
 
-/// Skeleton shown while the gauge's reachSummary loads.
+/// Skeleton shown while the gauge's narrow reads load.
 class _ForecastSkeleton extends StatelessWidget {
   const _ForecastSkeleton();
 
