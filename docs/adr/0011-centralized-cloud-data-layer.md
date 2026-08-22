@@ -351,6 +351,13 @@ value rather than a stopgap.
    (`data_sources_test.dart`), because a repository-level fake is structurally
    blind to a fetch that happens inside `ForecastService`.
 
+   **Measured, not assumed** (`river_data_repository_test.dart`): after the
+   sheet has read its three products, the forecast page issues **zero** further
+   fetches, and both surfaces receive the *identical* entry — verified by
+   changing what the source would return next and confirming the page still
+   gets the sheet's value. "Warm with nothing warming it" is a test result, not
+   an argument from key equality.
+
    Ordering assertions alone are not sufficient: review mutation-tested the
    original guard by moving the prefetch to start concurrently with first paint
    and it still passed, because it only checked position in a list recorded at

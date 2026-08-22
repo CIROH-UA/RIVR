@@ -179,4 +179,54 @@ void main() {
     expect(cache.listenable(key).value!.payload['value'], 99.0);
     expect(source.fetchCount, 0); // no network involved
   });
+  // ADR 0011 Phase 1 — the claim that "See forecast" is warm with nothing
+  // warming it. The sheet and the forecast page were made to read the SAME
+  // three narrow keys; that is only worth anything if the second surface
+  // genuinely hits cache. Asserted rather than assumed, because the previous
+  // design achieved warmth by an explicit background warm that also pulled a
+  // 156 KB series and duplicated the entry.
+  group('sheet -> forecast page is a cache hit', () {
+    const products = [
+      ForecastProduct.reachMetadata,
+      ForecastProduct.analysisAssimilation,
+      ForecastProduct.returnPeriods,
+    ];
+
+    RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: p,
+        );
+
+    test('the forecast page issues zero fetches after the sheet has loaded',
+        () async {
+      // Sheet opens.
+      for (final p in products) {
+        await repo.read(keyFor(p));
+      }
+      final afterSheet = source.fetchCount;
+      expect(afterSheet, products.length);
+
+      // User taps "See forecast" — same keys.
+      for (final p in products) {
+        await repo.read(keyFor(p));
+      }
+
+      expect(source.fetchCount, afterSheet,
+          reason: 'the page must not refetch what the sheet already holds');
+    });
+
+    test('the two surfaces receive the identical entry, not equal copies',
+        () async {
+      final fromSheet = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+      source.nextValue = 999.0; // would differ if the page refetched
+      final fromPage = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+
+      expect(fromPage!.payload['value'], fromSheet!.payload['value'],
+          reason: 'one cache entry per value is what stops the gauge and the '
+              'sheet disagreeing');
+      expect(fromPage.payload['value'], 1.0);
+    });
+  });
+
 }
