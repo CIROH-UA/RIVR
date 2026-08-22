@@ -236,9 +236,13 @@ from a single sitting.
    hypothesis.
 4. Upstream failure rate is measured over the week, so the 11% in this ADR is
    confirmed or corrected.
-5. Which reaches are actually opened is logged, so decision 6 — that caching
-   non-favourites is not worth it — rests on data rather than on an argument
-   about probability.
+5. ~~Which reaches are actually opened is logged~~ — **deferred, 2026-08-22.**
+   `firestore.rules` default-denies everything except `users/{uid}`, so a client
+   write needs a new rule, and a counter any client may increment is an abuse
+   surface. `logForecastLoaded` already emits `reach_id` to Firebase Analytics,
+   so the data exists if a BigQuery export is ever enabled. Decision 6 therefore
+   still rests on the scale argument rather than on measurement — stated plainly
+   rather than quietly skipped. It gates nothing; revisit if usage grows.
 6. **Any claim in this ADR contradicted by the data is corrected here before code
    is written.** At least one correction is expected.
 7. **Independent agent review passes** (see *The review gate*).
@@ -358,9 +362,14 @@ verifiable before any client depends on it.
   that reach, and the UI renders from the device cache meanwhile.
 - **GC:** documents whose reach is absent from the union and unrefreshed for ~7
   days are deleted.
-- **Security rules:** store documents are readable by authenticated users and
-  writable only by the service account. They contain no user data — the key is a
-  reach, not a person — but they must not be world-writable.
+- **Security rules — a hard blocker for Phase 4, found 2026-08-22.**
+  `firestore.rules` currently ends with a default `allow read, write: if false`
+  and grants access **only** to `users/{userId}`. The app therefore cannot read
+  any store collection today; `return_period_cache` is server-written and
+  client-unreadable for exactly this reason. Phase 4 does not work at all until a
+  rule is added: store documents readable by any authenticated user, writable
+  only by the Admin SDK. They hold no user data — the key is a reach, not a
+  person — but they must never be client-writable.
 - **Monitoring, shipped with this phase, not after:** the probe's
   `referenceTime` compared against every stored record; a heartbeat alerting when
   no successful write lands in N hours; and a **count assertion** of reaches
