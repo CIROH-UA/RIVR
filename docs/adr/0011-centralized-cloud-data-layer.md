@@ -89,6 +89,36 @@ failure rate looks like for `analysis_assimilation` + `returnPeriods`
 specifically, which is what a user actually waits on. Probe design pending
 Jerson's call.
 
+### DISPROVEN — using short_range for "current flow" is not a defect (2026-08-22)
+
+The repository has a product named `analysisAssimilation`, but
+`NoaaApiService.fetchCurrentFlowOnly` requests **short_range** and takes its
+current-hour value; `getCurrentFlow` does not consult analysis at all. I flagged
+this as possibly wrong on the reasoning that analysis-and-assimilation is the
+observation-corrected estimate of *now* and therefore more accurate.
+
+**Measured across five reaches, both series, same moment:**
+
+| reach | analysis | short_range | difference |
+|---|---|---|---|
+| 10376596 | 54.380 | 54.380 | identical |
+| 1352774 | 132.780 | 132.780 | identical |
+| 10092062 | 340.430 | 340.790 | 0.11 % |
+| 18471070 | 32162.5 | 32167.4 | 0.015 % |
+| 9962444 | 260.27 | 263.09 | 1.08 % |
+
+Both series carried a point for the same `validTime` (14:00Z), so this is
+like-for-like. Worst divergence is 1.08 % — 2.8 m³/s on a 260 m³/s river,
+invisible in a flow display and far inside the spacing of return-period
+thresholds, so it cannot flip a flood category.
+
+**And short_range came from a fresher run**: reference 13:00Z against analysis's
+11:00Z. The series in use is *more* current, not less. The concern was backwards.
+
+**Only the name is wrong.** A product called `analysisAssimilation` that fetches
+short-range data will mislead the next reader. Rename when Phase 5 touches these
+call sites; changing the behaviour would be a regression.
+
 ### The 0.3s entries are the tell
 
 Same URL, same reach, sometimes 0.3s and sometimes 60s. Upstream is fast when
