@@ -19,7 +19,24 @@ enum ForecastProduct {
   /// NWM map/preview summary: current flow + reach name + flood category, as
   /// shown in the map bottom sheet and favorites cards. Assembled by
   /// ForecastService; refreshes hourly with the current flow.
+  ///
+  /// **Heavy — prefer the narrow products below where a surface needs only part
+  /// of this.** Building it fetches reach info, current flow, return periods AND
+  /// a medium-range forecast (156 KB, 30.8 s median as measured in ADR 0011),
+  /// serially. The map detail sheet paid all of that and rendered none of the
+  /// forecast series.
   reachSummary,
+
+  /// NWM reach identity: river name, coordinates, place label. Its own product
+  /// because it is by far the cheapest call (~0.5 KB) and the slowest-changing
+  /// — a river's name does not move — so it carries a long TTL and lets a
+  /// surface title itself without waiting on any flow data.
+  ///
+  /// It also fails independently: during the 2026-08-22 outage NOAA's
+  /// `/streamflow` returned 504 for every series while `/reaches/{id}` kept
+  /// answering in 0.4 s, so this is the one thing that can still be shown when
+  /// flow is unavailable.
+  reachMetadata,
 
   /// NWM short-range forecast (~18 h, hourly).
   shortRange,

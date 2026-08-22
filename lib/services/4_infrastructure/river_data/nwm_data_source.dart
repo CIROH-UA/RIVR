@@ -8,6 +8,7 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 
 /// [IRiverDataSource] for the NOAA National Water Model (US). A thin adapter
@@ -40,6 +41,7 @@ class NwmDataSource implements IRiverDataSource {
   Set<ForecastProduct> get supportedProducts => const {
     ForecastProduct.analysisAssimilation,
     ForecastProduct.reachSummary,
+    ForecastProduct.reachMetadata,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
     ForecastProduct.longRange,
@@ -59,7 +61,9 @@ class NwmDataSource implements IRiverDataSource {
         // Every 6 hours (00/06/12/18Z).
         return PublishSchedule.nextCycle(now, everyHours: 6).add(_skew);
       case ForecastProduct.returnPeriods:
-        // Static thresholds — effectively don't change day to day.
+      case ForecastProduct.reachMetadata:
+        // Static — thresholds don't change day to day, and a river's name and
+        // coordinates don't change at all.
         return now.toUtc().add(const Duration(days: 30));
       case ForecastProduct.mediumRangeBlend:
       case ForecastProduct.geoglowsForecast:
@@ -79,6 +83,23 @@ class NwmDataSource implements IRiverDataSource {
         );
         return SourceFetchResult(
           payload: ReachSummaryPayload.encode(details),
+          unit: unit,
+        );
+      case ForecastProduct.reachMetadata:
+        // The cheap half of the old reachSummary: one ~0.5 KB call, no flow
+        // data, no forecast series. Lets a surface title itself in isolation.
+        final reach = await _forecastService.loadBasicReachInfo(key.reachId);
+        return SourceFetchResult(
+          payload: ReachMetadataPayload.encode(
+            ReachMetadata(
+              riverName: reach.riverName,
+              formattedLocation: reach.formattedLocation,
+              latitude: reach.latitude,
+              longitude: reach.longitude,
+            ),
+          ),
+          // Nothing here is a flow value, so the stored unit is irrelevant —
+          // recorded only to satisfy the entry contract.
           unit: unit,
         );
       case ForecastProduct.analysisAssimilation:

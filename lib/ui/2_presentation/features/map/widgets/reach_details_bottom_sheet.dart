@@ -1,5 +1,7 @@
 // lib/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart
 
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
@@ -14,7 +16,8 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_reposit
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
-import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
+import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_action_buttons.dart';
 
@@ -402,49 +405,143 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       return;
     }
 
-    ReachDetailsData details;
-    try {
-      final entry = await GetIt.I<IRiverDataRepository>().read(
-        RiverDataKey(
-          source: ForecastSource.nwm,
-          reachId: widget.selectedReach.reachId,
-          product: ForecastProduct.reachSummary,
-        ),
-      );
-      if (_isCancelled || !mounted) return;
-      if (entry == null) {
-        throw Exception('No reach details available.');
-      }
-      details = ReachSummaryPayload.decode(
-        entry,
-        GetIt.I<IFlowUnitPreferenceService>(),
-      );
-    } catch (e) {
-      if (_isCancelled || !mounted) return;
-      AppLogger.error('ReachDetailsSheet', 'Error loading details', e);
+    await _loadNwmDetailsProgressively();
+  }
+
+  /// Three independent reads, issued together, each rendering the moment it
+  /// lands (ADR 0011 Phase 1).
+  ///
+  /// This replaced a single `reachSummary` read, which looked cheap at the call
+  /// site and was not: building it fetched reach info, current flow, return
+  /// periods **and** a medium-range forecast *serially* — ~45 s at median, with
+  /// the 156 KB forecast series accounting for most of it. The sheet never
+  /// rendered that series; the forecast peak it shows comes from the map tile
+  /// (`selectedReach.mapFloodCategoryIndex`), not from a fetch. So it is not
+  /// deferred here, it is simply not requested.
+  ///
+  /// The three products fail independently, which matters: during the
+  /// 2026-08-22 outage NOAA's `/streamflow` returned 504 for every series while
+  /// `/reaches/{id}` kept answering, so the sheet can still name the river when
+  /// no flow exists anywhere.
+  Future<void> _loadNwmDetailsProgressively() async {
+    final repo = GetIt.I<IRiverDataRepository>();
+    final reachId = widget.selectedReach.reachId;
+    RiverDataKey keyFor(ForecastProduct p) =>
+        RiverDataKey(source: ForecastSource.nwm, reachId: reachId, product: p);
+
+    // Kicked off together — nothing here is ordered.
+    final metadataFuture = repo.read(keyFor(ForecastProduct.reachMetadata));
+    final flowFuture = repo.read(keyFor(ForecastProduct.analysisAssimilation));
+    final thresholdsFuture = repo.read(keyFor(ForecastProduct.returnPeriods));
+
+    var anySucceeded = false;
+
+    // 1. Identity — cheapest call, so the sheet titles itself first.
+    unawaited(metadataFuture.then((entry) {
+      if (_isCancelled || !mounted || entry == null) return;
+      final m = ReachMetadataPayload.decode(entry);
+      anySucceeded = true;
       setState(() {
-        _errorMessage = 'Failed to load reach details';
+        _riverName = m.riverName;
+        _formattedLocation = m.formattedLocation;
+        _latitude = m.latitude;
+        _longitude = m.longitude;
+      });
+    }).catchError((Object e) {
+      AppLogger.warning('ReachDetailsSheet', 'Reach metadata failed: $e');
+    }));
+
+    // 2. Current flow, and 3. thresholds. The category needs both, so it is
+    // derived once they have each landed — via FlowClassification, which is the
+    // single canonical classifier (ADR 0002). Nothing re-implements it here.
+    try {
+      final results = await Future.wait([
+        flowFuture.catchError((Object e) {
+          AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
+          return null;
+        }),
+        thresholdsFuture.catchError((Object e) {
+          AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
+          return null;
+        }),
+      ]);
+      if (_isCancelled || !mounted) return;
+
+      final unitService = GetIt.I<IFlowUnitPreferenceService>();
+      final flowEntry = results[0];
+      final thresholdEntry = results[1];
+
+      double? flow;
+      if (flowEntry != null) {
+        flow = CurrentFlowPayload.decode(
+          flowEntry,
+          GetIt.I<IForecastService>(),
+          unitService,
+        );
+        anySucceeded = true;
+      }
+      Map<int, double>? thresholds;
+      if (thresholdEntry != null) {
+        thresholds = ReturnPeriodPayload.decode(thresholdEntry, unitService);
+        anySucceeded = true;
+      }
+
+      setState(() {
+        _currentFlow = flow;
+        _flowCategory = (flow != null && thresholds != null)
+            ? FlowClassification.category(flow, thresholds)
+            : null;
         _isLoadingFlow = false;
         _isLoadingClassification = false;
       });
-      return;
+      _notifyCategoryColor();
+    } finally {
+      // Wait for identity too before deciding the sheet failed outright — a
+      // named river with no flow is a usable sheet, not an error.
+      await metadataFuture.catchError((Object _) => null);
+      if (!_isCancelled && mounted && !anySucceeded) {
+        setState(() {
+          _errorMessage = 'Failed to load reach details';
+          _isLoadingFlow = false;
+          _isLoadingClassification = false;
+        });
+      }
     }
 
-    setState(() {
-      _riverName = details.riverName;
-      _formattedLocation = details.formattedLocation;
-      _currentFlow = details.currentFlow;
-      _flowCategory = details.flowCategory;
-      _latitude = details.latitude;
-      _longitude = details.longitude;
-      _isLoadingFlow = false;
-      _isLoadingClassification = false;
-    });
-    _notifyCategoryColor();
+    _prefetchLongRange(reachId);
 
     AppLogger.info(
       'ReachDetailsSheet',
       'Details loaded, flow: $_currentFlow, category: $_flowCategory',
+    );
+  }
+
+  /// Warm the long-range forecast so "See forecast" does not make the user wait
+  /// a second time for a 63 KB / 30.5 s-median call they have already earned.
+  ///
+  /// Deliberately started only after the sheet's own reads have settled, so it
+  /// cannot compete for first paint. Failures are silent — 2 of 9 long-range
+  /// calls returned 504 while measuring, and a failed prefetch must cost the
+  /// user nothing: "See forecast" still fetches for itself.
+  void _prefetchLongRange(String reachId) {
+    if (widget.selectedReach.source.isGeoglows) return;
+    unawaited(
+      GetIt.I<IRiverDataRepository>()
+          .read(
+            RiverDataKey(
+              source: ForecastSource.nwm,
+              reachId: reachId,
+              product: ForecastProduct.longRange,
+            ),
+          )
+          .then((_) => null)
+          .catchError((Object e) {
+            AppLogger.debug(
+              'ReachDetailsSheet',
+              'Long-range prefetch failed (harmless): $e',
+            );
+            return null;
+          }),
     );
   }
 
