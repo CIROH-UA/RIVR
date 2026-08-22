@@ -24,10 +24,21 @@
 //      store. ADR 0011 Phase 3 guard 3 requires each reach to record the
 //      referenceTime it actually returned, precisely so this assumption never
 //      becomes load-bearing.
+//
+// A NOTE ON `ok` VS `complete`, which review caught (2026-08-22):
+//
+//   NOAA returns HTTP 200 with `mediumRange: {}` during partial outages — that
+//   was live while this was being reviewed. An earlier version set `ok = true`
+//   whenever the body parsed, so a run where the most important series was
+//   missing entirely would have been logged as healthy and silently undercounted
+//   the failure rate. `ok` now means "fetched and parsed"; `complete` means
+//   "every expected series carried a referenceTime". Analysis must key on
+//   `complete`, and the log line says DEGRADED when they disagree.
 
 import * as functions from "firebase-functions/v1";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
+import {NOAA_CONFIG} from "./noaa-client.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -35,23 +46,36 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+/** Probe reach. "Dead River" — a real favourite, advertises every series. */
+export const PROBE_REACH_ID = "9962444";
+
 /** Unfiltered streamflow returns every series' referenceTime in one response. */
-const PROBE_URL =
-  "https://api.water.noaa.gov/nwps/v1/reaches/9962444/streamflow";
+export const PROBE_URL =
+  `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${PROBE_REACH_ID}/streamflow`;
 
 /** Generous: we are measuring how slow it gets, not enforcing a budget. */
 const PROBE_TIMEOUT_MS = 120_000;
 
-const SERIES = [
+/**
+ * Every series the API advertises, including `mediumRangeBlend` — review noted
+ * the first version sampled four of five.
+ */
+export const SERIES = [
   "analysisAssimilation",
   "shortRange",
   "mediumRange",
   "longRange",
+  "mediumRangeBlend",
 ] as const;
 
-interface ProbeSample {
+export interface ProbeSample {
   sampledAt: FirebaseFirestore.Timestamp;
+  /** Fetched and parsed. Says nothing about whether any data was present. */
   ok: boolean;
+  /** `ok` AND every series carried a referenceTime. Key analysis on this. */
+  complete: boolean;
+  /** How many of SERIES had a referenceTime. */
+  seriesPresent: number;
   httpStatus: number | null;
   elapsedMs: number;
   bytes: number | null;
@@ -62,12 +86,14 @@ interface ProbeSample {
 
 /**
  * Pull every distinct `referenceTime` under a series node. The API nests these
- * differently per series (mean/member1..6 for mediumRange, series.data for
- * shortRange), so walk rather than assume a shape.
+ * differently per series (`mediumRange.mean.referenceTime`,
+ * `shortRange.series.referenceTime`), so walk rather than assume a shape.
  * @param {unknown} node Parsed JSON subtree for one series.
- * @return {string|null} The single referenceTime found, or null.
+ * @return {string|null} The referenceTime found, or null when the series is
+ *   absent or empty. Multiple distinct values are joined with "|" so an
+ *   internally inconsistent series is visible in the data instead of hidden.
  */
-function referenceTimeOf(node: unknown): string | null {
+export function referenceTimeOf(node: unknown): string | null {
   const found = new Set<string>();
   const walk = (v: unknown): void => {
     if (v === null || typeof v !== "object") return;
@@ -82,9 +108,68 @@ function referenceTimeOf(node: unknown): string | null {
   };
   walk(node);
   if (found.size === 0) return null;
-  // More than one would mean the series is not internally consistent — worth
-  // seeing in the data rather than silently picking the first.
   return Array.from(found).sort().join("|");
+}
+
+/**
+ * Build a sample from a raw response. Split out from the fetch so it is
+ * testable without network access.
+ * @param {object} args Raw response parts.
+ * @param {number|null} args.httpStatus HTTP status, null if the request threw.
+ * @param {string|null} args.body Response body, null if the request threw.
+ * @param {number} args.elapsedMs Wall-clock duration.
+ * @param {string|null} args.error Transport-level error, if any.
+ * @return {ProbeSample} The sample, never throwing.
+ */
+export function buildSample(args: {
+  httpStatus: number | null;
+  body: string | null;
+  elapsedMs: number;
+  error: string | null;
+}): ProbeSample {
+  const {httpStatus, body, elapsedMs} = args;
+  const sample: ProbeSample = {
+    sampledAt: admin.firestore.Timestamp.now(),
+    ok: false,
+    complete: false,
+    seriesPresent: 0,
+    httpStatus,
+    elapsedMs,
+    bytes: body === null ? null : Buffer.byteLength(body, "utf8"),
+    referenceTimes: Object.fromEntries(SERIES.map((s) => [s, null])),
+    error: args.error,
+  };
+
+  if (args.error !== null) return sample;
+  if (httpStatus === null || httpStatus < 200 || httpStatus >= 300) {
+    sample.error = `HTTP ${httpStatus}`;
+    return sample;
+  }
+  if (body === null) {
+    sample.error = "empty body";
+    return sample;
+  }
+
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(body) as Record<string, unknown>;
+  } catch (e) {
+    sample.error = e instanceof Error ? e.message : String(e);
+    return sample;
+  }
+
+  for (const s of SERIES) {
+    sample.referenceTimes[s] = referenceTimeOf(json[s]);
+  }
+  sample.seriesPresent =
+    Object.values(sample.referenceTimes).filter((v) => v !== null).length;
+  sample.ok = true;
+  sample.complete = sample.seriesPresent === SERIES.length;
+  if (!sample.complete) {
+    const missing = SERIES.filter((s) => sample.referenceTimes[s] === null);
+    sample.error = `missing series: ${missing.join(",")}`;
+  }
+  return sample;
 }
 
 /**
@@ -93,16 +178,6 @@ function referenceTimeOf(node: unknown): string | null {
  */
 export async function probeOnce(): Promise<ProbeSample> {
   const started = Date.now();
-  const base: ProbeSample = {
-    sampledAt: admin.firestore.Timestamp.now(),
-    ok: false,
-    httpStatus: null,
-    elapsedMs: 0,
-    bytes: null,
-    referenceTimes: Object.fromEntries(SERIES.map((s) => [s, null])),
-    error: null,
-  };
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
 
@@ -111,27 +186,20 @@ export async function probeOnce(): Promise<ProbeSample> {
       signal: controller.signal,
       headers: {"User-Agent": "RIVR-cadence-probe/1.0"},
     });
-    base.httpStatus = res.status;
-
-    const text = await res.text();
-    base.bytes = Buffer.byteLength(text, "utf8");
-    base.elapsedMs = Date.now() - started;
-
-    if (!res.ok) {
-      base.error = `HTTP ${res.status}`;
-      return base;
-    }
-
-    const json = JSON.parse(text) as Record<string, unknown>;
-    for (const s of SERIES) {
-      base.referenceTimes[s] = referenceTimeOf(json[s]);
-    }
-    base.ok = true;
-    return base;
+    const body = await res.text();
+    return buildSample({
+      httpStatus: res.status,
+      body,
+      elapsedMs: Date.now() - started,
+      error: null,
+    });
   } catch (e) {
-    base.elapsedMs = Date.now() - started;
-    base.error = e instanceof Error ? e.message : String(e);
-    return base;
+    return buildSample({
+      httpStatus: null,
+      body: null,
+      elapsedMs: Date.now() - started,
+      error: e instanceof Error ? e.message : String(e),
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -144,6 +212,11 @@ export async function probeOnce(): Promise<ProbeSample> {
  * documents, and the analysis (when does a run actually land, how late, how
  * often does the fetch fail) is far easier over rows than over an aggregate that
  * has already thrown away the shape.
+ *
+ * The log line is emitted BEFORE the write and the write is guarded, so a
+ * Firestore failure loses the document but never the observation — review found
+ * the first version could drop a sample leaving neither, which is this repo's
+ * documented silent-failure mode reproduced in new code.
  */
 export const probePublishCadence = functions
   .runWith({memory: "256MB", timeoutSeconds: 180})
@@ -152,20 +225,32 @@ export const probePublishCadence = functions
   .onRun(async () => {
     const sample = await probeOnce();
 
-    await db.collection("publish_cadence_log").add(sample);
-
-    // Logged as one line so a week reads cleanly in Cloud Logging without
-    // opening Firestore.
     const rt = SERIES.map((s) => `${s}=${sample.referenceTimes[s] ?? "-"}`)
       .join(" ");
-    if (sample.ok) {
+    if (sample.complete) {
       logger.info(
         `📈 cadence ok ${sample.elapsedMs}ms ${sample.bytes}B ${rt}`
+      );
+    } else if (sample.ok) {
+      logger.warn(
+        `📈 cadence DEGRADED ${sample.seriesPresent}/${SERIES.length} series ` +
+        `${sample.elapsedMs}ms ${sample.bytes}B ${rt} — ${sample.error}`
       );
     } else {
       logger.warn(
         `📈 cadence FAIL ${sample.elapsedMs}ms ` +
         `http=${sample.httpStatus} err=${sample.error}`
+      );
+    }
+
+    try {
+      await db.collection("publish_cadence_log").add(sample);
+    } catch (e) {
+      // A lost document is a gap in the dataset. Say so loudly — guard 1 asks
+      // for no gaps over an hour, and an unlogged gap is undetectable.
+      logger.error(
+        "📈 cadence WRITE FAILED — sample lost, dataset now has a gap",
+        {error: e instanceof Error ? e.message : String(e)}
       );
     }
   });

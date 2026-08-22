@@ -11,7 +11,7 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // NOAA API configuration (matches your exact AppConfig)
-const NOAA_CONFIG = {
+export const NOAA_CONFIG = {
   // Base URLs matching your AppConfig exactly
   noaaReachesBaseUrl: "https://api.water.noaa.gov/nwps/v1",
   nwmReturnPeriodUrl: "https://nwm-api.ciroh.org/return-period",

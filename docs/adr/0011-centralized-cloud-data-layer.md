@@ -1,6 +1,6 @@
 # 0011 — Centralized cloud-backed data layer
 
-**Status:** Specified, nothing implemented
+**Status:** Phase 0 instrumentation deployed 2026-08-22 (collecting; its guards need a week). Phases 1-9 specified, not implemented.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — that page is one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values), ADR 0008 (push)
 
@@ -233,9 +233,21 @@ from a single sitting.
 2. Publication lag is characterised per series — median and worst observed —
    rather than inferred from the two samples in this ADR.
 3. The dominant cost in the detail sheet is named with a number, not a
-   hypothesis.
+   hypothesis. **Note the ADR's own "~45 s at median" is arithmetic on the
+   per-source medians, not an observed end-to-end time — the sum of medians is
+   not the median of the sum.** This guard is not met by that figure.
+
+   *Deviation, 2026-08-22:* the device-side timing instrumentation is folded
+   into Phase 1 rather than built separately here, because Phase 1 rewrites the
+   exact code paths that would be instrumented and doing it twice is waste.
+   Phase 1 therefore carries the obligation to emit these numbers, and this
+   guard cannot close until it does.
 4. Upstream failure rate is measured over the week, so the 11% in this ADR is
-   confirmed or corrected.
+   confirmed or corrected. **Scope limit, found in review:** the probe issues one
+   unfiltered NOAA call, whereas the 11% spans five different endpoints including
+   CIROH return periods and the GEOGLOWS proxy. The probe measures NOAA
+   `/streamflow` availability only, and cannot by itself confirm or correct that
+   figure — say which number is being reported.
 5. ~~Which reaches are actually opened is logged~~ — **deferred, 2026-08-22.**
    `firestore.rules` default-denies everything except `users/{uid}`, so a client
    write needs a new rule, and a counter any client may increment is an abuse
@@ -363,8 +375,9 @@ verifiable before any client depends on it.
 - **GC:** documents whose reach is absent from the union and unrefreshed for ~7
   days are deleted.
 - **Security rules — a hard blocker for Phase 4, found 2026-08-22.**
-  `firestore.rules` currently ends with a default `allow read, write: if false`
-  and grants access **only** to `users/{userId}`. The app therefore cannot read
+  `firestore.rules` opens with a catch-all `match /{document=**}` denying read
+  and write, then grants access **only** to `users/{userId}`, plus a
+  `notification_logs` block that also denies all client access. The app therefore cannot read
   any store collection today; `return_period_cache` is server-written and
   client-unreadable for exactly this reason. Phase 4 does not work at all until a
   rule is added: store documents readable by any authenticated user, writable
