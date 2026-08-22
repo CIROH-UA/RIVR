@@ -2,38 +2,49 @@
 //
 // ADR 0011 Phase 0 — instrumentation, not a feature.
 //
-// Every measurement in ADR 0011 came from one sitting on 2026-08-21/22 during
-// which NOAA was returning 504s. That window produced a 30.8s median and an 11%
-// failure rate for medium_range, and showed the 00Z run publishing ~7 hours
-// after its nominal cycle time. Those numbers set the probe interval, the
-// monitoring thresholds and the cache policy — and none of them should be chosen
-// from a single sample.
+// Every latency figure in ADR 0011 came from one sitting on 2026-08-21/22
+// during which NOAA was returning 504s. The probe interval, the monitoring
+// thresholds and the cache policy all depend on knowing typical behaviour, and
+// none of them should be chosen from a single sample.
 //
-// This probe records what actually happens, hourly, so those numbers are
-// confirmed or corrected before code depends on them.
+// ── Why five endpoints and not one ───────────────────────────────────────────
 //
-// Two deliberate design choices:
+// v1 sampled only the unfiltered `/streamflow` response — the single heaviest
+// thing the API returns. A 50-sample comparison then showed that is the wrong
+// sensor:
 //
-//   1. NO RETRIES. The app retries; this must not. A retry would hide exactly
-//      the failure rate we are trying to measure, and a timeout that succeeds on
-//      attempt three is still a timeout the user waited through.
+//   ?series=analysis_assimilation   10/10 ok,  2.1 s avg
+//   ?series=short_range             10/10 ok,  2.2 s avg
+//   ?series=medium_range             9/10 ok, 10.9 s avg
+//   ?series=long_range              10/10 ok, 15.7 s avg
+//   unfiltered                       8/10 ok, 10.5 s avg
 //
-//   2. ONE REACH. `referenceTime` names a model run, and it was identical across
-//      8 sampled reaches. Probing one reach is therefore enough to detect a new
-//      run — but note this probe is measuring *cadence*, not deciding what to
-//      store. ADR 0011 Phase 3 guard 3 requires each reach to record the
-//      referenceTime it actually returned, precisely so this assumption never
-//      becomes load-bearing.
+// The two products the app depends on for current flow never failed, straight
+// through a window where heavier calls were timing out. So v1's "5 of 7 samples
+// failed" described the worst case, not whether a user's request would have
+// worked.
 //
-// A NOTE ON `ok` VS `complete`, which review caught (2026-08-22):
+// It also could not settle *why* things failed: all three failures fell in the
+// same two rounds, so endpoint weight and a bad window were confounded. Firing
+// all five **simultaneously** every hour separates them over days — if weight is
+// the cause, failures concentrate on the heavy endpoints across many different
+// hours; if it is load, they cluster by hour across all five.
 //
-//   NOAA returns HTTP 200 with `mediumRange: {}` during partial outages — that
-//   was live while this was being reviewed. An earlier version set `ok = true`
-//   whenever the body parsed, so a run where the most important series was
-//   missing entirely would have been logged as healthy and silently undercounted
-//   the failure rate. `ok` now means "fetched and parsed"; `complete` means
-//   "every expected series carried a referenceTime". Analysis must key on
-//   `complete`, and the log line says DEGRADED when they disagree.
+// ── Why hourly for the 6-hourly series too ───────────────────────────────────
+//
+// NOAA publishes analysis and short range hourly, and medium/blend/long four
+// times a day. Sampling the slow ones every 6 h would still be wrong here,
+// because we are not sampling to learn the values — we are sampling to learn
+// *when NOAA actually publishes*. The 00Z medium-range run was observed landing
+// ~07:20Z, later than its own 6-hour cycle. A 6-hourly probe would place that
+// inside a 6-hour window; hourly places it within one. Availability is also a
+// property of the moment rather than of the data, so 24 readings a day beats 4.
+//
+// ── Deliberate: no retries ───────────────────────────────────────────────────
+//
+// The app retries; this must not. A retry would hide exactly the failure rate
+// being measured, and a call that succeeds on attempt three is still a call the
+// user waited through.
 
 import * as functions from "firebase-functions/v1";
 import * as logger from "firebase-functions/logger";
@@ -46,20 +57,35 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-/** Probe reach. "Dead River" — a real favourite, advertises every series. */
-export const PROBE_REACH_ID = "9962444";
+/**
+ * Bumped when the document shape changes so analysis never silently mixes two
+ * schemas. v1 documents hold a single unfiltered sample; v2 holds all five.
+ * (ADR 0011 decision 16, applied to our own instrumentation.)
+ */
+export const PROBE_SCHEMA_VERSION = 2;
 
-/** Unfiltered streamflow returns every series' referenceTime in one response. */
-export const PROBE_URL =
-  `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${PROBE_REACH_ID}/streamflow`;
+/** Probe reach. "Dead River" — a real favourite; advertises every series. */
+export const PROBE_REACH_ID = "9962444";
 
 /** Generous: we are measuring how slow it gets, not enforcing a budget. */
 const PROBE_TIMEOUT_MS = 120_000;
 
 /**
- * Every series the API advertises, including `mediumRangeBlend` — review noted
- * the first version sampled four of five.
+ * The five requests, sampled together each hour.
+ *
+ * `series` is the `?series=` value; null means the unfiltered response. `key` is
+ * where that series' `referenceTime` lives in the JSON — for the unfiltered
+ * response every key is read from the one body.
  */
+export const ENDPOINTS = [
+  {name: "analysis_assimilation", series: "analysis_assimilation", key: "analysisAssimilation"},
+  {name: "short_range", series: "short_range", key: "shortRange"},
+  {name: "medium_range", series: "medium_range", key: "mediumRange"},
+  {name: "long_range", series: "long_range", key: "longRange"},
+  {name: "unfiltered", series: null, key: null},
+] as const;
+
+/** Series read out of the unfiltered response, for the cross-check. */
 export const SERIES = [
   "analysisAssimilation",
   "shortRange",
@@ -68,30 +94,41 @@ export const SERIES = [
   "mediumRangeBlend",
 ] as const;
 
-export interface ProbeSample {
-  sampledAt: FirebaseFirestore.Timestamp;
-  /** Fetched and parsed. Says nothing about whether any data was present. */
+export interface EndpointResult {
   ok: boolean;
-  /** `ok` AND every series carried a referenceTime. Key analysis on this. */
-  complete: boolean;
-  /** How many of SERIES had a referenceTime. */
-  seriesPresent: number;
   httpStatus: number | null;
   elapsedMs: number;
   bytes: number | null;
-  /** series name -> ISO referenceTime, or null when absent from the response. */
-  referenceTimes: Record<string, string | null>;
+  /** The series' referenceTime; for `unfiltered`, all series joined by name. */
+  referenceTime: string | null;
   error: string | null;
 }
 
+export interface CadenceSample {
+  schemaVersion: number;
+  sampledAt: FirebaseFirestore.Timestamp;
+  /** endpoint name -> its result. */
+  endpoints: Record<string, EndpointResult>;
+  /** Authoritative per-series referenceTime, taken from the filtered calls. */
+  referenceTimes: Record<string, string | null>;
+  /** How many of the five answered. */
+  okCount: number;
+  /**
+   * Whether the unfiltered response agreed with the filtered calls on every
+   * series both reported. Null when unfiltered failed, so there was nothing to
+   * compare. A false here would mean the API is internally inconsistent — worth
+   * seeing rather than averaging away.
+   */
+  unfilteredAgrees: boolean | null;
+}
+
 /**
- * Pull every distinct `referenceTime` under a series node. The API nests these
+ * Pull every distinct `referenceTime` under a node. The API nests these
  * differently per series (`mediumRange.mean.referenceTime`,
  * `shortRange.series.referenceTime`), so walk rather than assume a shape.
- * @param {unknown} node Parsed JSON subtree for one series.
- * @return {string|null} The referenceTime found, or null when the series is
- *   absent or empty. Multiple distinct values are joined with "|" so an
- *   internally inconsistent series is visible in the data instead of hidden.
+ * @param {unknown} node Parsed JSON subtree.
+ * @return {string|null} The referenceTime, or null when absent. Multiple
+ *   distinct values join with "|" so an inconsistent series stays visible.
  */
 export function referenceTimeOf(node: unknown): string | null {
   const found = new Set<string>();
@@ -112,89 +149,103 @@ export function referenceTimeOf(node: unknown): string | null {
 }
 
 /**
- * Build a sample from a raw response. Split out from the fetch so it is
- * testable without network access.
+ * Turn one raw response into a result. Split from the fetch so it is testable
+ * without network access.
  * @param {object} args Raw response parts.
+ * @param {string|null} args.seriesKey JSON key to read, null for unfiltered.
  * @param {number|null} args.httpStatus HTTP status, null if the request threw.
  * @param {string|null} args.body Response body, null if the request threw.
  * @param {number} args.elapsedMs Wall-clock duration.
  * @param {string|null} args.error Transport-level error, if any.
- * @return {ProbeSample} The sample, never throwing.
+ * @return {EndpointResult} Never throws — a failure is a data point.
  */
-export function buildSample(args: {
+export function buildEndpointResult(args: {
+  seriesKey: string | null;
   httpStatus: number | null;
   body: string | null;
   elapsedMs: number;
   error: string | null;
-}): ProbeSample {
-  const {httpStatus, body, elapsedMs} = args;
-  const sample: ProbeSample = {
-    sampledAt: admin.firestore.Timestamp.now(),
+}): EndpointResult {
+  const {seriesKey, httpStatus, body, elapsedMs} = args;
+  const result: EndpointResult = {
     ok: false,
-    complete: false,
-    seriesPresent: 0,
     httpStatus,
     elapsedMs,
     bytes: body === null ? null : Buffer.byteLength(body, "utf8"),
-    referenceTimes: Object.fromEntries(SERIES.map((s) => [s, null])),
+    referenceTime: null,
     error: args.error,
   };
 
-  if (args.error !== null) return sample;
+  if (args.error !== null) return result;
   if (httpStatus === null || httpStatus < 200 || httpStatus >= 300) {
-    sample.error = `HTTP ${httpStatus}`;
-    return sample;
+    result.error = `HTTP ${httpStatus}`;
+    return result;
   }
   if (body === null) {
-    sample.error = "empty body";
-    return sample;
+    result.error = "empty body";
+    return result;
   }
 
   let json: Record<string, unknown>;
   try {
     json = JSON.parse(body) as Record<string, unknown>;
   } catch (e) {
-    sample.error = e instanceof Error ? e.message : String(e);
-    return sample;
+    result.error = e instanceof Error ? e.message : String(e);
+    return result;
   }
 
-  for (const s of SERIES) {
-    sample.referenceTimes[s] = referenceTimeOf(json[s]);
+  if (seriesKey === null) {
+    // Unfiltered: record every series it carried, named, for the cross-check.
+    const parts = SERIES.map((s) => `${s}=${referenceTimeOf(json[s]) ?? "-"}`);
+    result.referenceTime = parts.join(" ");
+  } else {
+    result.referenceTime = referenceTimeOf(json[seriesKey]);
+    if (result.referenceTime === null) {
+      // HTTP 200 with an empty series — observed live on 2026-08-22. Parsing
+      // succeeded but there is no data, and that must not read as healthy.
+      result.error = "200 but series empty";
+      return result;
+    }
   }
-  sample.seriesPresent =
-    Object.values(sample.referenceTimes).filter((v) => v !== null).length;
-  sample.ok = true;
-  sample.complete = sample.seriesPresent === SERIES.length;
-  if (!sample.complete) {
-    const missing = SERIES.filter((s) => sample.referenceTimes[s] === null);
-    sample.error = `missing series: ${missing.join(",")}`;
-  }
-  return sample;
+
+  result.ok = true;
+  return result;
 }
 
 /**
- * Take one sample. Never throws: a failed probe is a data point, not an error.
- * @return {Promise<ProbeSample>} The recorded sample.
+ * Fetch one endpoint. Never throws.
+ * @param {string|null} series The `?series=` value, or null for unfiltered.
+ * @param {string|null} seriesKey JSON key to read, null for unfiltered.
+ * @return {Promise<EndpointResult>} The result.
  */
-export async function probeOnce(): Promise<ProbeSample> {
+export async function probeEndpoint(
+  series: string | null,
+  seriesKey: string | null
+): Promise<EndpointResult> {
+  const base =
+    `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${PROBE_REACH_ID}/streamflow`;
+  const url = series === null ? base : `${base}?series=${series}`;
+
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
 
   try {
-    const res = await fetch(PROBE_URL, {
+    const res = await fetch(url, {
       signal: controller.signal,
-      headers: {"User-Agent": "RIVR-cadence-probe/1.0"},
+      headers: {"User-Agent": "RIVR-cadence-probe/2.0"},
     });
     const body = await res.text();
-    return buildSample({
+    return buildEndpointResult({
+      seriesKey,
       httpStatus: res.status,
       body,
       elapsedMs: Date.now() - started,
       error: null,
     });
   } catch (e) {
-    return buildSample({
+    return buildEndpointResult({
+      seriesKey,
       httpStatus: null,
       body: null,
       elapsedMs: Date.now() - started,
@@ -206,48 +257,96 @@ export async function probeOnce(): Promise<ProbeSample> {
 }
 
 /**
- * Hourly cadence probe. Writes one document per sample to `publish_cadence_log`.
+ * Assemble one hour's sample from the five results.
+ * @param {Record<string, EndpointResult>} endpoints Per-endpoint results.
+ * @return {CadenceSample} The sample.
+ */
+export function buildSample(
+  endpoints: Record<string, EndpointResult>
+): CadenceSample {
+  // Authoritative freshness comes from the filtered calls: v1 could only read
+  // referenceTime when the unfiltered request succeeded, which is the one with
+  // the worst observed success rate (8/10 vs 10/10).
+  const referenceTimes: Record<string, string | null> = {};
+  for (const e of ENDPOINTS) {
+    if (e.key === null) continue;
+    referenceTimes[e.key] = endpoints[e.name]?.referenceTime ?? null;
+  }
+
+  // Cross-check: does the unfiltered body agree with the filtered calls?
+  let unfilteredAgrees: boolean | null = null;
+  const unfiltered = endpoints["unfiltered"];
+  if (unfiltered?.ok && unfiltered.referenceTime) {
+    const parsed = new Map(
+      unfiltered.referenceTime
+        .split(" ")
+        .map((p) => p.split("=") as [string, string])
+    );
+    unfilteredAgrees = Object.entries(referenceTimes).every(([k, v]) => {
+      const other = parsed.get(k);
+      if (v === null || other === undefined || other === "-") return true;
+      return v === other;
+    });
+  }
+
+  return {
+    schemaVersion: PROBE_SCHEMA_VERSION,
+    sampledAt: admin.firestore.Timestamp.now(),
+    endpoints,
+    referenceTimes,
+    okCount: Object.values(endpoints).filter((r) => r.ok).length,
+    unfilteredAgrees,
+  };
+}
+
+/**
+ * Hourly probe. One document per hour into `publish_cadence_log`, holding all
+ * five endpoint results.
  *
- * Storage is deliberately append-only and flat: a week of hourly samples is 168
- * documents, and the analysis (when does a run actually land, how late, how
- * often does the fetch fail) is far easier over rows than over an aggregate that
- * has already thrown away the shape.
+ * Storage is append-only and flat: a week is 168 documents, and the analysis
+ * (when a run lands, how late, how often each endpoint fails) reads far more
+ * easily over rows than over an aggregate that has thrown the shape away.
  *
  * The log line is emitted BEFORE the write and the write is guarded, so a
  * Firestore failure loses the document but never the observation — review found
- * the first version could drop a sample leaving neither, which is this repo's
- * documented silent-failure mode reproduced in new code.
+ * v1 could drop a sample leaving neither, which is this repo's documented
+ * silent-failure mode reproduced in new code.
  */
 export const probePublishCadence = functions
-  .runWith({memory: "256MB", timeoutSeconds: 180})
+  .runWith({memory: "256MB", timeoutSeconds: 300})
   .pubsub.schedule("0 * * * *")
   .timeZone("UTC")
   .onRun(async () => {
-    const sample = await probeOnce();
+    // Simultaneous, so endpoint weight and a bad minute stay separable.
+    const results = await Promise.all(
+      ENDPOINTS.map(async (e) => [
+        e.name,
+        await probeEndpoint(e.series, e.key),
+      ] as const)
+    );
+    const sample = buildSample(Object.fromEntries(results));
 
-    const rt = SERIES.map((s) => `${s}=${sample.referenceTimes[s] ?? "-"}`)
-      .join(" ");
-    if (sample.complete) {
-      logger.info(
-        `📈 cadence ok ${sample.elapsedMs}ms ${sample.bytes}B ${rt}`
-      );
-    } else if (sample.ok) {
-      logger.warn(
-        `📈 cadence DEGRADED ${sample.seriesPresent}/${SERIES.length} series ` +
-        `${sample.elapsedMs}ms ${sample.bytes}B ${rt} — ${sample.error}`
-      );
+    const line = ENDPOINTS.map((e) => {
+      const r = sample.endpoints[e.name];
+      return `${e.name}=${r.ok ? `${r.elapsedMs}ms` : `FAIL(${r.error})`}`;
+    }).join(" ");
+
+    if (sample.okCount === ENDPOINTS.length) {
+      logger.info(`📈 cadence ${sample.okCount}/${ENDPOINTS.length} ${line}`);
     } else {
+      logger.warn(`📈 cadence ${sample.okCount}/${ENDPOINTS.length} ${line}`);
+    }
+    if (sample.unfilteredAgrees === false) {
       logger.warn(
-        `📈 cadence FAIL ${sample.elapsedMs}ms ` +
-        `http=${sample.httpStatus} err=${sample.error}`
+        "📈 cadence DISAGREEMENT — unfiltered and filtered report different " +
+        `referenceTimes: ${JSON.stringify(sample.referenceTimes)} vs ` +
+        `${sample.endpoints["unfiltered"].referenceTime}`
       );
     }
 
     try {
       await db.collection("publish_cadence_log").add(sample);
     } catch (e) {
-      // A lost document is a gap in the dataset. Say so loudly — guard 1 asks
-      // for no gaps over an hour, and an unlogged gap is undetectable.
       logger.error(
         "📈 cadence WRITE FAILED — sample lost, dataset now has a gap",
         {error: e instanceof Error ? e.message : String(e)}
