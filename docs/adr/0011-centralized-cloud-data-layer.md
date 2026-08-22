@@ -49,37 +49,45 @@ consecutive attempts — while reach metadata, return periods and GEOGLOWS all
 answered normally. During that window the app could not show a flow value for
 any NWM river, because nothing renders from cache.
 
-### OPEN — is the unfiltered endpoint the thing that fails? (2026-08-22)
+### MEASURED — endpoint weight, not endpoint choice, is what fails (2026-08-22)
 
-**Unverified, 1 of 10 rounds.** Raised by Jerson: the failure rate above, and
-the Phase 0 probe, both measure the **unfiltered** `/streamflow` response — the
-single heaviest thing the API can return. If the filtered `?series=` endpoints
-survive when unfiltered does not, then "5 of 7 probe samples failed" describes
-the worst endpoint rather than the service, and the app has a cheaper path than
-assumed.
+Raised by Jerson: the failure rate above, and the Phase 0 probe, both measure the
+**unfiltered** `/streamflow` response — the heaviest thing the API returns. If
+the filtered `?series=` endpoints survive when unfiltered does not, the probe is
+a worst-case sensor rather than a measure of service availability.
 
-Round 1, all five fired **simultaneously** so an outage window cannot favour one:
+**10 rounds, 3 minutes apart, all five variants fired simultaneously each round
+so a bad window cannot favour one. 50 samples.**
 
-| endpoint | round 1 |
-|---|---|
-| `?series=analysis_assimilation` | 200 — 6.1 s, 10 KB |
-| `?series=short_range` | 200 — 8.6 s, 2.7 KB |
-| `?series=long_range` | 200 — 32.6 s, 65 KB |
-| `?series=medium_range` | 200 — 34.7 s, 160 KB |
-| **unfiltered** | **504** — 60.3 s |
+| endpoint | success | avg | worst |
+|---|---|---|---|
+| `?series=analysis_assimilation` | **10/10** | **2.1 s** | 8.4 s |
+| `?series=short_range` | **10/10** | **2.2 s** | 8.6 s |
+| `?series=medium_range` | 9/10 | 10.9 s | 34.7 s |
+| `?series=long_range` | 10/10 | 15.7 s | 51.5 s |
+| unfiltered | 8/10 | 10.5 s | 35.6 s |
 
-`medium_range` alone is 160 KB and succeeded, so size alone does not explain it;
-the *combined* response is what fails.
+**Confirmed:** under stress the heavy requests fail and the small ones do not.
+All three failures fell in the degraded rounds 1–2; `analysis_assimilation` and
+`short_range` came through untouched.
 
-**Why this matters beyond the probe.** `NoaaApiService.fetchAllForecasts` calls
-the unfiltered endpoint first and only falls back to filtered calls after it
-fails — so on this evidence the app spends 60 s on the least reliable request
-before trying the ones that work. If the pattern holds, that ordering is
-backwards and is a Phase 1-class fix, not a Phase 3 one.
+**Not confirmed:** that the unfiltered endpoint is *specifically* fragile. The
+failures cluster by time, not by endpoint — unfiltered twice and `medium_range`
+once, in the same two rounds. Separating "this URL is weak" from "those minutes
+were bad" needs failures spread across rounds, which this run does not show.
 
-**Do not act on one round.** An earlier single test in this same investigation
-concluded "all endpoints are down" and was wrong. Ten rounds, three minutes
-apart, are running; this section gets a verdict when they land.
+**The consequence that matters.** The two products the map detail sheet needs
+for current flow averaged **2.1 s at 10/10**, through a window where heavier
+calls were timing out. That is inside the 3-second bar with no caching at all —
+so a meaningful share of the latency problem is *which call we make*, not
+*whether we cache*.
+
+**And the Phase 0 probe measures the wrong thing.** It requests the heaviest
+response, so "5 of 7 samples failed" describes the worst case, not whether the
+app's own calls would have succeeded. Unverified and worth measuring: what the
+failure rate looks like for `analysis_assimilation` + `returnPeriods`
+specifically, which is what a user actually waits on. Probe design pending
+Jerson's call.
 
 ### The 0.3s entries are the tell
 
