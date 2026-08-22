@@ -49,6 +49,38 @@ consecutive attempts — while reach metadata, return periods and GEOGLOWS all
 answered normally. During that window the app could not show a flow value for
 any NWM river, because nothing renders from cache.
 
+### OPEN — is the unfiltered endpoint the thing that fails? (2026-08-22)
+
+**Unverified, 1 of 10 rounds.** Raised by Jerson: the failure rate above, and
+the Phase 0 probe, both measure the **unfiltered** `/streamflow` response — the
+single heaviest thing the API can return. If the filtered `?series=` endpoints
+survive when unfiltered does not, then "5 of 7 probe samples failed" describes
+the worst endpoint rather than the service, and the app has a cheaper path than
+assumed.
+
+Round 1, all five fired **simultaneously** so an outage window cannot favour one:
+
+| endpoint | round 1 |
+|---|---|
+| `?series=analysis_assimilation` | 200 — 6.1 s, 10 KB |
+| `?series=short_range` | 200 — 8.6 s, 2.7 KB |
+| `?series=long_range` | 200 — 32.6 s, 65 KB |
+| `?series=medium_range` | 200 — 34.7 s, 160 KB |
+| **unfiltered** | **504** — 60.3 s |
+
+`medium_range` alone is 160 KB and succeeded, so size alone does not explain it;
+the *combined* response is what fails.
+
+**Why this matters beyond the probe.** `NoaaApiService.fetchAllForecasts` calls
+the unfiltered endpoint first and only falls back to filtered calls after it
+fails — so on this evidence the app spends 60 s on the least reliable request
+before trying the ones that work. If the pattern holds, that ordering is
+backwards and is a Phase 1-class fix, not a Phase 3 one.
+
+**Do not act on one round.** An earlier single test in this same investigation
+concluded "all endpoints are down" and was wrong. Ten rounds, three minutes
+apart, are running; this section gets a verdict when they land.
+
 ### The 0.3s entries are the tell
 
 Same URL, same reach, sometimes 0.3s and sometimes 60s. Upstream is fast when
@@ -80,6 +112,37 @@ up to 156 KB to receive identical bytes.
 (`2026-08-22T05:00:00Z`, 8/8, no failures). That is consistent with atomic
 publication but does not prove it — see Phase 3 guard 4, which is designed so the
 answer does not matter.
+
+## NOAA's documented cadence, and where the app disagrees with it
+
+From [NOAA's National Water Model page](https://water.noaa.gov/about/nwm),
+their wording:
+
+| configuration | official cadence | horizon | members |
+|---|---|---|---|
+| Analysis & Assimilation (CONUS) | "cycles hourly" | real-time | 1 |
+| Short Range (CONUS) | "cycles hourly" | 18 h | 1 |
+| Medium Range (CONUS) | "executed four times per day" | 10 d / 8.5 d | 6 |
+| Medium Range Blend | "executed four times per day" | 10 d | 1 |
+| Long Range (CONUS) | "cycles four times per day" | 30 d | 16 |
+| **Alaska Short Range** | **"cycles every three hours"** | 15–45 h | 1 |
+| **Hawaii / Puerto Rico Short Range** | **"cycles two times per day"** | 48 h | 1 |
+
+`NwmDataSource.validUntil` matches this **for CONUS** — hourly for
+analysis/short, 6-hourly for medium/long.
+
+**Bug: it applies the CONUS rule to every reach.** Alaska short range cycles
+every three hours and Hawaii/Puerto Rico twice a day, so for a non-CONUS reach
+the app expires short-range data hourly and refetches up to 24× a day for
+something that changes 2–8×. Wasted calls against an API measured at 11%+
+failure, and on a product where a wasted call is the difference between a warm
+cache and a spinner. Not urgent — coverage there is thin — but it belongs to
+whichever phase touches `validUntil`.
+
+**It also confirms the publication-lag finding is real.** The 00Z medium-range
+run was observed appearing ~07:20Z. Against a documented 6-hourly cadence that
+is genuinely late, not a misreading of the schedule — the previous run remains
+the newest available for most of the window.
 
 ## Decisions
 
