@@ -106,9 +106,9 @@ Ranked by value for effort. Not mutually exclusive; A+C+E is the likely shape.
 
 **A. Route the NWM row through the SSOT repository.** Mirror
 `_buildGeoglowsRow`. Cached favourites render with no network; stale ones render
-instantly and refresh underneath. Closes ADR 0001 step 5b. *Largest win, lowest
-risk — the machinery is built, registered, and already in use by the other
-source.*
+instantly and refresh underneath. *Largest win, lowest risk — the machinery is
+built, registered, and already in use by the other source.* (Related to ADR 0001
+Step 7 but, per the section below, does not require it.)
 
 **B. Fetch only the medium-range mean.** Stop calling `loadCompleteReachData` for
 a page that uses one series. Cuts payload and parse cost even on a cache miss.
