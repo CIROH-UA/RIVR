@@ -151,6 +151,62 @@ itself.
 **Stale documentation is a defect.** Each phase updates the docs it invalidates
 as part of the phase, and Phase 9 sweeps whatever slipped through.
 
+## The review gate — the last guard of every phase
+
+**No phase is complete until an independent agent review passes.** This is the
+final numbered guard in each phase below, and it is a gate, not a formality: a
+phase that fails it is not done, regardless of how the other guards look.
+
+**Why.** The person who wrote the code is the worst judge of whether it meets the
+spec, because they have already convinced themselves. This repo has the receipts:
+a guard in ADR 0009 phase 4 that would have passed against the broken code, a
+`strings` check that passed against both the fixed and the broken IPA, a
+"measured" claim in ADR 0008 that was never measured, and a Phase 5 scope
+estimate in this very document that was wrong until it was checked. Every one was
+caught by looking again with fresh eyes, and every one had already been declared
+finished.
+
+**How it runs.**
+
+- A **fresh agent with no context from the implementation.** It must not inherit
+  the assumptions that produced the work.
+- It is given: the phase's guards, its "you are done when", and the diff. It is
+  **not** given a summary of what was done — summaries are where self-deception
+  hides.
+- It **verifies independently** — running tests, reading source, executing
+  commands. Claims in commit messages, code comments, or this ADR are treated as
+  assertions to check, never as evidence.
+- Its posture is **adversarial**: for each guard, actively try to construct a case
+  where the code fails it. The question is "how is this still broken", not "does
+  this look right".
+
+**Required output.** Per guard: `MET` / `NOT MET` / `CANNOT VERIFY`, each with
+concrete evidence — a command and its output, or a `file:line`. Then a single
+overall verdict.
+
+- **`CANNOT VERIFY` counts as a failure.** A guard that cannot be checked is a
+  guard that isn't real, and it must be rewritten until it can be.
+- The reviewer **reports and does not fix**. Fixing is the implementer's job;
+  merging the two roles recreates the problem the gate exists to solve.
+
+**It must specifically hunt this project's known failure modes:**
+
+1. **Fake guards** — would this test also pass against the code *before* the
+   change? If yes, it proves nothing. This is the single most valuable check.
+2. **Unearned "measured"** — is every number traceable to a run, or was it
+   inferred and then stated as fact?
+3. **Silent success** — if this failed halfway, would anything actually notice,
+   or would it exit 0 with partial data? Five operations in this repo have done
+   exactly that.
+4. **Stale documentation** — what did this change make untrue that is still
+   written down?
+5. **Legacy left behind** — is there now a second way to do the thing this phase
+   centralised?
+
+**The reviewer also answers the phase's "you are done when" in its own words**,
+from the evidence rather than from the ADR's phrasing. If it cannot, the phase is
+not done.
+
 Phases 1 and 2 are app-only. Phase 3 is server-only. They can proceed in
 parallel.
 
@@ -185,6 +241,7 @@ from a single sitting.
    about probability.
 6. **Any claim in this ADR contradicted by the data is corrected here before code
    is written.** At least one correction is expected.
+7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** you can state, with a week of data: how often each series
 actually publishes, how late it typically is, how often it fails, and how long
@@ -225,6 +282,7 @@ value rather than a stopgap.
    compete for the first paint. Assert on request ordering.
 6. With the network black-holed, the sheet reaches a terminal, non-spinner state
    naming what failed and offering retry.
+7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** tapping any stream on the map — favourite or not, on a cold
 cache — puts a sheet on screen instantly, titles it as soon as the cheapest call
@@ -262,6 +320,7 @@ would grow without bound.
    there is a crash on first launch.
 7. A unit-preference change re-renders from the same cached entry without a
    refetch, converting at read.
+8. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** browsing hundreds of streams leaves the cache bounded,
 favourites survive eviction unconditionally, and a stream you looked at earlier
@@ -326,19 +385,20 @@ verifiable before any client depends on it.
    while producing wrong or partial data; exit status has never caught one.
 9. Favouriting a never-viewed reach produces a store document within seconds, not
    at the next hourly run.
-11. **Documents are stored in the upstream native unit**, never a user's
+10. **Documents are stored in the upstream native unit**, never a user's
     preference. Test: two users with opposite unit settings favourite one reach
     and the document is byte-identical regardless of who triggered the fetch.
     This is the guard that stops a shared store from being poisoned by whoever
     happened to fetch first.
-12. **Overlapping runs cannot write backwards.** If a slow run is still going
+11. **Overlapping runs cannot write backwards.** If a slow run is still going
     when the next fires, a write carrying an older `referenceTime` must not
     replace a newer one. Test by interleaving two runs deliberately.
-13. Every stored document carries a schema version, and a reader rejects an
+12. Every stored document carries a schema version, and a reader rejects an
     unrecognised one rather than parsing it.
-10. Firestore reads and writes per day are **measured** against the documented
+13. Firestore reads and writes per day are **measured** against the documented
     free quota (50k reads / 20k writes) and recorded, so the scaling law —
     distinct reaches × cadence — is confirmed rather than assumed.
+14. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** the store has held correct, current values for every
 favourited reach across several publish cycles with nobody watching, a
@@ -383,6 +443,7 @@ Store.
    just in code review.
 8. Older app versions still on the direct path keep working throughout rollout;
    the store is additive, never a breaking change to the API contract.
+9. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** two phones signed into different accounts, both favouriting
 the same river, show the same number at the same time — and each renders it
@@ -437,6 +498,7 @@ since Phase 4 removes its last caller.
 8. **All ten `ReachDataProvider` consumers render correctly after the rewire** —
    each of the nine widgets plus `geoglows_forecast_provider` exercised, not
    assumed. This is the phase's main regression risk.
+9. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** there is exactly one way for a value to reach the screen,
 and no widget can fetch on its own even if someone tries.
@@ -469,6 +531,7 @@ untouched.
    pick one. Test: a reach near a threshold boundary classifies identically in
    the notification body and on screen. Reading the same document is not
    sufficient — identical inputs through different code can still disagree.
+7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** an alert fires from data the app is already displaying,
 within an hour of the run that triggered it, and a user sitting above threshold
@@ -496,6 +559,7 @@ stale value from a current one — we have trained them not to look.**
    **without** a user-visible error.
 4. The indicator is driven by the same signal that alarms operationally — one
    source of truth for "are we fresh".
+5. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** a user has no reason to pull-to-refresh, because the number
 on screen is provably the latest published — and when it isn't, the app says so
@@ -514,6 +578,7 @@ before they have to wonder.
    devices converge, alert fires.
 5. Android checked — it shares this code path entirely.
 6. Every number recorded with the build it came from.
+7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** the originally reported journey — tapping a Friday digest
 on a cold start — renders rivers in under 3 seconds, and you have the numbers to
@@ -569,6 +634,7 @@ be recoverable.
    the previous one. **Test this by reading it as if new** — every stale-doc
    incident in this repo started with a doc that was true when written.
 6. Full suite green with no skipped tests carried forward.
+7. **Independent agent review passes** (see *The review gate*).
 
 **You are done when** nothing in the tree describes or implements the old data
 path, the two known server defects are fixed rather than documented, and someone
@@ -635,6 +701,17 @@ Recorded because each of these was wrong or missing in the first draft:
    *Checked and clear:* the map search widget displays place categories from
    geocoding, not flow values, so it is not a value surface and needs no
    migration.
+
+9. **An independent agent review is now the final guard of every phase** (asked
+   for by Jerson). Specified in *The review gate*: a fresh agent, given the
+   guards and the diff but deliberately **not** a summary of the work, verifying
+   each guard independently and adversarially. `CANNOT VERIFY` counts as a
+   failure, and the reviewer reports without fixing.
+
+   Writing it surfaced a numbering bug in this document — Phase 3's guards ran
+   `9, 11, 12, 13, 10` because a later insertion landed before an earlier one.
+   Fixed, and all ten phases are now verified contiguous. Fitting, for a gate
+   whose purpose is that the author is the worst judge of their own work.
 
 **Correction to an earlier claim.** During discussion it was suggested that
 routing through our cloud would move `nwmApiKey` out of the app. **It does not.**
