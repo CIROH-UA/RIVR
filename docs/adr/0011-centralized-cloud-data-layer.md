@@ -367,6 +367,18 @@ the repository and directly.
 `interactive_chart`, and the mixed paths in `favorites_provider` and
 `weekly_outlook_page`.
 
+**`ReachDataProvider` is the bulk of this phase — measured, not guessed.** It is
+939 lines, mixes in `ReachDataCacheMixin` (a further 179), and is referenced from
+`main.dart` plus **nine** forecast widgets: `hydrograph_page`,
+`reach_forecast_page`, `chart_preview_widget`, `current_flow_status_card`,
+`forecast_category_grid`, `horizontal_flow_timeline`, `interactive_chart`,
+`long_range_calendar`, and `favorites_page`, plus `geoglows_forecast_provider`.
+
+It is therefore **rewired to read through the repository, not deleted.** Scope
+this phase around that migration; treating it as a leftover would badly
+underestimate the work, and every one of those nine widgets is a regression
+surface.
+
 **Delete `ForecastService`'s competing cache layer** — `_currentFlowCache`,
 `_flowCategoryCache`, `_recentResponseCache` and its `_forecastCacheService`
 writes. These are a second cache alongside the repository, with their own TTLs,
@@ -388,6 +400,9 @@ since Phase 4 removes its last caller.
    disk caches are gone; a reach cannot be represented twice with two different
    TTLs.
 7. No method survives with zero callers — verified by search, not by intent.
+8. **All ten `ReachDataProvider` consumers render correctly after the rewire** —
+   each of the nine widgets plus `geoglows_forecast_provider` exercised, not
+   assumed. This is the phase's main regression risk.
 
 **You are done when** there is exactly one way for a value to reach the screen,
 and no widget can fetch on its own even if someone tries.
@@ -478,9 +493,10 @@ be recoverable.
 - **Remove the Phase 4 kill switch** and its Remote Config parameter, once the
   store has run clean through Phase 8. A permanent fallback is a permanent second
   source of truth.
-- Delete every method, provider and mixin left with no callers —
-  `reach_data_provider` and `reach_data_cache_mixin` are the likely candidates,
-  but the list is **derived at the time, not predicted here**.
+- Delete every method, provider and mixin left with no callers. **The list is
+  derived at the time, not predicted here** — an earlier draft of this ADR named
+  `reach_data_provider` and `reach_data_cache_mixin` as candidates and was wrong
+  (see Phase 5).
 - Delete tests that only covered deleted paths; keep any that assert behaviour
   still promised, rewritten against the new path.
 - Resolve the two server defects already logged in ADR 0008 rather than carrying
