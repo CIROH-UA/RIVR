@@ -31,8 +31,9 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_act
 /// which is not hypothetical: on 2026-08-22 NOAA's `/streamflow` returned 504
 /// for every series while `/reaches/{id}` kept answering.
 ///
-/// `reachSummary` is warmed in the background afterwards, because that is the
-/// key the forecast page reads.
+/// The forecast page reads these same three keys, so "See forecast" is a cache
+/// hit without this sheet warming anything — and the same flow number is
+/// literally the same cache entry on both screens.
 ///
 /// Layout: current flow and the days ahead sit side by side as equal tiles
 /// ([ReachFlowTiles]) over the flood ladder, and reach metadata is collapsed
@@ -447,7 +448,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// lands (ADR 0011 Phase 1).
   ///
   /// This replaced a single `reachSummary` read, which looked cheap at the call
-  /// site and was not: building it fetched reach info, current flow, return
+  /// site and was not: building it fetches reach info, current flow, return
   /// periods **and** a medium-range forecast *serially*, the 156 KB / 30.8 s
   /// forecast series accounting for most of it. The sheet never
   /// rendered that series; the forecast peak it shows comes from the map tile
@@ -570,7 +571,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
     }).whenComplete(markSettled));
 
-    _warmForecastPage(reachId);
   }
 
   /// Resolve the place label after the sheet is already usable. Best-effort:
@@ -582,34 +582,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     }));
   }
 
-  /// Warm `reachSummary` — the key `reach_forecast_page` actually reads — so
-  /// "See forecast" stays a cache hit.
-  ///
-  /// This is not a nicety. Before this phase the sheet read `reachSummary`
-  /// itself, so opening the forecast page was already warm. Splitting the sheet
-  /// into narrow products removed that side effect and would have moved the
-  /// whole bundled wait onto the "See forecast" tap — making that tap *slower*
-  /// than before the optimisation. Review caught it.
-  ///
-  /// Started after the sheet's own reads are issued and never awaited, so it
-  /// cannot delay first paint. Failures are silent: the forecast page fetches
-  /// for itself regardless.
-  void _warmForecastPage(String reachId) {
-    if (widget.selectedReach.source.isGeoglows) return;
-    unawaited(
-      GetIt.I<IRiverDataRepository>()
-          .read(RiverDataKey(
-            source: ForecastSource.nwm,
-            reachId: reachId,
-            product: ForecastProduct.reachSummary,
-          ))
-          .then((_) => null)
-          .catchError((Object e) {
-            AppLogger.debug('ReachDetailsSheet', 'Warm failed (harmless): $e');
-            return null;
-          }),
-    );
-  }
+
 
   /// GEOGLOWS reach preview: current flow from the proxy (median of the latest
   /// forecast). GEOGLOWS streams are unnamed, so displayName falls back to

@@ -200,6 +200,31 @@ Future<void> _settle(WidgetTester t) async {
 void main() {
   tearDown(() => GetIt.instance.reset());
 
+  group('guard 1 — the sheet is up before any read completes', () {
+    // The <500ms half needs a device capture. This half does not: with every
+    // read hung, the sheet must still be on screen with its skeleton.
+    testWidgets('renders with zero completed reads', (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.reachMetadata: const Duration(seconds: 30),
+        ForecastProduct.analysisAssimilation: const Duration(seconds: 30),
+        ForecastProduct.returnPeriods: const Duration(seconds: 30),
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump();
+
+      expect(find.byType(ReachDetailsBottomSheet), findsOneWidget);
+      expect(find.byType(CupertinoActivityIndicator), findsWidgets,
+          reason: 'a skeleton, not a blank sheet');
+      expect(repo.requested, hasLength(3),
+          reason: 'all three issued, none completed');
+
+      await t.pump(const Duration(seconds: 31));
+      await _settle(t);
+    });
+  });
+
   group('guard 3 — the 156 KB medium-range fetch is never requested', () {
     // REGRESSION: the old sheet read `reachSummary`, whose fetch pulls medium
     // range internally. This assertion fails against that implementation.
@@ -226,33 +251,51 @@ void main() {
     });
   });
 
-  group('guard 5 — the sheet warms what the next screen reads, nothing else', () {
-    // The prefetch this guard used to describe was removed: it warmed
-    // ForecastProduct.longRange, but reach_forecast_page reads `reachSummary`
-    // and takes its long-range series from ReachDataProvider, so nothing ever
-    // read the warmed entry. It was 63 KB and a 30.5 s median on every tap for
-    // no benefit. See ADR 0011 Phase 1.
-    testWidgets('the sheet reads three products and warms only reachSummary',
-        (t) async {
+  group('guard 5 — the sheet issues exactly its three reads', () {
+    // The sheet used to warm `reachSummary` for the forecast page. That is gone:
+    // the forecast page now reads these same three keys, so it is warm without
+    // anyone warming it — and the flow number is literally the same cache entry
+    // on both screens rather than two entries fetched moments apart.
+    testWidgets('no fourth read rides along with a stream tap', (t) async {
       final repo = _RecordingRepo();
       _register(repo);
 
       await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
       await _settle(t);
 
-      expect(repo.requested, isNot(contains(ForecastProduct.longRange)),
-          reason: 'nothing reads that product — it was pure cost per tap');
-      expect(repo.requested, isNot(contains(ForecastProduct.mediumRange)));
+      expect(repo.requested.toSet(), {
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      });
+      expect(repo.requested, isNot(contains(ForecastProduct.reachSummary)),
+          reason: 'reachSummary pulls the 156 KB series two layers down');
+      expect(repo.requested, isNot(contains(ForecastProduct.longRange)));
+    });
 
-      // reachSummary IS warmed, because reach_forecast_page reads exactly that
-      // key. Before this phase the sheet read it directly, so "See forecast"
-      // was already warm; splitting into narrow products would otherwise have
-      // moved the whole bundled wait onto that tap.
-      expect(repo.requested, contains(ForecastProduct.reachSummary),
-          reason: '"See forecast" must not become slower than before Phase 1');
-      final own = repo.requested.take(3).toSet();
-      expect(own, isNot(contains(ForecastProduct.reachSummary)),
-          reason: 'the warm must not be one of the sheet\'s first-paint reads');
+    // Uses startedAt rather than list position. Review flagged that the previous
+    // assertion checked only order in a list recorded at call time — the exact
+    // mechanism the guard text says is insufficient — and that the start-time
+    // scaffolding built for a stronger check was never read by any test.
+    testWidgets('all three start together; none waits on another', (t) async {
+      // All three delayed, so none can complete inside its own synchronous
+      // body and be counted as "already done" by the next one.
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.reachMetadata: const Duration(milliseconds: 80),
+        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 40),
+        ForecastProduct.returnPeriods: const Duration(milliseconds: 60),
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(repo.startedAt, hasLength(3));
+      for (final p in repo.startedAt.keys) {
+        expect(repo.completedBefore[p], isEmpty,
+            reason: '$p started only after another read finished — that is '
+                'serial loading wearing a parallel costume');
+      }
     });
   });
 

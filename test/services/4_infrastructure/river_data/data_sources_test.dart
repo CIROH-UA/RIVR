@@ -203,6 +203,31 @@ void main() {
       expect(result.payload['latitude'], 40.0);
     });
 
+    // ADR 0011 Phase 1, guard 3 — asserted HERE, at the API layer, because the
+    // widget-level guard cannot see it. Review proved that: the sheet's test
+    // records reads at the repository, while `reachSummary` pulls medium range
+    // two layers further down through ForecastService. A guard scoped above the
+    // violation is structurally blind to it.
+    test('the narrow products never reach the medium-range endpoint', () async {
+      for (final p in [
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      ]) {
+        api.calls.clear();
+        await nwm.fetch(RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: p,
+        ));
+        expect(
+          api.calls.where((c) => c.contains('medium_range')),
+          isEmpty,
+          reason: '$p must not drag in the 156 KB series',
+        );
+      }
+    });
+
     test('validUntil throws for unsupported products', () {
       expect(
         () => nwm.validUntil(ForecastProduct.geoglowsForecast, DateTime.now()),

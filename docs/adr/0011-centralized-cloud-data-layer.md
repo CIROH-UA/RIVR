@@ -312,13 +312,16 @@ value rather than a stopgap.
    catches internally and never throws, nothing bounded it but a 30 s HTTP
    timeout. Geocoding now happens after the title is on screen. Closing this
    guard needs the Phase 0 device capture.
-2. With four calls of 1s / 5s / 10s / 30s, every value appears as it lands —
-   the 1s value is visible while the 30s call is outstanding.
+2. With reads of differing latency, every value appears as it lands — a ready
+   flow value is visible while a 30 s threshold call is still outstanding. The
+   sheet issues **three** reads, not four; the fourth call in the original
+   framing was the medium-range series, which this phase removed.
 3. Medium range is **not** requested until the forecast section is reached.
    Assert against a request-recording fake.
 4. One read failing never blocks the others — losing the flood category must
    not cost the river's name or its flow.
-5. **The sheet issues exactly its three reads and nothing else.**
+5. **The sheet issues exactly its three reads and nothing else**, and none of
+   them waits on another — asserted on recorded start times, not list position.
 
    *Corrected twice, and the second correction matters more than the first.*
 
@@ -335,9 +338,18 @@ value rather than a stopgap.
    forecast" tap and made it **slower than before the optimisation**. A local
    improvement that is a global regression.
 
-   The sheet therefore warms `reachSummary` in the background, after its own
-   reads are issued and never awaited. Guard: `reachSummary` is requested, but
-   is not among the three the first paint waits on.
+   **A third review rejected the warm as well, and it was right.** Warming
+   `reachSummary` still pulled the 156 KB medium-range series on every tap — two
+   layers below where the sheet's test could see it — and it put the same
+   current-flow number in two independently-cached entries, which is the
+   divergence decision 3 exists to prevent. The real fix was to stop the
+   forecast page reading the bundle at all: it now reads the **same three narrow
+   products**, so "See forecast" is warm with nothing warming it, and both
+   screens show one cache entry rather than two.
+
+   Guard 3 is now additionally asserted at the **API layer**
+   (`data_sources_test.dart`), because a repository-level fake is structurally
+   blind to a fetch that happens inside `ForecastService`.
 
    Ordering assertions alone are not sufficient: review mutation-tested the
    original guard by moving the prefetch to start concurrently with first paint

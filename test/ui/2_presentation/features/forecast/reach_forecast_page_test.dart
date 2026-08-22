@@ -39,14 +39,41 @@ class _StubUnit implements IFlowUnitPreferenceService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// `CurrentFlowPayload.decode` delegates the extraction to IForecastService —
+/// deliberately, so there is only one implementation of "what is the current
+/// flow" (ADR 0011 decision 15). The page therefore needs one registered.
+class _StubForecastService implements IForecastService {
+  @override
+  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
+      640.0;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _FakeRepo implements IRiverDataRepository {
-  _FakeRepo(this.entry);
+  _FakeRepo(this.entry, {this.byProduct = const {}});
   final RiverDataEntry? entry;
 
+  /// Per-product payloads. The NWM page reads three narrow products now
+  /// (ADR 0011 Phase 1) rather than one bundled `reachSummary`, so a single
+  /// entry for every key would hand each read the wrong shape.
+  final Map<ForecastProduct, Map<String, dynamic>> byProduct;
+
+  RiverDataEntry? _forKey(RiverDataKey key) {
+    final payload = byProduct[key.product];
+    if (payload == null) return entry;
+    return RiverDataEntry(
+      key: key,
+      window: _window(),
+      unit: 'CFS',
+      payload: payload,
+    );
+  }
+
   @override
-  Future<RiverDataEntry?> read(RiverDataKey key) async => entry;
+  Future<RiverDataEntry?> read(RiverDataKey key) async => _forKey(key);
   @override
-  Future<RiverDataEntry?> refresh(RiverDataKey key) async => entry;
+  Future<RiverDataEntry?> refresh(RiverDataKey key) async => _forKey(key);
   @override
   ValueListenable<RiverDataEntry?> watch(RiverDataKey key) =>
       ValueNotifier(entry);
@@ -75,10 +102,15 @@ FreshnessWindow _window() => FreshnessWindow(
       validUntil: DateTime.utc(2026, 7, 12, 13),
     );
 
-void _registerRepo(RiverDataEntry entry) {
+void _registerRepo(
+  RiverDataEntry entry, {
+  Map<ForecastProduct, Map<String, dynamic>> byProduct = const {},
+}) {
   final sl = GetIt.instance;
-  sl.registerSingleton<IRiverDataRepository>(_FakeRepo(entry));
+  sl.registerSingleton<IRiverDataRepository>(
+      _FakeRepo(entry, byProduct: byProduct));
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
+  sl.registerSingleton<IForecastService>(_StubForecastService());
 }
 
 Widget _wrap(Widget page) => CupertinoApp(
@@ -154,16 +186,47 @@ void main() {
       flowCategory: 'Normal',
       returnPeriods: {2: 1200, 5: 2400, 10: 3600, 25: 5800},
     );
-    _registerRepo(RiverDataEntry(
-      key: const RiverDataKey(
-        source: ForecastSource.nwm,
-        reachId: '123',
-        product: ForecastProduct.reachSummary,
+    _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '123',
+          product: ForecastProduct.reachSummary,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: ReachSummaryPayload.encode(details),
       ),
-      window: _window(),
-      unit: 'CFS',
-      payload: ReachSummaryPayload.encode(details),
-    ));
+      byProduct: {
+        ForecastProduct.reachMetadata: {
+          'riverName': details.riverName,
+          'formattedLocation': details.formattedLocation,
+          'latitude': 40.0,
+          'longitude': -111.0,
+        },
+        ForecastProduct.analysisAssimilation: {
+          'reach': {
+            'reachId': '123',
+            'name': 'Test River',
+            'latitude': 40.0,
+            'longitude': -111.0,
+            'streamflow': ['short_range'],
+          },
+          'shortRange': <String, dynamic>{},
+        },
+        ForecastProduct.returnPeriods: {
+          'returnPeriods': [
+            {
+              'feature_id': '123',
+              'return_period_2': 1200.0,
+              'return_period_5': 2400.0,
+              'return_period_10': 3600.0,
+              'return_period_25': 5800.0,
+            },
+          ],
+        },
+      },
+    );
 
     await tester.pumpWidget(_wrap(const ReachForecastPage(
       reachId: '123',

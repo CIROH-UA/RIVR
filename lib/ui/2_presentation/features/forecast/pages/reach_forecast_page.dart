@@ -34,7 +34,8 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_reposit
 import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
-import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
+import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_hydrograph_page.dart';
@@ -141,22 +142,59 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
 
     final unitService = GetIt.I<IFlowUnitPreferenceService>();
     try {
-      final entry = await GetIt.I<IRiverDataRepository>().read(
-        RiverDataKey(
-          source: ForecastSource.nwm,
-          reachId: widget.reachId,
-          product: ForecastProduct.reachSummary,
-        ),
-      );
+      // Reads the SAME three narrow products the map detail sheet reads, rather
+      // than the bundled `reachSummary` (ADR 0011 Phase 1).
+      //
+      // Two reasons, and the second is the important one. Cost: building
+      // `reachSummary` pulls a 156 KB / 30.8 s-median medium-range series this
+      // page never renders from that entry — it gets its series from
+      // ReachDataProvider. Correctness: while this page read `reachSummary` and
+      // the sheet read the narrow products, the same current-flow number lived
+      // in two independently-cached entries fetched at different moments, so
+      // the gauge and the sheet could legitimately disagree. Reading identical
+      // keys makes them identical by construction, which is what ADR 0011
+      // decision 3 and ADR 0002 require.
+      final repo = GetIt.I<IRiverDataRepository>();
+      RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
+            source: ForecastSource.nwm,
+            reachId: widget.reachId,
+            product: p,
+          );
+
+      final entries = await Future.wait([
+        repo.read(keyFor(ForecastProduct.reachMetadata)),
+        repo.read(keyFor(ForecastProduct.analysisAssimilation)),
+        repo.read(keyFor(ForecastProduct.returnPeriods)),
+      ]);
       if (!mounted) return;
-      if (entry == null) {
+
+      final metaEntry = entries[0];
+      if (metaEntry == null) {
         throw Exception('No reach details available.');
       }
-      final details = ReachSummaryPayload.decode(entry, unitService);
-      final currentUnit = unitService.currentFlowUnit;
-      final converted = details.returnPeriods?.map(
-        (year, flow) =>
-            MapEntry(year, unitService.convertFlow(flow, 'CMS', currentUnit)),
+      final meta = ReachMetadataPayload.decode(metaEntry);
+      final flow = entries[1] == null
+          ? null
+          : CurrentFlowPayload.decode(
+              entries[1]!,
+              GetIt.I<IForecastService>(),
+              unitService,
+            );
+      // Already converted to the display unit by the codec.
+      final converted =
+          entries[2] == null ? null : ReturnPeriodPayload.decode(entries[2]!, unitService);
+
+      final details = ReachDetailsData(
+        riverName: meta.riverName,
+        formattedLocation: meta.formattedLocation,
+        currentFlow: flow,
+        flowCategory: (flow != null && converted != null)
+            ? FlowClassification.category(flow, converted)
+            : null,
+        latitude: meta.latitude,
+        longitude: meta.longitude,
+        isClassificationAvailable: converted != null,
+        returnPeriods: converted,
       );
 
       setState(() {
