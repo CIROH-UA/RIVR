@@ -321,3 +321,9 @@ export const cleanupNotificationLogs = functions
       deletedCount: totalDeleted,
     });
   });
+
+// ADR 0011 Phase 0 — hourly publish-cadence probe (instrumentation).
+// Measures when NOAA runs actually land, and how often the fetch fails, so the
+// probe interval and monitoring thresholds rest on a week of data rather than
+// on one sitting during a 504 window.
+export {probePublishCadence} from "./publish-cadence-probe.js";

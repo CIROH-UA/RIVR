@@ -1,6 +1,6 @@
 # 0011 — Centralized cloud-backed data layer
 
-**Status:** Specified, nothing implemented
+**Status:** Phase 0 instrumentation deployed 2026-08-22 (collecting; its guards need a week). Phases 1-9 specified, not implemented.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — that page is one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values), ADR 0008 (push)
 
@@ -233,12 +233,28 @@ from a single sitting.
 2. Publication lag is characterised per series — median and worst observed —
    rather than inferred from the two samples in this ADR.
 3. The dominant cost in the detail sheet is named with a number, not a
-   hypothesis.
+   hypothesis. **Note the ADR's own "~45 s at median" is arithmetic on the
+   per-source medians, not an observed end-to-end time — the sum of medians is
+   not the median of the sum.** This guard is not met by that figure.
+
+   *Deviation, 2026-08-22:* the device-side timing instrumentation is folded
+   into Phase 1 rather than built separately here, because Phase 1 rewrites the
+   exact code paths that would be instrumented and doing it twice is waste.
+   Phase 1 therefore carries the obligation to emit these numbers, and this
+   guard cannot close until it does.
 4. Upstream failure rate is measured over the week, so the 11% in this ADR is
-   confirmed or corrected.
-5. Which reaches are actually opened is logged, so decision 6 — that caching
-   non-favourites is not worth it — rests on data rather than on an argument
-   about probability.
+   confirmed or corrected. **Scope limit, found in review:** the probe issues one
+   unfiltered NOAA call, whereas the 11% spans five different endpoints including
+   CIROH return periods and the GEOGLOWS proxy. The probe measures NOAA
+   `/streamflow` availability only, and cannot by itself confirm or correct that
+   figure — say which number is being reported.
+5. ~~Which reaches are actually opened is logged~~ — **deferred, 2026-08-22.**
+   `firestore.rules` default-denies everything except `users/{uid}`, so a client
+   write needs a new rule, and a counter any client may increment is an abuse
+   surface. `logForecastLoaded` already emits `reach_id` to Firebase Analytics,
+   so the data exists if a BigQuery export is ever enabled. Decision 6 therefore
+   still rests on the scale argument rather than on measurement — stated plainly
+   rather than quietly skipped. It gates nothing; revisit if usage grows.
 6. **Any claim in this ADR contradicted by the data is corrected here before code
    is written.** At least one correction is expected.
 7. **Independent agent review passes** (see *The review gate*).
@@ -358,9 +374,15 @@ verifiable before any client depends on it.
   that reach, and the UI renders from the device cache meanwhile.
 - **GC:** documents whose reach is absent from the union and unrefreshed for ~7
   days are deleted.
-- **Security rules:** store documents are readable by authenticated users and
-  writable only by the service account. They contain no user data — the key is a
-  reach, not a person — but they must not be world-writable.
+- **Security rules — a hard blocker for Phase 4, found 2026-08-22.**
+  `firestore.rules` opens with a catch-all `match /{document=**}` denying read
+  and write, then grants access **only** to `users/{userId}`, plus a
+  `notification_logs` block that also denies all client access. The app therefore cannot read
+  any store collection today; `return_period_cache` is server-written and
+  client-unreadable for exactly this reason. Phase 4 does not work at all until a
+  rule is added: store documents readable by any authenticated user, writable
+  only by the Admin SDK. They hold no user data — the key is a reach, not a
+  person — but they must never be client-writable.
 - **Monitoring, shipped with this phase, not after:** the probe's
   `referenceTime` compared against every stored record; a heartbeat alerting when
   no successful write lands in N hours; and a **count assertion** of reaches
