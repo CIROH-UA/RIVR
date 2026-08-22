@@ -1,6 +1,6 @@
 # 0010 — The Weekly Outlook takes minutes to load
 
-**Status:** Problem measured; six-phase plan with gates below; Option G (server-maintained favourites store) is the recommended destination; nothing implemented
+**Status:** Superseded in scope by **ADR 0011** (centralized cloud data layer), which absorbs Option G and the server-store decisions. Phases 1-2 here (per-row rendering, bounded wait) remain valid as UI resilience. Nothing implemented.
 **Related:** ADR 0001 (river data layer SSOT), ADR 0008 (push notifications)
 
 ## Symptom
