@@ -1,6 +1,6 @@
 # ADR 0003 — Weekly Outlook digest and independent notification types
 
-- **Status:** Accepted — phases 1–4 delivered (settings + data model, Digest-List page, server cron, deep-link + engagement back-off) 2026-07-19/20
+- **Status:** Accepted — phases 1–4 delivered (settings + data model, Digest-List page, server cron, deep-link + engagement back-off) 2026-07-19/20. **The deep link was never actually verified end to end until 2026-08-21**, when it turned out taps had never reached Dart on iOS (ADR 0008) and the page then rendered its empty state during the launch race. Both fixed in 2026.1.2+555 / 2026.1.3+561; the page's 3–5 minute load is open in ADR 0010. The engagement back-off has a design flaw worth reading before changing it — see below.
 - **Date:** 2026-07-20
 - **Deciders:** Jerson Garcia (lead)
 - **Relates to:** ADR 0002 (`0002-canonical-derived-value-layer.md`), `project_push_notifications_audit` (memory)
@@ -56,3 +56,28 @@ We wanted a second, calmer touchpoint — a **once-a-week digest** of how each f
 - `favoriteLabels` is populated when the app surfaces a favorite (viewing the Outlook page); a favorite never surfaced falls back to the server river name until then. The same open also resets the back-off counter (D8), so a user who never opens the page still gets the digest — just at a backed-off cadence.
 - Digest send time is MT for everyone until per-user timezones land (D6).
 - The back-off uses a global week index, so its biweekly/monthly "off weeks" are shared across users rather than per-user anniversaries — simpler and stateless, at the cost of exact per-user spacing.
+
+### Design flaw found in practice (2026-08-21)
+
+D8 assumes "opened the page" ≈ "engaged". In practice the reset lives at the
+**end** of a long chain — tap → route → page → favourites load → `buildOutlook`
+returns rows → `_recordOutlookOpen`. Any break in that chain looks exactly like
+a user ignoring the digest, and the counter ratchets up unopposed.
+
+All three links broke at once and the counter recorded none of it:
+
+1. taps never reached Dart on iOS (ADR 0008), so the page never opened;
+2. once they did, the page rendered its empty state and returned *before*
+   `_recordOutlookOpen`;
+3. the page can still take minutes to build rows (ADR 0010), and a user who
+   backs out early never reaches the reset.
+
+Measured consequence: repeated testing drove the counter to exactly 4 — the
+biweekly threshold — and a subsequent send was silently dropped as
+`📬 0/1 due this week`. It read as a delivery failure. **A user tapping every
+digest can be throttled for engaging.**
+
+Worth considering when this is next touched: reset on *tap* (the notification
+carries the intent) rather than on successful render, or reset optimistically on
+page mount and treat the row build as decoration. The current placement measures
+whether the app worked, not whether the person cared.

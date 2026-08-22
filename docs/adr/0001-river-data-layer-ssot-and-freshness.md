@@ -102,6 +102,14 @@ FCM data push ("new publish" / "threshold crossed on reach X, flow=Y")
 
 **Step 7 (unified domain model)** remains future work: retire the `ForecastResponse`/`GeoglowsForecast` fork so the NWM forecast *detail* pages (short/medium/long via `ReachDataProvider`/`ForecastService`) also move onto the repository. Not required for the Step 1–5 win.
 
+> **Update 2026-08-21 — Step 7 now has a user-visible cost.** The Weekly Outlook
+> builds its GEOGLOWS rows through this repository and its NWM rows through the
+> old `ForecastService.loadCompleteReachData`, which always hits the network and
+> never reads cache. Opened from a Friday digest push, that page showed a
+> spinner for 3–5 minutes on device. See **ADR 0010**. The parked-because-
+> low-value reasoning above still holds for detail pages; it no longer holds for
+> this one.
+
 ## Development plan (logical, dependency‑ordered)
 
 **Execution note (2026-07-10):** on acceptance we optimize the order for clean architecture — **build bottom‑up, contracts/vocabulary first**, so every later layer depends only on stable abstractions. The throwaway "Stage 0" GEOGLOWS service‑level cache is **dropped**; the double‑fetch is fixed properly when UI migrates onto the repository (a cache inside the source is exactly the scattered caching we are removing). Executed steps:

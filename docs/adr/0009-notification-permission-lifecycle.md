@@ -283,6 +283,30 @@ against the broken code. It now counts write *attempts*, with the spy recording
 even those that throw — which is what makes "the removal was never attempted"
 observable from outside at all.
 
+## Phase 5 — iOS delivery and tap routing now proven (2026-08-21)
+
+Three matrix cells are closed on **2026.1.3+561**, all on a real iPhone:
+
+| scenario | iOS | evidence |
+|---|---|---|
+| Notification seen on screen | ✅ | lock-screen screenshot, "Your rivers this week" |
+| Tap lands on the right screen | ✅ | Weekly Outlook opened from a cold start |
+| Deep-linked page loads real data | ✅ | `weeklyDigestsSinceOpen` reset 1 → 0 server-side, which only happens after the outlook builds rows from a non-empty favourites list |
+
+The last row is worth keeping as a technique: it verifies the client from the
+server, with no screenshot and no trust in what a person reports seeing.
+
+Getting here needed two fixes beyond the permission work — `firebase_messaging`
+16.0.3 had no UIScene support (ADR 0008), and the outlook rendered its empty
+state during the launch race. Both shipped in 555 and 561.
+
+**Still open on iOS:** fresh-install / never-asked, prime → Enable, prime → Not
+now, denied-at-OS, and the two multi-device rows. **Android remains entirely
+unproven** and still needs a real device or a `google_apis_playstore` AVD.
+
+**New, and it gates nothing here but is user-visible:** the deep-linked page
+took 3-5 minutes to render. See ADR 0010.
+
 ## Phase 5 — what is still needed
 
 Neither of these can be supplied from this machine:
