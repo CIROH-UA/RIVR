@@ -29,14 +29,26 @@ import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.
 
 void setupForecastDependencies() {
   final sl = GetIt.instance;
+
+  // Registered BEFORE the early-return below. A harness that registers
+  // INoaaApiService itself — the integration test app does — would otherwise
+  // short-circuit past this and leave IGeocodingService unregistered, and
+  // `GetIt.I<IGeocodingService>()` throws. On the forecast page that throw is
+  // caught by the surrounding try and sets the error state, replacing a page
+  // that had already rendered correctly. Review found that trap.
+  //
+  // Behind an interface so the surfaces that geocode can be tested in both
+  // directions — that it happens where it should, and that it does NOT happen
+  // on the fast path (ADR 0011 Phase 1). Also keeps live Mapbox calls out of
+  // the test suite.
+  if (!sl.isRegistered<IGeocodingService>()) {
+    sl.registerLazySingleton<IGeocodingService>(
+        () => const MapboxGeocodingService());
+  }
+
   if (sl.isRegistered<INoaaApiService>()) return;
 
   // Services
-  // Behind an interface so the surfaces that geocode can be tested in both
-  // directions — that it happens where it should, and that it does NOT happen
-  // on the fast path (ADR 0011 Phase 1). Also stops widget tests making live
-  // Mapbox calls.
-  sl.registerLazySingleton<IGeocodingService>(() => const MapboxGeocodingService());
 
   sl.registerLazySingleton<INoaaApiService>(
     () => NoaaApiService(unitService: sl<IFlowUnitPreferenceService>()),
@@ -54,6 +66,7 @@ void setupForecastDependencies() {
       cacheService: sl<IReachCacheService>(),
       unitService: sl<IFlowUnitPreferenceService>(),
       forecastCacheService: sl<IForecastCacheService>(),
+      geocoder: sl<IGeocodingService>(),
     ),
   );
 

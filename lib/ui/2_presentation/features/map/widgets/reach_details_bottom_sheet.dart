@@ -580,12 +580,19 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
 
   }
 
-  /// Resolve the place label after the sheet is already usable. Best-effort:
-  /// `GeocodingService` catches internally and yields null rather than throwing.
+  /// Resolve the place label after the sheet is already usable.
+  ///
+  /// The implementation catches internally, but *resolving* it can throw if DI
+  /// is misconfigured, so the whole thing is wrapped — a decoration must never
+  /// be able to disturb a sheet that already rendered.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(GetIt.I<IGeocodingService>().placeLabel(lat, lon).then((label) {
+    unawaited(Future(() => GetIt.I<IGeocodingService>().placeLabel(lat, lon))
+        .then((label) {
       if (_isCancelled || !mounted || label == null || label.isEmpty) return;
       setState(() => _formattedLocation = label);
+    }).catchError((Object e) {
+      AppLogger.debug('ReachDetailsSheet', 'Place label unavailable: $e');
+      return null;
     }));
   }
 

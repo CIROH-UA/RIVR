@@ -79,8 +79,12 @@ class _FakeRepo implements IRiverDataRepository {
 
   /// Which products the page asked for. Review proved this was unguarded:
   /// reverting the page to the bundled `reachSummary` — reintroducing both the
-  /// 156 KB fetch and the two-entry divergence — left all 896 tests green.
+  /// 156 KB fetch and the two-entry divergence — left the whole suite green.
   final List<ForecastProduct> requested = [];
+
+  /// Tracked separately — see the sheet test: `refresh` bypasses the cache, so
+  /// swapping it in makes "See forecast" repeat the whole wait.
+  final List<ForecastProduct> refreshed = [];
 
   RiverDataEntry? _forKey(RiverDataKey key) {
     requested.add(key.product);
@@ -97,7 +101,10 @@ class _FakeRepo implements IRiverDataRepository {
   @override
   Future<RiverDataEntry?> read(RiverDataKey key) async => _forKey(key);
   @override
-  Future<RiverDataEntry?> refresh(RiverDataKey key) async => _forKey(key);
+  Future<RiverDataEntry?> refresh(RiverDataKey key) async {
+    refreshed.add(key.product);
+    return _forKey(key);
+  }
   @override
   ValueListenable<RiverDataEntry?> watch(RiverDataKey key) =>
       ValueNotifier(entry);
@@ -332,6 +339,12 @@ void main() {
       ForecastProduct.analysisAssimilation,
       ForecastProduct.returnPeriods,
     ]));
+
+    // REGRESSION: swapping read() for refresh() here left the suite green,
+    // which would make this page bypass the cache the sheet just filled — the
+    // exact "See forecast repeats the wait" regression.
+    expect(repo.refreshed, isEmpty,
+        reason: 'the page must read through the cache the sheet warmed');
   });
 
 }

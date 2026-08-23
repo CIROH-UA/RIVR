@@ -327,8 +327,11 @@ same three keys, so "See forecast" is warm with nothing warming it.
 
 **Guards.**
 1. Sheet on screen **under 500 ms** with a skeleton, before any read completes.
-   *The under-500 ms half is open — no device capture yet, and the reads are
-   issued together with no genuine prioritisation.*
+
+   *The "before any read completes" half is guarded and mutation-proven. The
+   **under-500 ms** half stays open at merge: it needs a device capture, which
+   is **Phase 0 guard 4** and **Phase 8 guard 2**. Stated here so it is a
+   declared carry-forward rather than an unnoticed gap.*
 2. Values render as they land; a ready flow is visible while a threshold call is
    30 s out.
 3. **Medium range is never fetched on a tap** — asserted against the **real**
@@ -654,8 +657,11 @@ larger correctness win and a prerequisite.
   made it impossible to pin either direction — that a geocode does *not* happen
   on the fast path, or that it *does* happen at the consumer — and made widget
   tests issue live Mapbox calls. Both are now counted against a fake. The
-  statics remain for services not yet on the DI graph (map search, weekly
-  outlook); those are Phase 3 and Phase 9.
+  `ForecastService` takes it too, which is what removed the last live network
+  call from the suite — proven by instrumenting the real HTTP call and running
+  the full suite with zero hits. The statics remain only for surfaces not yet on
+  the DI graph — `favorite_river_card`, `weekly_outlook_service`,
+  `map_search_service` — which Phase 3 and Phase 9 own.
 - **A silently-failing store is the most dangerous outcome in this document**,
   because Phase 7 removes the timestamp that would let anyone notice. Monitoring
   ships with Phase 4 or the store does not ship.

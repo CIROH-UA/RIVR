@@ -143,6 +143,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
 
     final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    var needsPlaceLabel = false;
+    double? labelLat;
+    double? labelLon;
     try {
       // Reads the SAME three narrow products the map detail sheet reads, rather
       // than the bundled `reachSummary` (ADR 0011 Phase 1).
@@ -206,15 +209,10 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _loading = false;
       });
 
-      // `reachMetadata` deliberately does not geocode, so `formattedLocation`
-      // is empty on a cold reach cache — the bundled `reachSummary` path this
-      // replaced reverse-geocoded before returning. Without this the header and
-      // the stream-map subtitle silently lose "Provo, UT". Filled after the
-      // page is already usable, never in front of it.
-      if (details.formattedLocation == null ||
-          details.formattedLocation!.isEmpty) {
-        _fillPlaceLabel(meta.latitude, meta.longitude);
-      }
+      needsPlaceLabel = details.formattedLocation == null ||
+          details.formattedLocation!.isEmpty;
+      labelLat = meta.latitude;
+      labelLon = meta.longitude;
     } catch (e) {
       if (!mounted) return;
       AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
@@ -223,13 +221,23 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _loading = false;
       });
     }
+
+    // Deliberately OUTSIDE the try. `reachMetadata` does not geocode, so this
+    // is the only thing preserving the place name — but it is decoration, and
+    // it previously sat inside the try, where a throw from resolving the
+    // geocoder would land in the catch and replace a page that had already
+    // rendered correctly with an error card. Review found that.
+    if (needsPlaceLabel) _fillPlaceLabel(labelLat, labelLon);
   }
 
-  /// Resolve the place label after the page is usable. Best-effort:
-  /// `GeocodingService.placeLabel` catches internally and yields null rather
-  /// than throwing, so this can only ever add information.
+  /// Resolve the place label after the page is usable.
+  ///
+  /// Guarded rather than trusted: the implementation catches internally, but
+  /// *resolving* it can throw if DI is misconfigured, and this must never be
+  /// able to disturb a page that already rendered.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(GetIt.I<IGeocodingService>().placeLabel(lat, lon).then((label) {
+    unawaited(Future(() => GetIt.I<IGeocodingService>().placeLabel(lat, lon))
+        .then((label) {
       if (!mounted || label == null || label.isEmpty) return;
       final current = _details;
       if (current == null) return;
@@ -245,6 +253,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           returnPeriods: current.returnPeriods,
         );
       });
+    }).catchError((Object e) {
+      AppLogger.debug('ReachForecastPage', 'Place label unavailable: $e');
+      return null;
     }));
   }
 

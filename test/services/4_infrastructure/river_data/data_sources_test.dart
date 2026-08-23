@@ -67,8 +67,9 @@ class _FakeForecast implements IForecastService {
   @override
   Future<ReachData> loadBasicReachInfo(String reachId) async {
     basicCalls++;
-    // city/state already present, so the data source's geocode fallback is
-    // skipped — that path needs the network and is not what this test pins.
+    // NwmDataSource has no geocode fallback — that is the point of the
+    // injected-but-unused geocoder. city/state are set only so the reach looks
+    // realistic.
     return ReachData(
       reachId: reachId,
       riverName: 'Test River',

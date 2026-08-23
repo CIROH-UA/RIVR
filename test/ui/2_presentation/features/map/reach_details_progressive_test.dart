@@ -39,8 +39,9 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom
 /// Also stops widget tests making live Mapbox calls, which review found them
 /// doing twice per run.
 class _FakeGeocoder implements IGeocodingService {
-  _FakeGeocoder({this.label = 'Provo, UT'});
+  _FakeGeocoder({this.label = 'Provo, UT', this.delay});
   final String? label;
+  final Duration? delay;
   int calls = 0;
 
   @override
@@ -52,6 +53,7 @@ class _FakeGeocoder implements IGeocodingService {
   @override
   Future<String?> placeLabel(double? lat, double? lon) async {
     calls++;
+    if (delay != null) await Future<void>.delayed(delay!);
     return label;
   }
 }
@@ -85,7 +87,15 @@ FreshnessWindow _window() => FreshnessWindow(
 /// Records every product requested, and lets each one be delayed independently
 /// so "renders as it lands" is observable rather than asserted by faith.
 class _RecordingRepo implements IRiverDataRepository {
-  _RecordingRepo({this.delays = const {}, this.failures = const {}});
+  _RecordingRepo({
+    this.delays = const {},
+    this.failures = const {},
+    this.undecodableFlow = false,
+  });
+
+  /// Returns a 200 whose body the flow codec cannot read — distinct from a
+  /// thrown failure, and a path guard 6 never exercised.
+  final bool undecodableFlow;
 
   /// product -> how long its read takes.
   final Map<ForecastProduct, Duration> delays;
@@ -124,7 +134,7 @@ class _RecordingRepo implements IRiverDataRepository {
     );
   }
 
-  static Map<String, dynamic> _payloadFor(ForecastProduct p) {
+  Map<String, dynamic> _payloadFor(ForecastProduct p) {
     switch (p) {
       case ForecastProduct.reachMetadata:
         return {
@@ -150,6 +160,7 @@ class _RecordingRepo implements IRiverDataRepository {
           ],
         };
       case ForecastProduct.analysisAssimilation:
+        if (undecodableFlow) return <String, dynamic>{};
         // Must be decodable: `fromApiResponse` reads json['reach'], and an
         // empty map made it throw. Review found that every "passing" test was
         // silently rendering "not available" instead of a flow value.
@@ -172,8 +183,17 @@ class _RecordingRepo implements IRiverDataRepository {
     }
   }
 
+  /// Tracked separately: review swapped `read` for `refresh` at both surfaces
+  /// and every test passed. `refresh` skips the cache entirely, so that turns
+  /// each tap into three network fetches and makes "See forecast" repeat the
+  /// whole wait — the regression round 2 was opened to fix.
+  final List<ForecastProduct> refreshed = [];
+
   @override
-  Future<RiverDataEntry?> refresh(RiverDataKey key) => read(key);
+  Future<RiverDataEntry?> refresh(RiverDataKey key) {
+    refreshed.add(key.product);
+    return read(key);
+  }
   @override
   ValueListenable<RiverDataEntry?> watch(RiverDataKey key) =>
       ValueNotifier(null);
@@ -437,6 +457,13 @@ void main() {
           reason: 'the card must name what failed');
       expect(find.text('Retry'), findsOneWidget,
           reason: 'a terminal state with no way out is a dead end');
+
+      // The test is named "stops spinning" — assert it. Removing the loading
+      // resets in markSettled left this green, and with _isLoadingFlow stuck
+      // true the header's close button is replaced by a spinner, so the sheet
+      // cannot be dismissed from the header at all.
+      expect(find.byType(CupertinoActivityIndicator), findsNothing,
+          reason: 'an error card over a live spinner is not a terminal state');
     });
 
     testWidgets('Retry re-issues the reads', (t) async {
@@ -458,7 +485,7 @@ void main() {
     });
   });
   group('the place label is filled off the critical path', () {
-    // REGRESSION: deleting both _fillPlaceLabel call sites left all 906 tests
+    // REGRESSION: deleting both _fillPlaceLabel call sites left the whole suite
     // green, even though it is now the ONLY thing preserving the "Provo, UT"
     // label the removed reachSummary path used to supply.
     testWidgets('the label arrives after the sheet is already usable', (t) async {
@@ -513,6 +540,64 @@ void main() {
 
       await t.pump(const Duration(seconds: 31));
       await _settle(t);
+    });
+  });
+
+  group('the geocode stays off the critical path AT THE CONSUMER', () {
+    // REGRESSION: the only geocode guard asserted against NwmDataSource, which
+    // by design never geocodes. The geocode lives at the consumer, so moving it
+    // in front of the river name passed every test. In production that puts a
+    // 30 s-bounded hop ahead of the title.
+    testWidgets('the name renders while the geocode is still outstanding',
+        (t) async {
+      final geo = _FakeGeocoder(delay: const Duration(seconds: 20));
+      _register(_RecordingRepo(), geocoder: geo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('White River'), findsOneWidget,
+          reason: 'a place label must never gate the river name');
+
+      await t.pump(const Duration(seconds: 21));
+      await _settle(t);
+    });
+  });
+
+  group('the sheet reads through the cache, never around it', () {
+    // REGRESSION: swapping read() for refresh() left the suite green.
+    testWidgets('no read is issued as a forced refresh', (t) async {
+      final repo = _RecordingRepo();
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(repo.refreshed, isEmpty,
+          reason: 'refresh() bypasses the cache — every tap becomes three '
+              'network fetches and "See forecast" repeats the whole wait');
+      expect(repo.requested, hasLength(3));
+    });
+  });
+
+  group('a decoded-null flow is named, not silently dropped', () {
+    // REGRESSION: deleting `_failedProducts.add('current flow')` from the
+    // null-decode branch passed everything — guard 6's naming test drives
+    // failures through catchError, never through "upstream answered 200 with a
+    // body we cannot use".
+    testWidgets('an unusable flow payload is named in the error card',
+        (t) async {
+      final repo = _RecordingRepo(failures: {
+        ForecastProduct.reachMetadata,
+        ForecastProduct.returnPeriods,
+      }, undecodableFlow: true);
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(find.textContaining('current flow'), findsOneWidget,
+          reason: 'a 200 with an unusable body is a failure of that product');
     });
   });
 

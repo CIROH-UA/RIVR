@@ -10,7 +10,7 @@
 //   2. `data_sources_test.dart` fakes `IForecastService`, so it is blind for
 //      exactly the same reason one layer down. Review proved it: inserting a
 //      real `medium_range` fetch into `ForecastService.loadBasicReachInfo` left
-//      all 896 tests passing.
+//      the whole suite passing.
 //
 // The only way to see it is to run the real ForecastService against a recording
 // API client. That is what this does.
@@ -18,6 +18,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
@@ -72,6 +73,25 @@ class _RecordingApi implements INoaaApiService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// Counts geocodes so the "no live network in tests" property is provable.
+/// Review instrumented the real static and caught this file issuing a genuine
+/// Mapbox request: the fixture set `city`/`state` to suppress it, but
+/// `ReachDataDto.fromNoaaApi` never parses those fields, so the suppression
+/// was never real and the suite depended on internet.
+class _CountingGeocoder implements IGeocodingService {
+  int calls = 0;
+  @override
+  Future<Map<String, String?>> reverseGeocode(double lat, double lon) async {
+    calls++;
+    return {'city': 'Provo', 'state': 'UT', 'country': 'US'};
+  }
+  @override
+  Future<String?> placeLabel(double? lat, double? lon) async {
+    calls++;
+    return 'Provo, UT';
+  }
+}
+
 class _StubUnit implements IFlowUnitPreferenceService {
   @override
   String get currentFlowUnit => 'CFS';
@@ -113,15 +133,18 @@ class _NullForecastCache implements IForecastCacheService {
 
 void main() {
   late _RecordingApi api;
+  late _CountingGeocoder geocoder;
   late ForecastService service;
 
   setUp(() {
     api = _RecordingApi();
+    geocoder = _CountingGeocoder();
     service = ForecastService(
       apiService: api,
       cacheService: _NullReachCache(),
       forecastCacheService: _NullForecastCache(),
       unitService: _StubUnit(),
+      geocoder: geocoder,
     );
   });
 
@@ -151,6 +174,17 @@ void main() {
         reason: 'the 156 KB series must not ride along with a tap',
       );
       expect(api.calls.where((c) => c.contains('long_range')), isEmpty);
+    });
+
+    // REGRESSION: this file itself made a real Mapbox call. ForecastService
+    // now takes the geocoder, so a live call is impossible here by
+    // construction — and this asserts it rather than assuming it.
+    test('nothing on this path makes a live geocode', () async {
+      await service.loadBasicReachInfo('23021904');
+      await service.loadReachDetailsData('23021904');
+      expect(geocoder.calls, greaterThan(0),
+          reason: 'the bundle path does geocode — through the FAKE, not the '
+              'network. Zero here would mean the seam was bypassed.');
     });
 
     // The contrast that makes the guard meaningful: the bundle DOES pull it.

@@ -2,7 +2,7 @@
 
 import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
 import 'package:rivr/models/1_domain/shared/forecast_chart_data.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
@@ -38,12 +38,21 @@ class ForecastService implements IForecastService {
     required IReachCacheService cacheService,
     required IFlowUnitPreferenceService unitService,
     required IForecastCacheService forecastCacheService,
+    required IGeocodingService geocoder,
   })  : _apiService = apiService,
         _cacheService = cacheService,
         _unitService = unitService,
-        _forecastCacheService = forecastCacheService;
+        _forecastCacheService = forecastCacheService,
+        _geocoder = geocoder;
 
   // Cache computed values with TTL to avoid repeated calculations
+  /// Injected rather than static so tests cannot make live Mapbox calls.
+  /// Review proved they were: a test exercising this service reached
+  /// `loadOverviewData` and issued a real reverse-geocode, because the fixture
+  /// that was meant to suppress it set `city`/`state` — which
+  /// `ReachDataDto.fromNoaaApi` never parses, so the suppression never worked.
+  final IGeocodingService _geocoder;
+
   final Map<String, _TimedEntry<double?>> _currentFlowCache = {};
   final Map<String, _TimedEntry<String>> _flowCategoryCache = {};
 
@@ -82,7 +91,7 @@ class ForecastService implements IForecastService {
           AppLogger.debug('ForecastService', 'Adding location to cached reach via reverse geocoding');
 
           try {
-            final locationData = await GeocodingService.reverseGeocode(
+            final locationData = await _geocoder.reverseGeocode(
               reach.latitude,
               reach.longitude,
             );
@@ -115,7 +124,7 @@ class ForecastService implements IForecastService {
           AppLogger.debug('ForecastService', 'Performing reverse geocoding for complete location data');
 
           try {
-            final locationData = await GeocodingService.reverseGeocode(
+            final locationData = await _geocoder.reverseGeocode(
               reach.latitude,
               reach.longitude,
             );
