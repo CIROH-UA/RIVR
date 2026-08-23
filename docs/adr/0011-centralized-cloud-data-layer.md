@@ -656,8 +656,12 @@ larger correctness win and a prerequisite.
   `reachSummary`. Before Phase 1 all three shared one entry. They now bottom out
   in the same derivation but sit in *different cache entries fetched at different
   moments*, so the favourites card can legitimately disagree with the sheet — and
-  it still pays the 156 KB medium-range fetch. Documented in
-  `docs/internal/forecast-data-consistency-audit.md`; closed by Phase 3.
+  it still pays the 156 KB medium-range fetch. Closed by Phase 3.
+
+  *(An earlier draft cited `docs/internal/forecast-data-consistency-audit.md`
+  as where this is recorded. `docs/internal/` is gitignored, so that file is not
+  in the repository and the citation pointed at nothing — recorded here
+  instead.)*
 - **Geocoding is now behind `IGeocodingService`.** `GeocodingService`'s statics
   made it impossible to pin either direction — that a geocode does *not* happen
   on the fast path, or that it *does* happen at the consumer — and made widget

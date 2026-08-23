@@ -64,7 +64,12 @@ class _StubUnit implements IFlowUnitPreferenceService {
   @override
   String getDisplayUnit() => 'ft³/s';
   @override
-  double convertFlow(double value, String from, String to) => value;
+  double convertFlow(double value, String from, String to) {
+    if (from == to) return value;
+    if (from == 'CMS' && to == 'CFS') return value * 35.3147;
+    if (from == 'CFS' && to == 'CMS') return value / 35.3147;
+    return value;
+  }
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -658,6 +663,96 @@ void main() {
 
       expect(repo.requested, isNot(contains(ForecastProduct.mediumRange)));
       expect(repo.requested, isNot(contains(ForecastProduct.longRange)));
+    });
+  });
+
+  group('the flood category — half of what the sheet exists to say', () {
+    // REGRESSION: making recomputeCategory a no-op left the whole suite green,
+    // and so did dropping it from only the thresholds handler — which is the
+    // EXPECTED arrival order, since return periods (1.0-9.1 s) usually land
+    // after current flow (2.1 s). The common case was unguarded.
+    testWidgets('category appears when thresholds land AFTER flow', (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.returnPeriods: const Duration(milliseconds: 400),
+      });
+      int? recolour;
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+        selectedReach: _reach(),
+        onFlowCategoryColor: (argb) => recolour = argb,
+      )));
+      await t.pump(const Duration(milliseconds: 100));
+      await t.pump(const Duration(milliseconds: 600));
+      await _settle(t);
+
+      // The category is conveyed by colour rather than a text label, so the
+      // recolour callback is the observable. It fires from recomputeCategory,
+      // which is exactly what the surviving mutation neutered.
+      expect(recolour, isNotNull,
+          reason: 'the map recolours from this callback; silence means the '
+              'stream keeps a colour the sheet is not explaining');
+    });
+
+    testWidgets('category appears when flow lands AFTER thresholds', (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 400),
+      });
+      int? recolour;
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+        selectedReach: _reach(),
+        onFlowCategoryColor: (argb) => recolour = argb,
+      )));
+      await t.pump(const Duration(milliseconds: 600));
+      await _settle(t);
+
+      expect(recolour, isNotNull,
+          reason: 'whichever value arrives second must complete the category');
+    });
+  });
+
+  group('closing mid-flight does not crash', () {
+    // Closing a sheet while three <=30 s reads are outstanding is the ordinary
+    // map interaction; setState after dispose throws. Every _isCancelled /
+    // mounted check was deletable with the suite green.
+    testWidgets('disposing while reads are outstanding is safe', (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.reachMetadata: const Duration(seconds: 5),
+        ForecastProduct.analysisAssimilation: const Duration(seconds: 5),
+        ForecastProduct.returnPeriods: const Duration(seconds: 5),
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump(const Duration(milliseconds: 50));
+
+      // Sheet goes away while everything is still in flight.
+      await t.pumpWidget(_wrap(const SizedBox.shrink()));
+      await t.pump(const Duration(seconds: 6));
+      await _settle(t);
+
+      expect(t.takeException(), isNull,
+          reason: 'a setState after dispose would surface here');
+    });
+  });
+
+  group('the no-flow terminal state', () {
+    // REGRESSION: deleting the no-flow card passed everything, including
+    // guard 6's own "flow fails but identity succeeds" test, which asserts
+    // only an absence.
+    testWidgets('a reach with no flow says so', (t) async {
+      final repo = _RecordingRepo(failures: {
+        ForecastProduct.analysisAssimilation,
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(find.textContaining('not available'), findsOneWidget,
+          reason: 'the user must be told why there is no number');
     });
   });
 

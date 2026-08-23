@@ -261,6 +261,35 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }));
   }
 
+  /// GEOGLOWS streams are unnamed, so the place label supplies both the header
+  /// ("Stream near {city}") and the subtitle. Resolved AFTER first paint —
+  /// awaiting it inline gated the whole page on a Mapbox call.
+  void _fillGeoglowsPlaceLabel(double? lat, double? lon) {
+    if (lat == null || lon == null) return;
+    unawaited(Future(() => GetIt.I<IGeocodingService>().reverseGeocode(lat, lon))
+        .then((geo) {
+      if (!mounted) return;
+      final city = geo['city'];
+      final country = geo['country'];
+      if (city == null || city.isEmpty) return;
+      final current = _details;
+      if (current == null) return;
+      setState(() {
+        _details = ReachDetailsData(
+          riverName: 'Stream near $city',
+          formattedLocation: [city, country]
+              .where((s) => s != null && s.isNotEmpty)
+              .join(', '),
+          currentFlow: current.currentFlow,
+          returnPeriods: current.returnPeriods,
+        );
+      });
+    }).catchError((Object e) {
+      AppLogger.debug('ReachForecastPage', 'GEOGLOWS place label failed: $e');
+      return null;
+    }));
+  }
+
   Future<void> _loadGeoglows() async {
     final unitService = GetIt.I<IFlowUnitPreferenceService>();
     try {
@@ -277,30 +306,13 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       }
       final fc = GeoglowsForecastPayload.decode(entry, unitService);
 
-      // GEOGLOWS reaches have no name — reverse-geocode the tap coordinate to a
-      // place so the header reads "Stream near {city}" with a "City, Country"
-      // subtitle, matching how NWM streams show their location.
-      var riverName = 'Stream ${widget.reachId}';
-      var location = '';
-      if (widget.lat != null && widget.lon != null) {
-        try {
-          final geo = await GetIt.I<IGeocodingService>()
-              .reverseGeocode(widget.lat!, widget.lon!);
-          // 'state'/region is unreliable internationally (Mapbox returns codes
-          // like '13' for French departments), so name from city + country.
-          final city = geo['city'];
-          final country = geo['country'];
-          if (city != null && city.isNotEmpty) {
-            riverName = 'Stream near $city';
-          }
-          location = [city, country]
-              .where((s) => s != null && s.isNotEmpty)
-              .join(', ');
-        } catch (_) {
-          // Keep the id fallback if geocoding fails.
-        }
-        if (!mounted) return;
-      }
+      // GEOGLOWS reaches have no name. The place label used to be resolved
+      // HERE, awaited inline before the setState below — so a Mapbox hop
+      // bounded only by AppConfig.httpTimeout gated the entire page render.
+      // That is the same defect fixed on the sheet and on the NWM path; review
+      // found it still live on this branch. It is now filled afterwards.
+      final riverName = 'Stream ${widget.reachId}';
+      const location = '';
 
       setState(() {
         _details = ReachDetailsData(
@@ -327,6 +339,8 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         _unit = unitService.getDisplayUnit();
         _loading = false;
       });
+
+      _fillGeoglowsPlaceLabel(widget.lat, widget.lon);
     } catch (e) {
       if (!mounted) return;
       AppLogger.error('ReachForecastPage', 'Error loading GEOGLOWS forecast', e);
@@ -487,9 +501,10 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   }
 
   Widget _buildScroll() {
-    if (_loading) {
-      return const _ForecastSkeleton();
-    }
+    // Error is checked FIRST. With the order reversed, a load that failed
+    // without clearing _loading rendered the skeleton forever and no test
+    // could see it — review found that reachable on both the NWM and GEOGLOWS
+    // branches. An error state must never be maskable by a stuck flag.
     if (_error != null) {
       return Center(
         child: Padding(
@@ -504,6 +519,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           ),
         ),
       );
+    }
+    if (_loading) {
+      return const _ForecastSkeleton();
     }
 
     // The ReachDataProvider is a shared singleton, so guard against a stale

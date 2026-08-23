@@ -54,15 +54,19 @@ class _StubUnit implements IFlowUnitPreferenceService {
 /// real reverse-geocodes per run, making the suite depend on internet and on a
 /// gitignored token.
 class _FakeGeocoder implements IGeocodingService {
+  _FakeGeocoder({this.delay});
+  final Duration? delay;
   int calls = 0;
   @override
   Future<Map<String, String?>> reverseGeocode(double lat, double lon) async {
     calls++;
+    if (delay != null) await Future<void>.delayed(delay!);
     return {'city': 'Testville', 'state': 'TS', 'country': 'US'};
   }
   @override
   Future<String?> placeLabel(double? lat, double? lon) async {
     calls++;
+    if (delay != null) await Future<void>.delayed(delay!);
     return 'Testville, TS';
   }
 }
@@ -76,7 +80,8 @@ class _StubForecastService implements IForecastService {
 }
 
 class _FakeRepo implements IRiverDataRepository {
-  _FakeRepo(this.entry, {this.byProduct = const {}, this.delay});
+  _FakeRepo(this.entry, {this.byProduct = const {}, this.delay, this.failAll = false});
+  final bool failAll;
   final Duration? delay;
   final RiverDataEntry? entry;
 
@@ -117,6 +122,11 @@ class _FakeRepo implements IRiverDataRepository {
   @override
   Future<RiverDataEntry?> read(RiverDataKey key) async {
     final k = _forKey(key);
+    if (failAll) {
+      if (delay != null) await Future<void>.delayed(delay!);
+      _done.add(key.product);
+      throw Exception('simulated upstream failure');
+    }
     // Marked done only AFTER the delay: marking it synchronously would make
     // every later read look like it waited, which is the fixture bug not the
     // production behaviour.
@@ -161,13 +171,16 @@ _FakeRepo _registerRepo(
   RiverDataEntry entry, {
   Map<ForecastProduct, Map<String, dynamic>> byProduct = const {},
   Duration? delay,
+  bool failAll = false,
+  _FakeGeocoder? geocoder,
 }) {
   final sl = GetIt.instance;
-  final repo = _FakeRepo(entry, byProduct: byProduct, delay: delay);
+  final repo =
+      _FakeRepo(entry, byProduct: byProduct, delay: delay, failAll: failAll);
   sl.registerSingleton<IRiverDataRepository>(repo);
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   sl.registerSingleton<IForecastService>(_StubForecastService());
-  sl.registerSingleton<IGeocodingService>(_FakeGeocoder());
+  sl.registerSingleton<IGeocodingService>(geocoder ?? _FakeGeocoder());
   return repo;
 }
 
@@ -221,6 +234,23 @@ Map<ForecastProduct, Map<String, dynamic>> _narrowPayloads() => {
       },
     };
 
+
+GeoglowsForecast _geoglowsForecast() => GeoglowsForecast(
+      riverId: '760021642',
+      unit: 'ft³/s',
+      generatedAt: DateTime.utc(2026, 8, 22),
+      points: [
+        for (var i = 0; i < 15; i++)
+          GeoglowsForecastPoint(
+            validTime: DateTime.now().toUtc().add(Duration(days: i)),
+            median: 1000.0 - i * 5,
+            lower: 900,
+            upper: 1100,
+          ),
+      ],
+      returnPeriods: const {2: 5000, 5: 8000, 10: 12000, 25: 20000},
+    );
+
 void main() {
   tearDown(() => GetIt.instance.reset());
 
@@ -264,10 +294,10 @@ void main() {
     // Flow 1,000 sits below the 2-yr threshold -> Normal. The value lives in
     // the gauge's RichText ('1,000 ft³/s'), so match with findRichText.
     expect(find.text('1,000 ft³/s', findRichText: true), findsOneWidget);
-    // Discriminating: with thresholds converted (30 CMS -> ~1059 CFS) a flow
-    // of 640 is NORMAL; left in native CMS it would exceed the 25-year
-    // threshold and read as the top category. Review found the previous
-    // fixture (1200) read NORMAL either way, so this assertion was vacuous.
+    // GEOGLOWS values are converted at decode, so entry.unit already matches
+    // the display unit here — the CMS→CFS discrimination this comment used to
+    // describe belongs to the NWM test, not this one. GEOGLOWS decode
+    // conversion is guarded by geoglows_forecast_payload_test.
     expect(find.text('NORMAL'), findsOneWidget);
     // No coordinate -> id fallback name.
     expect(find.text('Stream 210230337'), findsOneWidget);
@@ -414,6 +444,107 @@ void main() {
           reason: '$p started only after another read finished — that is '
               'serial loading wearing a parallel costume');
     }
+  });
+
+  // REGRESSION: there was no forecast-page test in which a load fails, on
+  // either branch. Deleting `_loading = false` from a catch left the page
+  // rendering its skeleton forever, and _buildScroll checked _loading BEFORE
+  // _error so a stuck flag masked the error entirely. Both branches now
+  // covered, and the check order is reversed so it cannot be masked again.
+  testWidgets('NWM: a failed load shows an error, not an endless skeleton',
+      (tester) async {
+    _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '123',
+          product: ForecastProduct.reachSummary,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: const <String, dynamic>{},
+      ),
+      failAll: true,
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '123',
+      source: ForecastSource.nwm,
+    )));
+    await _pumpLoaded(tester);
+
+    
+    expect(find.textContaining('Failed to load'), findsOneWidget,
+        reason: 'a failure must reach a terminal state, not shimmer forever');
+  });
+
+  testWidgets('GEOGLOWS: a failed load shows an error, not an endless skeleton',
+      (tester) async {
+    _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: '760021642',
+          product: ForecastProduct.geoglowsForecast,
+        ),
+        window: _window(),
+        unit: 'CMS',
+        payload: const <String, dynamic>{},
+      ),
+      failAll: true,
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '760021642',
+      source: ForecastSource.geoglows,
+      lat: 12.1,
+      lon: 15.3,
+    )));
+    await _pumpLoaded(tester);
+
+    expect(find.textContaining('Failed to load forecast'), findsOneWidget,
+        reason: 'a failure must reach a terminal state, not shimmer forever');
+  });
+
+  // REGRESSION: the GEOGLOWS branch awaited reverseGeocode inline before its
+  // setState, so a Mapbox hop bounded only by AppConfig.httpTimeout gated the
+  // whole page render — the defect already fixed on the sheet and the NWM path.
+  testWidgets('GEOGLOWS: the page renders while the geocode is outstanding',
+      (tester) async {
+    final repo = _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: '760021642',
+          product: ForecastProduct.geoglowsForecast,
+        ),
+        window: _window(),
+        unit: 'CMS',
+        payload: GeoglowsForecastPayload.encode(_geoglowsForecast()),
+      ),
+      geocoder: _FakeGeocoder(delay: const Duration(seconds: 20)),
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '760021642',
+      source: ForecastSource.geoglows,
+      lat: 12.1,
+      lon: 15.3,
+    )));
+    await _pumpLoaded(tester);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('Stream'), findsWidgets,
+        reason: 'a place label must never gate the page render');
+    expect(find.textContaining('Failed to load'), findsNothing);
+    // Same rule as every other surface: read through the cache the sheet
+    // warmed. refresh() here re-fetches the ~20 s GEOGLOWS proxy on every
+    // "See forecast".
+    expect(repo.refreshed, isEmpty,
+        reason: 'GEOGLOWS must not force a refresh either');
+
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pump(const Duration(milliseconds: 50));
   });
 
 }
