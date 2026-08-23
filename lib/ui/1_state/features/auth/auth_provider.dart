@@ -7,6 +7,7 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/models/1_domain/features/auth/auth_user.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
@@ -95,9 +96,17 @@ class AuthProvider with ChangeNotifier {
     AppLogger.info('AuthProvider', 'Initializing...');
 
     // Listen to auth state changes
+    // Whether this session has SEEN a signed-in user. The stream can emit
+    // null on a cold start (signed-out app open, or before the restored user
+    // arrives); clearing on those would wipe a signed-out user's browse cache
+    // pointlessly — or worse, a signed-IN user's pins file on every launch,
+    // undoing the cold-start eviction fix outright. Only a null that FOLLOWS a
+    // non-null is a sign-out.
+    var hadUser = false;
     _authStateSubscription =
         _authRepository.authStateChanges.listen((firebaseUser) async {
       if (firebaseUser != null) {
+        hadUser = true;
         _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
         AppLogger.info(
             'AuthProvider', 'User signed in: ${_currentUser!.uid}');
@@ -116,6 +125,13 @@ class AuthProvider with ChangeNotifier {
         _currentUser = null;
         _currentUserSettings = null;
         _isAwaitingEmailVerification = false;
+        // The server-side sign-out path — token revoked, account removed
+        // remotely — must clear the same caches the explicit paths do. Gated
+        // on hadUser: see the declaration above.
+        if (hadUser) {
+          hadUser = false;
+          _clearRiverDataCache();
+        }
         AppLogger.info('AuthProvider', 'User signed out');
         _setCrashlyticsUserSafe('');
       }
@@ -255,6 +271,19 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Sign out current user
+  /// Drop the river-data cache and its pins on any identity change: cached
+  /// data is not sensitive, but the PINS belong to the account — carried over,
+  /// they shield the previous user's favourites from the next user's retention
+  /// cap (ADR 0011 Phase 2). ONE helper for the whole class of exits: signOut,
+  /// deleteAccount, and the server-side auth-state drop. Review round 2 found
+  /// the first fix applied to signOut alone, with deleteAccount's own comment
+  /// promising a mirror it did not perform.
+  void _clearRiverDataCache() {
+    if (GetIt.I.isRegistered<IRiverDataCache>()) {
+      unawaited(GetIt.I<IRiverDataCache>().clear());
+    }
+  }
+
   Future<void> signOut() async {
     _setLoading(true);
 
@@ -277,6 +306,7 @@ class AuthProvider with ChangeNotifier {
       _biometricEnabled = null;
       _currentUserSettings = null;
       _fcmService.clearCache();
+      _clearRiverDataCache();
       _setSuccess('Signed out successfully');
     } else {
       _setError(result.errorMessage ?? 'Sign out failed');
@@ -308,6 +338,7 @@ class AuthProvider with ChangeNotifier {
       _biometricEnabled = null;
       _currentUserSettings = null;
       _fcmService.clearCache();
+      _clearRiverDataCache();
       _setSuccess('Account deleted');
       return true;
     } else {

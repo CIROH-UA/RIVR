@@ -12,7 +12,17 @@ class SourceFetchResult {
   final Map<String, dynamic> payload;
   final String unit;
 
-  const SourceFetchResult({required this.payload, required this.unit});
+  /// The upstream model run this data came from — NWM's `referenceTime`,
+  /// GEOGLOWS's forecast date — when the source can supply one (ADR 0011
+  /// Phase 2: entries record their run so supersession is decidable from the
+  /// stored data, without re-deriving anything from the network).
+  final String? runId;
+
+  const SourceFetchResult({
+    required this.payload,
+    required this.unit,
+    this.runId,
+  });
 }
 
 /// One data source (NWM, GEOGLOWS, ...) behind a uniform contract (ADR 0001,

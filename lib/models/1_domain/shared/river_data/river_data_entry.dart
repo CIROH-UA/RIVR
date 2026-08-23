@@ -16,6 +16,14 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 /// value) are wrapped in a small map by their producer so the envelope is
 /// always a JSON object.
 class RiverDataEntry {
+  /// Version of the on-disk entry format (ADR 0011 Phase 2). Bump when the
+  /// envelope or any payload shape changes incompatibly; the cache DISCARDS
+  /// entries whose version it does not recognise rather than parsing them, so
+  /// an upgrade never feeds an old shape to a new codec. The version is also
+  /// baked into cache filenames (`<storageKey>.v<N>.json`), which makes the
+  /// upgrade sweep a directory listing instead of N file reads.
+  static const int schemaVersion = 1;
+
   final RiverDataKey key;
   final FreshnessWindow window;
 
@@ -24,22 +32,31 @@ class RiverDataEntry {
   final String unit;
   final Map<String, dynamic> payload;
 
+  /// The upstream model run this entry came from, when the source supplied
+  /// one. Comparing two entries' runs decides supersession without touching
+  /// the network: same run = same data, refetched. Null for sources or
+  /// products that publish no run identity.
+  final String? runId;
+
   const RiverDataEntry({
     required this.key,
     required this.window,
     required this.unit,
     required this.payload,
+    this.runId,
   });
 
   /// Convenience passthrough — cached value still reflects the latest publish.
   bool isFreshAt(DateTime now) => window.isFreshAt(now);
 
   Map<String, dynamic> toJson() => {
+    'schema': schemaVersion,
     'source': key.source.id,
     'reachId': key.reachId,
     'product': key.product.id,
     'window': window.toJson(),
     'unit': unit,
+    if (runId != null) 'runId': runId,
     'payload': payload,
   };
 
@@ -51,6 +68,7 @@ class RiverDataEntry {
     ),
     window: FreshnessWindow.fromJson(json['window'] as Map<String, dynamic>),
     unit: json['unit'] as String,
+    runId: json['runId'] as String?,
     payload: Map<String, dynamic>.from(json['payload'] as Map),
   );
 

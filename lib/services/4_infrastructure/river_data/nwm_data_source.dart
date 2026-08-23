@@ -83,6 +83,33 @@ class NwmDataSource implements IRiverDataSource {
     }
   }
 
+  /// Pull the model-run identity (`referenceTime`) out of [sectionKey]'s
+  /// section of a raw NOAA payload — `series.referenceTime` for deterministic
+  /// series, the first member's for ensembles. Null when the section carries
+  /// none: not every product HAS a run, and inventing one would make
+  /// supersession lie.
+  ///
+  /// Keyed by section, never first-found: `fetchForecast` falls back to the
+  /// FULL multi-section response when the filtered call comes back empty, and
+  /// round 6 proved the first-found version stamping mediumRange and longRange
+  /// entries with shortRange's run — which advances hourly while theirs move
+  /// 4×/day, so their recorded run flipped without their data moving.
+  static String? _runIdOf(Map<String, dynamic> payload, String sectionKey) {
+    final section = payload[sectionKey];
+    if (section is! Map) return null;
+    final series = section['series'];
+    if (series is Map && series['referenceTime'] is String) {
+      return series['referenceTime'] as String;
+    }
+    // Ensemble shape: members keyed inside the section.
+    for (final member in section.values) {
+      if (member is Map && member['referenceTime'] is String) {
+        return member['referenceTime'] as String;
+      }
+    }
+    return null;
+  }
+
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     final unit = _unitService.currentFlowUnit;
@@ -95,6 +122,11 @@ class NwmDataSource implements IRiverDataSource {
         return SourceFetchResult(
           payload: ReachSummaryPayload.encode(details),
           unit: unit,
+          // No runId, DECLARED (ADR 0011 guard 1's exception list): the run
+          // identity is dropped at the IForecastService seam —
+          // ReachDetailsData carries no referenceTime. This is the legacy
+          // bundle the favourites path still reads; Phase 3 deletes it, so
+          // the run is not threaded through a dying seam.
         );
       case ForecastProduct.reachMetadata:
         // The cheap half of the old reachSummary: no flow data, no forecast
@@ -125,24 +157,35 @@ class NwmDataSource implements IRiverDataSource {
           unit: unit,
         );
       case ForecastProduct.analysisAssimilation:
+        final aaPayload = await _api.fetchCurrentFlowOnly(key.reachId);
         return SourceFetchResult(
-          payload: await _api.fetchCurrentFlowOnly(key.reachId),
+          payload: aaPayload,
           unit: unit,
+          // Current flow is derived from the short_range series
+          // (fetchCurrentFlowOnly fetches exactly that), so its run IS that
+          // section's run.
+          runId: _runIdOf(aaPayload, 'shortRange'),
         );
       case ForecastProduct.shortRange:
+        final shortPayload = await _api.fetchForecast(key.reachId, 'short_range');
         return SourceFetchResult(
-          payload: await _api.fetchForecast(key.reachId, 'short_range'),
+          payload: shortPayload,
           unit: unit,
+          runId: _runIdOf(shortPayload, 'shortRange'),
         );
       case ForecastProduct.mediumRange:
+        final mediumPayload = await _api.fetchForecast(key.reachId, 'medium_range');
         return SourceFetchResult(
-          payload: await _api.fetchForecast(key.reachId, 'medium_range'),
+          payload: mediumPayload,
           unit: unit,
+          runId: _runIdOf(mediumPayload, 'mediumRange'),
         );
       case ForecastProduct.longRange:
+        final longPayload = await _api.fetchForecast(key.reachId, 'long_range');
         return SourceFetchResult(
-          payload: await _api.fetchForecast(key.reachId, 'long_range'),
+          payload: longPayload,
           unit: unit,
+          runId: _runIdOf(longPayload, 'longRange'),
         );
       case ForecastProduct.returnPeriods:
         return SourceFetchResult(

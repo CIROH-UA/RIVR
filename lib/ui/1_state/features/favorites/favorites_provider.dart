@@ -22,6 +22,7 @@ import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usec
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
@@ -179,6 +180,10 @@ class FavoritesProvider with ChangeNotifier {
     final result = await _initializeFavorites();
 
     if (result.isFailure) {
+      // The throw happens BEFORE _updateFavoriteReachIds, deliberately: a
+      // failed load must leave the cache's pins exactly as they were. Review
+      // round 8 proved the swallowed-to-[] version un-pinning every favourite
+      // and persisting the empty set over pins.json on one Firestore error.
       throw Exception(result.errorMessage ?? 'Failed to load favorites');
     }
 
@@ -187,9 +192,15 @@ class FavoritesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Update the lookup set when favorites list changes
+  /// Update the lookup set when favorites list changes, and pin the same set
+  /// in the river-data cache so the retention cap can never evict a favourite
+  /// (ADR 0011 Phase 2). Resolved lazily so tests without a cache registration
+  /// simply skip pinning, like [_resolveGeoglowsApi].
   void _updateFavoriteReachIds() {
     _favoriteReachIds = _favorites.map((f) => f.reachId).toSet();
+    if (GetIt.I.isRegistered<IRiverDataCache>()) {
+      GetIt.I<IRiverDataCache>().setPinnedReaches(_favoriteReachIds);
+    }
   }
 
   /// The data source of a favorited reach (NWM vs GEOGLOWS); defaults to NWM
@@ -757,10 +768,13 @@ class FavoritesProvider with ChangeNotifier {
 
     // Clear all data
     _favorites.clear();
-    _favoriteReachIds.clear();
     _refreshingReachIds.clear();
     _sessionData.clear();
     _sessionReturnPeriods.clear();
+    // Through the single membership hook, so the cache un-pins too — review
+    // found this path bypassing it, leaving pins for favourites that no longer
+    // exist.
+    _updateFavoriteReachIds();
 
     _clearError();
     notifyListeners();

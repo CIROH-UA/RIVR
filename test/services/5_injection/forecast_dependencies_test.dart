@@ -19,6 +19,7 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/5_injection/forecast_dependencies.dart';
 
 class _StubUnit implements IFlowUnitPreferenceService {
@@ -73,7 +74,30 @@ void main() {
     expect(sl.isRegistered<IGeocodingService>(), isTrue);
   });
 
-  // Not asserted here: resolving IForecastService, which needs the cache
-  // services this harness does not register. The geocoder is the type this
-  // guard exists for, and it resolves standalone (`const MapboxGeocodingService`).
+  // ADR 0011 Phase 2: the retention wiring rests entirely on this ONE
+  // registration being present and being a SINGLETON. FavoritesProvider pins
+  // through GetIt, AuthProvider clears through GetIt, RiverDataRepository
+  // holds the instance it was constructed with — three consumers, one
+  // instance, or the phase is inert. Round 5 proved both failure modes with
+  // the whole 1055-test suite green: registerFactory (each consumer gets a
+  // throwaway; favourites evictable, sign-out clears nothing) and deleting
+  // the registration outright (both isRegistered guards go false; every
+  // pin/clear is a silent no-op).
+  group('the river-data cache registration (Phase 2 load-bearing)', () {
+    test('it is registered', () {
+      setupForecastDependencies();
+
+      expect(sl.isRegistered<IRiverDataCache>(), isTrue,
+          reason: 'absent, FavoritesProvider and AuthProvider both no-op '
+              'behind their isRegistered checks and the phase never runs');
+    });
+
+    test('it is one shared instance, not a factory', () {
+      setupForecastDependencies();
+
+      expect(identical(sl<IRiverDataCache>(), sl<IRiverDataCache>()), isTrue,
+          reason: 'a factory hands the pinner, the clearer and the repository '
+              'three different caches — pins protect nothing anyone reads');
+    });
+  });
 }

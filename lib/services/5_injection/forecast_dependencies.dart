@@ -97,7 +97,12 @@ void setupForecastDependencies() {
 
   // Shared cache + single-source-of-truth repository (ADR 0001). Self-initializes
   // its disk store on first use. Consumed by the map detail sheet, both
-  // forecast-page branches and the weekly outlook (ADR 0011 Phase 1).
+  // forecast-page branches and the weekly outlook (ADR 0011 Phase 1), and —
+  // load-bearing for Phase 2 — by FavoritesProvider (pinning) and AuthProvider
+  // (identity-change clear), both through GetIt. It must stay a SINGLETON:
+  // a factory hands the pinner, the clearer and the repository three different
+  // caches, and the retention phase goes silently inert. Guarded in
+  // forecast_dependencies_test.
   sl.registerLazySingleton<IRiverDataCache>(() => RiverDataCache());
   sl.registerLazySingleton<IRiverDataRepository>(
     () => RiverDataRepository(

@@ -55,6 +55,63 @@ void main() {
       expect(f.points.first.median, closeTo(41.46, 0.001));
     });
 
+    // ADR 0011 Phase 2 (round 7): the fallback decision is made HERE, in one
+    // derivation with the stamp itself — round 7 caught a separate
+    // re-derivation accepting a malformed forecast_date that the stamp parser
+    // had rejected, so a wall-clock stamp was flagged genuine and a run id
+    // minted from it. These drive the real parser, not a fake's boolean.
+    group('generation identity', () {
+      test('a well-formed forecast_date is genuine', () async {
+        final unit = FlowUnitPreferenceService();
+        final client = MockClient((req) async =>
+            http.Response(fx('proxy_210230337.json'), 200));
+        final svc = GeoglowsApiService(client: client, unitService: unit);
+
+        final f = await svc.fetchForecast('210230337');
+
+        expect(f.generatedAtIsFallback, isFalse);
+        expect(f.generatedAt.toUtc(), DateTime.utc(2026, 7, 2));
+      });
+
+      test('a MALFORMED forecast_date with parseable timestamps is still '
+          'genuine — identified by the first step', () async {
+        final unit = FlowUnitPreferenceService();
+        final client = MockClient((req) async => http.Response(
+            '{"forecast_date":"07/02/26","forecast":{'
+            '"datetime":["2026-07-02T03:00:00Z","2026-07-02T06:00:00Z"],'
+            '"flow_median":[1.0,2.0],'
+            '"flow_uncertainty_lower":[0.5,1.0],'
+            '"flow_uncertainty_upper":[2.0,3.0]}}',
+            200));
+        final svc = GeoglowsApiService(client: client, unitService: unit);
+
+        final f = await svc.fetchForecast('210230337');
+
+        expect(f.generatedAtIsFallback, isFalse,
+            reason: 'the first timestamp is deterministic across refetches — '
+                'a valid run identity');
+        expect(f.generatedAt.toUtc(), DateTime.utc(2026, 7, 2, 3));
+      });
+
+      test('no stamp of any kind is a wall-clock fallback', () async {
+        final unit = FlowUnitPreferenceService();
+        final client = MockClient((req) async => http.Response(
+            '{"forecast_date":"07/02/26","forecast":{'
+            '"datetime":["not-a-time","also-not"],'
+            '"flow_median":[1.0,2.0],'
+            '"flow_uncertainty_lower":[0.5,1.0],'
+            '"flow_uncertainty_upper":[2.0,3.0]}}',
+            200));
+        final svc = GeoglowsApiService(client: client, unitService: unit);
+
+        final f = await svc.fetchForecast('210230337');
+
+        expect(f.generatedAtIsFallback, isTrue,
+            reason: 'nothing in this response identifies the run; flagging '
+                'the wall clock as genuine mints a fake run id downstream');
+      });
+    });
+
     test('surfaces proxy error bodies as failures', () async {
       final unit = FlowUnitPreferenceService();
       final client = MockClient(

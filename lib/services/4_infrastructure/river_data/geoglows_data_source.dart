@@ -54,6 +54,15 @@ class GeoglowsDataSource implements IRiverDataSource {
           // The API converted to the current unit; tag with the canonical token
           // (CFS/CMS) so read-time conversion knows what it holds.
           unit: _unitService.currentFlowUnit,
+          // GEOGLOWS publishes one run per UTC day; the generation stamp is
+          // its identity (ADR 0011 Phase 2, run recorded on the entry) —
+          // unless the response carried none and the stamp is wall-clock, in
+          // which case null: a fabricated run makes every refetch look like
+          // an update. Round 6 caught the unconditional version doing exactly
+          // what the NWM side's own comment forbids, one source over.
+          runId: forecast.generatedAtIsFallback
+              ? null
+              : forecast.generatedAt.toIso8601String(),
         );
       default:
         throw ArgumentError('GEOGLOWS does not support ${key.product}');

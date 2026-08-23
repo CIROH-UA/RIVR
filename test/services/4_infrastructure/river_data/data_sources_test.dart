@@ -20,7 +20,10 @@ class _FakeNoaa implements INoaaApiService {
   @override
   Future<Map<String, dynamic>> fetchCurrentFlowOnly(String reachId) async {
     calls.add('current:$reachId');
-    return {'flow': 42.0};
+    // Production delegates to fetchForecast('short_range'); mirror that so
+    // the payload shape (and its referenceTime) is the one the run-id
+    // extraction actually meets.
+    return fetchForecast(reachId, 'short_range', isOverview: true);
   }
 
   @override
@@ -30,7 +33,34 @@ class _FakeNoaa implements INoaaApiService {
     bool isOverview = false,
   }) async {
     calls.add('forecast:$series:$reachId');
-    return {'series': series, 'reachId': reachId};
+    // The FULL multi-section response with a DISTINCT referenceTime per
+    // section — the shape the unfiltered fallback actually returns. Round 6
+    // proved a single-section fake structurally blind to the extraction
+    // stamping mediumRange with shortRange's run.
+    return {
+      'reach': {'reachId': reachId},
+      'shortRange': {
+        'series': {
+          'referenceTime': '2026-08-23T12:00:00',
+          'units': 'ft³/s',
+          'data': <dynamic>[],
+        },
+      },
+      'mediumRange': {
+        'member1': {
+          'referenceTime': '2026-08-23T06:00:00',
+          'units': 'ft³/s',
+          'data': <dynamic>[],
+        },
+      },
+      'longRange': {
+        'member1': {
+          'referenceTime': '2026-08-23T00:00:00',
+          'units': 'ft³/s',
+          'data': <dynamic>[],
+        },
+      },
+    };
   }
 
   @override
@@ -103,6 +133,10 @@ class _FakeForecast implements IForecastService {
 class _FakeGeoglows implements IGeoglowsApiService {
   final List<String> calls = [];
 
+  /// The degraded-response shape: no generation stamp anywhere, so the API
+  /// layer stamped wall-clock and flagged it.
+  bool generatedAtIsFallback = false;
+
   @override
   Future<GeoglowsForecast> fetchForecast(String riverId) async {
     calls.add('gforecast:$riverId');
@@ -110,6 +144,7 @@ class _FakeGeoglows implements IGeoglowsApiService {
       riverId: riverId,
       unit: 'ft³/s',
       generatedAt: DateTime.utc(2026, 7, 10, 0, 0),
+      generatedAtIsFallback: generatedAtIsFallback,
       points: [
         GeoglowsForecastPoint(
           validTime: DateTime.utc(2026, 7, 10, 3),
@@ -141,6 +176,7 @@ class _FakeUnit implements IFlowUnitPreferenceService {
 }
 
 void main() {
+  runIdTests();
   group('NwmDataSource', () {
     late _FakeNoaa api;
     late _FakeForecast forecast;
@@ -306,7 +342,8 @@ void main() {
         product: ForecastProduct.shortRange,
       ));
       expect(short.unit, 'CFS');
-      expect(short.payload['series'], 'short_range');
+      // The fake now returns the real NOAA nesting (for the run-id tests), so
+      // assert on the call made rather than a synthetic echo field.
       expect(api.calls, contains('forecast:short_range:23021904'));
 
       await nwm.fetch(const RiverDataKey(
@@ -385,6 +422,97 @@ void main() {
       expect(points.length, 2);
       expect((points.first as Map)['median'], 10);
       expect(api.calls, contains('gforecast:210230337'));
+    });
+  });
+}
+// ADR 0011 Phase 2 (round 5): entries record the run they came from. The
+// extraction lives in the sources; these pin the two shapes.
+void runIdTests() {
+  group('run identity', () {
+    test('NWM: each product records ITS OWN section\'s referenceTime',
+        () async {
+      final api = _FakeNoaa();
+      final src = NwmDataSource(
+        geocoder: _CountingGeocoder(),
+        api: api,
+        forecastService: _FakeForecast(),
+        unitService: _FakeUnit('CFS'),
+      );
+      RiverDataKey k(ForecastProduct p) => RiverDataKey(
+          source: ForecastSource.nwm, reachId: '123', product: p);
+
+      final short = await src.fetch(k(ForecastProduct.shortRange));
+      final medium = await src.fetch(k(ForecastProduct.mediumRange));
+      final long = await src.fetch(k(ForecastProduct.longRange));
+
+      expect(short.runId, '2026-08-23T12:00:00');
+
+      // analysisAssimilation is the most-read runId in the app — the sheet's
+      // and forecast page's current flow. Its data IS the short_range series
+      // (fetchCurrentFlowOnly delegates there), so it records that run.
+      final aa = await src.fetch(k(ForecastProduct.analysisAssimilation));
+      expect(aa.runId, '2026-08-23T12:00:00',
+          reason: 'unguarded, round 7 nulled it with the suite green');
+      expect(medium.runId, '2026-08-23T06:00:00',
+          reason: 'the unfiltered fallback returns every section; first-found '
+              'stamped this with shortRange\'s run, which advances hourly '
+              'while medium range moves 4×/day — supersession lying');
+      expect(long.runId, '2026-08-23T00:00:00');
+    });
+
+    test('NWM: a payload with no referenceTime yields null, not a fake',
+        () async {
+      final api = _FakeNoaa();
+      final src = NwmDataSource(
+        geocoder: _CountingGeocoder(),
+        api: api,
+        forecastService: _FakeForecast(),
+        unitService: _FakeUnit('CFS'),
+      );
+
+      final result = await src.fetch(const RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '123',
+        product: ForecastProduct.returnPeriods,
+      ));
+
+      expect(result.runId, isNull);
+    });
+
+    test('GEOGLOWS: the generation date is the run', () async {
+      final src = GeoglowsDataSource(
+        api: _FakeGeoglows(),
+        unitService: _FakeUnit('CFS'),
+      );
+
+      final result = await src.fetch(const RiverDataKey(
+        source: ForecastSource.geoglows,
+        reachId: '760021642',
+        product: ForecastProduct.geoglowsForecast,
+      ));
+
+      expect(result.runId, DateTime.utc(2026, 7, 10).toIso8601String());
+    });
+
+    // REGRESSION (round 6, F3): when the response carries no generation stamp
+    // the API layer falls back to wall-clock — and minting a run from that
+    // makes every refetch of identical data look like a new run. NWM's side
+    // states this rule in a comment; GEOGLOWS did the opposite.
+    test('GEOGLOWS: a wall-clock fallback stamp yields NO run id', () async {
+      final api = _FakeGeoglows()..generatedAtIsFallback = true;
+      final src = GeoglowsDataSource(
+        api: api,
+        unitService: _FakeUnit('CFS'),
+      );
+
+      final result = await src.fetch(const RiverDataKey(
+        source: ForecastSource.geoglows,
+        reachId: '760021642',
+        product: ForecastProduct.geoglowsForecast,
+      ));
+
+      expect(result.runId, isNull,
+          reason: 'a fabricated run is worse than none — supersession lies');
     });
   });
 }

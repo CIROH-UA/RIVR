@@ -58,7 +58,12 @@ class FavoritesService implements IFavoritesService {
       return favorites;
     } catch (e) {
       AppLogger.error('FavoritesService', 'Error loading favorites: $e', e);
-      return [];
+      // Rethrown, not swallowed to []: an empty list means "this account has
+      // no favourites" and — since ADR 0011 Phase 2 — that answer un-pins
+      // every reach in the retention cache and persists the empty pin set.
+      // A Firestore hiccup must not be able to say it. (userId == null and
+      // a missing settings doc above ARE genuinely empty accounts.)
+      rethrow;
     }
   }
 

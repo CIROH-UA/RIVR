@@ -15,7 +15,9 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 ///  - notify observers of a key when its entry changes, so one fetch's result
 ///    updates every widget bound to that key.
 abstract class IRiverDataCache {
-  /// Prepare disk storage. Safe to call once at startup.
+  /// Prepare disk storage: create the directory, discard entries of
+  /// unrecognised schema versions, load the persisted pins. Runs lazily from
+  /// the first get/put/pin-push — nothing needs to call it directly.
   Future<void> initialize();
 
   bool get isReady;
@@ -28,12 +30,26 @@ abstract class IRiverDataCache {
   Future<void> put(RiverDataEntry entry);
 
   /// Observe the entry for [key]. Seeded with the current in-memory value (or
-  /// null) and updated on every [put]/[evict]. Backs `ValueListenableBuilder`.
+  /// null), updated on every [put]/[evict]/retention eviction/[clear], and
+  /// seeded again when a disk read hydrates the key. Backs
+  /// `ValueListenableBuilder`. Object identity is stable for a key while
+  /// anything is listening.
   ValueListenable<RiverDataEntry?> listenable(RiverDataKey key);
+
+  /// Declare which reaches must never be evicted by the retention cap — the
+  /// user's favourites (ADR 0011 Phase 2). The favourites provider pushes this
+  /// whenever membership changes; ids are reach ids, source-agnostic, because
+  /// pinning the id in one source and evicting it in another would be
+  /// indistinguishable from a bug to the user.
+  void setPinnedReaches(Set<String> reachIds);
 
   /// Remove a single key from memory, disk, and observers.
   Future<void> evict(RiverDataKey key);
 
-  /// Drop everything (e.g. on sign-out).
+  /// Drop everything — entries, observers' values, AND the pinned set with
+  /// its persisted file (pins belong to the account being cleared, and the
+  /// empty set counts as this session's pin declaration so the old file
+  /// cannot resurrect it). Called on every identity change: signOut,
+  /// deleteAccount, and the auth-state listener's revoked-token path.
   Future<void> clear();
 }

@@ -88,10 +88,12 @@ class GeoglowsApiService implements IGeoglowsApiService {
         'Forecast for $riverId: ${points.length} points -> ${_unitService.currentFlowUnit}',
       );
 
+      final generation = _generationOf(data);
       return GeoglowsForecast(
         riverId: riverId,
         unit: _unitService.getDisplayUnit(),
-        generatedAt: _generatedAt(data),
+        generatedAt: generation.time,
+        generatedAtIsFallback: generation.isFallback,
         points: points,
         returnPeriods: returnPeriods.isEmpty ? null : returnPeriods,
       );
@@ -153,7 +155,7 @@ class GeoglowsApiService implements IGeoglowsApiService {
       return GeoglowsEnsembleForecast(
         riverId: riverId,
         unit: _unitService.getDisplayUnit(),
-        generatedAt: _generatedAt(data),
+        generatedAt: _generationOf(data).time,
         points: points,
       );
     } catch (e) {
@@ -251,24 +253,36 @@ class GeoglowsApiService implements IGeoglowsApiService {
     return _unitService.convertToPreferredUnit(raw, _nativeUnit);
   }
 
-  DateTime _generatedAt(Map<String, dynamic> data) {
+  /// The generation stamp and whether it had to be fabricated, decided in ONE
+  /// place. Round 7 caught a separate `_generatedAtIsFallback` re-deriving the
+  /// rule with different parse acceptance ("length >= 8" vs a full YYYYMMDD
+  /// parse), so a malformed `forecast_date` produced a wall-clock stamp
+  /// flagged as genuine — and a run id minted from it. One derivation cannot
+  /// disagree with itself.
+  ({DateTime time, bool isFallback}) _generationOf(Map<String, dynamic> data) {
     // Proxy shape: forecast_date is YYYYMMDD (the daily UTC model run).
     final fd = data['forecast_date'];
     if (fd is String && fd.length == 8) {
       final y = int.tryParse(fd.substring(0, 4));
       final mo = int.tryParse(fd.substring(4, 6));
       final d = int.tryParse(fd.substring(6, 8));
-      if (y != null && mo != null && d != null) return DateTime.utc(y, mo, d);
+      if (y != null && mo != null && d != null) {
+        return (time: DateTime.utc(y, mo, d), isFallback: false);
+      }
     }
     // REST shape fallback: metadata.gen_date.
     final meta = data['metadata'];
     if (meta is Map && meta['gen_date'] is String) {
       final parsed = DateTime.tryParse(meta['gen_date'] as String);
-      if (parsed != null) return parsed;
+      if (parsed != null) return (time: parsed, isFallback: false);
     }
-    // Last resort: the first forecast timestamp.
+    // The first forecast timestamp still identifies the run — it is
+    // deterministic across refetches of the same data.
     final fc = (data['forecast'] as Map?) ?? data;
     final first = _parseTime(_at(_asList(fc['datetime']), 0));
-    return first ?? DateTime.now().toUtc();
+    if (first != null) return (time: first, isFallback: false);
+    // Wall clock: display can use it; a run identity must never be minted
+    // from it.
+    return (time: DateTime.now().toUtc(), isFallback: true);
   }
 }

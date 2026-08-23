@@ -1,7 +1,6 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phase 0 deployed and collecting. Phase 1 built, in review, unmerged.
-Phases 2–9 specified, not implemented.
+**Status:** Phase 0 deployed and collecting. Phase 1 complete (gate passed, round 17), merged. Phase 2 complete (closed under the 3-round review cap), merged. Phases 3–9 specified, not implemented.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
@@ -380,10 +379,32 @@ formality.
   its output or a `file:line`. **`CANNOT VERIFY` is a failure.**
 - **Reports, does not fix.** Merging those roles recreates the problem.
 - **Mutation-tests the guards**: break the property deliberately and confirm a
-  test dies. This has caught more real defects here than any other technique.
+  test dies. This has caught more real defects here than any other technique —
+  scoped to the phase's **core properties** (3-4 per phase), not every comment.
 
 Hunt this project's known failure modes: fake guards; unearned "measured"; silent
 success; stale docs; a second way to do the thing just centralised.
+
+**The cap: three rounds per phase, maximum.** Decided 2026-08-23, after Phase 1
+took 17 rounds and Phase 2 eight. The ledger was clear: rounds 1-3 caught real,
+user-visible defects that a 1,000-test green suite missed (a digest label
+overwriting user data, a favourite evictable on every cold start, a page blank
+for five seconds, a pin-wipe on a Firestore hiccup). Rounds 4+ almost
+exclusively found correct-but-unguarded code, comment inaccuracies and doc
+drift — hygiene priced at hours per round.
+
+The agent gets **at most three attempts** to find defects that would make the
+phase's goal fail. Rules under the cap:
+
+- **What blocks:** live defects, and documentation that states something
+  untrue. Nothing else fails a round.
+- **What does not block:** correct code that lacks a guard, unlabelled
+  defensive checks, style. These get fixed in the same pass as the blocking
+  items — no additional round to re-verify them.
+- After the final round's blocking findings are fixed and their fixes
+  verified, the phase **closes**. Remaining review suggestions are recorded,
+  not looped on.
+- A phase may still close early: a round with no blocking findings passes it.
 
 ---
 
@@ -482,24 +503,83 @@ blank spinner, and "See forecast" does not repeat a wait.
 
 ---
 
-## Phase 2 — Device cache discipline
+## Phase 2 — Device cache discipline ▶ COMPLETE (closed under the 3-round cap)
 
-**Nothing prunes the disk cache today** — `evict()` and `clear()` exist and
-nothing calls them.
+**Closed 2026-08-23** after eight review rounds — the phase that motivated the
+cap above. Real defects found and fixed with verified guards: the memory-only
+pin set evicting a favourite on every cold start (round 1); the identity-change
+clear missing deleteAccount and the auth-state listener (rounds 2-3); the
+unbounded notifier/recency maps (rounds 3-4); first-found run extraction
+stamping mediumRange with shortRange's run (round 6); a fabricated GEOGLOWS
+wall-clock run id (rounds 6-7); and a swallowed Firestore error un-pinning
+every favourite and persisting the empty pin set (round 8). All core
+properties mutation-proven; remaining round-8 riders (guard-of-guard depth)
+fixed in the closing pass without a ninth round.
+
+**Before this phase nothing pruned the disk cache** — `evict()` and `clear()`
+existed and nothing called them.
+
+**Built.** Retention lives in `RiverDataCache`: an LRU cap on non-pinned
+*reaches* (a reach's products are one unit — half-evicting a reach leaves a
+name whose flow will never refetch with it), enforced after every write;
+favourites pinned via `setPinnedReaches`, pushed by `FavoritesProvider` at its
+single membership hook (`_updateFavoriteReachIds`) and **persisted to
+`pins.json`**, so a cold-start put that beats the Firestore favourites load can
+never evict a favourite (review round 1 caught the memory-only version doing
+exactly that); schema version baked into both the entry JSON and the cache
+**filename** (`<storageKey>.v<N>.json`), so the once-per-upgrade discard sweep
+is a directory listing, not N file reads. LRU order is memory-tracked and falls
+back to file mtime across restarts (stat once per group per session). Every
+identity change — `signOut`, `deleteAccount`, and the auth-state listener's
+revoked-token path, gated on a null that follows a non-null — clears the cache
+and its pins through one `AuthProvider._clearRiverDataCache()` helper; clear,
+pin-persist and entry writes are serialised so a fire-and-forget sign-out
+cannot race the next account's pins. There is deliberately no time-based
+deletion — an old entry whose run has not advanced is still the current data.
+
+**Declared limit on guard 6 (unit change, zero refetches).** The guard holds on
+the `RiverDataRepository` path — the unit is not part of `RiverDataKey`, so a
+preference flip re-reads the identical entry with zero fetches and converts at
+decode; mutation-proven. The app's unit-flip handler
+(`favorites_page._updateFlowUnitAsync`) additionally calls the LEGACY
+`ForecastService.clearUnitDependentCaches()`, which wipes the old forecast disk
+cache and forces refetches on every surface still reading through
+`ForecastService` (hydrograph, interactive chart, `ReachDataProvider`). That
+cache and those surfaces are exactly what **Phase 3 deletes** — fixing the flip
+inside Phase 2 would mean investing in a code path whose removal is the next
+phase's whole job. Carried forward explicitly: Phase 3 guard 4 restates this
+property and owns making it true app-wide.
 
 **Build.** Retention keyed on **run supersession**, not wall-clock. LRU cap on
 non-favourites. **Favourites pinned**, never evicted. Entries record the run they
 came from so supersession is decidable offline, and carry a schema version.
 
 **Guards.**
-1. An entry whose run has not advanced is served with **no network call**,
-   however old in wall-clock terms. Tap → back → tap again issues nothing.
+1. Inside its publish-aligned window an entry is served with **no network
+   call**, however old in wall-clock terms — the window is the source's own
+   schedule, never a generic TTL. Tap → back → tap again issues nothing.
+   *Past* the window the cached value is still served instantly while ONE
+   background revalidation runs (ADR 0001 decision D3): whether the run actually
+   advanced is not decidable without asking, so the revalidate is the ask, and
+   the user never waits on it. Entries record the run they came from
+   (`runId` — NWM `referenceTime` lifted from the product's OWN payload
+   section, GEOGLOWS generation date when the response carries one), so what a
+   revalidate brought back is decidable from the stored data alone; Phase 5's
+   store diffing builds on it. Declared exceptions, all null by design:
+   products with no run (returnPeriods, reachMetadata); a GEOGLOWS response
+   carrying no generation stamp of any kind (minting one from wall-clock would
+   make every refetch look like an update); and `reachSummary`, the legacy
+   bundle whose seam (`ReachDetailsData`) drops the reference time — Phase 3
+   deletes that product, so the run is not threaded through a dying seam.
 2. Exceeding the cap evicts least-recently-used non-favourites and **never** a
    favourite — tested with the cap exceeded entirely by favourites.
 3. Cache size stabilises under simulated browsing of many reaches.
 4. Favouriting a previously-browsed stream renders instantly from cache.
 5. **Upgrading over an old install discards unrecognised schema versions** rather
-   than parsing them. Every upgrading user hits this once, on first launch.
+   than parsing them. Every upgrading user hits this once, on first cache use
+   (`initialize` runs lazily from the first get/put/pin-push — the favourites
+   load's `setPinnedReaches` typically triggers it during startup; nothing
+   calls it directly, and nothing needs to).
 6. **A unit-preference change re-renders from the same cached entry with zero
    refetches.**
 7. Independent agent review passes.

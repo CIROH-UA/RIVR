@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get_it/get_it.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart' show MockUser;
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
@@ -38,6 +40,13 @@ class _MockAuthRepository implements IAuthRepository {
   }) {
     _accounts[email] = {'password': password};
     _emailVerified = emailVerified;
+  }
+
+  /// The stream emits null — a revoked token, a deleted account, or the
+  /// stream's cold-start word for a signed-out app.
+  void simulateAuthStateNull() {
+    _signedInUser = null;
+    _authStateController.add(null);
   }
 
   /// Simulate sign-in (used by the mock use case wrapper)
@@ -224,13 +233,30 @@ class _MockFCMService implements IFCMService {
   void clearCache() {}
 }
 
+/// Records clear() calls — the wiring guard for ADR 0011 Phase 2. Round 2
+/// proved the sign-out clear was deletable with the whole suite green: the
+/// cache-side test proves clear() works, and nothing proved anyone calls it.
+class _RecordingRiverDataCache implements IRiverDataCache {
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async => clearCalls++;
+
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 void main() {
   late _MockAuthRepository mockAuthRepo;
   late _MockSettingsRepository mockSettingsRepo;
   late _MockFCMService mockFcm;
   late AuthProvider provider;
 
+  late _RecordingRiverDataCache riverCache;
+
   setUp(() {
+    riverCache = _RecordingRiverDataCache();
+    GetIt.I.registerSingleton<IRiverDataCache>(riverCache);
     mockAuthRepo = _MockAuthRepository();
     mockSettingsRepo = _MockSettingsRepository();
     mockFcm = _MockFCMService();
@@ -252,6 +278,7 @@ void main() {
   tearDown(() {
     provider.dispose();
     mockAuthRepo.dispose();
+    GetIt.I.reset();
   });
 
   group('AuthProvider', () {
@@ -376,6 +403,88 @@ void main() {
         expect(result, isTrue);
         expect(provider.successMessage, 'Password reset email sent');
         expect(provider.errorMessage, isEmpty);
+      });
+    });
+
+    // ADR 0011 Phase 2: every identity change drops the river-data cache and
+    // its pins — carried over, the pins shield the previous user's favourites
+    // from the next user's retention cap. Round 2 found the fix on signOut
+    // alone (deleteAccount's own "mirror signOut's cleanup" comment promising
+    // a mirror it did not perform), and the wiring entirely unguarded.
+    group('identity changes clear the river-data cache', () {
+      test('signOut clears it', () async {
+        await provider.signOut();
+
+        expect(riverCache.clearCalls, greaterThan(0),
+            reason: 'the cache-side tests prove clear() works; this proves '
+                'someone calls it');
+      });
+
+      test('deleteAccount clears it', () async {
+        mockAuthRepo.seedUser(
+          email: 'doomed@example.com',
+          password: 'correct-pass',
+        );
+        mockAuthRepo.simulateSignIn('doomed@example.com');
+        riverCache.clearCalls = 0; // ignore any sign-in-time activity
+
+        await provider.deleteAccount('correct-pass');
+
+        expect(riverCache.clearCalls, greaterThan(0),
+            reason: 'account deletion is the strongest identity change there '
+                'is — pins surviving it belong to a user who no longer exists');
+      });
+
+      test('a failed deleteAccount clears nothing', () async {
+        mockAuthRepo.seedUser(
+          email: 'safe@example.com',
+          password: 'correct-pass',
+        );
+        mockAuthRepo.simulateSignIn('safe@example.com');
+        riverCache.clearCalls = 0;
+
+        await provider.deleteAccount('wrong-password');
+
+        expect(riverCache.clearCalls, 0,
+            reason: 'the account is still there; its cache is still its own');
+      });
+    });
+
+    // REGRESSION (round 3, F1): the auth-state listener's clear — the path a
+    // revoked token or a server-side account removal takes — was deletable
+    // with the suite green, because no test ever called initialize() and
+    // subscribed the listener. And the clear must be gated on a null that
+    // FOLLOWS a non-null: the stream emits null on a signed-out cold start,
+    // and clearing there wipes pins on every launch — undoing the cold-start
+    // eviction fix outright.
+    group('the auth-state listener', () {
+      test('a server-side sign-out clears the cache', () async {
+        mockAuthRepo.seedUser(
+            email: 'revoked@example.com', password: 'pw');
+        await provider.initialize();
+        mockAuthRepo.simulateSignIn('revoked@example.com');
+        await Future<void>.delayed(Duration.zero);
+        riverCache.clearCalls = 0;
+
+        // The token is revoked remotely: the stream emits null.
+        mockAuthRepo.simulateAuthStateNull();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(riverCache.clearCalls, greaterThan(0),
+            reason: 'the remote sign-out path must clear the same caches the '
+                'explicit signOut() does');
+      });
+
+      test('a signed-out cold start clears nothing', () async {
+        await provider.initialize();
+        // The stream's first word is null — nobody was signed in.
+        mockAuthRepo.simulateAuthStateNull();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(riverCache.clearCalls, 0,
+            reason: 'a null that follows no user is a cold start, not a '
+                'sign-out — clearing here wipes the pins file on every '
+                'launch of a signed-out app');
       });
     });
 

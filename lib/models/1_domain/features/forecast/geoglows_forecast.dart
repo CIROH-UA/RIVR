@@ -43,6 +43,12 @@ class GeoglowsForecast {
   /// When the forecast was generated (model run time).
   final DateTime generatedAt;
 
+  /// True when [generatedAt] is wall-clock-at-fetch because the response
+  /// carried no generation stamp at all. Display can still show it; a RUN
+  /// identity must not be minted from it — every refetch would look like a
+  /// new run for identical data (ADR 0011 Phase 2).
+  final bool generatedAtIsFallback;
+
   /// Ordered forecast steps (earliest first).
   final List<GeoglowsForecastPoint> points;
 
@@ -54,6 +60,7 @@ class GeoglowsForecast {
     required this.riverId,
     required this.unit,
     required this.generatedAt,
+    this.generatedAtIsFallback = false,
     required this.points,
     this.returnPeriods,
   });

@@ -95,6 +95,7 @@ class RiverDataRepository implements IRiverDataRepository {
         validUntil: source.validUntil(key.product, now),
       ),
       unit: result.unit,
+      runId: result.runId,
       payload: result.payload,
     );
     await _cache.put(entry);
