@@ -3,7 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -448,7 +448,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   ///
   /// This replaced a single `reachSummary` read, which looked cheap at the call
   /// site and was not: building it fetches reach info, current flow, return
-  /// periods **and** a medium-range forecast *serially*, the 156 KB / 30.8 s
+  /// periods **and** a medium-range forecast *serially*, the 156 KB
   /// forecast series accounting for most of it. The sheet never
   /// rendered that series; the forecast peak it shows comes from the map tile
   /// (`selectedReach.mapFloodCategoryIndex`), not from a fetch. So it is not
@@ -522,7 +522,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _longitude = m.longitude;
       });
       // The place name is decoration, so it is resolved after the title is
-      // already on screen rather than in front of it (ADR 0011 decision 7).
+      // already on screen rather than in front of it (ADR 0011, geocoding off the critical path).
       if (m.formattedLocation == null || m.formattedLocation!.isEmpty) {
         _fillPlaceLabel(m.latitude, m.longitude);
       }
@@ -583,7 +583,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// Resolve the place label after the sheet is already usable. Best-effort:
   /// `GeocodingService` catches internally and yields null rather than throwing.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(GeocodingService.placeLabel(lat, lon).then((label) {
+    unawaited(GetIt.I<IGeocodingService>().placeLabel(lat, lon).then((label) {
       if (_isCancelled || !mounted || label == null || label.isEmpty) return;
       setState(() => _formattedLocation = label);
     }));

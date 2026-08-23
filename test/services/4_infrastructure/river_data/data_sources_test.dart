@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
@@ -40,6 +41,23 @@ class _FakeNoaa implements INoaaApiService {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Counts calls so "does not geocode" is observable rather than inferred.
+class _CountingGeocoder implements IGeocodingService {
+  int calls = 0;
+
+  @override
+  Future<Map<String, String?>> reverseGeocode(double lat, double lon) async {
+    calls++;
+    return {'city': 'Provo', 'state': 'UT', 'country': 'US'};
+  }
+
+  @override
+  Future<String?> placeLabel(double? lat, double? lon) async {
+    calls++;
+    return 'Provo, UT';
+  }
 }
 
 class _FakeForecast implements IForecastService {
@@ -125,15 +143,18 @@ void main() {
   group('NwmDataSource', () {
     late _FakeNoaa api;
     late _FakeForecast forecast;
+    late _CountingGeocoder geocoder;
     late NwmDataSource nwm;
 
     setUp(() {
       api = _FakeNoaa();
       forecast = _FakeForecast();
+      geocoder = _CountingGeocoder();
       nwm = NwmDataSource(
         api: api,
         forecastService: forecast,
         unitService: _FakeUnit('CFS'),
+        geocoder: geocoder,
       );
     });
 
@@ -228,28 +249,45 @@ void main() {
       }
     });
 
-    // ADR 0011 — geocoding stays off the critical path. An earlier version put
-    // a reverseGeocode inside this branch; because GeocodingService catches
-    // internally and never throws, nothing bounded it but a 30 s HTTP timeout,
-    // sitting in front of the one call this product exists to keep fast.
+    // ADR 0011 — geocoding stays off the critical path.
     //
-    // REGRESSION: review reinstated that call and all 900 tests passed. The
-    // guard is timing-based because the geocode is a static that cannot be
-    // injected — a real network call cannot complete in a millisecond, so a
-    // fast return proves it was not made.
-    test('reachMetadata does not geocode — it stays the cheap call', () async {
-      final sw = Stopwatch()..start();
+    // REGRESSION, and the second attempt at this guard. The first asserted on
+    // elapsed time on the theory that "a real reverseGeocode cannot return this
+    // fast"; review measured one returning in 86 ms, under the 200 ms
+    // threshold, and noted that at baseline the timer measured nothing at all.
+    // A guard that cannot fail for the right reason is not a guard.
+    //
+    // The geocoder is now injected, so the assertion is what it should always
+    // have been: it was never called.
+    test('reachMetadata never geocodes — counted, not timed', () async {
+      expect(geocoder.calls, 0, reason: 'precondition');
+
       await nwm.fetch(const RiverDataKey(
         source: ForecastSource.nwm,
         reachId: '23021904',
         product: ForecastProduct.reachMetadata,
       ));
-      sw.stop();
 
-      expect(sw.elapsedMilliseconds, lessThan(200),
-          reason: 'a real reverseGeocode cannot return this fast; anything '
-              'slower means a network call crept back onto this path');
+      expect(geocoder.calls, 0,
+          reason: 'reverseGeocode catches internally and never throws, so on '
+              'this path nothing would bound it but a 30 s HTTP timeout — in '
+              'front of the cheapest call in the app');
       expect(forecast.basicCalls, 1);
+    });
+
+    test('no product on the tap path geocodes', () async {
+      for (final p in [
+        ForecastProduct.reachMetadata,
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.returnPeriods,
+      ]) {
+        await nwm.fetch(RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: p,
+        ));
+      }
+      expect(geocoder.calls, 0);
     });
 
     test('validUntil throws for unsupported products', () {

@@ -148,7 +148,7 @@ void main() {
       expect(
         api.calls.where((c) => c.contains('medium_range')),
         isEmpty,
-        reason: 'the 156 KB / 30.8 s series must not ride along with a tap',
+        reason: 'the 156 KB series must not ride along with a tap',
       );
       expect(api.calls.where((c) => c.contains('long_range')), isEmpty);
     });

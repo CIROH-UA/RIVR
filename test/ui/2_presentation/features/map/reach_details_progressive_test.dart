@@ -5,7 +5,7 @@
 // What this exists to prevent: the sheet used to make ONE `reachSummary` read,
 // which looked cheap at the call site and was not. Building that payload fetched
 // reach info, current flow, return periods AND a medium-range forecast
-// serially, of which the 156 KB / 30.8 s medium-range call was the bulk. (The
+// serially, of which the 156 KB medium-range call was the bulk. (The
 // end-to-end total has not been measured on device — the per-call medians have.) The sheet never rendered a forecast series at all; its peak comes
 // from the map tile.
 //
@@ -26,12 +26,35 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
+
+/// Injectable geocoder: lets the tests pin both directions — that the label
+/// arrives, and (in data_sources_test) that the data source never asks for it.
+/// Also stops widget tests making live Mapbox calls, which review found them
+/// doing twice per run.
+class _FakeGeocoder implements IGeocodingService {
+  _FakeGeocoder({this.label = 'Provo, UT'});
+  final String? label;
+  int calls = 0;
+
+  @override
+  Future<Map<String, String?>> reverseGeocode(double lat, double lon) async {
+    calls++;
+    return {'city': 'Provo', 'state': 'UT', 'country': 'US'};
+  }
+
+  @override
+  Future<String?> placeLabel(double? lat, double? lon) async {
+    calls++;
+    return label;
+  }
+}
 
 class _StubUnit implements IFlowUnitPreferenceService {
   @override
@@ -106,7 +129,11 @@ class _RecordingRepo implements IRiverDataRepository {
       case ForecastProduct.reachMetadata:
         return {
           'riverName': 'White River',
-          'formattedLocation': 'Provo, UT',
+          // NO formattedLocation. Production's reachMetadata deliberately does
+          // not geocode, so this is empty on a cold cache and the consumer
+          // fills it. A fixture supplying it would make the tests pass over a
+          // path that is broken in the app — review found exactly that on the
+          // forecast page.
           'latitude': 40.2,
           'longitude': -111.6,
         };
@@ -163,11 +190,12 @@ SelectedReach _reach() => SelectedReach(
       selectedAt: DateTime.utc(2026, 8, 22, 12),
     );
 
-void _register(_RecordingRepo repo) {
+void _register(_RecordingRepo repo, {_FakeGeocoder? geocoder}) {
   final sl = GetIt.instance;
   sl.registerSingleton<IRiverDataRepository>(repo);
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   sl.registerSingleton<IForecastService>(_StubForecastService());
+  sl.registerSingleton<IGeocodingService>(geocoder ?? _FakeGeocoder());
 }
 
 /// A child of the sheet consumes FavoritesProvider (the favourite toggle), so
@@ -429,4 +457,63 @@ void main() {
       expect(repo.requested.length, greaterThan(before));
     });
   });
+  group('the place label is filled off the critical path', () {
+    // REGRESSION: deleting both _fillPlaceLabel call sites left all 906 tests
+    // green, even though it is now the ONLY thing preserving the "Provo, UT"
+    // label the removed reachSummary path used to supply.
+    testWidgets('the label arrives after the sheet is already usable', (t) async {
+      final geo = _FakeGeocoder(label: 'Provo, UT');
+      _register(_RecordingRepo(), geocoder: geo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(geo.calls, greaterThan(0),
+          reason: 'reachMetadata deliberately does not geocode, so the '
+              'consumer must — otherwise the location is silently lost');
+      // Asserted on the call rather than rendered text: the label sits inside
+      // the collapsed Details disclosure, so it is not on screen by default.
+      // The call is what deleting _fillPlaceLabel removes, which is the
+      // regression this pins.
+    });
+
+    testWidgets('a geocode returning nothing leaves a usable sheet', (t) async {
+      final geo = _FakeGeocoder(label: null);
+      _register(_RecordingRepo(), geocoder: geo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      expect(find.text('White River'), findsOneWidget);
+      expect(find.textContaining('Failed to load'), findsNothing,
+          reason: 'the place name is decoration; losing it is not a failure');
+    });
+  });
+
+  group('guard 6 — the error card is terminal, not premature', () {
+    // REGRESSION: markSettled's `settled < 3` could be changed to `< 1` and
+    // every test passed — an error card thrown up over reads still in flight
+    // was invisible to the suite.
+    testWidgets('no error card while a read is still outstanding', (t) async {
+      final repo = _RecordingRepo(
+        delays: {ForecastProduct.returnPeriods: const Duration(seconds: 30)},
+        failures: {
+          ForecastProduct.reachMetadata,
+          ForecastProduct.analysisAssimilation,
+        },
+      );
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump(const Duration(milliseconds: 200));
+
+      expect(find.textContaining('Failed to load'), findsNothing,
+          reason: 'two reads failed but the third is still in flight — '
+              'declaring failure now is premature');
+
+      await t.pump(const Duration(seconds: 31));
+      await _settle(t);
+    });
+  });
+
 }

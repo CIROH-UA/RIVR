@@ -1,4 +1,6 @@
 import 'package:get_it/get_it.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
+import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/4_infrastructure/api/noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
@@ -30,6 +32,12 @@ void setupForecastDependencies() {
   if (sl.isRegistered<INoaaApiService>()) return;
 
   // Services
+  // Behind an interface so the surfaces that geocode can be tested in both
+  // directions — that it happens where it should, and that it does NOT happen
+  // on the fast path (ADR 0011 Phase 1). Also stops widget tests making live
+  // Mapbox calls.
+  sl.registerLazySingleton<IGeocodingService>(() => const MapboxGeocodingService());
+
   sl.registerLazySingleton<INoaaApiService>(
     () => NoaaApiService(unitService: sl<IFlowUnitPreferenceService>()),
   );
@@ -60,6 +68,7 @@ void setupForecastDependencies() {
   sl.registerLazySingleton<SourceRegistry>(
     () => SourceRegistry([
       NwmDataSource(
+        geocoder: sl<IGeocodingService>(),
         api: sl<INoaaApiService>(),
         forecastService: sl<IForecastService>(),
         unitService: sl<IFlowUnitPreferenceService>(),

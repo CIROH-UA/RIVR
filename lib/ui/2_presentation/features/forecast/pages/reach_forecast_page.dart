@@ -33,7 +33,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
@@ -148,14 +148,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       // than the bundled `reachSummary` (ADR 0011 Phase 1).
       //
       // Two reasons, and the second is the important one. Cost: building
-      // `reachSummary` pulls a 156 KB / 30.8 s-median medium-range series this
+      // `reachSummary` pulls a 156 KB medium-range series (avg 10.9 s, worst 34.7 s) this
       // page never renders from that entry — it gets its series from
       // ReachDataProvider. Correctness: while this page read `reachSummary` and
       // the sheet read the narrow products, the same current-flow number lived
       // in two independently-cached entries fetched at different moments, so
       // the gauge and the sheet could legitimately disagree. Reading identical
       // keys makes them identical by construction, which is what ADR 0011
-      // decision 3 and ADR 0002 require.
+      // decision 11 and ADR 0002 require.
       final repo = GetIt.I<IRiverDataRepository>();
       RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
             source: ForecastSource.nwm,
@@ -229,7 +229,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   /// `GeocodingService.placeLabel` catches internally and yields null rather
   /// than throwing, so this can only ever add information.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(GeocodingService.placeLabel(lat, lon).then((label) {
+    unawaited(GetIt.I<IGeocodingService>().placeLabel(lat, lon).then((label) {
       if (!mounted || label == null || label.isEmpty) return;
       final current = _details;
       if (current == null) return;
@@ -271,8 +271,8 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       var location = '';
       if (widget.lat != null && widget.lon != null) {
         try {
-          final geo = await GeocodingService.reverseGeocode(
-              widget.lat!, widget.lon!);
+          final geo = await GetIt.I<IGeocodingService>()
+              .reverseGeocode(widget.lat!, widget.lon!);
           // 'state'/region is unreliable internationally (Mapbox returns codes
           // like '13' for French departments), so name from city + country.
           final city = geo['city'];

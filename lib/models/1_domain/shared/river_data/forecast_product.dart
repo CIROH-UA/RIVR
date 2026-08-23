@@ -23,7 +23,7 @@ enum ForecastProduct {
   /// **Heavy — prefer the narrow products below where a surface needs only part
   /// of this.** Building it fetches reach info, current flow, return periods AND
   /// a medium-range forecast, serially. The medium-range call alone measured
-  /// 156 KB at a 30.8 s median (ADR 0011); the end-to-end total has not been
+  /// 156 KB, avg 10.9 s and worst 34.7 s (ADR 0011); the end-to-end total has not been
   /// measured on device. The map detail sheet paid all of it and rendered none
   /// of the forecast series.
   reachSummary,
@@ -35,7 +35,7 @@ enum ForecastProduct {
   ///
   /// It also fails independently: during the 2026-08-22 outage NOAA's
   /// `/streamflow` returned 504 for every series while `/reaches/{id}` kept
-  /// answering in 0.4 s (ADR 0011, "Independently measured endpoints"), so this
+  /// answering in 0.4 s (ADR 0011, "Upstream goes fully down"), so this
   /// is the one thing that can still be shown when flow is unavailable.
   reachMetadata,
 

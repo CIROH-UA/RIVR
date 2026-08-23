@@ -19,6 +19,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
@@ -41,7 +42,24 @@ class _StubUnit implements IFlowUnitPreferenceService {
 
 /// `CurrentFlowPayload.decode` delegates the extraction to IForecastService —
 /// deliberately, so there is only one implementation of "what is the current
-/// flow" (ADR 0011 decision 15). The page therefore needs one registered.
+/// flow" (ADR 0011 decision 13). The page therefore needs one registered.
+/// Injected so this test stops making live Mapbox calls — review measured two
+/// real reverse-geocodes per run, making the suite depend on internet and on a
+/// gitignored token.
+class _FakeGeocoder implements IGeocodingService {
+  int calls = 0;
+  @override
+  Future<Map<String, String?>> reverseGeocode(double lat, double lon) async {
+    calls++;
+    return {'city': 'Testville', 'state': 'TS', 'country': 'US'};
+  }
+  @override
+  Future<String?> placeLabel(double? lat, double? lon) async {
+    calls++;
+    return 'Testville, TS';
+  }
+}
+
 class _StubForecastService implements IForecastService {
   @override
   double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
@@ -117,6 +135,7 @@ _FakeRepo _registerRepo(
   sl.registerSingleton<IRiverDataRepository>(repo);
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   sl.registerSingleton<IForecastService>(_StubForecastService());
+  sl.registerSingleton<IGeocodingService>(_FakeGeocoder());
   return repo;
 }
 
@@ -246,11 +265,10 @@ void main() {
     expect(find.text('640 ft³/s', findRichText: true), findsOneWidget);
     expect(find.text('NORMAL'), findsOneWidget);
     expect(find.text('Test River'), findsOneWidget);
-    // The place name now arrives from an async geocode after first paint, so
-    // it is absent here rather than bundled with the flow. Its arrival is not
-    // asserted: GeocodingService is a static that this test cannot inject.
-    // Marked as a known gap rather than faked green.
-    expect(find.text('Testville, TS'), findsNothing);
+    // Arrives from the injected geocoder after first paint. Assertable again
+    // now that the geocoder is behind an interface — previously this was a
+    // declared gap because the static could not be substituted.
+    expect(find.text('Testville, TS'), findsOneWidget);
     // Range selector: Today + the two multi-day options (nominal while the
     // separate forecast series hasn't loaded in this fake).
     expect(find.text('Today'), findsOneWidget);

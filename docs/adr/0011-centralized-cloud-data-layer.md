@@ -650,6 +650,12 @@ larger correctness win and a prerequisite.
   moments*, so the favourites card can legitimately disagree with the sheet — and
   it still pays the 156 KB medium-range fetch. Documented in
   `docs/internal/forecast-data-consistency-audit.md`; closed by Phase 3.
+- **Geocoding is now behind `IGeocodingService`.** `GeocodingService`'s statics
+  made it impossible to pin either direction — that a geocode does *not* happen
+  on the fast path, or that it *does* happen at the consumer — and made widget
+  tests issue live Mapbox calls. Both are now counted against a fake. The
+  statics remain for services not yet on the DI graph (map search, weekly
+  outlook); those are Phase 3 and Phase 9.
 - **A silently-failing store is the most dangerous outcome in this document**,
   because Phase 7 removes the timestamp that would let anyone notice. Monitoring
   ships with Phase 4 or the store does not ship.

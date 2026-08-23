@@ -11,7 +11,7 @@ import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 ///
 /// Both **delegate** their derivation rather than reimplementing it — current
 /// flow through `IForecastService.getCurrentFlow`, thresholds through
-/// `ReachDataDto.fromReturnPeriodApi`. That is deliberate: ADR 0011 decision 15
+/// `ReachDataDto.fromReturnPeriodApi`. That is deliberate: ADR 0011 decision 13
 /// says a derived value is computed in exactly one place, and a second
 /// "extract the current flow" implementation living in a codec is precisely the
 /// drift ADR 0002 exists to prevent.

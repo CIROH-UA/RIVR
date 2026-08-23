@@ -1,5 +1,6 @@
 // lib/services/4_infrastructure/geo/geocoding_service.dart
 
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -169,4 +170,21 @@ class GeocodingService {
       AppLogger.warning('GeocodingService', 'L2 cache write failed: $e');
     }
   }
+}
+
+/// Adapter exposing [GeocodingService]'s statics through [IGeocodingService],
+/// so consumers depend on the interface and tests can substitute a fake.
+///
+/// The statics stay: they are used by services that are not yet on the DI graph
+/// (map search, weekly outlook). This is the seam for the surfaces that are.
+class MapboxGeocodingService implements IGeocodingService {
+  const MapboxGeocodingService();
+
+  @override
+  Future<Map<String, String?>> reverseGeocode(double latitude, double longitude) =>
+      GeocodingService.reverseGeocode(latitude, longitude);
+
+  @override
+  Future<String?> placeLabel(double? latitude, double? longitude) =>
+      GeocodingService.placeLabel(latitude, longitude);
 }

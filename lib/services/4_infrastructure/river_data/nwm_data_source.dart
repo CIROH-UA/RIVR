@@ -6,6 +6,7 @@ import 'package:rivr/models/1_domain/shared/river_data/publish_schedule.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
@@ -22,13 +23,23 @@ class NwmDataSource implements IRiverDataSource {
     required INoaaApiService api,
     required IForecastService forecastService,
     required IFlowUnitPreferenceService unitService,
+    required IGeocodingService geocoder,
   }) : _api = api,
        _forecastService = forecastService,
-       _unitService = unitService;
+       _unitService = unitService,
+       // Injected but deliberately UNUSED: `reachMetadata` must not geocode.
+       // Holding the dependency is what makes that testable — a fake can
+       // assert zero calls. The previous guard timed the fetch instead, and
+       // review measured a real geocode returning in 86 ms, under the
+       // threshold, so it could never have failed for the right reason.
+       // ignore: unused_field
+       _geocoder = geocoder;
 
   final INoaaApiService _api;
   final IForecastService _forecastService;
   final IFlowUnitPreferenceService _unitService;
+  // ignore: unused_field
+  final IGeocodingService _geocoder;
 
   /// Small slack so we don't invalidate the instant a cycle rolls over and
   /// refetch before the new run has actually published.
@@ -96,7 +107,7 @@ class NwmDataSource implements IRiverDataSource {
         // the one call this product exists to keep fast.
         //
         // The place name is decoration and is filled off the critical path by
-        // the consumer (ADR 0011 decision 7). `formattedLocation` here is
+        // the consumer (ADR 0011, geocoding off the critical path). `formattedLocation` here is
         // whatever the reach already knew.
         final reach = await _forecastService.loadBasicReachInfo(key.reachId);
 

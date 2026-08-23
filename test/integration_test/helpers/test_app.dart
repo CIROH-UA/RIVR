@@ -4,6 +4,7 @@
 // All external dependencies (Firebase, NOAA, FCM, etc.) are replaced
 // with in-memory fakes registered via GetIt.
 
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get_it/get_it.dart';
@@ -267,6 +268,16 @@ AuthProvider createAuthProvider(TestServices services) {
   );
 }
 
+/// Geocoding is off the critical path and must never be exercised here.
+class _NoopGeocoder implements IGeocodingService {
+  const _NoopGeocoder();
+  @override
+  Future<Map<String, String?>> reverseGeocode(double lat, double lon) async =>
+      const {'city': null, 'state': null, 'country': null};
+  @override
+  Future<String?> placeLabel(double? lat, double? lon) async => null;
+}
+
 FavoritesProvider createFavoritesProvider(TestServices services) {
   final repository = RiverDataRepository(
     cache: RiverDataCache(
@@ -277,6 +288,9 @@ FavoritesProvider createFavoritesProvider(TestServices services) {
         api: services.noaaApi,
         forecastService: services.forecast,
         unitService: services.flowUnit,
+        // Never used by the products under test, and injected precisely so no
+        // integration test can make a live Mapbox call.
+        geocoder: const _NoopGeocoder(),
       ),
     ]),
   );
