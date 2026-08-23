@@ -14,6 +14,7 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
@@ -65,7 +66,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   // Progressive loading states
   bool _isLoadingFlow = false;
   bool _isLoadingClassification = false;
-  bool _isCancelled = false;
   String? _errorMessage;
 
   // Essential data
@@ -80,20 +80,41 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// "Failed to load reach details" whatever went wrong.
   final Set<String> _failedProducts = {};
 
+  /// Resolved in initState, NOT inside the load methods.
+  ///
+  /// Both loads are `async`, so a GetIt lookup at their top does not throw to
+  /// the caller — it lands in an unawaited Future, and on the GEOGLOWS branch
+  /// in that method's own catch, where a missing registration was rendered as
+  /// "Could not load GEOGLOWS forecast for this river." with a Retry that can
+  /// never succeed. Resolving here makes a wiring bug fail as a wiring bug, at
+  /// mount. Round 11 reported this on the Weekly Outlook; round 12 found it
+  /// still live here and on both forecast-page branches.
+  late final IRiverDataRepository _repo;
+  late final IFlowUnitPreferenceService _unitService;
+  late final IForecastService _forecastService;
+  late final IGeocodingService _geocoder;
+
   @override
   void initState() {
     super.initState();
+    _repo = GetIt.I<IRiverDataRepository>();
+    _unitService = GetIt.I<IFlowUnitPreferenceService>();
+    _forecastService = GetIt.I<IForecastService>();
+    _geocoder = GetIt.I<IGeocodingService>();
     _loadDataProgressively();
   }
 
-  @override
-  void dispose() {
-    _isCancelled = true;
-    super.dispose();
-  }
+  // No `_isCancelled` flag. It was set in dispose() and every guard read
+  // `_isCancelled || !mounted`, so the two conditions were always equal and
+  // each covered for the other — removing either half, or deleting the flag
+  // entirely, left all 973 tests green. Round 13 proved that. `mounted` alone
+  // is the single falsifiable check.
 
   String _formatFlow(double flow) {
-    final currentUnit = GetIt.I<IFlowUnitPreferenceService>().currentFlowUnit;
+    // The field hoisted in initState, not a fresh GetIt lookup: this runs on
+    // the build path, and a resolution there would crash the render rather than
+    // fail at mount where the wiring bug actually is.
+    final currentUnit = _unitService.currentFlowUnit;
 
     // Format the value (no conversion needed)
     String formattedValue;
@@ -354,7 +375,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// wants the sheet to work — not a partial repair.
   void _retryLoad() {
     setState(() {
-      _errorMessage = null;
+      _errorMessage = null; // defensive: _retryLoad already clears it
       _isLoadingFlow = true;
       _isLoadingClassification = true;
     });
@@ -400,6 +421,20 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
             style: TextStyle(
               fontSize: 14,
               color: CupertinoColors.label.resolveFrom(context),
+            ),
+          ),
+          // A missing flow is often a transient upstream failure (the
+          // 2026-08-22 outage answered /reaches while every /streamflow series
+          // 504ed), so this state gets a way out like every other terminal
+          // state (guard 6). Round 16 found it was a dead end on this surface
+          // and the forecast page while the outlook's equivalent had Retry.
+          Align(
+            alignment: Alignment.centerRight,
+            child: CupertinoButton(
+              padding: const EdgeInsets.only(top: 4),
+              minimumSize: Size.zero,
+              onPressed: _retryLoad,
+              child: const Text('Retry', style: TextStyle(fontSize: 14)),
             ),
           ),
         ],
@@ -459,18 +494,21 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// `/reaches/{id}` kept answering, so the sheet can still name the river when
   /// no flow exists anywhere.
   Future<void> _loadNwmDetailsProgressively() async {
-    final repo = GetIt.I<IRiverDataRepository>();
+    final repo = _repo;
     final reachId = widget.selectedReach.reachId;
     RiverDataKey keyFor(ForecastProduct p) =>
         RiverDataKey(source: ForecastSource.nwm, reachId: reachId, product: p);
 
-    final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    final unitService = _unitService;
     final started = DateTime.now();
     var anySucceeded = false;
     var settled = 0;
     _failedProducts.clear();
 
     // Phase 0 guard 3's device timing, folded into this phase per the ADR.
+    // Instrumentation, not a guarded property: nothing asserts these lines are
+    // emitted (AppLogger.metric is a static). Deleting this body is invisible
+    // to the suite — labelled per the ADR rather than left looking tested.
     void logTiming(String what, bool ok) => AppLogger.metric(
           'ReachDetailsSheet',
           'timing reach=$reachId product=$what ok=$ok '
@@ -482,7 +520,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     // with no flow is a usable sheet.
     void markSettled() {
       settled++;
-      if (settled < 3 || _isCancelled || !mounted) return;
+      if (settled < 3 || !mounted) return;
       setState(() {
         _isLoadingFlow = false;
         _isLoadingClassification = false;
@@ -512,7 +550,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     // 2026-08-22 outage this kept answering while every flow series 504'd.
     unawaited(repo.read(keyFor(ForecastProduct.reachMetadata)).then((entry) {
       logTiming('reachMetadata', entry != null);
-      if (_isCancelled || !mounted || entry == null) return;
+      if (!mounted || entry == null) return;
       final m = ReachMetadataPayload.decode(entry);
       anySucceeded = true;
       setState(() {
@@ -526,7 +564,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       if (m.formattedLocation == null || m.formattedLocation!.isEmpty) {
         _fillPlaceLabel(m.latitude, m.longitude);
       }
-    }).catchError((Object e) {
+    }, onError: (Object e) {
       logTiming('reachMetadata', false);
       _failedProducts.add('name');
       AppLogger.warning('ReachDetailsSheet', 'Reach metadata failed: $e');
@@ -538,10 +576,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     unawaited(
         repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
       logTiming('analysisAssimilation', entry != null);
-      if (_isCancelled || !mounted || entry == null) return;
+      if (!mounted || entry == null) return;
       final flow = CurrentFlowPayload.decode(
         entry,
-        GetIt.I<IForecastService>(),
+        _forecastService,
         unitService,
       );
       if (flow == null) {
@@ -557,7 +595,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         _isLoadingFlow = false;
       });
       recomputeCategory();
-    }).catchError((Object e) {
+    }, onError: (Object e) {
       logTiming('analysisAssimilation', false);
       _failedProducts.add('current flow');
       AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
@@ -566,13 +604,13 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     // 3. Thresholds — only the flood category depends on these.
     unawaited(repo.read(keyFor(ForecastProduct.returnPeriods)).then((entry) {
       logTiming('returnPeriods', entry != null);
-      if (_isCancelled || !mounted || entry == null) return;
+      if (!mounted || entry == null) return;
       thresholds = ReturnPeriodPayload.decode(entry, unitService);
       if (thresholds == null) return;
       anySucceeded = true;
       setState(() => _isLoadingClassification = false);
       recomputeCategory();
-    }).catchError((Object e) {
+    }, onError: (Object e) {
       logTiming('returnPeriods', false);
       _failedProducts.add('flood risk');
       AppLogger.warning('ReachDetailsSheet', 'Return periods failed: $e');
@@ -583,16 +621,26 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// Resolve the place label after the sheet is already usable.
   ///
   /// The implementation catches internally, but *resolving* it can throw if DI
-  /// is misconfigured, so the whole thing is wrapped — a decoration must never
-  /// be able to disturb a sheet that already rendered.
+  /// is misconfigured, so the geocode is wrapped — a decoration must never be
+  /// able to disturb a sheet that already rendered.
+  ///
+  /// The catch covers the GEOCODE ONLY. It used to wrap the `.then` too, which
+  /// swallowed anything the callback could throw, `setState() called after
+  /// dispose()` included — making the `mounted` check unfalsifiable, so no test
+  /// could guard it. Swept here from the two forecast-page branches and the
+  /// weekly outlook, where review round 11 proved the hole.
+  ///
+  /// The three product reads use `then(onSuccess, onError:)` for the same
+  /// reason — unlike `.then(cb).catchError(h)`, a throw from `cb` does NOT
+  /// reach `h`, so their `mounted` checks can actually fail a test while their
+  /// failure naming still works.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(Future(() => GetIt.I<IGeocodingService>().placeLabel(lat, lon))
-        .then((label) {
-      if (_isCancelled || !mounted || label == null || label.isEmpty) return;
-      setState(() => _formattedLocation = label);
-    }).catchError((Object e) {
+    unawaited(_geocoder.placeLabel(lat, lon).catchError((Object e) {
       AppLogger.debug('ReachDetailsSheet', 'Place label unavailable: $e');
       return null;
+    }).then((label) {
+      if (!mounted || label == null || label.isEmpty) return;
+      setState(() => _formattedLocation = label);
     }));
   }
 
@@ -602,58 +650,71 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// forecast). GEOGLOWS streams are unnamed, so displayName falls back to
   /// `Stream <id>`. Flood classification for GEOGLOWS is not wired yet.
   Future<void> _loadGeoglowsDetails() async {
+    // From initState — see the field declarations.
+    final repo = _repo;
+    final unitService = _unitService;
+    GeoglowsForecast? forecast;
     try {
-      final entry = await GetIt.I<IRiverDataRepository>().read(
+      final entry = await repo.read(
         RiverDataKey(
           source: ForecastSource.geoglows,
           reachId: widget.selectedReach.reachId,
           product: ForecastProduct.geoglowsForecast,
         ),
       );
-      if (_isCancelled || !mounted) return;
       if (entry == null) {
         throw Exception('No GEOGLOWS forecast available for this river.');
       }
-      final forecast = GeoglowsForecastPayload.decode(
-        entry,
-        GetIt.I<IFlowUnitPreferenceService>(),
-      );
-      setState(() {
-        _riverName = null;
-        _formattedLocation = '';
-        _currentFlow = forecast.currentMedian;
-        // GEOGLOWS return periods (Gumbel) come in the model's unit, same as
-        // currentMedian — classify through the one app-wide ladder instead of
-        // hardcoding 'Normal'.
-        _flowCategory = FlowClassification.category(
-          forecast.currentMedian,
-          forecast.returnPeriods,
-        );
-        _latitude = widget.selectedReach.latitude;
-        _longitude = widget.selectedReach.longitude;
-        _isLoadingFlow = false;
-        _isLoadingClassification = false;
-      });
-      _notifyCategoryColor();
-      AppLogger.info(
-        'ReachDetailsSheet',
-        'GEOGLOWS details loaded, flow: $_currentFlow',
-      );
+      forecast = GeoglowsForecastPayload.decode(entry, unitService);
     } catch (e) {
-      if (_isCancelled || !mounted) return;
+      if (!mounted) return;
       AppLogger.error('ReachDetailsSheet', 'Error loading GEOGLOWS details', e);
       setState(() {
         _errorMessage = 'Could not load GEOGLOWS forecast for this river.';
         _isLoadingFlow = false;
         _isLoadingClassification = false;
       });
+      return;
     }
+
+    // Outside the try, deliberately: a `setState() called after dispose()` here
+    // used to be caught above and rendered as a load failure, which made the
+    // `mounted` check unfalsifiable — deleting it changed nothing a test could
+    // see. Round 12 proved that on all four surfaces.
+    // ONE check, immediately before the setState it protects.
+    if (!mounted) return;
+    final fc = forecast;
+    setState(() {
+      _riverName = null;
+      _formattedLocation = '';
+      _currentFlow = fc.currentMedian;
+      // GEOGLOWS return periods (Gumbel) come in the model's unit, same as
+      // currentMedian — classify through the one app-wide ladder instead of
+      // hardcoding 'Normal'.
+      _flowCategory = FlowClassification.category(
+        fc.currentMedian,
+        fc.returnPeriods,
+      );
+      _latitude = widget.selectedReach.latitude;
+      _longitude = widget.selectedReach.longitude;
+      _errorMessage = null;
+      _isLoadingFlow = false;
+      _isLoadingClassification = false;
+    });
+    _notifyCategoryColor();
+    AppLogger.info(
+      'ReachDetailsSheet',
+      'GEOGLOWS details loaded, flow: $_currentFlow',
+    );
   }
 
   /// Hand the resolved flood-category color to the map so it can recolor the
   /// tapped-stream highlight. No-op until the flow has actually been classified.
   void _notifyCategoryColor() {
     final cb = widget.onFlowCategoryColor;
+    // `!mounted` here is defensive, not tested: every caller checks before
+    // calling. Labelled per the ADR — an unlabelled untestable check reads as a
+    // guarded property and wastes a review round rediscovering it is not.
     if (cb == null || _flowCategory == null || !mounted) return;
     final base = AppConstants.getFlowCategoryColor(_flowCategory);
     final resolved = CupertinoDynamicColor.maybeResolve(base, context) ?? base;

@@ -54,8 +54,9 @@ void setupForecastDependencies() {
     () => NoaaApiService(unitService: sl<IFlowUnitPreferenceService>()),
   );
 
-  // GEOGLOWS forecast client (global, non-US rivers). Not yet consumed by the
-  // forecast flow — source-routing (NWM vs GEOGLOWS) is the next step.
+  // GEOGLOWS forecast client (global, non-US rivers). Consumed through
+  // GeoglowsDataSource in the SourceRegistry below, which is how the repository
+  // routes a GEOGLOWS reach.
   sl.registerLazySingleton<IGeoglowsApiService>(
     () => GeoglowsApiService(unitService: sl<IFlowUnitPreferenceService>()),
   );
@@ -76,8 +77,9 @@ void setupForecastDependencies() {
   );
 
   // Pluggable data sources behind one registry (ADR 0001). Adding a source =
-  // one entry here + an IRiverDataSource impl. Consumed by the RiverDataRepository
-  // (next step); not yet wired to the UI.
+  // one entry here + an IRiverDataSource impl. Consumed by the
+  // RiverDataRepository, which the map sheet, both forecast-page branches and
+  // the weekly outlook all read through as of ADR 0011 Phase 1.
   sl.registerLazySingleton<SourceRegistry>(
     () => SourceRegistry([
       NwmDataSource(
@@ -94,8 +96,8 @@ void setupForecastDependencies() {
   );
 
   // Shared cache + single-source-of-truth repository (ADR 0001). Self-initializes
-  // its disk store on first use. Not yet consumed by the UI (step 5 migrates
-  // surfaces onto it).
+  // its disk store on first use. Consumed by the map detail sheet, both
+  // forecast-page branches and the weekly outlook (ADR 0011 Phase 1).
   sl.registerLazySingleton<IRiverDataCache>(() => RiverDataCache());
   sl.registerLazySingleton<IRiverDataRepository>(
     () => RiverDataRepository(

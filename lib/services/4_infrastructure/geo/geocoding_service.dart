@@ -175,8 +175,9 @@ class GeocodingService {
 /// Adapter exposing [GeocodingService]'s statics through [IGeocodingService],
 /// so consumers depend on the interface and tests can substitute a fake.
 ///
-/// The statics stay: they are used by services that are not yet on the DI graph
-/// (map search, weekly outlook). This is the seam for the surfaces that are.
+/// The statics stay: two callers remain off the DI graph — `favorite_river_card`
+/// and `map_search_service`, owned by Phases 3 and 9. Every surface Phase 1
+/// touched, the weekly outlook included, goes through this seam.
 class MapboxGeocodingService implements IGeocodingService {
   const MapboxGeocodingService();
 

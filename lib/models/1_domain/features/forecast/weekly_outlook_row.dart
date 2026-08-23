@@ -16,6 +16,14 @@ class OutlookRow {
   /// Null when coordinates or geocoding are unavailable.
   final String? location;
 
+  /// The reach's coordinate, carried on the row so the page can resolve
+  /// [location] after render without re-deriving which favourite a row came
+  /// from. It used to match back by `reachId` alone and, on no match, fall
+  /// back to `favorites[i]` — which would have attached one river's place
+  /// label to another. A row that owns its coordinate cannot do that.
+  final double? latitude;
+  final double? longitude;
+
   /// Display unit label for [peakFlow] (e.g. 'ft³/s', 'm³/s').
   final String unit;
 
@@ -38,6 +46,8 @@ class OutlookRow {
     required this.source,
     required this.displayName,
     this.location,
+    this.latitude,
+    this.longitude,
     required this.unit,
     required this.sparkline,
     required this.trend,
@@ -59,8 +69,9 @@ class OutlookRow {
   /// The card headline: a named reach keeps its name; an unnamed one (GEOGLOWS
   /// or unnamed NWM) leads with its geocoded place, falling back to the id-based
   /// display name. Placeholder display names embed the reach id, so a name that
-  /// contains the id means "no real name". Also persisted as the digest label so
-  /// the push banner reads the same.
+  /// contains the id means "no real name". Non-placeholder titles are also
+  /// persisted as the digest label (after the geocodes settle — see
+  /// `_persistDigestLabels`) so the push banner reads the same.
   String get title {
     final hasName = !displayName.contains(reachId);
     if (hasName) return displayName;
@@ -73,4 +84,23 @@ class OutlookRow {
     if (byScore != 0) return byScore;
     return (b.peakFlow ?? 0).compareTo(a.peakFlow ?? 0);
   }
+
+  /// Same row with a resolved place label. The label arrives after the page has
+  /// rendered (ADR 0011: geocoding stays off the render path), so rows are
+  /// built without one and updated in place.
+  OutlookRow withLocation(String label) => OutlookRow(
+        reachId: reachId,
+        source: source,
+        displayName: displayName,
+        location: label,
+        latitude: latitude,
+        longitude: longitude,
+        unit: unit,
+        sparkline: sparkline,
+        trend: trend,
+        peakFlow: peakFlow,
+        peakTime: peakTime,
+        category: category,
+        categoryIndex: categoryIndex,
+      );
 }

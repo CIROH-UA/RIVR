@@ -10,10 +10,31 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/utils/forecast_peak.dart';
 import 'package:rivr/utils/forecast_trend.dart';
+
+/// The outcome of building a week's outlook: the rows that came back, and the
+/// favourites that could not be loaded at all.
+///
+/// Failures used to be swallowed to a bare `null` and dropped, so a total
+/// upstream outage — every favourite throwing — was indistinguishable from
+/// "your rivers have no forecast this week". The page showed a dead-end card
+/// with no Retry. Review round 11 reproduced that with both datasources
+/// throwing. Naming the failures is what lets the page tell the two apart and
+/// offer a way out.
+class OutlookResult {
+  const OutlookResult({required this.rows, required this.failedNames});
+
+  final List<OutlookRow> rows;
+
+  /// Display names of the favourites whose load threw, in favourites order.
+  final List<String> failedNames;
+
+  /// Nothing loaded and something failed — an outage, not an empty week.
+  bool get isTotalFailure => rows.isEmpty && failedNames.isNotEmpty;
+}
 
 /// Builds the week-ahead [OutlookRow]s for the Weekly Outlook page from a user's
 /// favorites — fetching each reach's forecast series (NWM medium-range or
@@ -28,32 +49,52 @@ class WeeklyOutlookService {
     required IForecastService forecastService,
     required IRiverDataRepository riverData,
     required IFlowUnitPreferenceService unitService,
+    required IGeocodingService geocoder,
   })  : _forecastService = forecastService,
         _riverData = riverData,
-        _unitService = unitService;
+        _unitService = unitService,
+        _geocoder = geocoder;
 
-  /// Load + summarize every favorite in parallel; failed reaches are skipped so
-  /// one bad fetch doesn't blank the whole page. Result is newsworthiness-ranked.
-  Future<List<OutlookRow>> buildOutlook(List<FavoriteRiver> favorites) async {
-    final rows = await Future.wait(
-      favorites.map(_buildRow),
+  final IGeocodingService _geocoder;
+
+  /// Load + summarize every favorite **in parallel**; a reach that fails is
+  /// reported rather than dropped, so one bad fetch doesn't blank the page and a
+  /// total outage is still distinguishable. Rows are newsworthiness-ranked.
+  ///
+  /// The parallelism is the whole point of this method: N favourites each cost a
+  /// `loadCompleteReachData`, and running them in sequence is the 3-5 minute
+  /// stall ADR 0010 was opened for. Guarded in weekly_outlook_service_test.
+  Future<OutlookResult> buildOutlook(List<FavoriteRiver> favorites) async {
+    final outcomes = await Future.wait(favorites.map(_buildRow));
+    final rows = [
+      for (final o in outcomes)
+        if (o.row != null) o.row!,
+    ]..sort(OutlookRow.byNewsworthiness);
+    return OutlookResult(
+      rows: rows,
+      failedNames: [
+        for (final o in outcomes)
+          if (o.failedName != null) o.failedName!,
+      ],
     );
-    final result = rows.whereType<OutlookRow>().toList()
-      ..sort(OutlookRow.byNewsworthiness);
-    return result;
   }
 
-  Future<OutlookRow?> _buildRow(FavoriteRiver favorite) async {
+  /// A row, or the name of the favourite that failed. Both null means the reach
+  /// loaded fine but has no forecast points — an empty week, not a failure.
+  Future<({OutlookRow? row, String? failedName})> _buildRow(
+    FavoriteRiver favorite,
+  ) async {
     try {
-      return favorite.source.isGeoglows
+      final row = favorite.source.isGeoglows
           ? await _buildGeoglowsRow(favorite)
           : await _buildNwmRow(favorite);
+      return (row: row, failedName: null);
     } catch (e) {
       AppLogger.warning(
         'WeeklyOutlookService',
         'Skipping ${favorite.reachId} (${favorite.source.id}) in outlook: $e',
       );
-      return null;
+      return (row: null, failedName: favorite.displayName);
     }
   }
 
@@ -141,9 +182,16 @@ class WeeklyOutlookService {
       reachId: favorite.reachId,
       source: favorite.source,
       displayName: displayName,
-      location: await _locationLabel(lat, lon),
+      // No await: the place label is decoration, and awaiting it here made
+      // every row wait on a Mapbox hop — with buildOutlook waiting on all rows,
+      // that gated the entire page on geocoding. Same shape already fixed on
+      // the map sheet and both forecast-page branches; missed here until
+      // review. Rows carry a null label and the page fills it afterwards.
+      location: null,
       unit: unitLabel,
       sparkline: flows,
+      latitude: lat,
+      longitude: lon,
       trend: computeFlowTrend(flows),
       peakFlow: peak?.flow,
       peakTime: peak?.time.toLocal(),
@@ -152,8 +200,8 @@ class WeeklyOutlookService {
     );
   }
 
-  /// Reverse-geocode to a place label — shared with the favorites card so a
-  /// river reads the same place everywhere. Best-effort (null on failure).
-  Future<String?> _locationLabel(double? lat, double? lon) =>
-      GeocodingService.placeLabel(lat, lon);
+  /// Reverse-geocode a row's coordinate, for the consumer to call AFTER the
+  /// page has rendered. Best-effort (null on failure).
+  Future<String?> placeLabelFor(double? lat, double? lon) =>
+      _geocoder.placeLabel(lat, lon);
 }

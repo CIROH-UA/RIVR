@@ -17,7 +17,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
+import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -30,6 +32,7 @@ import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
+import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_action_buttons.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom_sheet.dart';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
@@ -96,7 +99,19 @@ class _RecordingRepo implements IRiverDataRepository {
     this.delays = const {},
     this.failures = const {},
     this.undecodableFlow = false,
+    this.lowThresholds = false,
   });
+
+  /// A 200 whose body the threshold codec cannot read — decodes to null,
+  /// which is neither a success nor a named failure. Set by the retry test
+  /// between attempts, on the same instance.
+  bool undecodableThresholds = false;
+
+  /// Return periods low enough that the stubbed 1,234 flow clears them, so the
+  /// sheet's classification can be asserted in BOTH directions. Without it the
+  /// only fixture read Normal — which is exactly what a classifier hardcoded to
+  /// 'Normal' returns, so the category tests could not tell the two apart.
+  final bool lowThresholds;
 
   /// Returns a 200 whose body the flow codec cannot read — distinct from a
   /// thrown failure, and a path guard 6 never exercised.
@@ -105,8 +120,10 @@ class _RecordingRepo implements IRiverDataRepository {
   /// product -> how long its read takes.
   final Map<ForecastProduct, Duration> delays;
 
-  /// products whose read should throw.
-  final Set<ForecastProduct> failures;
+  /// products whose read should throw. Mutable: the retry test reshapes the
+  /// failure set between attempts on the SAME instance, because the sheet
+  /// resolves its repository once in initState.
+  Set<ForecastProduct> failures;
 
   final List<ForecastProduct> requested = [];
 
@@ -152,15 +169,44 @@ class _RecordingRepo implements IRiverDataRepository {
           'latitude': 40.2,
           'longitude': -111.6,
         };
+      case ForecastProduct.geoglowsForecast:
+        // A real payload, so the GEOGLOWS branch has a SUCCESS path under test.
+        // Review found all three of its tests used the empty default and so
+        // exercised only the error path. `lowThresholds` mirrors the NWM
+        // fixture: the same ~800 median against thresholds 100× apart, so the
+        // category comparison works on this branch too.
+        return GeoglowsForecastPayload.encode(GeoglowsForecast(
+          riverId: '760021642',
+          unit: 'ft³/s',
+          generatedAt: DateTime.utc(2026, 8, 22),
+          points: [
+            for (var i = 0; i < 15; i++)
+              GeoglowsForecastPoint(
+                validTime: DateTime.now().toUtc().add(Duration(days: i)),
+                median: 800.0 - i * 5,
+                lower: 700,
+                upper: 900,
+              ),
+          ],
+          returnPeriods: lowThresholds
+              ? const {2: 50, 5: 80, 10: 120, 25: 200}
+              : const {2: 5000, 5: 8000},
+        ));
       case ForecastProduct.returnPeriods:
+        if (undecodableThresholds) return <String, dynamic>{};
         // Shape mirrors the real API: one object per reach with
         // `return_period_<years>` keys (see ReachDataDto.fromReturnPeriodApi).
         return {
           'returnPeriods': [
             {
               'feature_id': '9962444',
-              'return_period_2': 100.0,
-              'return_period_5': 200.0,
+              // Native CMS. 100 CMS ≈ 3,531 CFS, above the 1,234 CFS stub, so
+              // the default fixture is Normal; the low set is ≈35 CFS and is
+              // cleared several times over.
+              'return_period_2': lowThresholds ? 1.0 : 100.0,
+              'return_period_5': lowThresholds ? 2.0 : 200.0,
+              'return_period_10': lowThresholds ? 3.0 : 300.0,
+              'return_period_25': lowThresholds ? 4.0 : 400.0,
             },
           ],
         };
@@ -282,6 +328,18 @@ void main() {
       expect(find.byType(ReachDetailsBottomSheet), findsOneWidget);
       expect(find.byType(CupertinoActivityIndicator), findsWidgets,
           reason: 'a skeleton, not a blank sheet');
+      // The title-block skeleton specifically (round 17, F53): the assertion
+      // above is satisfied by the header's trailing spinner alone, so the
+      // whole title skeleton was deletable with the suite green.
+      expect(find.byType(DecoratedBox), findsWidgets);
+      expect(
+          find.byWidgetPredicate((w) =>
+              w is Container &&
+              w.constraints?.maxHeight != null &&
+              w.decoration is BoxDecoration &&
+              (w.decoration as BoxDecoration).borderRadius != null),
+          findsWidgets,
+          reason: 'the grey title placeholder bars must render while loading');
       expect(repo.requested, hasLength(3),
           reason: 'all three issued, none completed');
 
@@ -514,11 +572,22 @@ void main() {
 
       expect(geo.calls, greaterThan(0),
           reason: 'reachMetadata deliberately does not geocode, so the '
-              'consumer must — otherwise the location is silently lost');
-      // Asserted on the call rather than rendered text: the label sits inside
-      // the collapsed Details disclosure, so it is not on screen by default.
-      // The call is what deleting _fillPlaceLabel removes, which is the
-      // regression this pins.
+              'consumer must');
+      // AND that the answer is kept. Round 13 proved the previous version could
+      // not see this: deleting `setState(() => _formattedLocation = label)` —
+      // fetching the label and throwing it away — left all 973 tests green,
+      // because asserting on `geo.calls` only proves a request was made.
+      // Read off ReachActionButtons, which the sheet hands the label to and
+      // which carries it into "add to favourites" and the share sheet. The
+      // Details disclosure that also shows it is collapsed by default and its
+      // rows are not built, so there is no rendered text to match — this is the
+      // consumer that is always in the tree.
+      final actions = t.widget<ReachActionButtons>(
+          find.byType(ReachActionButtons));
+      expect(actions.formattedLocation, 'Provo, UT',
+          reason: 'a label fetched and dropped is the same as no label; '
+              'asserting on geo.calls alone proved only that a request went '
+              'out, and deleting the setState left 973 tests green');
     });
 
     testWidgets('a geocode returning nothing leaves a usable sheet', (t) async {
@@ -713,6 +782,76 @@ void main() {
     });
   });
 
+  // REGRESSION (round 13): the sheet's category tests asserted only that the
+  // recolour callback fired, so hardcoding FlowClassification.category to
+  // 'Normal' left all 973 tests green — on both branches. This surface feeds
+  // the map's stream recolouring, and it was the one without a value assertion.
+  //
+  // Colour rather than text, because that is how the sheet conveys the
+  // category. Comparing two fixtures rather than pinning a palette value: same
+  // 1,234 CFS flow, thresholds 100× apart, so the two must differ. This dies
+  // for a classifier stuck on any one answer, and it also pins the CMS→display
+  // conversion — unconverted, the 100 CMS threshold reads as 100 CFS, 1,234
+  // clears it, and the "normal" fixture paints as a flood like the other.
+  testWidgets('an elevated flow does not colour the same as a normal one',
+      (t) async {
+    int? normal;
+    _register(_RecordingRepo());
+    await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+      selectedReach: _reach(),
+      onFlowCategoryColor: (argb) => normal = argb,
+    )));
+    await _settle(t);
+    await t.pumpWidget(_wrap(const SizedBox.shrink()));
+    await GetIt.instance.reset();
+
+    int? elevated;
+    _register(_RecordingRepo(lowThresholds: true));
+    await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+      selectedReach: _reach(),
+      onFlowCategoryColor: (argb) => elevated = argb,
+    )));
+    await _settle(t);
+
+    expect(normal, isNotNull);
+    expect(elevated, isNotNull);
+    expect(elevated, isNot(normal),
+        reason: 'same flow, thresholds 100× apart — a classifier that always '
+            'answers Normal paints both identically and the map lies');
+  });
+
+  // REGRESSION (round 14): the comparison above only built NWM fixtures, so
+  // hardcoding the GEOGLOWS branch's category to 'Normal' — the exact mutation
+  // named in that line's own comment — left all 980 tests green. This branch
+  // recolours the map for every non-US river.
+  testWidgets(
+      'GEOGLOWS: an elevated flow does not colour the same as a normal one',
+      (t) async {
+    int? normal;
+    _register(_RecordingRepo());
+    await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+      selectedReach: _geoglowsReach(),
+      onFlowCategoryColor: (argb) => normal = argb,
+    )));
+    await _settle(t);
+    await t.pumpWidget(_wrap(const SizedBox.shrink()));
+    await GetIt.instance.reset();
+
+    int? elevated;
+    _register(_RecordingRepo(lowThresholds: true));
+    await t.pumpWidget(_wrap(ReachDetailsBottomSheet(
+      selectedReach: _geoglowsReach(),
+      onFlowCategoryColor: (argb) => elevated = argb,
+    )));
+    await _settle(t);
+
+    expect(normal, isNotNull);
+    expect(elevated, isNotNull);
+    expect(elevated, isNot(normal),
+        reason: 'same median, thresholds 100× apart — a branch hardcoded to '
+            'Normal paints both identically');
+  });
+
   group('closing mid-flight does not crash', () {
     // Closing a sheet while three <=30 s reads are outstanding is the ordinary
     // map interaction; setState after dispose throws. Every _isCancelled /
@@ -736,6 +875,124 @@ void main() {
       expect(t.takeException(), isNull,
           reason: 'a setState after dispose would surface here');
     });
+
+    // The test above pops DURING the reads, so `_fillPlaceLabel` never starts
+    // and the geocode callback's own mounted check is never exercised. Review
+    // round 11 found this hole on the weekly outlook; it is the same here and
+    // on both forecast-page branches. This lets the metadata land, then pops
+    // while the geocode is still in flight.
+    testWidgets('disposing while the place-label geocode is outstanding is safe',
+        (t) async {
+      _register(_RecordingRepo(),
+          geocoder: _FakeGeocoder(delay: const Duration(seconds: 5)));
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+
+      await t.pumpWidget(_wrap(const SizedBox.shrink()));
+      await t.pump(const Duration(seconds: 6));
+      await _settle(t);
+
+      expect(t.takeException(), isNull,
+          reason: 'the geocode resolves after dispose and its callback calls '
+              'setState — only the mounted check stops that throwing');
+    });
+  });
+
+  // REGRESSION (round 12, class g): the sheet resolved its dependencies inside
+  // the load methods, so a missing registration was caught and rendered as a
+  // load failure with a Retry that could never succeed. Fixed on the Weekly
+  // Outlook in round 11 and left live here.
+  // REGRESSION (round 13): every dispose test popped while a load was
+  // SUCCEEDING, so the `mounted` check on the failure path was unfalsifiable —
+  // on all four surfaces at once. Closing the sheet while a failing read is in
+  // flight is just as ordinary as closing it during a slow one.
+  group('closing mid-FAILURE does not crash', () {
+    testWidgets('disposing while all three reads are failing is safe',
+        (t) async {
+      _register(_RecordingRepo(
+        delays: {
+          ForecastProduct.reachMetadata: const Duration(seconds: 5),
+          ForecastProduct.analysisAssimilation: const Duration(seconds: 5),
+          ForecastProduct.returnPeriods: const Duration(seconds: 5),
+        },
+        failures: {
+          ForecastProduct.reachMetadata,
+          ForecastProduct.analysisAssimilation,
+          ForecastProduct.returnPeriods,
+        },
+      ));
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await t.pump(const Duration(milliseconds: 50));
+
+      await t.pumpWidget(_wrap(const SizedBox.shrink()));
+      await t.pump(const Duration(seconds: 6));
+      await _settle(t);
+
+      expect(t.takeException(), isNull,
+          reason: 'markSettled writes the error card; without its mounted '
+              'check that setState lands on a defunct State');
+    });
+
+    testWidgets('disposing while a failing GEOGLOWS read is outstanding is safe',
+        (t) async {
+      _register(_RecordingRepo(
+        delays: {ForecastProduct.geoglowsForecast: const Duration(seconds: 5)},
+        failures: {ForecastProduct.geoglowsForecast},
+      ));
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await t.pump(const Duration(milliseconds: 50));
+
+      await t.pumpWidget(_wrap(const SizedBox.shrink()));
+      await t.pump(const Duration(seconds: 6));
+      await _settle(t);
+
+      expect(t.takeException(), isNull);
+    });
+  });
+
+  group('a missing registration is a wiring bug, not a load failure', () {
+    testWidgets('NWM branch', (t) async {
+      _register(_RecordingRepo());
+      GetIt.instance.unregister<IRiverDataRepository>();
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      final thrown = t.takeException();
+      await _settle(t);
+
+      expect(thrown, isNotNull,
+          reason: 'an unresolvable dependency must surface where it happened');
+      expect(find.textContaining('Failed to load'), findsNothing);
+    });
+
+    testWidgets('the geocoder counts too', (t) async {
+      _register(_RecordingRepo());
+      GetIt.instance.unregister<IGeocodingService>();
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      final thrown = t.takeException();
+      await _settle(t);
+
+      expect(thrown, isNotNull,
+          reason: 'round 15: the geocoder was still resolved inside a caught '
+              'future here, degrading a wiring bug to a debug log');
+    });
+
+    testWidgets('GEOGLOWS branch', (t) async {
+      _register(_RecordingRepo());
+      GetIt.instance.unregister<IRiverDataRepository>();
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      final thrown = t.takeException();
+      await _settle(t);
+
+      expect(thrown, isNotNull);
+      expect(find.textContaining('Could not load GEOGLOWS'), findsNothing);
+    });
   });
 
   group('the no-flow terminal state', () {
@@ -753,6 +1010,93 @@ void main() {
 
       expect(find.textContaining('not available'), findsOneWidget,
           reason: 'the user must be told why there is no number');
+      // With a way out (round 16, F51): a missing flow is often transient (the
+      // 2026-08-22 outage), and this card was a dead end.
+      expect(find.text('Retry'), findsOneWidget);
+    });
+
+    // REGRESSION (round 17, F52): `_failedProducts` is a field, and the
+    // `.clear()` at the top of each load was deletable with the suite green.
+    // Without it, failure names LEAK ACROSS RETRIES: a product that failed on
+    // attempt 1 but answered fine on attempt 2 is still named in attempt 2's
+    // error card — guard 6's "names what failed" telling a lie.
+    testWidgets('a retry does not inherit the previous attempt\'s failures',
+        (t) async {
+      // Attempt 1: thresholds throw (and flow is undecodable) → no-flow card.
+      final repo = _RecordingRepo(
+        failures: {ForecastProduct.returnPeriods},
+        undecodableFlow: true,
+      );
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+      expect(find.text('Retry'), findsWidgets,
+          reason: 'precondition: attempt 1 left a retryable state');
+
+      // Attempt 2, same repo instance (the sheet resolved it in initState):
+      // metadata now throws instead; thresholds answer, but with a body that
+      // decodes to null — neither a success nor a named failure.
+      repo.failures = {ForecastProduct.reachMetadata};
+      repo.undecodableThresholds = true;
+
+      await t.tap(find.text('Retry').first);
+      await _settle(t);
+
+      expect(find.textContaining('flood risk'), findsNothing,
+          reason: 'thresholds answered fine on THIS attempt — naming them '
+              'means the failure set leaked across the retry');
+      expect(find.textContaining('name'), findsOneWidget,
+          reason: 'and the product that did fail this attempt is named');
+    });
+
+    testWidgets('Retry from the no-flow card actually refetches', (t) async {
+      final repo = _RecordingRepo(failures: {
+        ForecastProduct.analysisAssimilation,
+      });
+      _register(repo);
+
+      await t.pumpWidget(_wrap(ReachDetailsBottomSheet(selectedReach: _reach())));
+      await _settle(t);
+      final before = repo.requested.length;
+
+      await t.tap(find.text('Retry'));
+      await _settle(t);
+
+      expect(repo.requested.length, greaterThan(before),
+          reason: 'a Retry that issues no reads is decoration');
+    });
+  });
+
+  group('GEOGLOWS — success path and dispose, swept from the NWM branch', () {
+    testWidgets('a successful GEOGLOWS load renders its value', (t) async {
+      _register(_RecordingRepo());
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await _settle(t);
+
+      expect(find.textContaining('Failed'), findsNothing);
+      expect(find.textContaining('800'), findsWidgets,
+          reason: 'the branch had three tests and all ran the error path');
+    });
+
+    testWidgets('disposing mid-flight on the GEOGLOWS branch is safe',
+        (t) async {
+      final repo = _RecordingRepo(delays: {
+        ForecastProduct.geoglowsForecast: const Duration(seconds: 5),
+      });
+      _register(repo);
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await t.pump(const Duration(milliseconds: 50));
+
+      await t.pumpWidget(_wrap(const SizedBox.shrink()));
+      await t.pump(const Duration(seconds: 6));
+      await _settle(t);
+
+      expect(t.takeException(), isNull);
     });
   });
 

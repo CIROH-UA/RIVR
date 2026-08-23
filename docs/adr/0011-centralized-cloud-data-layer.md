@@ -266,6 +266,92 @@ shape and check each. The surfaces that display river data are the map detail
 sheet, the forecast page (NWM and GEOGLOWS branches), the Weekly Outlook page,
 the favourites card, and the two providers.
 
+Round 11 repeated it once more, this time on the Weekly Outlook: the surface got
+the *fixes* (geocode off the build path, error precedence, DI seam) but almost
+none of the *guards*, so four separate mutations — geocode restored to the build
+path, CMS conversion dropped, `Future.wait` replaced with a serial loop, failure
+reporting deleted — each left the suite green. The class list below is now
+checked mechanically, surface by surface, before a round is submitted.
+
+**Never build a guard on top of the defect.** Round 11's sharpest finding. The
+Weekly Outlook's first widget test drove its error state by leaving
+`IGeocodingService` unregistered — which only *worked* because `_service` was a
+`late final` resolved inside `_load()`'s try, i.e. the very defect the same phase
+fixes on the NWM forecast page. Applying the fix turned three of the four new
+tests red. A test whose fixture is a bug cements the bug. Before writing a
+failure test, ask which production path produces this failure — if the answer is
+"a misconfiguration that a different guard already proves cannot happen", the
+test is wrong, not the code.
+
+**A catch that wraps the callback makes its `mounted` check unfalsifiable.**
+Three variants of this, found across rounds 11 and 12, all on all four surfaces:
+
+1. *The geocode chains.* `.then(cb).catchError(h)` routes `cb`'s own throws into
+   `h`, so `setState() called after dispose()` was swallowed by the handler meant
+   for a failed lookup. The catch now covers the geocode only.
+2. *The load paths.* The success `setState` sat inside the load's own `try`, so
+   the same throw was caught there and rendered as a load failure. The success
+   `setState` now happens after the `try`, and the sheet's three product reads
+   use `then(cb, onError:)` — unlike `.then(cb).catchError(h)`, a throw from `cb`
+   does not reach `onError`.
+3. *Two redundant checks.* With a `mounted` check both inside and after the
+   `try`, each covered for the other: removing either alone changed nothing a
+   test could see. One check now sits immediately before the `setState` it
+   protects. The map sheet had a second form of this — every guard read
+   `_isCancelled || !mounted`, and `dispose()` set `_isCancelled`, so the two
+   conditions were always equal. Deleting the whole flag left 973 tests green.
+   It is gone; `mounted` alone is the check.
+4. *The failure path.* Every "disposing mid-flight is safe" test popped while a
+   load was **succeeding**, so the `mounted` check on the catch — and on the
+   sheet's `markSettled`, which writes the error card — was unfalsifiable on all
+   four surfaces at once. Each surface now has a paired test that pops while a
+   **failing** load is outstanding.
+
+**A rebuild-from-scratch `setState` wipes state that arrived between rebuilds.**
+Round 14's live bug: the forecast page's per-product `publish()` rebuilt
+`_details` wholesale from the product values, so a geocoded place label that had
+already rendered was silently erased when the next product landed — present at
+300 ms, gone at 6 s, and the measured latencies (metadata 0.3-1.1 s, geocode
+~0.1 s, return periods 1.0-9.1 s) made that ordering the normal case. Values that
+arrive outside the rebuild's inputs must live in state the rebuild reads, not in
+the record it overwrites. Corollary for tests: a "renders while slow product is
+out" test must re-assert AFTER the slow product lands.
+
+**Moving work off a path moves every consumer of its result.** Round 15's live
+regression: taking the geocode out of the outlook build meant rows no longer
+carried labels when `_recordOutlookOpen` persisted `row.title` — so the user doc
+the Friday push banner reads got "Station 9962444" written over a correct
+"Provo, UT", while the screen (which fills labels reactively) stayed right. The
+worst shape a bug can take: the visible output and the persisted output diverge,
+and every test looks at the visible one. When a value stops being computed
+eagerly, grep for every consumer of the field and decide per consumer: wait,
+skip, or read the post-fill state.
+
+**A guard that classifies independently cannot guard the classifier.** The page's
+NORMAL text comes from `FlowGauge`, which runs its own `FlowClassification` on
+the raw props — so hardcoding every classifier *in the page* left the suite
+green. Assert on output the code under test computed (`_returnPeriodBand`'s
+"10–25 yr" text), not on a sibling's recomputation.
+
+**A guard nothing can drive is not a guard; label it.** Where a check survives
+because its path is genuinely unreachable (`WeeklyOutlookPage._load`'s catch,
+which `buildOutlook` cannot enter since it catches per row), the comment says so
+outright. The alternative — leaving it to read like a tested property — is how
+five rounds of review kept re-finding the same thing.
+
+Related, and the reason round 12 could prove all of this: a dispose test must pop
+while the thing it guards is *actually outstanding*. Popping during the reads
+never runs the geocode callback; popping after the load never runs the post-load
+`setState`. Both holes existed on all four surfaces at once, so the whole
+family of "disposing mid-flight is safe" tests was vacuous.
+
+**An `async` method's GetIt lookup does not throw to its caller.** Hoisting a
+resolution to the top of an `async` `_load()` looks like it moves the failure out
+of the `try`, but an `async` body never throws synchronously — the error lands in
+an unawaited Future and arrives after the test body finishes, where
+`takeException()` cannot see it. Resolve dependencies in `initState`, where the
+throw is a real mount-time failure.
+
 **Scope guards where the failure lives.** Repeatedly a guard was written one or
 two layers above the thing it claimed to prevent and was structurally blind to
 it. If a fetch happens inside `ForecastService`, a fake `IForecastService` cannot
@@ -329,7 +415,16 @@ how long the app really takes to draw a detail sheet warm and cold.
 
 ---
 
-## Phase 1 — The non-favourite experience ▶ BUILT, IN REVIEW
+## Phase 1 — The non-favourite experience ▶ COMPLETE (gate passed, round 17)
+
+**The review gate passed on round 17** — sixteen rounds failed first, each
+documented in "Sweep the class, not the instance" above. The passing round
+re-verified every prior fix by mutation (58 mutations, all killed or labelled),
+found three low-severity gaps (F52 retry-leaked failure names, F53/F54
+under-asserted skeletons), and all three were closed and mutation-verified in
+the same pass. Declared carry-forwards at close: the <500 ms device capture
+(Phase 0 guard 4 / Phase 8 guard 2) and the two documented `favoriteLabels`
+limits (reachId-keyed across sources; place-over-stored-name).
 
 Permanent value: non-favourites always take the live path.
 
@@ -352,15 +447,34 @@ same three keys, so "See forecast" is warm with nothing warming it.
    release" was wrong and is corrected.*
 2. Values render as they land; a ready flow is visible while a threshold call is
    30 s out.
+
+   *Guarded on the sheet since Phase 1 and — as of round 13 — on the NWM
+   forecast page, which was batching all three reads through one `Future.wait`
+   and one `setState`. It therefore showed nothing until the slowest landed:
+   with `/return-period` measured at 1.0-9.1 s, a name and a flow that arrived
+   in 10 ms sat invisible for five seconds. The page now settles per product.
+   Its concurrency guard could not see this — concurrent reads and a batched
+   render look identical to a start-time assertion — so the new guard drives
+   per-product latency directly.*
 3. **Medium range is never fetched on a tap** — asserted against the **real**
    `ForecastService` with a recording API client, plus a canary that the bundle
    *does* still fetch it, so the guard cannot become vacuous.
 4. One read failing never blocks the others.
 5. Exactly three reads, none waiting on another — asserted on recorded start
    times, not list position.
-6. Terminal state **names what failed** and offers **Retry**.
+6. Terminal state **names what failed** and offers **Retry** — on all four
+   surfaces, the Weekly Outlook included, where a total upstream outage used to
+   render "No forecast is available for your rivers right now" with no way out.
 7. The forecast page reads the narrow products, never the bundle.
-8. Independent agent review passes.
+8. A missing DI registration fails as a **wiring bug at mount**, never as a load
+   failure with a Retry that cannot succeed. Resolutions live in `initState`:
+   hoisting them to the top of an `async` load body is not enough, since an
+   `async` body never throws synchronously to its caller.
+9. Every `mounted` check is **individually falsifiable** — one check per
+   `setState`, no redundant pair, no enclosing catch that swallows
+   `setState() called after dispose()`, and a dispose test that pops while the
+   guarded work is genuinely outstanding, on both the success and failure paths.
+10. Independent agent review passes.
 
 **You are done when** tapping any stream puts a sheet up instantly, titles it as
 soon as the cheapest call lands, fills each number independently, never shows a
@@ -685,8 +799,9 @@ larger correctness win and a prerequisite.
   `ConnectivityService._canReachInternet` reaches
   `clients3.google.com/generate_204` via the integration harness. Pre-existing;
   named here rather than left inside a sweeping "no network" claim. The statics remain only for surfaces not yet on
-  the DI graph — `favorite_river_card`, `weekly_outlook_service`,
-  `map_search_service` — which Phase 3 and Phase 9 own.
+  the DI graph — `favorite_river_card` and `map_search_service` — which Phase 3
+  and Phase 9 own. `weekly_outlook_service` took the interface in Phase 1 and no
+  longer calls them.
 - **A silently-failing store is the most dangerous outcome in this document**,
   because Phase 7 removes the timestamp that would let anyone notice. Monitoring
   ships with Phase 4 or the store does not ship.

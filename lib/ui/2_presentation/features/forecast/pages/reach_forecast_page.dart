@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/load_view_state.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/utils/flow_format.dart';
@@ -65,10 +66,6 @@ const List<Color> _zoneColors = [
   CupertinoColors.systemRed,
   CupertinoColors.systemPurple,
 ];
-/// Category index 0..4 (or -1) via the single app-wide classifier.
-int _categoryFor(double? flow, Map<int, double>? rp) =>
-    FlowClassification.indexFor(flow, rp);
-
 class ReachForecastPage extends StatefulWidget {
   const ReachForecastPage({
     super.key,
@@ -113,11 +110,37 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   // ReachDataProvider's currentForecast (loaded below, read in build).
   List<GeoglowsForecastPoint>? _geoPoints;
 
+  /// The geocoded place label, held OUTSIDE `_details` on purpose. The label
+  /// resolves between product landings (metadata 0.3-1.1 s, geocode ~0.1 s,
+  /// return periods 1.0-9.1 s), and while `publish()` rebuilt `_details`
+  /// wholesale from the product values, the next product to land silently wiped
+  /// a label that was already on screen. Round 14 proved it: present at 300 ms,
+  /// gone at 6 s. A field the rebuild reads cannot be wiped by the rebuild.
+  String? _placeLabel;
+
   bool get _isGeoglows => widget.source.isGeoglows;
+
+  /// Resolved in initState, NOT inside `_load()`.
+  ///
+  /// `_load()` is `async`, so a GetIt lookup at its top does not throw to the
+  /// caller — it lands in an unawaited Future and, before the hoist, in
+  /// `_load()`'s own catch, where a missing registration was rendered as
+  /// "Failed to load this river's details" with a Retry that can never succeed.
+  /// Resolving here makes a wiring bug fail as a wiring bug, at mount, where it
+  /// is visible. Round 11 reported this on the Weekly Outlook; round 12 found
+  /// it still live on both branches here. Pinned by reach_forecast_page_test.
+  late final IFlowUnitPreferenceService _unitService;
+  late final IRiverDataRepository _repo;
+  late final IForecastService _forecastService;
+  late final IGeocodingService _geocoder;
 
   @override
   void initState() {
     super.initState();
+    _unitService = GetIt.I<IFlowUnitPreferenceService>();
+    _repo = GetIt.I<IRiverDataRepository>();
+    _forecastService = GetIt.I<IForecastService>();
+    _geocoder = GetIt.I<IGeocodingService>();
     _range = _isGeoglows ? ForecastRange.fifteenDay : ForecastRange.tenDay;
     _load();
     if (!_isGeoglows) {
@@ -136,114 +159,201 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }
   }
 
+  void _retry() {
+    setState(() {
+      _error = null;
+      _loading = true;
+    });
+    _load();
+  }
+
+  /// Reads the SAME three narrow products the map detail sheet reads, rather
+  /// than the bundled `reachSummary` (ADR 0011 Phase 1).
+  ///
+  /// Two reasons, and the second is the important one. Cost: building
+  /// `reachSummary` pulls a 156 KB medium-range series (avg 10.9 s, worst
+  /// 34.7 s) this page never renders from that entry — it gets its series from
+  /// ReachDataProvider. Correctness: while this page read `reachSummary` and the
+  /// sheet read the narrow products, the same current-flow number lived in two
+  /// independently-cached entries fetched at different moments, so the gauge and
+  /// the sheet could legitimately disagree. Reading identical keys makes them
+  /// identical by construction (ADR 0011 decision 11, ADR 0002).
+  ///
+  /// **The three products settle independently**, as the sheet's do. They used
+  /// to be batched through one `Future.wait` and one `setState`, so the page
+  /// showed nothing until the SLOWEST read landed — with `/return-period`
+  /// measured at 1.0-9.1 s, a name and a flow that arrived in 10 ms sat
+  /// invisible for five seconds. That is guard 2, and round 13 proved it broken
+  /// here while the sheet passed its equivalent. Batching also meant one throw
+  /// blanked a page the other two could have filled (guard 4).
   Future<void> _load() async {
     if (_isGeoglows) {
       await _loadGeoglows();
       return;
     }
 
-    final unitService = GetIt.I<IFlowUnitPreferenceService>();
-    var needsPlaceLabel = false;
-    double? labelLat;
-    double? labelLon;
-    try {
-      // Reads the SAME three narrow products the map detail sheet reads, rather
-      // than the bundled `reachSummary` (ADR 0011 Phase 1).
-      //
-      // Two reasons, and the second is the important one. Cost: building
-      // `reachSummary` pulls a 156 KB medium-range series (avg 10.9 s, worst 34.7 s) this
-      // page never renders from that entry — it gets its series from
-      // ReachDataProvider. Correctness: while this page read `reachSummary` and
-      // the sheet read the narrow products, the same current-flow number lived
-      // in two independently-cached entries fetched at different moments, so
-      // the gauge and the sheet could legitimately disagree. Reading identical
-      // keys makes them identical by construction, which is what ADR 0011
-      // decision 11 and ADR 0002 require.
-      final repo = GetIt.I<IRiverDataRepository>();
-      RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
-            source: ForecastSource.nwm,
-            reachId: widget.reachId,
-            product: p,
-          );
+    // Dependencies come from initState — see the field declarations.
+    final unitService = _unitService;
+    final repo = _repo;
+    final forecastService = _forecastService;
 
-      final entries = await Future.wait([
-        repo.read(keyFor(ForecastProduct.reachMetadata)),
-        repo.read(keyFor(ForecastProduct.analysisAssimilation)),
-        repo.read(keyFor(ForecastProduct.returnPeriods)),
-      ]);
+    RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: widget.reachId,
+          product: p,
+        );
+
+    final failed = <String>[];
+    var anySucceeded = false;
+    var settled = 0;
+
+    ReachMetadata? meta;
+    double? flow;
+    Map<int, double>? converted;
+
+    // Re-rendered whenever any product lands, so whichever arrives first is on
+    // screen immediately and the others fill in around it.
+    //
+    // The ONE `mounted` check for the success-path setState lives here,
+    // immediately before it. The three callbacks below do NOT re-check before
+    // publish() — round 14 found that when they did, each of the four checks
+    // was individually deletable with the suite green, because they all covered
+    // for each other (ADR 0011, "Two redundant checks"). The metadata callback
+    // checks once AFTER publish(), guarding the geocode side-effect only —
+    // a different setState-free concern, individually falsifiable.
+    void publish() {
       if (!mounted) return;
-
-      final metaEntry = entries[0];
-      if (metaEntry == null) {
-        throw Exception('No reach details available.');
-      }
-      final meta = ReachMetadataPayload.decode(metaEntry);
-      final flow = entries[1] == null
-          ? null
-          : CurrentFlowPayload.decode(
-              entries[1]!,
-              GetIt.I<IForecastService>(),
-              unitService,
-            );
-      // Already converted to the display unit by the codec.
-      final converted =
-          entries[2] == null ? null : ReturnPeriodPayload.decode(entries[2]!, unitService);
-
-      final details = ReachDetailsData(
-        riverName: meta.riverName,
-        formattedLocation: meta.formattedLocation,
-        currentFlow: flow,
-        // Populated for model completeness; this page derives its own index
-        // via _categoryFor so the value is not read here.
-        flowCategory: (flow != null && converted != null)
-            ? FlowClassification.category(flow, converted)
-            : null,
-        latitude: meta.latitude,
-        longitude: meta.longitude,
-        isClassificationAvailable: converted != null,
-        returnPeriods: converted,
-      );
-
       setState(() {
-        _details = details;
+        _details = ReachDetailsData(
+          riverName: meta?.riverName,
+          // The geocoded label survives later products landing — see
+          // `_placeLabel`.
+          formattedLocation:
+              (meta?.formattedLocation?.isNotEmpty == true)
+                  ? meta!.formattedLocation
+                  : _placeLabel,
+          currentFlow: flow,
+          // Populated for model completeness; this page derives its own index
+          // from _returnPeriods via FlowClassification (`_categoryIndex`), so
+          // the string is not read back here.
+          flowCategory: (flow != null && converted != null)
+              ? FlowClassification.category(flow, converted)
+              : null,
+          latitude: meta?.latitude,
+          longitude: meta?.longitude,
+          isClassificationAvailable: converted != null,
+          returnPeriods: converted,
+        );
         _returnPeriods = converted;
         _unit = unitService.getDisplayUnit();
-        _loading = false;
-      });
-
-      needsPlaceLabel = details.formattedLocation == null ||
-          details.formattedLocation!.isEmpty;
-      labelLat = meta.latitude;
-      labelLon = meta.longitude;
-    } catch (e) {
-      if (!mounted) return;
-      AppLogger.error('ReachForecastPage', 'Error loading reach details', e);
-      setState(() {
-        _error = 'Failed to load reach details';
+        // A load that produced something clears any earlier failure. On this
+        // surface the state is defensive — `_retry()` clears `_error` before
+        // calling `_load()` — and labelled as such per the ADR; the reachable
+        // variant lives on the Weekly Outlook and is guarded there.
+        _error = null;
         _loading = false;
       });
     }
 
-    // Deliberately OUTSIDE the try. `reachMetadata` does not geocode, so this
-    // is the only thing preserving the place name — but it is decoration, and
-    // it previously sat inside the try, where a throw from resolving the
-    // geocoder would land in the catch and replace a page that had already
-    // rendered correctly with an error card. Review found that.
-    if (needsPlaceLabel) _fillPlaceLabel(labelLat, labelLon);
+    // A read has finished, whatever the outcome. Only a clean sweep of failures
+    // is a page failure — a named river with no flood risk is a usable page.
+    void markSettled() {
+      settled++;
+      if (settled < 3 || !mounted) return;
+      if (anySucceeded) return;
+      // Name what broke, as the sheet does — "Failed to load name, current
+      // flow" beats a generic apology and tells the user whether retrying is
+      // worth it (ADR 0011 guard 6).
+      setState(() {
+        _error = failed.isEmpty
+            ? 'Failed to load this river\'s details'
+            : 'Failed to load ${failed.join(', ')}';
+        _loading = false;
+      });
+    }
+
+    void onFailed(String label, Object e) {
+      AppLogger.warning('ReachForecastPage',
+          'Failed to load $label for ${widget.reachId}: $e');
+      failed.add(label);
+    }
+
+    // `then(onSuccess, onError:)`, never `.then(cb).catchError(h)` — the latter
+    // routes cb's OWN throws into the handler, which would swallow a
+    // `setState() called after dispose()` and make publish()'s `mounted` check
+    // unfalsifiable (ADR 0011, round 12).
+    unawaited(repo.read(keyFor(ForecastProduct.reachMetadata)).then((entry) {
+      if (entry == null) return;
+      meta = ReachMetadataPayload.decode(entry);
+      anySucceeded = true;
+      publish();
+      // The place name is decoration, resolved after the title is already on
+      // screen rather than in front of it. The `mounted` check guards the
+      // GEOCODE, not a setState — publish() protects its own — so it is not a
+      // redundant pair: round 15 measured a Mapbox call being issued for a page
+      // that had already been popped.
+      if (!mounted) return;
+      final m = meta;
+      if (m != null &&
+          (m.formattedLocation == null || m.formattedLocation!.isEmpty)) {
+        _fillPlaceLabel(m.latitude, m.longitude);
+      }
+    }, onError: (Object e) => onFailed('name', e)).whenComplete(markSettled));
+
+    unawaited(
+        repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
+      if (entry == null) return;
+      flow = CurrentFlowPayload.decode(entry, forecastService, unitService);
+      if (flow == null) {
+        // Upstream answered but carried no usable value — a failure of this
+        // product, not a success, or it is never named in the error card.
+        failed.add('current flow');
+        return;
+      }
+      anySucceeded = true;
+      publish();
+    }, onError: (Object e) => onFailed('current flow', e))
+            .whenComplete(markSettled));
+
+    unawaited(repo.read(keyFor(ForecastProduct.returnPeriods)).then((entry) {
+      if (entry == null) return;
+      // Already converted to the display unit by the codec.
+      converted = ReturnPeriodPayload.decode(entry, unitService);
+      if (converted == null) return;
+      anySucceeded = true;
+      publish();
+    }, onError: (Object e) => onFailed('flood risk', e))
+        .whenComplete(markSettled));
   }
+
 
   /// Resolve the place label after the page is usable.
   ///
-  /// Guarded rather than trusted: the implementation catches internally, but
-  /// *resolving* it can throw if DI is misconfigured, and this must never be
-  /// able to disturb a page that already rendered.
+  /// `_geocoder` comes from initState like every other dependency, so a missing
+  /// registration is a mount-time wiring bug — round 15 found this surface
+  /// still resolving it inside a caught future, where the wiring bug degraded
+  /// to a debug log line (guard 8's rule is initState, no carve-outs).
+  /// The catch covers the GEOCODE ONLY, deliberately. It used to wrap the
+  /// `.then` as well, which swallowed everything the callback could throw —
+  /// including `setState() called after dispose()`. That made the `mounted`
+  /// check unfalsifiable: deleting it changed nothing observable, so no test
+  /// could ever guard it. Review round 11 proved exactly that on the weekly
+  /// outlook; the same shape was here.
   void _fillPlaceLabel(double? lat, double? lon) {
-    unawaited(Future(() => GetIt.I<IGeocodingService>().placeLabel(lat, lon))
-        .then((label) {
+    unawaited(_geocoder.placeLabel(lat, lon).catchError((Object e) {
+      AppLogger.debug('ReachForecastPage', 'Place label unavailable: $e');
+      return null;
+    }).then((label) {
       if (!mounted || label == null || label.isEmpty) return;
       final current = _details;
+      // Defensive: publish()/the GEOGLOWS setState always assign _details
+      // before this callback can run, so the null case is undrivable. Labelled
+      // per the ADR.
       if (current == null) return;
       setState(() {
+        // Both the field (so a later publish() keeps it) and the current
+        // details (so it is on screen now).
+        _placeLabel = label;
         _details = ReachDetailsData(
           riverName: current.riverName,
           formattedLocation: label,
@@ -255,9 +365,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           returnPeriods: current.returnPeriods,
         );
       });
-    }).catchError((Object e) {
-      AppLogger.debug('ReachForecastPage', 'Place label unavailable: $e');
-      return null;
     }));
   }
 
@@ -266,13 +373,20 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   /// awaiting it inline gated the whole page on a Mapbox call.
   void _fillGeoglowsPlaceLabel(double? lat, double? lon) {
     if (lat == null || lon == null) return;
-    unawaited(Future(() => GetIt.I<IGeocodingService>().reverseGeocode(lat, lon))
-        .then((geo) {
+    unawaited(_geocoder.reverseGeocode(lat, lon)
+        // Geocode only — see _fillPlaceLabel.
+        .catchError((Object e) {
+      AppLogger.debug('ReachForecastPage', 'GEOGLOWS place label failed: $e');
+      return <String, String?>{};
+    }).then((geo) {
       if (!mounted) return;
       final city = geo['city'];
       final country = geo['country'];
       if (city == null || city.isEmpty) return;
       final current = _details;
+      // Defensive: publish()/the GEOGLOWS setState always assign _details
+      // before this callback can run, so the null case is undrivable. Labelled
+      // per the ADR.
       if (current == null) return;
       setState(() {
         _details = ReachDetailsData(
@@ -284,23 +398,26 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           returnPeriods: current.returnPeriods,
         );
       });
-    }).catchError((Object e) {
-      AppLogger.debug('ReachForecastPage', 'GEOGLOWS place label failed: $e');
-      return null;
     }));
   }
 
   Future<void> _loadGeoglows() async {
-    final unitService = GetIt.I<IFlowUnitPreferenceService>();
+    // From initState — see the field declarations.
+    final unitService = _unitService;
+    final repo = _repo;
+    ({
+      ReachDetailsData details,
+      Map<int, double>? returnPeriods,
+      List<GeoglowsForecastPoint> points,
+    })? loaded;
     try {
-      final entry = await GetIt.I<IRiverDataRepository>().read(
+      final entry = await repo.read(
         RiverDataKey(
           source: ForecastSource.geoglows,
           reachId: widget.reachId,
           product: ForecastProduct.geoglowsForecast,
         ),
       );
-      if (!mounted) return;
       if (entry == null) {
         throw Exception('No GEOGLOWS forecast available.');
       }
@@ -314,44 +431,56 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       final riverName = 'Stream ${widget.reachId}';
       const location = '';
 
-      setState(() {
-        _details = ReachDetailsData(
+      // Forecast, not retrospective: keep only from the current reading onward.
+      // GEOGLOWS series start at the model-init time (often earlier today);
+      // showing that recent past muddies "peak"/trend and the chart. Trimming
+      // here makes everything downstream (chart, weekly split, peak, day count)
+      // forward-looking from a single source.
+      final fwd = ForecastPeak.upcomingPoints(
+          fc.points.map((p) => (flow: p.median, time: p.validTime)));
+      final firstUpcoming = fwd.isEmpty ? null : fwd.first.time;
+
+      loaded = (
+        details: ReachDetailsData(
           riverName: riverName,
           formattedLocation: location,
           currentFlow: fc.currentMedian,
           returnPeriods: fc.returnPeriods,
-        );
+        ),
         // Already in the user's unit (converted at decode) — no reconciliation.
-        _returnPeriods = fc.returnPeriods;
-        // Forecast, not retrospective: keep only from the current reading
-        // onward. GEOGLOWS series start at the model-init time (often earlier
-        // today); showing that recent past muddies "peak"/trend and the chart.
-        // Trimming here makes everything downstream (chart, weekly split, peak,
-        // day count) forward-looking from a single source.
-        final fwd = ForecastPeak.upcomingPoints(
-            fc.points.map((p) => (flow: p.median, time: p.validTime)));
-        final firstUpcoming = fwd.isEmpty ? null : fwd.first.time;
-        _geoPoints = firstUpcoming == null
+        returnPeriods: fc.returnPeriods,
+        points: firstUpcoming == null
             ? fc.points
             : fc.points
                 .where((p) => !p.validTime.isBefore(firstUpcoming))
-                .toList();
-        _unit = unitService.getDisplayUnit();
-        _loading = false;
-      });
-
-      _fillGeoglowsPlaceLabel(widget.lat, widget.lon);
+                .toList(),
+      );
     } catch (e) {
       if (!mounted) return;
       AppLogger.error('ReachForecastPage', 'Error loading GEOGLOWS forecast', e);
       setState(() {
-        _error = 'Failed to load forecast';
+        _error = 'Failed to load this river\'s forecast';
         _loading = false;
       });
+      return;
     }
+
+    // Outside the try — see _load(). A setState here must be able to throw.
+    if (!mounted) return;
+    final result = loaded;
+    setState(() {
+      _details = result.details;
+      _returnPeriods = result.returnPeriods;
+      _geoPoints = result.points;
+      _unit = unitService.getDisplayUnit();
+      _error = null;
+      _loading = false;
+    });
+
+    _fillGeoglowsPlaceLabel(widget.lat, widget.lon);
   }
 
-  int get _categoryIndex => _categoryFor(_details?.currentFlow, _returnPeriods);
+  int get _categoryIndex => FlowClassification.indexFor(_details?.currentFlow, _returnPeriods);
 
   String get _river =>
       _details?.riverName ?? (_loading ? '' : 'Stream ${widget.reachId}');
@@ -449,7 +578,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   String _returnPeriodBand() {
     final f = _details?.currentFlow;
     final rp = _returnPeriods;
-    final i = _categoryFor(f, rp);
+    final i = FlowClassification.indexFor(f, rp);
     return switch (i) {
       0 => '< 2 yr',
       1 => '2–5 yr',
@@ -501,26 +630,37 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   }
 
   Widget _buildScroll() {
-    // Error is checked FIRST. With the order reversed, a load that failed
-    // without clearing _loading rendered the skeleton forever and no test
-    // could see it — review found that reachable on both the NWM and GEOGLOWS
-    // branches. An error state must never be maskable by a stuck flag.
-    if (_error != null) {
+    // Precedence lives in loadViewStateFor, not in the order of these ifs —
+    // see that function for why statement order was not a real guard.
+    final view = loadViewStateFor(hasError: _error != null, isLoading: _loading);
+    if (view == LoadViewState.error) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Text(
-            _error!,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 15,
-              color: CupertinoColors.secondaryLabel.resolveFrom(context),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: CupertinoColors.secondaryLabel.resolveFrom(context),
+                ),
+              ),
+              // A terminal state with no way out is a dead end — the rule the
+              // map sheet already follows, swept here rather than waiting for
+              // it to be reported on this surface too.
+              CupertinoButton(
+                onPressed: _retry,
+                child: const Text('Retry'),
+              ),
+            ],
           ),
         ),
       );
     }
-    if (_loading) {
+    if (view == LoadViewState.loading) {
       return const _ForecastSkeleton();
     }
 
@@ -565,6 +705,37 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
             ),
           ),
         ),
+        // The page loaded but the flow did not (the 2026-08-22 outage shape:
+        // /reaches answers while every /streamflow series 504s). Without this
+        // the gauge shows '—' and every stat shows '—', with no statement of
+        // what is wrong — the sheet says it plainly, and this surface did not.
+        if (!_loading && _error == null && _details?.currentFlow == null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: Column(
+                children: [
+                  Text(
+                    'Current flow data is not available for this reach right now.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color:
+                          CupertinoColors.secondaryLabel.resolveFrom(context),
+                    ),
+                  ),
+                  // Often transient — a way out, like every other terminal
+                  // state (guard 6; round 16 found this one was a dead end).
+                  CupertinoButton(
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.only(top: 4),
+                    onPressed: _retry,
+                    child: const Text('Retry', style: TextStyle(fontSize: 14)),
+                  ),
+                ],
+              ),
+            ),
+          ),
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 20, 18, 0),
@@ -605,7 +776,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   List<Widget> _nwmBodySlivers(ForecastResponse? nwm) {
     final series = _nwmSeries(nwm, _range);
     final flows = series?.data.map((p) => p.flow).toList();
-    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
+    final catI = FlowClassification.indexFor(_details?.currentFlow, _returnPeriods);
     final color = catI >= 0
         ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
         : CupertinoColors.systemBlue.resolveFrom(context);
@@ -715,7 +886,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     Color? peakColor;
     if (peak != null) {
       peakValue = FlowFormat.grouped(peak.flow);
-      final ci = _categoryFor(peak.flow, _returnPeriods);
+      final ci = FlowClassification.indexFor(peak.flow, _returnPeriods);
       if (ci >= 0) {
         peakSub = kFloodCategories[ci];
         peakColor = CupertinoDynamicColor.resolve(_zoneColors[ci], context);
@@ -753,7 +924,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       }
     }
 
-    final rpSub = switch (_categoryFor(_details?.currentFlow, _returnPeriods)) {
+    final rpSub = switch (FlowClassification.indexFor(_details?.currentFlow, _returnPeriods)) {
       0 => 'below flood',
       1 => 'action stage',
       2 => 'moderate',
@@ -782,7 +953,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     final lat = _details?.latitude ?? widget.lat;
     final lon = _details?.longitude ?? widget.lon;
     if (lat == null || lon == null) return;
-    final catI = _categoryFor(_details?.currentFlow, _returnPeriods);
+    final catI = FlowClassification.indexFor(_details?.currentFlow, _returnPeriods);
     final color = catI >= 0
         ? CupertinoDynamicColor.resolve(_zoneColors[catI], context)
         : CupertinoColors.activeBlue.resolveFrom(context);

@@ -8,12 +8,14 @@ import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/forecast/weekly_outlook_row.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/load_view_state.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/utils/flow_format.dart';
@@ -30,11 +32,16 @@ class WeeklyOutlookPage extends StatefulWidget {
 }
 
 class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
-  late final WeeklyOutlookService _service = WeeklyOutlookService(
-    forecastService: GetIt.I<IForecastService>(),
-    riverData: GetIt.I<IRiverDataRepository>(),
-    unitService: GetIt.I<IFlowUnitPreferenceService>(),
-  );
+  /// Built in initState, NOT as a `late final` field initializer.
+  ///
+  /// A `late final` runs on first touch, and the first touch was
+  /// `_service.buildOutlook(...)` inside `_load()`'s try — so an unregistered
+  /// GetIt type became "Could not load this week's outlook." with a Retry that
+  /// could never succeed. That is the same defect the NWM forecast page fixes by
+  /// keeping its resolution outside the try, and review round 11 caught that the
+  /// fix had not been swept here. A missing registration must surface as a
+  /// wiring bug, not be laundered into a data-load failure.
+  late final WeeklyOutlookService _service;
 
   bool _loading = true;
   String? _error;
@@ -54,6 +61,11 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   /// provider does not rebuild it.
   bool _outlookBuilt = false;
 
+  /// Resolved in initState with everything else (guard 8, no carve-outs):
+  /// round 16 found these two lookups still inside caught bodies, where a
+  /// missing registration degraded to a debug log line.
+  late final IUserSettingsService _settingsService;
+
   /// Falls back to the empty state if favourites never arrive.
   Timer? _emptyStateFallback;
 
@@ -63,6 +75,13 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   @override
   void initState() {
     super.initState();
+    _service = WeeklyOutlookService(
+      forecastService: GetIt.I<IForecastService>(),
+      riverData: GetIt.I<IRiverDataRepository>(),
+      unitService: GetIt.I<IFlowUnitPreferenceService>(),
+      geocoder: GetIt.I<IGeocodingService>(),
+    );
+    _settingsService = GetIt.I<IUserSettingsService>();
     final provider = context.read<FavoritesProvider>();
     _favoritesProvider = provider;
     provider.addListener(_onFavoritesChanged);
@@ -78,12 +97,65 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
 
   /// Favourites finished loading after this page was already on screen.
   void _onFavoritesChanged() {
+    // `!mounted` is defensive: dispose() removes this listener, so no test can
+    // drive the unmounted case. Labelled per the ADR.
     if (_outlookBuilt || !mounted) return;
     if (_favoritesProvider?.favorites.isNotEmpty ?? false) _load();
   }
 
+  /// Resolve each row's place label AFTER the page is on screen. Awaiting these
+  /// inside the row build gated the whole page on geocoding.
+  ///
+  /// Coordinates come off the row itself. Matching back to a favourite by
+  /// `reachId` alone ignored `source` and, on no match, fell back to an
+  /// arbitrary favourite — which would have labelled one river with another
+  /// river's city.
+  Future<void> _fillPlaceLabels(List<OutlookRow> rows) {
+    final pending = <Future<void>>[];
+    for (final row in rows) {
+      pending.add(
+        Future(() => _service.placeLabelFor(row.latitude, row.longitude))
+            // The catch covers the GEOCODE ONLY. Wrapping the `.then` too
+            // swallowed everything the callback could throw, `setState() called
+            // after dispose()` included — which made the `mounted` check
+            // unfalsifiable. Review round 11 removed that check and no test
+            // could see it.
+            .catchError((Object e) {
+          AppLogger.debug('WeeklyOutlookPage', 'Place label failed: $e');
+          return null;
+        }).then((label) {
+          if (!mounted || label == null || label.isEmpty) return;
+          // Matched by identity, not by index: an index captured before the
+          // await binds to a position, and a later rebuild that reordered
+          // `_rows` would attach one river's city to another.
+          setState(() => _rows = [
+                for (final r in _rows)
+                  if (r.reachId == row.reachId && r.source == row.source)
+                    r.withLocation(label)
+                  else
+                    r,
+              ]);
+        }),
+      );
+    }
+    return Future.wait(pending);
+  }
+
+  void _retry() {
+    setState(() {
+      _error = null;
+      _loading = true;
+      // The no-forecast empty state is reached with _outlookBuilt = true (the
+      // build "succeeded", it just had nothing). Without this reset, Retry from
+      // that state early-returns at the top of _load() and spins forever.
+      _outlookBuilt = false;
+    });
+    _load();
+  }
+
   Future<void> _load() async {
     if (_outlookBuilt) return;
+    OutlookResult? outcome;
     try {
       final favorites =
           (_favoritesProvider ?? context.read<FavoritesProvider>()).favorites;
@@ -100,7 +172,17 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
       // is the floor: an account that genuinely has no favourites still gets
       // the empty state, just not instantly.
       if (favorites.isEmpty) {
-        _emptyStateFallback ??= Timer(_favouritesGracePeriod, () {
+        // Rescheduled, not `??=`. Once the first timer had fired, `??=` left a
+        // non-null completed Timer, so a later _load() with no favourites —
+        // reachable via Retry — scheduled nothing and returned with `_loading`
+        // still true: a permanent spinner. Round 13 flagged it as a latent
+        // hypothesis; cheaper to remove than to argue about reachability.
+        _emptyStateFallback?.cancel();
+        _emptyStateFallback = Timer(_favouritesGracePeriod, () {
+          // Defensive, both halves: dispose() cancels this timer, and _load()
+          // cancels it in the same synchronous block that sets _outlookBuilt —
+          // so neither condition is reachable and no test can drive this line.
+          // Labelled per the ADR rather than left reading as a guarded pair.
           if (!mounted || _outlookBuilt) return;
           setState(() {
             _rows = const [];
@@ -113,47 +195,133 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
       _outlookBuilt = true;
       _emptyStateFallback?.cancel();
 
-      final rows = await _service.buildOutlook(favorites);
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
-      // Persist labels (for the digest banner) + reset the back-off counter,
-      // since opening the outlook is engagement. Fire-and-forget.
-      _recordOutlookOpen(rows);
+      outcome = await _service.buildOutlook(favorites);
     } catch (e) {
       AppLogger.error('WeeklyOutlookPage', 'Failed to build outlook', e);
+      // Defensive, and honestly labelled as such: `buildOutlook` catches per
+      // row and returns an OutlookResult rather than throwing, so nothing an
+      // upstream can do reaches this catch — only a programming error does.
+      // No test can drive it, so removing this line kills nothing. The
+      // reachable outage path is `isTotalFailure` below, which IS guarded.
       if (!mounted) return;
       setState(() {
+        // Reset, or the guard at the top of _load() early-returns forever and
+        // neither Retry nor a later favourites notification can ever rebuild —
+        // the page would be permanently stuck with no way out.
+        _outlookBuilt = false;
         _error = 'Could not load this week\'s outlook.';
         _loading = false;
       });
+      return;
     }
+
+    // Everything below is OUTSIDE the try, deliberately. Inside it, a
+    // `setState() called after dispose()` was caught here and rendered as a
+    // load failure — so deleting a `mounted` check changed nothing observable
+    // and no test could guard it. Round 12 proved that on all four surfaces.
+    if (!mounted) return;
+    // Copied to a local: promotion does not survive into the closure.
+    final result = outcome;
+
+    // Opening the outlook is engagement whether or not the load succeeded —
+    // the back-off counter resets on the OUTAGE path too. Round 16 caught this
+    // running after the isTotalFailure return, so a user who opened the page
+    // during an outage kept escalating toward digest suppression.
+    _recordOutlookOpen();
+
+    // Every favourite failed. buildOutlook catches per row, so this is the
+    // shape a real outage takes — and it used to render "No forecast is
+    // available for your rivers right now" with no Retry, a dead end reached by
+    // the most ordinary failure there is.
+    if (result.isTotalFailure) {
+      setState(() {
+        _outlookBuilt = false;
+        _error = _failureMessage(result.failedNames);
+        _loading = false;
+      });
+      return;
+    }
+
+    final rows = result.rows;
+    setState(() {
+      _rows = rows;
+      // A load that succeeded must clear any earlier failure. Without this the
+      // recovery path _onFavoritesChanged exists for rebuilt correctly and the
+      // page still showed the outage card, with the loaded rows hidden behind
+      // it — `loadViewStateFor` makes error win over content.
+      _error = null;
+      _loading = false;
+    });
+    // Persist the digest labels only AFTER the geocodes have resolved, reading
+    // the rows as they are THEN. `withLocation` returns new objects into
+    // `_rows`, so the list built above never acquires a label — round 15 caught
+    // this persisting "Station 9962444" over a previously-correct "Provo, UT"
+    // in the user doc the Friday push banner reads. The screen was right and
+    // the write was wrong, which is the worst combination: nothing visible ever
+    // disagrees.
+    // No mounted check here: _persistDigestLabels checks once at its own top,
+    // where the context read happens. A second one at this call site made both
+    // undeletable-without-detection (round 16, the "Two redundant checks"
+    // shape yet again).
+    unawaited(_fillPlaceLabels(rows).then((_) => _persistDigestLabels(_rows)));
   }
 
-  /// On opening the outlook: reset the digest back-off counter (opening is
-  /// engagement) and persist each loaded favorite's label to the user doc so the
-  /// Friday digest banner reads the same name/place the app shows. Labels merge
-  /// (read-modify-write) so favorites that failed to load keep theirs.
-  Future<void> _recordOutlookOpen(List<OutlookRow> rows) async {
+  /// Name what failed, as the map sheet does — "Failed to load X" beats a
+  /// generic apology, and with two or three favourites the names fit.
+  static String _failureMessage(List<String> failed) {
+    if (failed.isEmpty) return 'Could not load this week\'s outlook.';
+    if (failed.length <= 2) return 'Could not load ${failed.join(' or ')}.';
+    return 'Could not load ${failed.take(2).join(', ')} '
+        'and ${failed.length - 2} more.';
+  }
+
+  /// Reset the digest back-off counter: opening the outlook is engagement.
+  Future<void> _recordOutlookOpen() async {
     if (!mounted) return;
     final userId = context.read<AuthProvider>().currentUser?.uid;
     if (userId == null) return;
     try {
-      final svc = GetIt.I<IUserSettingsService>();
-      final updates = <String, dynamic>{'weeklyDigestsSinceOpen': 0};
-      if (rows.isNotEmpty) {
-        final settings = await svc.getUserSettings(userId);
-        final merged = Map<String, String>.from(settings?.favoriteLabels ?? {});
-        for (final r in rows) {
-          merged[r.reachId] = r.title;
-        }
-        updates['favoriteLabels'] = merged;
-      }
-      await svc.updateUserSettings(userId, updates);
+      await _settingsService
+          .updateUserSettings(userId, {'weeklyDigestsSinceOpen': 0});
     } catch (e) {
       AppLogger.debug('WeeklyOutlookPage', 'Outlook-open persist failed: $e');
+    }
+  }
+
+  /// Persist each row's resolved label to the user doc, so the Friday digest
+  /// banner (functions/src/weekly-digest.ts reads `favoriteLabels`) shows the
+  /// same name/place the app shows. Called after the geocodes settle.
+  ///
+  /// Placeholder titles are SKIPPED, not written: a title that embeds the reach
+  /// id means "no name and no label", and writing it would overwrite a correct
+  /// label persisted on an earlier open. The write is read-modify-write so
+  /// labels for rows that did not load this week survive (guarded: round 16
+  /// proved the merge was deletable with the suite green).
+  ///
+  /// Known limits, accepted: the map is keyed by reachId alone because
+  /// functions/src/weekly-digest.ts reads it that way — an NWM COMID and a
+  /// GEOGLOWS LINKNO that collide numerically would share a label slot. And a
+  /// reach that stored a river name in an earlier week but is unnamed now gets
+  /// its geocoded place written over the name.
+  Future<void> _persistDigestLabels(List<OutlookRow> rows) async {
+    if (!mounted || rows.isEmpty) return;
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+    try {
+      final svc = _settingsService;
+      final settings = await svc.getUserSettings(userId);
+      final merged = Map<String, String>.from(settings?.favoriteLabels ?? {});
+      var changed = false;
+      for (final r in rows) {
+        if (r.title.contains(r.reachId)) continue; // placeholder — never write
+        if (merged[r.reachId] == r.title) continue;
+        merged[r.reachId] = r.title;
+        changed = true;
+      }
+      if (!changed) return;
+      await svc.updateUserSettings(userId, {'favoriteLabels': merged});
+    } catch (e) {
+      AppLogger.debug('WeeklyOutlookPage', 'Digest-label persist failed: $e');
     }
   }
 
@@ -187,18 +355,27 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   }
 
   Widget _body() {
-    // Error before loading. With the order reversed, a load that failed
-    // without clearing `_loading` renders a spinner forever and the failure is
-    // invisible — the same defect found on the forecast page, swept for here
-    // rather than waiting for it to be reported on this surface too.
-    if (_error != null) {
-      return _centeredMessage(
-        CupertinoIcons.exclamationmark_triangle,
-        _error!,
-        CupertinoColors.systemOrange,
+    // Precedence lives in loadViewStateFor, not in the order of these ifs.
+    final view = loadViewStateFor(hasError: _error != null, isLoading: _loading);
+    if (view == LoadViewState.error) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _centeredMessage(
+            CupertinoIcons.exclamationmark_triangle,
+            _error!,
+            CupertinoColors.systemOrange,
+          ),
+          // A terminal state with no way out is a dead end — the same rule the
+          // map sheet follows.
+          CupertinoButton(
+            onPressed: _retry,
+            child: const Text('Retry'),
+          ),
+        ],
       );
     }
-    if (_loading) {
+    if (view == LoadViewState.loading) {
       return const Center(child: CupertinoActivityIndicator(radius: 15));
     }
     if (_favoriteCount == 0) {
@@ -209,10 +386,23 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
       );
     }
     if (_rows.isEmpty) {
-      return _centeredMessage(
-        CupertinoIcons.cloud,
-        'No forecast is available for your rivers right now.',
-        CupertinoColors.systemGrey,
+      // Reachable without any failure: every favourite answering 200 with no
+      // usable series (a partial-publication window). Honest — but a state the
+      // user may sit in for minutes, so it gets a Retry like every other
+      // terminal state (guard 6). Round 15 flagged it as the one dead end left.
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _centeredMessage(
+            CupertinoIcons.cloud,
+            'No forecast is available for your rivers right now.',
+            CupertinoColors.systemGrey,
+          ),
+          CupertinoButton(
+            onPressed: _retry,
+            child: const Text('Retry'),
+          ),
+        ],
       );
     }
 
