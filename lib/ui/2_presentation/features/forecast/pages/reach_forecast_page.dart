@@ -193,6 +193,8 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         riverName: meta.riverName,
         formattedLocation: meta.formattedLocation,
         currentFlow: flow,
+        // Populated for model completeness; this page derives its own index
+        // via _categoryFor so the value is not read here.
         flowCategory: (flow != null && converted != null)
             ? FlowClassification.category(flow, converted)
             : null,

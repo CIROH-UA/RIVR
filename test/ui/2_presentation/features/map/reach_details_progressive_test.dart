@@ -201,6 +201,18 @@ class _RecordingRepo implements IRiverDataRepository {
   Future<void> ingest(RiverDataEntry e) async {}
 }
 
+/// GEOGLOWS reaches are everything outside the US, and Phase 1's "you are done
+/// when" says *any* stream. Review found this branch had zero tests, and the
+/// exact terminal-state defect fixed on the NWM branch was live here.
+SelectedReach _geoglowsReach() => SelectedReach(
+      reachId: '760021642',
+      source: ForecastSource.geoglows,
+      streamOrder: 3,
+      latitude: 12.1,
+      longitude: 15.3,
+      selectedAt: DateTime.utc(2026, 8, 22, 12),
+    );
+
 SelectedReach _reach() => SelectedReach(
       reachId: '9962444',
       source: ForecastSource.nwm,
@@ -598,6 +610,54 @@ void main() {
 
       expect(find.textContaining('current flow'), findsOneWidget,
           reason: 'a 200 with an unusable body is a failure of that product');
+    });
+  });
+
+  group('GEOGLOWS — the branch review found untested', () {
+    testWidgets('a failed load is terminal: named, retryable, not spinning',
+        (t) async {
+      final repo = _RecordingRepo(failures: {ForecastProduct.geoglowsForecast});
+      _register(repo);
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await _settle(t);
+
+      expect(find.textContaining('GEOGLOWS'), findsOneWidget,
+          reason: 'the failure must be named');
+      expect(find.text('Retry'), findsOneWidget);
+      // REGRESSION: deleting the loading resets from this branch passed the
+      // whole suite. With them stuck true the sheet shows an error card over a
+      // live spinner AND the header close button is replaced by that spinner,
+      // so it cannot be dismissed.
+      expect(find.byType(CupertinoActivityIndicator), findsNothing,
+          reason: 'an error card over a live spinner is not terminal');
+    });
+
+    testWidgets('reads through the cache, never as a forced refresh',
+        (t) async {
+      final repo = _RecordingRepo();
+      _register(repo);
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await _settle(t);
+
+      expect(repo.refreshed, isEmpty);
+      expect(repo.requested, contains(ForecastProduct.geoglowsForecast));
+      expect(repo.requested, isNot(contains(ForecastProduct.reachSummary)));
+    });
+
+    testWidgets('a GEOGLOWS tap never fetches the 156 KB series', (t) async {
+      final repo = _RecordingRepo();
+      _register(repo);
+
+      await t.pumpWidget(
+          _wrap(ReachDetailsBottomSheet(selectedReach: _geoglowsReach())));
+      await _settle(t);
+
+      expect(repo.requested, isNot(contains(ForecastProduct.mediumRange)));
+      expect(repo.requested, isNot(contains(ForecastProduct.longRange)));
     });
   });
 

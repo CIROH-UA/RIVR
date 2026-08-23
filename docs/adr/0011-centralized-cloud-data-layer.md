@@ -332,6 +332,11 @@ same three keys, so "See forecast" is warm with nothing warming it.
    **under-500 ms** half stays open at merge: it needs a device capture, which
    is **Phase 0 guard 4** and **Phase 8 guard 2**. Stated here so it is a
    declared carry-forward rather than an unnoticed gap.*
+
+   *That capture must be taken in **debug or profile**, not release:
+   `AppLogger.metric` uses `dart:developer.log`, which writes nothing without an
+   attached VM service. An earlier note claiming it "always logs, including
+   release" was wrong and is corrected.*
 2. Values render as they land; a ready flow is visible while a threshold call is
    30 s out.
 3. **Medium range is never fetched on a tap** — asserted against the **real**
@@ -657,9 +662,12 @@ larger correctness win and a prerequisite.
   made it impossible to pin either direction — that a geocode does *not* happen
   on the fast path, or that it *does* happen at the consumer — and made widget
   tests issue live Mapbox calls. Both are now counted against a fake. The
-  `ForecastService` takes it too, which is what removed the last live network
-  call from the suite — proven by instrumenting the real HTTP call and running
-  the full suite with zero hits. The statics remain only for surfaces not yet on
+  `ForecastService` takes it too, which removed the last **Mapbox** call from
+  the suite — proven by instrumenting the real HTTP call and running the whole
+  suite with zero hits. One live call remains and is **not** Phase 1's:
+  `ConnectivityService._canReachInternet` reaches
+  `clients3.google.com/generate_204` via the integration harness. Pre-existing;
+  named here rather than left inside a sweeping "no network" claim. The statics remain only for surfaces not yet on
   the DI graph — `favorite_river_card`, `weekly_outlook_service`,
   `map_search_service` — which Phase 3 and Phase 9 own.
 - **A silently-failing store is the most dangerous outcome in this document**,

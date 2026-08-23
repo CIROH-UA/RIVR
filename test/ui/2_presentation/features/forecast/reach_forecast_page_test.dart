@@ -34,8 +34,15 @@ class _StubUnit implements IFlowUnitPreferenceService {
   String get currentFlowUnit => 'CFS';
   @override
   String getDisplayUnit() => 'ft³/s';
+  /// Real, not identity. With the identity stub a missing CMS→CFS conversion
+  /// was invisible: review showed the category assertion passed either way.
   @override
-  double convertFlow(double value, String from, String to) => value;
+  double convertFlow(double value, String from, String to) {
+    if (from == to) return value;
+    if (from == 'CMS' && to == 'CFS') return value * 35.3147;
+    if (from == 'CFS' && to == 'CMS') return value / 35.3147;
+    return value;
+  }
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -69,7 +76,8 @@ class _StubForecastService implements IForecastService {
 }
 
 class _FakeRepo implements IRiverDataRepository {
-  _FakeRepo(this.entry, {this.byProduct = const {}});
+  _FakeRepo(this.entry, {this.byProduct = const {}, this.delay});
+  final Duration? delay;
   final RiverDataEntry? entry;
 
   /// Per-product payloads. The NWM page reads three narrow products now
@@ -86,8 +94,16 @@ class _FakeRepo implements IRiverDataRepository {
   /// swapping it in makes "See forecast" repeat the whole wait.
   final List<ForecastProduct> refreshed = [];
 
+  /// Products already finished when a given read STARTED. Non-empty means the
+  /// page is loading serially — round 7 flagged this and round 8 found it still
+  /// unguarded, costing ~0.5 s + 2.1 s + 1–9 s in sequence on a cold cache
+  /// instead of the slowest of the three.
+  final Map<ForecastProduct, Set<ForecastProduct>> completedBefore = {};
+  final Set<ForecastProduct> _done = {};
+
   RiverDataEntry? _forKey(RiverDataKey key) {
     requested.add(key.product);
+    completedBefore[key.product] = {..._done};
     final payload = byProduct[key.product];
     if (payload == null) return entry;
     return RiverDataEntry(
@@ -99,7 +115,15 @@ class _FakeRepo implements IRiverDataRepository {
   }
 
   @override
-  Future<RiverDataEntry?> read(RiverDataKey key) async => _forKey(key);
+  Future<RiverDataEntry?> read(RiverDataKey key) async {
+    final k = _forKey(key);
+    // Marked done only AFTER the delay: marking it synchronously would make
+    // every later read look like it waited, which is the fixture bug not the
+    // production behaviour.
+    if (delay != null) await Future<void>.delayed(delay!);
+    _done.add(key.product);
+    return k;
+  }
   @override
   Future<RiverDataEntry?> refresh(RiverDataKey key) async {
     refreshed.add(key.product);
@@ -136,9 +160,10 @@ FreshnessWindow _window() => FreshnessWindow(
 _FakeRepo _registerRepo(
   RiverDataEntry entry, {
   Map<ForecastProduct, Map<String, dynamic>> byProduct = const {},
+  Duration? delay,
 }) {
   final sl = GetIt.instance;
-  final repo = _FakeRepo(entry, byProduct: byProduct);
+  final repo = _FakeRepo(entry, byProduct: byProduct, delay: delay);
   sl.registerSingleton<IRiverDataRepository>(repo);
   sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   sl.registerSingleton<IForecastService>(_StubForecastService());
@@ -158,6 +183,43 @@ Future<void> _pumpLoaded(WidgetTester tester) async {
   await tester.pump(); // let _load()'s await resolve
   await tester.pump(const Duration(milliseconds: 50)); // rebuild post-setState
 }
+
+
+/// The three narrow payloads, shaped as production produces them.
+///
+/// Thresholds are chosen so the ×35.31 CMS→CFS conversion CHANGES the category:
+/// 30 CMS ≈ 1059 CFS, and the fixture flow is 640. Converted → below the 2-year
+/// threshold (Normal); unconverted → above it. Review found the previous
+/// fixture used 1200, which read Normal either way, so the category assertion
+/// could not tell whether the conversion happened at all.
+Map<ForecastProduct, Map<String, dynamic>> _narrowPayloads() => {
+      ForecastProduct.reachMetadata: {
+        'riverName': 'Test River',
+        'latitude': 40.0,
+        'longitude': -111.0,
+      },
+      ForecastProduct.analysisAssimilation: {
+        'reach': {
+          'reachId': '123',
+          'name': 'Test River',
+          'latitude': 40.0,
+          'longitude': -111.0,
+          'streamflow': ['short_range'],
+        },
+        'shortRange': <String, dynamic>{},
+      },
+      ForecastProduct.returnPeriods: {
+        'returnPeriods': [
+          {
+            'feature_id': '123',
+            'return_period_2': 30.0,
+            'return_period_5': 60.0,
+            'return_period_10': 90.0,
+            'return_period_25': 150.0,
+          },
+        ],
+      },
+    };
 
 void main() {
   tearDown(() => GetIt.instance.reset());
@@ -202,6 +264,10 @@ void main() {
     // Flow 1,000 sits below the 2-yr threshold -> Normal. The value lives in
     // the gauge's RichText ('1,000 ft³/s'), so match with findRichText.
     expect(find.text('1,000 ft³/s', findRichText: true), findsOneWidget);
+    // Discriminating: with thresholds converted (30 CMS -> ~1059 CFS) a flow
+    // of 640 is NORMAL; left in native CMS it would exceed the 25-year
+    // threshold and read as the top category. Review found the previous
+    // fixture (1200) read NORMAL either way, so this assertion was vacuous.
     expect(find.text('NORMAL'), findsOneWidget);
     // No coordinate -> id fallback name.
     expect(find.text('Stream 210230337'), findsOneWidget);
@@ -230,37 +296,7 @@ void main() {
         unit: 'CFS',
         payload: ReachSummaryPayload.encode(details),
       ),
-      byProduct: {
-        ForecastProduct.reachMetadata: {
-          'riverName': details.riverName,
-          // Deliberately NO formattedLocation: production's reachMetadata does
-          // not geocode, so a fixture supplying it would make this test pass
-          // over a path that is broken in the app. Review caught exactly that.
-          'latitude': 40.0,
-          'longitude': -111.0,
-        },
-        ForecastProduct.analysisAssimilation: {
-          'reach': {
-            'reachId': '123',
-            'name': 'Test River',
-            'latitude': 40.0,
-            'longitude': -111.0,
-            'streamflow': ['short_range'],
-          },
-          'shortRange': <String, dynamic>{},
-        },
-        ForecastProduct.returnPeriods: {
-          'returnPeriods': [
-            {
-              'feature_id': '123',
-              'return_period_2': 1200.0,
-              'return_period_5': 2400.0,
-              'return_period_10': 3600.0,
-              'return_period_25': 5800.0,
-            },
-          ],
-        },
-      },
+      byProduct: _narrowPayloads(),
     );
 
     await tester.pumpWidget(_wrap(const ReachForecastPage(
@@ -270,6 +306,7 @@ void main() {
     await _pumpLoaded(tester);
 
     expect(find.text('640 ft³/s', findRichText: true), findsOneWidget);
+
     expect(find.text('NORMAL'), findsOneWidget);
     expect(find.text('Test River'), findsOneWidget);
     // Arrives from the injected geocoder after first paint. Assertable again
@@ -345,6 +382,38 @@ void main() {
     // exact "See forecast repeats the wait" regression.
     expect(repo.refreshed, isEmpty,
         reason: 'the page must read through the cache the sheet warmed');
+  });
+
+  // REGRESSION: replacing the page's Future.wait with three sequential awaits
+  // left the whole suite green across two review rounds.
+  testWidgets('NWM: the three reads are concurrent, not serial', (tester) async {
+    final repo = _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '123',
+          product: ForecastProduct.reachSummary,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: const <String, dynamic>{},
+      ),
+      byProduct: _narrowPayloads(),
+      delay: const Duration(milliseconds: 40),
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '123',
+      source: ForecastSource.nwm,
+    )));
+    await _pumpLoaded(tester);
+    await tester.pump(const Duration(milliseconds: 200));
+
+    for (final p in repo.completedBefore.keys) {
+      expect(repo.completedBefore[p], isEmpty,
+          reason: '$p started only after another read finished — that is '
+              'serial loading wearing a parallel costume');
+    }
   });
 
 }

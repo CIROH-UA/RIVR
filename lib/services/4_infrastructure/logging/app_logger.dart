@@ -24,11 +24,16 @@ class AppLogger {
     }
   }
 
-  /// Timing/measurement lines — **always logs**, including release.
+  /// Timing/measurement lines.
   ///
-  /// [info] is `kDebugMode`-only, which silently defeats any measurement taken
-  /// on a release build. ADR 0011 Phase 0 needs warm/cold/degraded numbers from
-  /// a real device, so instrumentation uses this instead.
+  /// **Not release-visible, despite an earlier claim here that it was.** This
+  /// was introduced because [info] is `kDebugMode`-only and would be silent in
+  /// release — but `dart:developer.log` writes nothing without an attached VM
+  /// service either, which review proved with a product-mode AOT build. So
+  /// Phase 0's device capture can be taken in **debug or profile** (where a VM
+  /// service is attached), not from a shipped release build. That is sufficient
+  /// for the measurement; it is recorded here so nobody relies on the wrong
+  /// thing.
   static void metric(String tag, String message) {
     developer.log('METRIC: $message', name: tag, level: 800);
   }
