@@ -643,6 +643,13 @@ larger correctness win and a prerequisite.
   it.
 - **The backend becomes a dependency for viewing data**, not just for
   notifications. Hence the kill switch and the degrade-to-live-path rule.
+- **Phase 1 opened a divergence that Phase 3 closes.** The map sheet and the
+  forecast page now read the narrow products; `favorites_provider` still reads
+  `reachSummary`. Before Phase 1 all three shared one entry. They now bottom out
+  in the same derivation but sit in *different cache entries fetched at different
+  moments*, so the favourites card can legitimately disagree with the sheet — and
+  it still pays the 156 KB medium-range fetch. Documented in
+  `docs/internal/forecast-data-consistency-audit.md`; closed by Phase 3.
 - **A silently-failing store is the most dangerous outcome in this document**,
   because Phase 7 removes the timestamp that would let anyone notice. Monitoring
   ships with Phase 4 or the store does not ship.

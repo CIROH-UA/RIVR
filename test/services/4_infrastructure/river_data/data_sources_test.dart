@@ -228,6 +228,30 @@ void main() {
       }
     });
 
+    // ADR 0011 — geocoding stays off the critical path. An earlier version put
+    // a reverseGeocode inside this branch; because GeocodingService catches
+    // internally and never throws, nothing bounded it but a 30 s HTTP timeout,
+    // sitting in front of the one call this product exists to keep fast.
+    //
+    // REGRESSION: review reinstated that call and all 900 tests passed. The
+    // guard is timing-based because the geocode is a static that cannot be
+    // injected — a real network call cannot complete in a millisecond, so a
+    // fast return proves it was not made.
+    test('reachMetadata does not geocode — it stays the cheap call', () async {
+      final sw = Stopwatch()..start();
+      await nwm.fetch(const RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '23021904',
+        product: ForecastProduct.reachMetadata,
+      ));
+      sw.stop();
+
+      expect(sw.elapsedMilliseconds, lessThan(200),
+          reason: 'a real reverseGeocode cannot return this fast; anything '
+              'slower means a network call crept back onto this path');
+      expect(forecast.basicCalls, 1);
+    });
+
     test('validUntil throws for unsupported products', () {
       expect(
         () => nwm.validUntil(ForecastProduct.geoglowsForecast, DateTime.now()),

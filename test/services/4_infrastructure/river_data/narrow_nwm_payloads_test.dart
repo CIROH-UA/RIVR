@@ -19,7 +19,9 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
 
 const _cmsToCfs = 35.3147;
@@ -64,7 +66,114 @@ List<Map<String, dynamic>> _api({double twoYear = 100.0}) => [
       {'feature_id': '9962444', 'return_period_2': twoYear},
     ];
 
+
+/// Returns a fixed flow so the codec's *conversion* is the only variable.
+class _StubForecast implements IForecastService {
+  @override
+  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
+      _stubFlow;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+double? _stubFlow = 100.0;
+
+RiverDataEntry _flowEntry(String storedUnit) => RiverDataEntry(
+      key: const RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '9962444',
+        product: ForecastProduct.analysisAssimilation,
+      ),
+      window: FreshnessWindow(
+        fetchedAt: DateTime.utc(2026, 8, 22, 12),
+        validUntil: DateTime.utc(2026, 8, 22, 13),
+      ),
+      unit: storedUnit,
+      payload: {
+        'reach': {
+          'reachId': '9962444',
+          'name': 'Dead River',
+          'latitude': 40.2,
+          'longitude': -111.6,
+          'streamflow': ['short_range'],
+        },
+        'shortRange': <String, dynamic>{},
+      },
+    );
+
+void _currentFlowGuards() {
+  group('CurrentFlowPayload — the stored unit is converted to the reader\'s', () {
+    setUp(() => _stubFlow = 100.0);
+
+    // REGRESSION: deleting the conversion entirely from this codec left all 900
+    // tests passing. The display sites append `currentFlowUnit` as a LABEL
+    // without converting, so an unconverted value prints the wrong number under
+    // the right label — wrong and invisible, which is the whole reason ADR 0011
+    // makes unit conversion a first-class concern.
+    //
+    // This matters specifically because the cloud store will hold NATIVE units
+    // shared across users: a CMS-stored entry read by a CFS user must convert.
+    test('a CMS-stored entry read by a CFS user is converted', () {
+      final flow = CurrentFlowPayload.decode(
+        _flowEntry('CMS'),
+        _StubForecast(),
+        _RealUnit('CFS'),
+      );
+      expect(flow, isNotNull);
+      expect(flow!, closeTo(100.0 * _cmsToCfs, 0.01));
+      expect(flow, isNot(closeTo(100.0, 0.01)),
+          reason: 'returning the raw number means conversion was skipped');
+    });
+
+    test('a CFS-stored entry read by a CMS user is converted the other way', () {
+      final flow = CurrentFlowPayload.decode(
+        _flowEntry('CFS'),
+        _StubForecast(),
+        _RealUnit('CMS'),
+      );
+      expect(flow!, closeTo(100.0 / _cmsToCfs, 0.0001));
+    });
+
+    test('matching units pass through untouched', () {
+      final flow = CurrentFlowPayload.decode(
+        _flowEntry('CFS'),
+        _StubForecast(),
+        _RealUnit('CFS'),
+      );
+      expect(flow!, closeTo(100.0, 0.0001));
+    });
+
+    test('no flow available yields null rather than a converted zero', () {
+      _stubFlow = null;
+      expect(
+        CurrentFlowPayload.decode(
+          _flowEntry('CMS'), _StubForecast(), _RealUnit('CFS')),
+        isNull,
+      );
+    });
+
+    test('an unreadable payload degrades to null instead of throwing', () {
+      final broken = RiverDataEntry(
+        key: _flowEntry('CMS').key,
+        window: _flowEntry('CMS').window,
+        unit: 'CMS',
+        payload: const <String, dynamic>{},
+      );
+      expect(
+        () => CurrentFlowPayload.decode(broken, _StubForecast(), _RealUnit('CFS')),
+        returnsNormally,
+      );
+      expect(
+        CurrentFlowPayload.decode(broken, _StubForecast(), _RealUnit('CFS')),
+        isNull,
+      );
+    });
+  });
+}
+
 void main() {
+  _currentFlowGuards();
+
   group('ReturnPeriodPayload — thresholds are always native CMS', () {
     // REGRESSION: fails if the source converts from `entry.unit` instead of
     // from CMS. With entry.unit == 'CFS' and target CFS, that path is a no-op

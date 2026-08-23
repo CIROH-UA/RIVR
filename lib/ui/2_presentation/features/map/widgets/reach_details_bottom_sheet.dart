@@ -285,11 +285,10 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     ];
   }
 
-  // Return-period thresholds are deliberately NOT shown here. They would make
-  // the categories checkable, but ReachDetailsData documents them as native
-  // units while _currentFlow arrives already converted, and nothing else in the
-  // app reads them — so rendering them through _formatFlow would risk printing
-  // CMS values labelled CFS. Worth adding once that conversion is settled.
+  // Return-period thresholds are deliberately NOT shown here — a product
+  // decision, not a technical one. The unit hazard that used to justify this is
+  // gone: ReturnPeriodPayload.decode now converts from native CMS to the
+  // reader's unit, so they could be rendered through _formatFlow safely.
 
   Widget _buildErrorCard() {
     return Container(
@@ -507,7 +506,9 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       _notifyCategoryColor();
     }
 
-    // 1. Identity — cheapest call, so the sheet titles itself first. During the
+    // 1. Identity — measured the cheapest of the three (~0.5 KB), so it
+    //    usually lands first. Note "usually": all three are issued together
+    //    with no head start, so this is an expectation, not a guarantee. During the
     // 2026-08-22 outage this kept answering while every flow series 504'd.
     unawaited(repo.read(keyFor(ForecastProduct.reachMetadata)).then((entry) {
       logTiming('reachMetadata', entry != null);
