@@ -187,15 +187,19 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   }
 
   Widget _body() {
-    if (_loading) {
-      return const Center(child: CupertinoActivityIndicator(radius: 15));
-    }
+    // Error before loading. With the order reversed, a load that failed
+    // without clearing `_loading` renders a spinner forever and the failure is
+    // invisible — the same defect found on the forecast page, swept for here
+    // rather than waiting for it to be reported on this surface too.
     if (_error != null) {
       return _centeredMessage(
         CupertinoIcons.exclamationmark_triangle,
         _error!,
         CupertinoColors.systemOrange,
       );
+    }
+    if (_loading) {
+      return const Center(child: CupertinoActivityIndicator(radius: 15));
     }
     if (_favoriteCount == 0) {
       return _centeredMessage(

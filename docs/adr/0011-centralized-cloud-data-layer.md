@@ -253,6 +253,19 @@ reaches.** Cost scales with distinct favourited reaches × cadence, not with use
 against the current code is not a guard — this repo has produced several, and
 four consecutive Phase 1 reviews each found another.
 
+**Sweep the class, not the instance.** When a review reports a defect, the
+question is not "where was it reported" but "where else does this shape exist".
+Nine Phase 1 rounds found the *same* defect on three different surfaces in
+sequence — the geocode on the critical path was fixed on the sheet, then found
+on the NWM page, then on the GEOGLOWS page — because each fix addressed the
+report rather than the class. Jerson's framing: being told to clean under the
+bed does not mean the rest of the floor was not part of the job.
+
+Practically: after any fix, enumerate every surface that could exhibit the same
+shape and check each. The surfaces that display river data are the map detail
+sheet, the forecast page (NWM and GEOGLOWS branches), the Weekly Outlook page,
+the favourites card, and the two providers.
+
 **Scope guards where the failure lives.** Repeatedly a guard was written one or
 two layers above the thing it claimed to prevent and was structurally blind to
 it. If a fetch happens inside `ForecastService`, a fake `IForecastService` cannot

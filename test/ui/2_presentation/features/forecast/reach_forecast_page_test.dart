@@ -547,4 +547,69 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   });
 
+  // Same class as the sheet's dispose test, swept here rather than waiting for
+  // it to be reported on this surface. Popping the forecast page while its
+  // three reads are outstanding is ordinary navigation; a setState after
+  // dispose throws. This page has no dispose() — it relies on `mounted`, which
+  // is correct, and this is what proves it.
+  testWidgets('NWM: popping while reads are outstanding is safe', (tester) async {
+    _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '123',
+          product: ForecastProduct.reachSummary,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: const <String, dynamic>{},
+      ),
+      byProduct: _narrowPayloads(),
+      delay: const Duration(seconds: 5),
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '123',
+      source: ForecastSource.nwm,
+    )));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.pumpWidget(_wrap(const SizedBox.shrink()));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('GEOGLOWS: popping while the geocode is outstanding is safe',
+      (tester) async {
+    _registerRepo(
+      RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: '760021642',
+          product: ForecastProduct.geoglowsForecast,
+        ),
+        window: _window(),
+        unit: 'CMS',
+        payload: GeoglowsForecastPayload.encode(_geoglowsForecast()),
+      ),
+      geocoder: _FakeGeocoder(delay: const Duration(seconds: 5)),
+    );
+
+    await tester.pumpWidget(_wrap(const ReachForecastPage(
+      reachId: '760021642',
+      source: ForecastSource.geoglows,
+      lat: 12.1,
+      lon: 15.3,
+    )));
+    await _pumpLoaded(tester);
+
+    await tester.pumpWidget(_wrap(const SizedBox.shrink()));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(tester.takeException(), isNull);
+  });
+
 }
