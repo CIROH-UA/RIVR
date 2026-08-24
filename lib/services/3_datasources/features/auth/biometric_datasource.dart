@@ -20,7 +20,14 @@ class BiometricDatasource {
   })  : _localAuth = localAuth ?? LocalAuthentication(),
         _secureStorage = secureStorage ??
             const FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
+              aOptions: AndroidOptions(
+      // v11: everything is encrypted by default (the old
+      // encryptedSharedPreferences flag is gone). Existing users' stored
+      // values auto-migrate from the v9 cipher; migrateWithBackup makes that
+      // migration crash-resistant so a kill mid-upgrade cannot eat the
+      // biometric credentials.
+      migrateWithBackup: true,
+    ),
               iOptions: IOSOptions(
                 accessibility: KeychainAccessibility.first_unlock_this_device,
               ),
@@ -41,13 +48,13 @@ class BiometricDatasource {
 
   /// Prompt the user for biometric authentication.
   Future<bool> authenticate(String reason) async {
+    // local_auth 3.0: AuthenticationOptions is gone; options are top-level
+    // named params. stickyAuth became persistAcrossBackgrounding.
     return _localAuth
         .authenticate(
           localizedReason: reason,
-          options: const AuthenticationOptions(
-            stickyAuth: true,
-            biometricOnly: true,
-          ),
+          biometricOnly: true,
+          persistAcrossBackgrounding: true,
         )
         .timeout(const Duration(seconds: 30), onTimeout: () => false);
   }

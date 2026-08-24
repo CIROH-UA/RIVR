@@ -12,7 +12,14 @@ class CacheService implements ICacheService {
 
   // Secure storage for sensitive data
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(
+      // v11: everything is encrypted by default (the old
+      // encryptedSharedPreferences flag is gone). Existing users' stored
+      // values auto-migrate from the v9 cipher; migrateWithBackup makes that
+      // migration crash-resistant so a kill mid-upgrade cannot eat the
+      // biometric credentials.
+      migrateWithBackup: true,
+    ),
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock_this_device,
     ),

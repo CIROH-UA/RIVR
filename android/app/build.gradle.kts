@@ -28,7 +28,7 @@ plugins {
 
 android {
     namespace = "com.hydromap.rivr"
-    compileSdk = 36 // Updated for latest Firebase and notification support
+    compileSdk = 37 // flutter_secure_storage 11 + permission_handler 13 compile against 37
     ndkVersion = "28.2.13676358"
 
     compileOptions {

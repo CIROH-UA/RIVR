@@ -330,8 +330,9 @@ class FCMService implements IFCMService {
         requestBadgePermission: false,
         requestSoundPermission: false,
       );
+      // v22: positional settings became a required named parameter.
       await _localNotifications.initialize(
-        const InitializationSettings(android: androidInit, iOS: iosInit),
+        settings: const InitializationSettings(android: androidInit, iOS: iosInit),
         onDidReceiveNotificationResponse: _onLocalNotificationTap,
       );
 
@@ -379,11 +380,12 @@ class FCMService implements IFCMService {
 
     if (notification == null || !Platform.isAndroid) return;
 
+    // v22: all-named parameters.
     _localNotifications.show(
-      notification.hashCode,
-      notification.title,
-      notification.body,
-      const NotificationDetails(
+      id: notification.hashCode,
+      title: notification.title,
+      body: notification.body,
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _androidChannelId,
           _androidChannelName,
