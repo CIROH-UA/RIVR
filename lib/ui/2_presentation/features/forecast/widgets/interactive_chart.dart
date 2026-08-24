@@ -7,6 +7,7 @@ import 'package:syncfusion_flutter_charts/charts.dart';
 import 'dart:math' as math;
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
+import 'package:rivr/ui/1_state/shared/section_load_state.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -763,6 +764,13 @@ class _InteractiveChartState extends State<InteractiveChart> {
 
   @override
   Widget build(BuildContext context) {
+    // "Empty" and "hasn't arrived yet" are different answers. Checking only
+    // whether the data is empty made an in-flight fetch look exactly like a
+    // reach with no chart data at all (R2-7), so ask the section state first.
+    if (widget.reachProvider.getSectionState(widget.forecastType).isLoading) {
+      return _buildLoadingChart();
+    }
+
     // DON'T render chart until we have actual forecast data
     if (!_isInitialized ||
         (_chartData.isEmpty && _ensembleChartData.isEmpty) ||
@@ -913,6 +921,27 @@ class _InteractiveChartState extends State<InteractiveChart> {
             },
           ),
           _buildEnsembleLegend(),
+        ],
+      ),
+    );
+  }
+
+  /// Mirrors hydrograph_page's _buildLoadingState so the two chart surfaces
+  /// show the same thing while their data is in flight.
+  Widget _buildLoadingChart() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CupertinoActivityIndicator(radius: 20),
+          SizedBox(height: 16),
+          Text(
+            'Loading chart data...',
+            style: TextStyle(
+              fontSize: 16,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
         ],
       ),
     );
