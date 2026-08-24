@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:get_it/get_it.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
@@ -557,25 +558,14 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
   }
 
-  Color _getBadgeColor(String category) {
-    switch (category.toLowerCase()) {
-      case 'normal':
-        return CupertinoColors.systemBlue;
-      case 'action':
-        return CupertinoColors.systemYellow;
-      case 'moderate':
-        return CupertinoColors.systemOrange;
-      case 'major':
-        return CupertinoColors.systemRed;
-      case 'extreme':
-        return CupertinoColors.systemPurple;
-      case 'nodata':
-      case 'unknown':
-        return CupertinoColors.systemGrey;
-      default:
-        return CupertinoColors.systemGrey;
-    }
-  }
+  /// Badge fill for a flow category.
+  ///
+  /// Was a local switch over the same five names with its own colour
+  /// literals; resolves through the one palette now (ADR 0007). Names off
+  /// the ladder — 'nodata', 'unknown', anything unexpected — still come back
+  /// as [AppConstants.unknownCategoryColor], same grey as before.
+  Color _getBadgeColor(String category) =>
+      AppConstants.getFlowCategoryColor(category);
 
   Widget _buildBottomContent() {
     return Column(

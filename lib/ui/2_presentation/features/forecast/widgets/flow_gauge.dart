@@ -6,13 +6,14 @@
 // marker rides the arc at the current flow, and the big number + category
 // label sit inside the semicircle.
 //
-// Category colours come from the app's existing return-period palette
-// (see AppConstants.getFlowCategoryColor): systemBlue / systemYellow /
-// systemOrange / systemRed / systemPurple.
+// Category colours come from the one flood palette
+// (AppConstants.floodCategoryColors, ADR 0007) — indexed to match
+// kFloodCategories, never re-declared locally.
 
 import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/utils/flow_format.dart';
 
 class FlowGauge extends StatelessWidget {
@@ -33,13 +34,8 @@ class FlowGauge extends StatelessWidget {
   /// Display unit, e.g. "ft³/s" or "m³/s".
   final String unit;
 
-  static const List<Color> _dynZoneColors = [
-    CupertinoColors.systemBlue,
-    CupertinoColors.systemYellow,
-    CupertinoColors.systemOrange,
-    CupertinoColors.systemRed,
-    CupertinoColors.systemPurple,
-  ];
+  /// The one flood palette, index-aligned with [kFloodCategories].
+  static const List<Color> _zoneColors = AppConstants.floodCategoryColors;
 
   /// Ordered thresholds [t2, t5, t10, t25] or null when incomplete.
   List<double>? get _thresholds {
@@ -74,7 +70,7 @@ class FlowGauge extends StatelessWidget {
     final hasCategory = i >= 0;
 
     Color resolve(Color c) => CupertinoDynamicColor.resolve(c, context);
-    final zoneColors = _dynZoneColors.map(resolve).toList();
+    final zoneColors = _zoneColors.map(resolve).toList();
     final neutral = resolve(CupertinoColors.systemGrey3);
     final markerColor = hasCategory ? zoneColors[i] : neutral;
 
