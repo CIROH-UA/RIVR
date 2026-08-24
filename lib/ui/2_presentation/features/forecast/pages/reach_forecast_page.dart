@@ -41,6 +41,7 @@ import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payl
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
+import 'package:rivr/ui/1_state/shared/section_load_state.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/geoglows_hydrograph_page.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flow_gauge.dart';
@@ -803,12 +804,25 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       case ForecastRange.today:
         return HorizontalFlowTimeline(reachId: widget.reachId);
       case ForecastRange.tenDay:
-        return DailyFlowForecastWidget(
-          forecastResponse: nwm,
-          forecastType: 'medium_range',
-          allowMultipleExpanded: false,
-          maxHeight: 620,
-        );
+        {
+          // A non-null `nwm` only means the provider holds THIS reach — the
+          // medium-range products can still be in flight for another 4-5s.
+          // Rendering the daily widget then shows its "No Forecast Data" card,
+          // which is the SAME UI a reach with genuinely no forecast gets, so a
+          // slow load is indistinguishable from an empty river (R2-7).
+          //
+          // Same shape as LongRangeCalendar: loading first, and only once the
+          // section is done does an empty/error message mean anything.
+          final dailyState =
+              context.watch<ReachDataProvider>().getSectionState('medium_range');
+          if (!dailyState.isDone) return const _DetailLoading();
+          return DailyFlowForecastWidget(
+            forecastResponse: nwm,
+            forecastType: 'medium_range',
+            allowMultipleExpanded: false,
+            maxHeight: 620,
+          );
+        }
       case ForecastRange.thirtyDay:
         return LongRangeCalendar(reachId: widget.reachId);
       case ForecastRange.fifteenDay:
