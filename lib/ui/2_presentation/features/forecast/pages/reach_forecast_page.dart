@@ -32,6 +32,7 @@ import 'package:rivr/models/1_domain/features/forecast/reach_details_data.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
@@ -59,13 +60,9 @@ extension on ForecastRange {
       };
 }
 
-const List<Color> _zoneColors = [
-  CupertinoColors.systemBlue,
-  CupertinoColors.systemYellow,
-  CupertinoColors.systemOrange,
-  CupertinoColors.systemRed,
-  CupertinoColors.systemPurple,
-];
+/// The one flood palette, index-aligned with [kFloodCategories] (ADR 0007).
+/// Sourced, never copied — a local literal here is how the ladder drifts.
+const List<Color> _zoneColors = AppConstants.floodCategoryColors;
 class ReachForecastPage extends StatefulWidget {
   const ReachForecastPage({
     super.key,

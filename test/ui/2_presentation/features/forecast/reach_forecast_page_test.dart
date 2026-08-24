@@ -12,12 +12,14 @@ import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
+import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
@@ -1459,5 +1461,108 @@ void main() {
     expect(provider.loaded, contains('123'),
         reason: 'without it the stat-card peaks and the embedded hourly/daily '
             'widgets never get a forecast at all');
+  });
+
+  // ── The page's own flood palette (ADR 0007 follow-up) ──────────────────────
+  //
+  // The page keeps a file-private `_zoneColors` feeding four live call sites:
+  // the outlook accent, the GEOGLOWS chart zones, the stat card's peak, and
+  // the stream-map sheet. It used to be its own copy of the Cupertino system
+  // ladder, so it silently disagreed with the gauge sitting directly above it
+  // once the canonical palette moved off the system colours.
+  //
+  // The peak stat's subtitle is the one place that colour reaches a plain
+  // Text, so it is the handle used here. Asserted against the live constant,
+  // never a hex: a re-introduced local copy tracks the copy, so the next edit
+  // to AppConstants.floodCategoryColors fails this test and names the file.
+  group("the page's peak colour comes from the palette", () {
+    // Thresholds are the GEOGLOWS fixture's, already in the display unit.
+    // One peak per rung, chosen to sit unambiguously inside its band.
+    const rp = {2: 5000.0, 5: 8000.0, 10: 12000.0, 25: 20000.0};
+    const peakForRung = [1000.0, 6000.0, 9000.0, 15000.0, 25000.0];
+
+    Future<Color?> pumpAndReadPeakSub(WidgetTester tester, int rung) async {
+      // Self-contained so one test can walk every rung: _registerRepo would
+      // otherwise throw on the second call of a loop, since the suite's
+      // tearDown only resets between tests. Awaited — an unawaited reset()
+      // lands AFTER the re-registration and empties GetIt under the page.
+      await GetIt.instance.reset();
+      final flow = peakForRung[rung];
+      final forecast = GeoglowsForecast(
+        riverId: '210230337',
+        unit: 'ft³/s',
+        generatedAt: DateTime.utc(2026, 7, 12),
+        // Flat series anchored at "now": the upcoming peak is exactly `flow`,
+        // independent of when the test runs.
+        points: [
+          for (var i = 0; i < 15; i++)
+            GeoglowsForecastPoint(
+              validTime: DateTime.now().toUtc().add(Duration(days: i)),
+              median: flow,
+              lower: flow * 0.9,
+              upper: flow * 1.1,
+            ),
+        ],
+        returnPeriods: rp,
+      );
+      _registerRepo(RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.geoglows,
+          reachId: '210230337',
+          product: ForecastProduct.geoglowsForecast,
+        ),
+        window: _window(),
+        unit: 'CFS',
+        payload: GeoglowsForecastPayload.encode(forecast),
+      ));
+
+      await tester.pumpWidget(_wrap(ReachForecastPage(
+        // Distinct key per rung. Without it the element is reused across loop
+        // iterations — same widget type, same (absent) key — so initState
+        // never re-runs and the page keeps the PREVIOUS rung's forecast. The
+        // loop then reads a stale colour and still passes.
+        key: ValueKey('rung-$rung'),
+        reachId: '210230337',
+        source: ForecastSource.geoglows,
+      )));
+      await _pumpLoaded(tester);
+
+      final name = kFloodCategories[rung];
+      final sub = find.text(name);
+      expect(sub, findsOneWidget,
+          reason: 'the peak stat should read "$name" for a peak of $flow '
+              'against $rp');
+      return tester.widget<Text>(sub).style?.color;
+    }
+
+    for (var rung = 0; rung < kFloodCategories.length; rung++) {
+      testWidgets('${kFloodCategories[rung]} peak uses floodCategoryColors',
+          (tester) async {
+        expect(
+          await pumpAndReadPeakSub(tester, rung),
+          AppConstants.floodCategoryColors[rung],
+          reason: 'the stat card is not reading rung $rung from the palette — '
+              'check for a re-introduced _zoneColors literal in '
+              'reach_forecast_page.dart',
+        );
+      });
+    }
+
+    // The specific regression: _zoneColors was the Cupertino system ladder.
+    testWidgets('no rung falls back to a Cupertino system colour',
+        (tester) async {
+      const oldCopy = [
+        CupertinoColors.systemBlue,
+        CupertinoColors.systemYellow,
+        CupertinoColors.systemOrange,
+        CupertinoColors.systemRed,
+        CupertinoColors.systemPurple,
+      ];
+      for (var rung = 0; rung < kFloodCategories.length; rung++) {
+        expect(await pumpAndReadPeakSub(tester, rung), isNot(oldCopy[rung]),
+            reason: '${kFloodCategories[rung]} rendered the pre-ADR-0007 '
+                'system colour — the local copy is back');
+      }
+    });
   });
 }
