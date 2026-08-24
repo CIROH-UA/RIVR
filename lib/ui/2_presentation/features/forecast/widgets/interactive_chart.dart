@@ -843,7 +843,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
               ),
               axisLabelFormatter: (AxisLabelRenderDetails details) {
                 return ChartAxisLabel(
-                  FlowFormat.compact(details.value.toDouble()),
+                  FlowFormat.grouped(details.value.toDouble()),
                   TextStyle(
                     fontSize: 11,
                     color: CupertinoColors.secondaryLabel.resolveFrom(context),
