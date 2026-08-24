@@ -55,7 +55,7 @@ interface AlertCheckResult {
   errors: number;
 }
 
-interface AlertData {
+export interface AlertData {
   forecastFlow: number;
   threshold: number;
   returnPeriod: string;
@@ -393,7 +393,7 @@ async function checkUserRivers(
  * Evaluate whether a reach's forecast exceeds return period thresholds.
  * Pure function — no API calls, uses pre-fetched data.
  */
-function evaluateAlert(
+export function evaluateAlert(
   reachId: string,
   reachData: ReachData,
   userFlowUnit: "cfs" | "cms"
@@ -433,17 +433,24 @@ function evaluateAlert(
         ([period, threshold]) => ({
           period,
           threshold_CMS: Math.round(threshold * 100) / 100,
-          exceeds: forecastCms > (threshold / SCALE_FACTOR),
+          exceeds: forecastCms >= (threshold / SCALE_FACTOR),
         })),
     });
 
   // Find HIGHEST exceeded threshold
   let highestExceededAlert: AlertData | null = null;
 
-  for (const [returnPeriod, thresholdCms] of Object.entries(thresholds)) {
+  // Ascending by recurrence year, so the LAST match really is the highest.
+  // Keys are "2-year"/"25-year" — non-integer strings, so Object.entries would
+  // otherwise iterate in Firestore field order and a shuffled document could
+  // report the lowest exceeded threshold as the winner.
+  const byYearAscending = Object.entries(thresholds)
+    .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10));
+
+  for (const [returnPeriod, thresholdCms] of byYearAscending) {
     const scaledThreshold = thresholdCms / SCALE_FACTOR;
 
-    if (forecastCms > scaledThreshold) {
+    if (forecastCms >= scaledThreshold) {
       const displayForecast = userFlowUnit === "cfs" ?
         maxForecastFlow :
         forecastCms;
