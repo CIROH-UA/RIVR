@@ -2,38 +2,25 @@
 
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
-import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 import 'package:rivr/services/1_contracts/features/favorites/i_favorites_repository.dart';
 
 /// Coordinator that wraps favorites operations with [ServiceResult] error
-/// handling. Aggregates five data sources: [IFavoritesService],
-/// [IForecastService], [IReachCacheService], [IFlowUnitPreferenceService],
-/// and [INoaaApiService].
+/// handling. Wraps [IFavoritesService] with [IFlowUnitPreferenceService] for
+/// unit-tagged persistence — the flow-data paths that once aggregated three
+/// more services were deleted in ADR 0011 Phase 3 (dormant behind a use case
+/// nothing resolved).
 class FavoritesRepositoryImpl implements IFavoritesRepository {
   final IFavoritesService _favoritesService;
-  final IForecastService _forecastService;
-  final IReachCacheService _cacheService;
   final IFlowUnitPreferenceService _unitService;
-  final INoaaApiService _apiService;
 
   const FavoritesRepositoryImpl({
     required IFavoritesService favoritesService,
-    required IForecastService forecastService,
-    required IReachCacheService cacheService,
     required IFlowUnitPreferenceService unitService,
-    required INoaaApiService apiService,
   })  : _favoritesService = favoritesService,
-        _forecastService = forecastService,
-        _cacheService = cacheService,
-        _unitService = unitService,
-        _apiService = apiService;
+        _unitService = unitService;
 
   @override
   Future<ServiceResult<List<FavoriteRiver>>> loadFavorites() async {
@@ -116,73 +103,7 @@ class FavoritesRepositoryImpl implements IFavoritesRepository {
     }
   }
 
-  /// Loads current flow data; falls back to cached return periods when
-  /// the forecast response doesn't include them.
-  @override
-  Future<ServiceResult<ForecastResponse>> getFlowData(String reachId) async {
-    try {
-      final forecast = await _forecastService.loadCurrentFlowOnly(reachId);
-
-      // If return periods already present in forecast, we're done
-      if (forecast.reach.hasReturnPeriods) {
-        return ServiceResult.success(forecast);
-      }
-
-      // Check cache for return periods
-      final cached = await _cacheService.get(reachId);
-      if (cached?.hasReturnPeriods == true) {
-        final merged = forecast.reach.mergeWith(cached!);
-        return ServiceResult.success(ForecastResponse(
-          reach: merged,
-          analysisAssimilation: forecast.analysisAssimilation,
-          shortRange: forecast.shortRange,
-          mediumRange: forecast.mediumRange,
-          longRange: forecast.longRange,
-          mediumRangeBlend: forecast.mediumRangeBlend,
-        ));
-      }
-
-      // Fetch return periods fresh and cache them
-      final returnPeriods = await _apiService.fetchReturnPeriods(reachId);
-      if (returnPeriods.isNotEmpty) {
-        final returnPeriodData =
-            ReachDataDto.fromReturnPeriodApi(returnPeriods).toEntity();
-        if (cached != null) {
-          await _cacheService.store(cached.mergeWith(returnPeriodData));
-        }
-        final merged = forecast.reach.mergeWith(returnPeriodData);
-        return ServiceResult.success(ForecastResponse(
-          reach: merged,
-          analysisAssimilation: forecast.analysisAssimilation,
-          shortRange: forecast.shortRange,
-          mediumRange: forecast.mediumRange,
-          longRange: forecast.longRange,
-          mediumRangeBlend: forecast.mediumRangeBlend,
-        ));
-      }
-
-      return ServiceResult.success(forecast);
-    } catch (e) {
-      return ServiceResult.failure(
-        ServiceException.fromError(e, context: 'getFlowData'),
-      );
-    }
   }
-
-  @override
-  Future<ServiceResult<ForecastResponse>> refreshFlowData(
-    String reachId,
-  ) async {
-    try {
-      final forecast = await _forecastService.refreshReachData(reachId);
-      return ServiceResult.success(forecast);
-    } catch (e) {
-      return ServiceResult.failure(
-        ServiceException.fromError(e, context: 'refreshFlowData'),
-      );
-    }
-  }
-}
 
 // Expose unit service for providers that still need it directly
 // (kept for DI completeness — not a repository method)

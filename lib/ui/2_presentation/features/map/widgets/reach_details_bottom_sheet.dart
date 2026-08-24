@@ -17,7 +17,6 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_reposit
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
@@ -91,7 +90,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// still live here and on both forecast-page branches.
   late final IRiverDataRepository _repo;
   late final IFlowUnitPreferenceService _unitService;
-  late final IForecastService _forecastService;
   late final IGeocodingService _geocoder;
 
   @override
@@ -99,7 +97,6 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     super.initState();
     _repo = GetIt.I<IRiverDataRepository>();
     _unitService = GetIt.I<IFlowUnitPreferenceService>();
-    _forecastService = GetIt.I<IForecastService>();
     _geocoder = GetIt.I<IGeocodingService>();
     _loadDataProgressively();
   }
@@ -577,11 +574,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
         repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
       logTiming('analysisAssimilation', entry != null);
       if (!mounted || entry == null) return;
-      final flow = CurrentFlowPayload.decode(
-        entry,
-        _forecastService,
-        unitService,
-      );
+      final flow = CurrentFlowPayload.decode(entry, unitService);
       if (flow == null) {
         // Upstream answered but carried no usable value. That is a failure of
         // this product, not a success — without this it is never named in the

@@ -66,7 +66,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
   }
 
   // REMOVED: _convertFlowToCurrentUnit method - no longer needed!
-  // The NoaaApiService already converts all forecast data to preferred units
+  // Forecast data is already converted to preferred units at the API layer
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +83,7 @@ class _CurrentFlowStatusCardState extends State<CurrentFlowStatusCard>
           return _buildEmptyCard();
         }
 
-        // FIXED: Get flow data that's already converted by NoaaApiService
+        // FIXED: Get flow data that's already converted at the API layer
         final currentFlow = reachProvider
             .getCurrentFlow(); // Already in preferred unit!
         final reach = reachProvider.currentReach;

@@ -10,14 +10,13 @@ import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
-import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 
 /// [IRiverDataSource] for the NOAA National Water Model (US). A thin adapter
-/// over the existing NWM stack: raw forecast products map to [INoaaApiService]
-/// calls, while the composite `reachSummary` (current flow + name + category)
-/// delegates to [IForecastService] to reuse its phased loading + classification
-/// rather than re-deriving it. Payloads are tagged with the unit they were
-/// fetched in (the repository converts at read).
+/// over the NWM stack: each raw forecast product maps to one [INoaaApiService]
+/// call, and `reachMetadata` goes through [IForecastService.loadBasicReachInfo]
+/// for its reach-info cache. The composite `reachSummary` bundle was deleted in
+/// Phase 3 — this source rejects it. Payloads are tagged with the unit they
+/// were fetched in (consumers convert at decode).
 class NwmDataSource implements IRiverDataSource {
   NwmDataSource({
     required INoaaApiService api,
@@ -51,7 +50,6 @@ class NwmDataSource implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => const {
     ForecastProduct.analysisAssimilation,
-    ForecastProduct.reachSummary,
     ForecastProduct.reachMetadata,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
@@ -63,7 +61,6 @@ class NwmDataSource implements IRiverDataSource {
   DateTime validUntil(ForecastProduct product, DateTime now) {
     switch (product) {
       case ForecastProduct.analysisAssimilation:
-      case ForecastProduct.reachSummary:
       case ForecastProduct.shortRange:
         // Hourly (driven by current flow).
         return PublishSchedule.nextTopOfHour(now).add(_skew);
@@ -79,6 +76,7 @@ class NwmDataSource implements IRiverDataSource {
       case ForecastProduct.mediumRangeBlend:
       case ForecastProduct.geoglowsForecast:
       case ForecastProduct.geoglowsEnsemble:
+      case ForecastProduct.reachSummary: // deleted in Phase 3
         throw ArgumentError('NWM does not support $product');
     }
   }
@@ -114,20 +112,6 @@ class NwmDataSource implements IRiverDataSource {
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     final unit = _unitService.currentFlowUnit;
     switch (key.product) {
-      case ForecastProduct.reachSummary:
-        // Reuse ForecastService's phased load + classification.
-        final details = await _forecastService.loadReachDetailsData(
-          key.reachId,
-        );
-        return SourceFetchResult(
-          payload: ReachSummaryPayload.encode(details),
-          unit: unit,
-          // No runId, DECLARED (ADR 0011 guard 1's exception list): the run
-          // identity is dropped at the IForecastService seam —
-          // ReachDetailsData carries no referenceTime. This is the legacy
-          // bundle the favourites path still reads; Phase 3 deletes it, so
-          // the run is not threaded through a dying seam.
-        );
       case ForecastProduct.reachMetadata:
         // The cheap half of the old reachSummary: no flow data, no forecast
         // series. Lets a surface title itself in isolation.
@@ -195,6 +179,10 @@ class NwmDataSource implements IRiverDataSource {
       case ForecastProduct.mediumRangeBlend:
       case ForecastProduct.geoglowsForecast:
       case ForecastProduct.geoglowsEnsemble:
+      case ForecastProduct.reachSummary:
+        // reachSummary DELETED in Phase 3: the bundle cost a 156 KB
+        // medium-range fetch per favourites refresh and split current flow
+        // across two cache entries. Every ex-reader is on the narrow products.
         throw ArgumentError('NWM does not support ${key.product}');
     }
   }

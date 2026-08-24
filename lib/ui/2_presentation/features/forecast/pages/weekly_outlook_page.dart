@@ -7,11 +7,7 @@ import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/forecast/weekly_outlook_row.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
-import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
-import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
@@ -75,12 +71,9 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   @override
   void initState() {
     super.initState();
-    _service = WeeklyOutlookService(
-      forecastService: GetIt.I<IForecastService>(),
-      riverData: GetIt.I<IRiverDataRepository>(),
-      unitService: GetIt.I<IFlowUnitPreferenceService>(),
-      geocoder: GetIt.I<IGeocodingService>(),
-    );
+    // Constructed by DI (Phase 3): the page must not assemble the service's
+    // dependency graph — that pulled the fetch contract into lib/ui.
+    _service = GetIt.I<WeeklyOutlookService>();
     _settingsService = GetIt.I<IUserSettingsService>();
     final provider = context.read<FavoritesProvider>();
     _favoritesProvider = provider;

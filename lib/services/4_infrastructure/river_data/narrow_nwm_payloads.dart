@@ -2,8 +2,8 @@
 
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart';
+import 'package:rivr/services/4_infrastructure/forecast/forecast_values.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
 /// Read-side codecs for the two narrow NWM products the map detail sheet reads
@@ -26,7 +26,6 @@ class CurrentFlowPayload {
   /// it was stored in to the user's current preference.
   static double? decode(
     RiverDataEntry entry,
-    IForecastService forecastService,
     IFlowUnitPreferenceService unitService,
   ) {
     // `fromApiResponse` throws on a payload it cannot read — an empty body, a
@@ -36,7 +35,11 @@ class CurrentFlowPayload {
     double? flow;
     try {
       final response = ForecastResponseDto.fromApiResponse(entry.payload);
-      flow = forecastService.getCurrentFlow(response);
+      // ForecastValues is the ONE implementation of "what is the current
+      // flow" (ADR 0002 / decision 13); ForecastService delegates to it too.
+      // Taking it directly is what lets lib/ui decode without depending on
+      // the fetch layer (Phase 3 guard 1).
+      flow = ForecastValues.currentFlow(response);
     } catch (e) {
       // Logged, not swallowed: a decode bug and "upstream had no data" look
       // identical on screen, and review found exactly that hiding in a test

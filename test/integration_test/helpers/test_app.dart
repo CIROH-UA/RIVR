@@ -24,7 +24,6 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'dart:io';
@@ -44,13 +43,6 @@ import 'package:rivr/models/2_usecases/features/favorites/initialize_favorites_u
 import 'package:rivr/models/2_usecases/features/favorites/add_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/remove_favorite_usecase.dart';
 import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usecase.dart';
-import 'package:rivr/models/2_usecases/features/favorites/get_favorite_flow_usecase.dart';
-import 'package:rivr/services/2_coordinators/features/forecast/forecast_repository_impl.dart';
-import 'package:rivr/services/1_contracts/features/forecast/i_forecast_repository.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_overview_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_supplementary_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_complete_forecast_usecase.dart';
 import 'package:rivr/services/2_coordinators/features/auth/auth_repository_impl.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/2_coordinators/features/settings/settings_repository_impl.dart';
@@ -80,7 +72,6 @@ class TestServices {
   final MockUserSettingsService userSettings;
   final MockBackgroundImageService backgroundImage;
   final MockFlowUnitPreferenceService flowUnit;
-  final MockForecastCacheService forecastCache;
 
   TestServices({
     MockAuthService? auth,
@@ -93,7 +84,6 @@ class TestServices {
     MockUserSettingsService? userSettings,
     MockBackgroundImageService? backgroundImage,
     MockFlowUnitPreferenceService? flowUnit,
-    MockForecastCacheService? forecastCache,
   })  : auth = auth ?? MockAuthService(),
         forecast = forecast ?? MockForecastService(),
         noaaApi = noaaApi ?? MockNoaaApiService(),
@@ -103,8 +93,7 @@ class TestServices {
         reachCache = reachCache ?? MockReachCacheService(),
         userSettings = userSettings ?? MockUserSettingsService(),
         backgroundImage = backgroundImage ?? MockBackgroundImageService(),
-        flowUnit = flowUnit ?? MockFlowUnitPreferenceService(),
-        forecastCache = forecastCache ?? MockForecastCacheService() {
+        flowUnit = flowUnit ?? MockFlowUnitPreferenceService() {
     // Let the FCM mock persist the notifications flag to user settings on
     // enable/disable, mirroring the real service's Firestore write.
     this.fcm.userSettings = this.userSettings;
@@ -123,30 +112,19 @@ class TestServices {
     sl.registerSingleton<IUserSettingsService>(userSettings);
     sl.registerSingleton<IBackgroundImageService>(backgroundImage);
     sl.registerSingleton<IFlowUnitPreferenceService>(flowUnit);
-    sl.registerSingleton<IForecastCacheService>(forecastCache);
 
     // Forecast repository + use cases (needed by ReachDataProvider)
-    final forecastRepo = ForecastRepositoryImpl(forecastService: forecast);
-    sl.registerSingleton<IForecastRepository>(forecastRepo);
-    sl.registerFactory(() => LoadForecastOverviewUseCase(forecastRepo));
-    sl.registerFactory(() => LoadForecastSupplementaryUseCase(forecastRepo));
-    sl.registerFactory(() => LoadSpecificForecastUseCase(forecastRepo));
-    sl.registerFactory(() => LoadCompleteForecastUseCase(forecastRepo));
 
     // Favorites repository + use cases (needed by FavoritesProvider)
     final favoritesRepo = FavoritesRepositoryImpl(
       favoritesService: favorites,
-      forecastService: forecast,
-      cacheService: reachCache,
       unitService: flowUnit,
-      apiService: noaaApi,
     );
     sl.registerSingleton<IFavoritesRepository>(favoritesRepo);
     sl.registerFactory(() => InitializeFavoritesUseCase(favoritesRepo));
     sl.registerFactory(() => AddFavoriteUseCase(favoritesRepo));
     sl.registerFactory(() => RemoveFavoriteUseCase(favoritesRepo));
     sl.registerFactory(() => ReorderFavoritesUseCase(favoritesRepo));
-    sl.registerFactory(() => GetFavoriteFlowUseCase(favoritesRepo));
 
     // Auth repository + use cases (needed by AuthProvider)
     final authRepo = AuthRepositoryImpl(
@@ -286,8 +264,8 @@ FavoritesProvider createFavoritesProvider(TestServices services) {
     registry: SourceRegistry([
       NwmDataSource(
         api: services.noaaApi,
-        forecastService: services.forecast,
         unitService: services.flowUnit,
+        forecastService: services.forecast,
         // Never used by the products under test, and injected precisely so no
         // integration test can make a live Mapbox call.
         geocoder: const _NoopGeocoder(),
@@ -296,7 +274,6 @@ FavoritesProvider createFavoritesProvider(TestServices services) {
   );
   return FavoritesProvider(
     favoritesService: services.favorites,
-    forecastService: services.forecast,
     reachCacheService: services.reachCache,
     unitService: services.flowUnit,
     repository: repository,
@@ -304,7 +281,25 @@ FavoritesProvider createFavoritesProvider(TestServices services) {
 }
 
 ReachDataProvider createReachDataProvider(TestServices services) {
-  return ReachDataProvider(forecastService: services.forecast);
+  // Phase 3: the provider reads through the repository — the harness hands it
+  // the same in-memory graph the favourites provider uses.
+  return ReachDataProvider(
+    repository: RiverDataRepository(
+      cache: RiverDataCache(
+        cacheDirProvider: () =>
+            Directory.systemTemp.createTemp('rivr_it_reach_cache'),
+      ),
+      registry: SourceRegistry([
+        NwmDataSource(
+          api: services.noaaApi,
+          unitService: services.flowUnit,
+          forecastService: services.forecast,
+          geocoder: const _NoopGeocoder(),
+        ),
+      ]),
+    ),
+    unitService: services.flowUnit,
+  );
 }
 
 /// Builds a testable CupertinoApp with all providers and mock services.

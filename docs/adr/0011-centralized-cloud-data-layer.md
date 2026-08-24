@@ -1,6 +1,6 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phase 0 deployed and collecting. Phase 1 complete (gate passed, round 17), merged. Phase 2 complete (closed under the 3-round review cap), merged. Phases 3–9 specified, not implemented.
+**Status:** Phase 0 deployed and collecting. Phases 1–3 complete, merged. Phases 4–9 specified, not implemented.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
@@ -537,18 +537,11 @@ pin-persist and entry writes are serialised so a fire-and-forget sign-out
 cannot race the next account's pins. There is deliberately no time-based
 deletion — an old entry whose run has not advanced is still the current data.
 
-**Declared limit on guard 6 (unit change, zero refetches).** The guard holds on
-the `RiverDataRepository` path — the unit is not part of `RiverDataKey`, so a
-preference flip re-reads the identical entry with zero fetches and converts at
-decode; mutation-proven. The app's unit-flip handler
-(`favorites_page._updateFlowUnitAsync`) additionally calls the LEGACY
-`ForecastService.clearUnitDependentCaches()`, which wipes the old forecast disk
-cache and forces refetches on every surface still reading through
-`ForecastService` (hydrograph, interactive chart, `ReachDataProvider`). That
-cache and those surfaces are exactly what **Phase 3 deletes** — fixing the flip
-inside Phase 2 would mean investing in a code path whose removal is the next
-phase's whole job. Carried forward explicitly: Phase 3 guard 4 restates this
-property and owns making it true app-wide.
+**Guard 6 (unit change, zero refetches) — resolved app-wide by Phase 3.** The
+Phase 2 limit declared here (the legacy `ForecastService` cache wipe on a unit
+flip) is gone with the caches themselves: the flip is now
+`recomputeForUnitChange()` — zero cache clears, zero fetches, decode converts —
+and the property is mutation-proven at the provider (Phase 3 guard 4).
 
 **Build.** Retention keyed on **run supersession**, not wall-clock. LRU cap on
 non-favourites. **Favourites pinned**, never evicted. Entries record the run they
@@ -566,11 +559,10 @@ came from so supersession is decidable offline, and carry a schema version.
    section, GEOGLOWS generation date when the response carries one), so what a
    revalidate brought back is decidable from the stored data alone; Phase 5's
    store diffing builds on it. Declared exceptions, all null by design:
-   products with no run (returnPeriods, reachMetadata); a GEOGLOWS response
-   carrying no generation stamp of any kind (minting one from wall-clock would
-   make every refetch look like an update); and `reachSummary`, the legacy
-   bundle whose seam (`ReachDetailsData`) drops the reference time — Phase 3
-   deletes that product, so the run is not threaded through a dying seam.
+   products with no run (returnPeriods, reachMetadata), and a GEOGLOWS
+   response carrying no generation stamp of any kind (minting one from
+   wall-clock would make every refetch look like an update). (`reachSummary`
+   was a third exception until Phase 3 deleted the product outright.)
 2. Exceeding the cap evicts least-recently-used non-favourites and **never** a
    favourite — tested with the cap exceeded entirely by favourites.
 3. Cache size stabilises under simulated browsing of many reaches.
@@ -590,14 +582,70 @@ still draws instantly with the network off.
 
 ---
 
-## Phase 3 — One data path inside the app
+## Phase 3 — One data path inside the app ▶ COMPLETE (closed under the 3-round cap)
+
+**Closed 2026-08-23.** Round 1 found one live defect (the chart stuck on "No
+chart data available" when opened mid-load — fixed with a regression test) and
+two documentation lies (fixed by finishing the build: the favourites card and
+weekly outlook were rewired onto the narrow products and `reachSummary` +
+the old `ForecastService` deleted for real). Rounds 2–3 failed only on stale
+comments, all removed; every code fix held under mutation in both rounds.
+
+**Built.** `ReachDataProvider` rewired onto `IRiverDataRepository`: its session
+cache, private disk cache and hand-rolled SWR loop are deleted — the repository
+already does all three. The 179-line cache mixin is gone; display values are
+pure per-call derivations over the decoded response (`ForecastValues`, which
+`ForecastService` now delegates to, so each rule has ONE implementation).
+`ForecastService`'s three TTL caches and the whole legacy forecast disk cache
+(`ForecastCacheService` + contract) are deleted, along with the four forecast
+use cases, `IForecastRepository`, `ForecastRepositoryImpl` and three other
+zero-caller use cases — the provider was their only client. `lib/ui/` holds no
+reference to `IForecastService`/`NoaaApiService` (guard 1 is now a CI test, not
+a grep); the weekly outlook service is DI-assembled; `ReachDetailsData` moved to
+the domain layer; `CurrentFlowPayload.decode` no longer needs the fetch
+contract. A unit flip is `recomputeForUnitChange()` — zero cache clears, zero
+fetches; decode converts. Background revalidations reach open pages through the
+repository's watch listenables.
+
+**Review round 1 additions.** The favourites card and the weekly outlook now
+read the same narrow products as every other surface (the card read the
+`reachSummary` bundle; the outlook fetched NOAA directly per favourite per
+open — both could disagree with the sheet about the same river). With their
+last readers gone, `reachSummary`, its codec, `loadReachDetailsData` and the
+rest of the old `ForecastService` (three TTL caches, seven load methods, ten
+value helpers) are deleted — the service is now one method,
+`loadBasicReachInfo`, backing the `reachMetadata` product; `IForecastService`
+declares exactly that method. In total eight use-case files died with their
+repositories. Guard 3's bundle-fetches-medium canary died with the bundle; the
+source now REJECTS the product, and that rejection is the pinned test. One
+live defect fixed: `InteractiveChart` extracted its series once and never
+re-extracted, so a chart opened while medium range was in flight showed "No
+chart data available" forever — it now re-extracts when the provider's
+forecast identity changes (regression test drives the exact gated-read
+window).
+
+**Honest census, guard 6 (consumers).** The "ten consumers" of the old
+provider were an overcount: `chart_preview_widget` is fully commented out,
+`current_flow_status_card` and `forecast_category_grid` are mounted nowhere,
+`geoglows_forecast_provider` mentions the provider only in a doc comment. The
+live set — main.dart, reach_forecast_page, hydrograph_page, interactive_chart,
+horizontal_flow_timeline, long_range_calendar, daily_flow_forecast_widget,
+favorites_page — is exercised by the page/widget suites plus the new
+interactive-chart test; hydrograph_page and long_range_calendar have no
+dedicated widget test and are covered only via the page tests. Declared, not
+hidden.
+
+**Declared, Phase 5's problem:** `ReachCacheService` still stores reach info
+(name, coords, thresholds) for `loadBasicReachInfo`'s fast path — a second
+store for reach METADATA (never for flow series). It follows the metadata
+product into the repository when Phase 5 touches this seam.
 
 **Moved earlier in the rewrite.** Consistency is the goal, and this is what
 delivers it *between screens*. It is also a prerequisite for the store being
 useful: a shared cloud value is worthless if four widgets still fetch their own.
 
-Today the app is split — `favorites_provider` and `weekly_outlook_page` read
-*both* through the repository and directly.
+Before this phase the app was split — `favorites_provider` and
+`weekly_outlook_page` read *both* through the repository and directly.
 
 **Build.** Remove direct `ForecastService` / `NoaaApiService` use from
 `reach_data_provider`, `reach_data_cache_mixin`, `hydrograph_page`,
@@ -858,12 +906,13 @@ larger correctness win and a prerequisite.
   it.
 - **The backend becomes a dependency for viewing data**, not just for
   notifications. Hence the kill switch and the degrade-to-live-path rule.
-- **Phase 1 opened a divergence that Phase 3 closes.** The map sheet and the
-  forecast page now read the narrow products; `favorites_provider` still reads
-  `reachSummary`. Before Phase 1 all three shared one entry. They now bottom out
-  in the same derivation but sit in *different cache entries fetched at different
-  moments*, so the favourites card can legitimately disagree with the sheet — and
-  it still pays the 156 KB medium-range fetch. Closed by Phase 3.
+- **Phase 1 opened a divergence that Phase 3 closed.** The map sheet and the
+  forecast page read the narrow products from Phase 1; `favorites_provider`
+  kept reading `reachSummary` — same derivation, *different cache entries
+  fetched at different moments*, so the favourites card could legitimately
+  disagree with the sheet, and it paid the 156 KB medium-range fetch on every
+  refresh. Phase 3 put the card on the same narrow products and deleted the
+  bundle.
 
   *(An earlier draft cited `docs/internal/forecast-data-consistency-audit.md`
   as where this is recorded. `docs/internal/` is gitignored, so that file is not
@@ -900,6 +949,8 @@ larger correctness win and a prerequisite.
 ## What this does to the Weekly Outlook
 
 ADR 0010's 3–5 minute stall is closed by **Phases 3 and 5**, not by anything
-specific to that page. Its NWM rows call `loadCompleteReachData` — always
-network, all four products, for a page rendering one series. Once favourites read
-through the store, the page draws from documents it already holds.
+specific to that page. Its NWM rows used to call `loadCompleteReachData` —
+always network, all four products, for a page rendering one series; Phase 3
+rewired them onto repository reads of `mediumRange` alone (and deleted the
+method). Once favourites read through the store, the page draws from documents
+it already holds.

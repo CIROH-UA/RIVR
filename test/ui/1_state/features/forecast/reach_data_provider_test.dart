@@ -1,837 +1,474 @@
-import 'dart:async';
+// test/ui/1_state/features/forecast/reach_data_provider_test.dart
+//
+// ADR 0011 Phase 3: the provider reads through IRiverDataRepository — the ONE
+// data path — and holds no cache of its own. The old suite drove four use-case
+// fakes and two provider-owned caches, all of which are deleted; this one
+// drives a repository fake and asserts the phase's core properties:
+//
+//  * phased loading still works (overview awaited, sections parallel);
+//  * one fetch per key even with concurrent consumers (guard 3 is the
+//    repository's dedup; here we pin that the provider READS, never refreshes);
+//  * a unit flip re-renders from the same cached entries with zero fetches
+//    (guard 4);
+//  * background revalidations arriving through watch() merge into the page
+//    (guard 2's mechanism);
+//  * generation-based cancellation and error paths survive the rewire.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
-import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
-import 'package:rivr/models/1_domain/shared/forecast_chart_data.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_overview_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_supplementary_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_complete_forecast_usecase.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
-import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/1_state/shared/section_load_state.dart';
 
-import '../../../../helpers/fake_data.dart';
-
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
-
-/// Stub IForecastService that returns controllable values for methods
-/// called by the ReachDataCacheMixin.
-class StubForecastService implements IForecastService {
-  double? currentFlowReturn;
-  String flowCategoryReturn = 'Normal';
-  List<String> availableTypesReturn = ['short_range', 'medium_range'];
-  bool hasEnsembleReturn = false;
+/// Real CMS/CFS arithmetic and a MUTABLE preference, so the unit-flip guard
+/// can drive the actual conversion path.
+class _Unit implements IFlowUnitPreferenceService {
+  _Unit(this.current);
+  String current;
 
   @override
-  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
-      currentFlowReturn;
+  String get currentFlowUnit => current;
+  @override
+  String getDisplayUnit() => current == 'CFS' ? 'ft³/s' : 'm³/s';
+  @override
+  String normalizeUnit(String unit) {
+    final u = unit.toUpperCase();
+    if (u.contains('CFS') || u.contains('FT')) return 'CFS';
+    if (u.contains('CMS') || u.contains('M³') || u.contains('M3')) return 'CMS';
+    return u;
+  }
 
   @override
-  String getFlowCategory(ForecastResponse forecast, {String? preferredType}) =>
-      flowCategoryReturn;
+  double convertFlow(double v, String from, String to) {
+    final f = normalizeUnit(from);
+    final t = normalizeUnit(to);
+    if (f == t) return v;
+    if (f == 'CMS' && t == 'CFS') return v * 35.3147;
+    if (f == 'CFS' && t == 'CMS') return v / 35.3147;
+    return v;
+  }
 
   @override
-  List<String> getAvailableForecastTypes(ForecastResponse forecast) =>
-      availableTypesReturn;
-
-  @override
-  bool hasEnsembleData(ForecastResponse forecast) => hasEnsembleReturn;
-
-  @override
-  List<HourlyFlowDataPoint> getShortRangeHourlyData(
-          ForecastResponse forecast) =>
-      [];
-
-  @override
-  List<HourlyFlowDataPoint> getAllShortRangeHourlyData(
-          ForecastResponse forecast) =>
-      [];
-
-  @override
-  void clearUnitDependentCaches() {}
-
-  @override
-  void clearComputedCaches() {}
-
-  @override
-  Future<Map<String, dynamic>> getCacheStats() async => {};
-
-  // Unused by provider — stubs for interface compliance
-  @override
-  Future<ForecastResponse> loadOverviewData(String reachId) =>
-      throw UnimplementedError();
-  @override
-  Future<ForecastResponse> loadSupplementaryData(
-          String reachId, ForecastResponse existingData) =>
-      throw UnimplementedError();
-  @override
-  Future<ForecastResponse> loadCompleteReachData(String reachId) =>
-      throw UnimplementedError();
-  @override
-  Future<ForecastResponse> loadSpecificForecast(
-          String reachId, String forecastType) =>
-      throw UnimplementedError();
-  @override
-  Future<ForecastResponse> refreshReachData(String reachId) =>
-      throw UnimplementedError();
-  @override
-  Future<bool> isReachCached(String reachId) async => false;
-  @override
-  Future<ForecastResponse> loadCurrentFlowOnly(String reachId) =>
-      throw UnimplementedError();
-  @override
-  Future<ReachData> loadBasicReachInfo(String reachId) =>
-      throw UnimplementedError();
-  @override
-  ForecastResponse mergeCurrentFlowData(
-          ForecastResponse existing, ForecastResponse newFlowData) =>
-      throw UnimplementedError();
-  @override
-  Map<String, dynamic> getEnsembleSummary(
-          ForecastResponse forecast, String forecastType) =>
-      {};
-  @override
-  List<EnsembleStatPoint> getEnsembleStatistics(
-          ForecastResponse forecast, String forecastType) =>
-      [];
-  @override
-  bool hasMultipleEnsembleMembers(
-          ForecastResponse forecast, String forecastType) =>
-      false;
-  @override
-  Map<String, List<ChartData>> getEnsembleSeriesForChart(
-          ForecastResponse forecast, String forecastType) =>
-      {};
-  @override
-  List<ChartDataPoint> getEnsembleReferenceData(
-          ForecastResponse forecast, String forecastType) =>
-      [];
-  @override
-  Future<ReachDetailsData> loadReachDetailsData(String reachId) =>
-      throw UnimplementedError();
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
-/// A controllable stub for use cases. [handler] returns the result for each
-/// call, and [callLog] records every invocation so tests can assert ordering.
-class StubOverviewUseCase implements LoadForecastOverviewUseCase {
-  Future<ServiceResult<ForecastResponse>> Function(String reachId) handler;
-  final List<String> callLog = [];
+/// Repository fake: counts reads/refreshes per product, serves canned raw-NOAA
+/// payloads (the shape the real cache holds), and exposes its watch notifiers
+/// so a test can push a "background revalidation" into the provider.
+class _Repo implements IRiverDataRepository {
+  _Repo({this.failProducts = const {}, this.delay});
 
-  StubOverviewUseCase(this.handler);
+  final Set<ForecastProduct> failProducts;
+  final Duration? delay;
 
-  @override
-  Future<ServiceResult<ForecastResponse>> call(String reachId) {
-    callLog.add(reachId);
-    return handler(reachId);
-  }
+  final List<ForecastProduct> reads = [];
+  final List<ForecastProduct> refreshes = [];
+  final Map<String, ValueNotifier<RiverDataEntry?>> notifiers = {};
 
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
+  /// Flow value served for short_range — mutable so a revalidation can differ.
+  double shortRangeFlow = 640;
 
-class StubSpecificForecastUseCase implements LoadSpecificForecastUseCase {
-  Future<ServiceResult<ForecastResponse>> Function(
-      String reachId, String forecastType) handler;
-  final List<(String, String)> callLog = [];
-
-  StubSpecificForecastUseCase(this.handler);
-
-  @override
-  Future<ServiceResult<ForecastResponse>> call(
-    String reachId,
-    String forecastType,
-  ) {
-    callLog.add((reachId, forecastType));
-    return handler(reachId, forecastType);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class StubSupplementaryUseCase implements LoadForecastSupplementaryUseCase {
-  Future<ServiceResult<ForecastResponse>> Function(
-      String reachId, ForecastResponse existing) handler;
-  final List<String> callLog = [];
-
-  StubSupplementaryUseCase(this.handler);
-
-  @override
-  Future<ServiceResult<ForecastResponse>> call(
-    String reachId,
-    ForecastResponse existingData,
-  ) {
-    callLog.add(reachId);
-    return handler(reachId, existingData);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class StubCompleteUseCase implements LoadCompleteForecastUseCase {
-  @override
-  Future<ServiceResult<ForecastResponse>> call(String reachId) async =>
-      ServiceResult.success(_emptyForecast());
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-/// Controllable stub for IForecastCacheService.
-class StubForecastCacheService implements IForecastCacheService {
-  CacheResult<ForecastResponse>? getWithFreshnessReturn;
-  final List<String> getWithFreshnessLog = [];
-  final List<String> storeLog = [];
-  final List<String> clearReachLog = [];
-  int clearAllCount = 0;
-
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  bool get isReady => true;
-
-  @override
-  Future<CacheResult<ForecastResponse>?> getWithFreshness(
-      String reachId) async {
-    getWithFreshnessLog.add(reachId);
-    return getWithFreshnessReturn;
-  }
-
-  @override
-  Future<void> store(String reachId, ForecastResponse response) async {
-    storeLog.add(reachId);
-  }
-
-  @override
-  Future<void> clearReach(String reachId) async {
-    clearReachLog.add(reachId);
-  }
-
-  @override
-  Future<void> clearAll() async {
-    clearAllCount++;
-  }
-
-  @override
-  Future<Map<String, dynamic>> getCacheStats() async => {};
-}
-
-// ---------------------------------------------------------------------------
-// Test data helpers
-// ---------------------------------------------------------------------------
-
-ForecastResponse _emptyForecast({ReachData? reach}) => ForecastResponse(
-      reach: reach ?? createTestReachData(),
-      mediumRange: {},
-      longRange: {},
+  RiverDataEntry entryFor(ForecastProduct p) {
+    Map<String, dynamic> payload;
+    switch (p) {
+      case ForecastProduct.shortRange:
+        payload = {
+          'reach': {
+            'reachId': '123',
+            'name': 'Test River',
+            'latitude': 40.0,
+            'longitude': -111.0,
+            'streamflow': ['short_range'],
+          },
+          'shortRange': {
+            'series': {
+              'referenceTime': '2026-08-23T12:00:00',
+              'units': 'ft³/s',
+              // Anchored at "now" so the current-hour-forward filter always
+              // keeps them, whenever the test runs.
+              'data': [
+                {
+                  'validTime': DateTime.now()
+                      .toUtc()
+                      .add(const Duration(hours: 1))
+                      .toIso8601String(),
+                  'flow': shortRangeFlow,
+                },
+                {
+                  'validTime': DateTime.now()
+                      .toUtc()
+                      .add(const Duration(hours: 2))
+                      .toIso8601String(),
+                  'flow': shortRangeFlow + 5,
+                },
+              ],
+            },
+          },
+        };
+      case ForecastProduct.mediumRange:
+        payload = {
+          'reach': {
+            'reachId': '123',
+            'name': 'Test River',
+            'latitude': 40.0,
+            'longitude': -111.0,
+            'streamflow': ['short_range'],
+          },
+          'mediumRange': {
+            'mean': {
+              'referenceTime': '2026-08-23T06:00:00',
+              'units': 'ft³/s',
+              'data': [
+                {'validTime': '2026-08-24T00:00:00', 'flow': 700.0},
+              ],
+            },
+          },
+        };
+      case ForecastProduct.longRange:
+        payload = {
+          'reach': {
+            'reachId': '123',
+            'name': 'Test River',
+            'latitude': 40.0,
+            'longitude': -111.0,
+            'streamflow': ['short_range'],
+          },
+          'longRange': {
+            'member1': {
+              'referenceTime': '2026-08-23T00:00:00',
+              'units': 'ft³/s',
+              'data': [
+                {'validTime': '2026-08-26T00:00:00', 'flow': 800.0},
+              ],
+            },
+          },
+        };
+      case ForecastProduct.returnPeriods:
+        payload = {
+          'returnPeriods': [
+            {
+              'feature_id': '123',
+              'return_period_2': 1200.0,
+              'return_period_5': 2400.0,
+              'return_period_10': 3600.0,
+              'return_period_25': 5800.0,
+            },
+          ],
+        };
+      default:
+        payload = const {};
+    }
+    return RiverDataEntry(
+      key: RiverDataKey(
+          source: ForecastSource.nwm, reachId: '123', product: p),
+      window: FreshnessWindow(
+        fetchedAt: DateTime.now().toUtc(),
+        validUntil: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      ),
+      unit: 'CFS',
+      payload: payload,
     );
+  }
 
-ForecastResponse _forecastWithShortRange({ReachData? reach}) =>
-    ForecastResponse(
-      reach: reach ?? createTestReachData(),
-      shortRange: createTestForecastSeries(),
-      mediumRange: {},
-      longRange: {},
-    );
+  @override
+  Future<RiverDataEntry?> read(RiverDataKey key) async {
+    reads.add(key.product);
+    if (delay != null) await Future<void>.delayed(delay!);
+    if (failProducts.contains(key.product)) {
+      throw Exception('simulated failure for ${key.product}');
+    }
+    final entry = entryFor(key.product);
+    notifiers
+        .putIfAbsent(key.storageKey, () => ValueNotifier(null))
+        .value = entry;
+    return entry;
+  }
 
-ForecastResponse _forecastWithMediumRange({ReachData? reach}) =>
-    ForecastResponse(
-      reach: reach ?? createTestReachData(),
-      mediumRange: {
-        'mean': createTestForecastSeries(),
-      },
-      longRange: {},
-    );
+  @override
+  Future<RiverDataEntry?> refresh(RiverDataKey key) async {
+    refreshes.add(key.product);
+    return read(key);
+  }
 
-ForecastResponse _forecastWithLongRange({ReachData? reach}) => ForecastResponse(
-      reach: reach ?? createTestReachData(),
-      mediumRange: {},
-      longRange: {
-        'mean': createTestForecastSeries(),
-      },
-    );
+  @override
+  ValueListenable<RiverDataEntry?> watch(RiverDataKey key) =>
+      notifiers.putIfAbsent(key.storageKey, () => ValueNotifier(null));
 
-ForecastResponse _forecastWithReturnPeriods() => ForecastResponse(
-      reach: createTestReachDataWithReturnPeriods(),
-      mediumRange: {},
-      longRange: {},
-    );
+  /// Push a fresh entry through the watch channel — what a background
+  /// revalidation (from ANY surface) looks like to the provider.
+  void pushRevalidation(ForecastProduct p) {
+    final key = RiverDataKey(
+        source: ForecastSource.nwm, reachId: '123', product: p);
+    notifiers
+        .putIfAbsent(key.storageKey, () => ValueNotifier(null))
+        .value = entryFor(p);
+  }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+  @override
+  Future<void> ingest(RiverDataEntry e) async {}
+}
+
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 20));
 
 void main() {
-  late StubForecastService forecastService;
-  late StubForecastCacheService forecastCacheService;
-  late StubOverviewUseCase overviewUseCase;
-  late StubSpecificForecastUseCase specificUseCase;
-  late StubSupplementaryUseCase supplementaryUseCase;
-  late ReachDataProvider provider;
-
-  setUp(() {
-    forecastService = StubForecastService();
-    forecastService.currentFlowReturn = 150.0;
-    forecastCacheService = StubForecastCacheService();
-
-    overviewUseCase = StubOverviewUseCase(
-      (reachId) async => ServiceResult.success(_emptyForecast()),
-    );
-
-    specificUseCase = StubSpecificForecastUseCase(
-      (reachId, type) async => ServiceResult.success(_emptyForecast()),
-    );
-
-    supplementaryUseCase = StubSupplementaryUseCase(
-      (reachId, existing) async => ServiceResult.success(
-        ForecastResponse(
-          reach: createTestReachDataWithReturnPeriods(
-              reachId: existing.reach.reachId),
-          mediumRange: {},
-          longRange: {},
-        ),
-      ),
-    );
-
-    provider = ReachDataProvider(
-      forecastService: forecastService,
-      forecastCacheService: forecastCacheService,
-      loadOverview: overviewUseCase,
-      loadSpecificForecast: specificUseCase,
-      loadSupplementary: supplementaryUseCase,
-      loadComplete: StubCompleteUseCase(),
-    );
-  });
-
   group('loadAllData — overview first, then parallel', () {
-    test('returns true and sets overview data when overview succeeds',
+    test('returns true with reach + hourly data when short range lands',
         () async {
-      final result = await provider.loadAllData('123');
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      expect(result, isTrue);
-      expect(provider.hasOverviewData, isTrue);
-      expect(provider.currentReach?.reachId, '23021904');
-      expect(overviewUseCase.callLog, ['123']);
+      final ok = await p.loadAllData('123');
+      await _settle();
+
+      expect(ok, isTrue);
+      expect(p.currentReach?.riverName, 'Test River');
+      expect(p.hasHourlyForecast, isTrue);
+      expect(p.hasDailyForecast, isTrue);
+      expect(p.hasExtendedForecast, isTrue);
+      expect(p.hasSupplementaryData, isTrue,
+          reason: 'return periods merged onto the reach');
+      expect(p.loadingPhase, 'complete');
     });
 
-    test('returns false and sets error when overview fails', () async {
-      overviewUseCase.handler = (reachId) async =>
-          ServiceResult.failure(const ServiceException.network('Network error'));
+    test('reads the four products, never as a forced refresh', () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      final result = await provider.loadAllData('123');
+      await p.loadAllData('123');
+      await _settle();
 
-      expect(result, isFalse);
-      expect(provider.errorMessage, 'Network error');
-      expect(provider.hourlyState, SectionLoadState.error);
-      expect(provider.dailyState, SectionLoadState.error);
-      expect(provider.extendedState, SectionLoadState.error);
+      expect(
+          repo.reads,
+          containsAll([
+            ForecastProduct.shortRange,
+            ForecastProduct.mediumRange,
+            ForecastProduct.longRange,
+            ForecastProduct.returnPeriods,
+          ]));
+      expect(repo.refreshes, isEmpty,
+          reason: 'refresh() bypasses the shared cache — the provider must '
+              'read through it so it hits what the sheet warmed (guard 3)');
     });
 
-    test('fires all three section loads plus supplementary after overview',
-        () async {
-      // Use completers so we can verify all were fired
-      final shortCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final mediumCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final longCompleter = Completer<ServiceResult<ForecastResponse>>();
+    test('a failed overview is an error, not a crash', () async {
+      final repo = _Repo(failProducts: {ForecastProduct.shortRange});
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      specificUseCase.handler = (reachId, type) {
-        switch (type) {
-          case 'short_range':
-            return shortCompleter.future;
-          case 'medium_range':
-            return mediumCompleter.future;
-          case 'long_range':
-            return longCompleter.future;
-          default:
-            throw ArgumentError('Unexpected type: $type');
-        }
-      };
+      final ok = await p.loadAllData('123');
 
-      // loadAllData returns after overview; parallel loads are still in-flight
-      final result = await provider.loadAllData('123');
-      expect(result, isTrue);
-
-      // All section states should be loading
-      expect(provider.hourlyState, SectionLoadState.loading);
-      expect(provider.dailyState, SectionLoadState.loading);
-      expect(provider.extendedState, SectionLoadState.loading);
-
-      // Verify all three section types were requested
-      expect(specificUseCase.callLog, [
-        ('123', 'short_range'),
-        ('123', 'medium_range'),
-        ('123', 'long_range'),
-      ]);
-
-      // Complete them
-      shortCompleter.complete(
-          ServiceResult.success(_forecastWithShortRange()));
-      mediumCompleter.complete(
-          ServiceResult.success(_forecastWithMediumRange()));
-      longCompleter.complete(
-          ServiceResult.success(_forecastWithLongRange()));
-
-      // Let microtasks run
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-
-      expect(provider.hourlyState, SectionLoadState.loaded);
-      expect(provider.dailyState, SectionLoadState.loaded);
-      expect(provider.extendedState, SectionLoadState.loaded);
+      expect(ok, isFalse);
+      expect(p.errorMessage, isNotNull);
+      expect(p.loadingPhase, 'none');
     });
 
-    test('uses session cache on second call (fast path)', () async {
-      await provider.loadAllData('123');
-      // Let parallel loads complete
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
+    test('a failed section does not block the others', () async {
+      final repo = _Repo(failProducts: {ForecastProduct.mediumRange});
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      overviewUseCase.callLog.clear();
-      specificUseCase.callLog.clear();
+      final ok = await p.loadAllData('123');
+      await _settle();
 
-      final result = await provider.loadAllData('123');
-
-      expect(result, isTrue);
-      // Should NOT have called overview or specific again
-      expect(overviewUseCase.callLog, isEmpty);
-      expect(specificUseCase.callLog, isEmpty);
-      expect(provider.loadingPhase, 'complete');
+      expect(ok, isTrue);
+      expect(p.dailyState, SectionLoadState.error);
+      expect(p.hasExtendedForecast, isTrue,
+          reason: 'long range landed regardless of medium failing');
+      expect(p.hasSupplementaryData, isTrue);
     });
   });
 
-  group('parallel section loading — independent notifyListeners', () {
-    test('each section notifies independently as it resolves', () async {
-      final shortCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final mediumCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final longCompleter = Completer<ServiceResult<ForecastResponse>>();
+  group('the sections load in parallel, after the overview', () {
+    // REGRESSION (phase 3 mutation M5): serialising the section loads behind
+    // the overview await left the suite green — the exact 3-await-chain shape
+    // Phase 1 killed on the forecast page. loadAllData must RETURN when the
+    // overview lands, with the other three still in flight.
+    test('loadAllData returns while the other sections are still loading',
+        () async {
+      final repo = _Repo(delay: const Duration(milliseconds: 40));
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      specificUseCase.handler = (reachId, type) {
-        switch (type) {
-          case 'short_range':
-            return shortCompleter.future;
-          case 'medium_range':
-            return mediumCompleter.future;
-          case 'long_range':
-            return longCompleter.future;
-          default:
-            throw ArgumentError('Unexpected type: $type');
-        }
-      };
+      final ok = await p.loadAllData('123');
 
-      final notifications = <String>[];
-      provider.addListener(() {
-        // Record which sections are done at each notification
-        if (provider.hourlyState.isDone &&
-            !notifications.contains('short_range')) {
-          notifications.add('short_range');
-        }
-        if (provider.dailyState.isDone &&
-            !notifications.contains('medium_range')) {
-          notifications.add('medium_range');
-        }
-        if (provider.extendedState.isDone &&
-            !notifications.contains('long_range')) {
-          notifications.add('long_range');
-        }
-      });
+      expect(ok, isTrue);
+      expect(p.hasOverviewData, isTrue,
+          reason: 'the overview is what the await was for');
+      expect(p.dailyState.isLoading || p.extendedState.isLoading, isTrue,
+          reason: 'the remaining sections must be IN FLIGHT when loadAllData '
+              'returns — awaiting them serially is a 3× slower first paint');
 
-      await provider.loadAllData('123');
-
-      // Complete short range first
-      shortCompleter.complete(
-          ServiceResult.success(_forecastWithShortRange()));
-      await Future.delayed(Duration.zero);
-      expect(notifications, contains('short_range'));
-      expect(notifications, isNot(contains('medium_range')));
-
-      // Complete medium range
-      mediumCompleter.complete(
-          ServiceResult.success(_forecastWithMediumRange()));
-      await Future.delayed(Duration.zero);
-      expect(notifications, contains('medium_range'));
-
-      // Complete long range
-      longCompleter.complete(
-          ServiceResult.success(_forecastWithLongRange()));
-      await Future.delayed(Duration.zero);
-      expect(notifications, contains('long_range'));
-    });
-
-    test('section error does not block other sections', () async {
-      final shortCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final mediumCompleter = Completer<ServiceResult<ForecastResponse>>();
-      final longCompleter = Completer<ServiceResult<ForecastResponse>>();
-
-      specificUseCase.handler = (reachId, type) {
-        switch (type) {
-          case 'short_range':
-            return shortCompleter.future;
-          case 'medium_range':
-            return mediumCompleter.future;
-          case 'long_range':
-            return longCompleter.future;
-          default:
-            throw ArgumentError('Unexpected type: $type');
-        }
-      };
-
-      await provider.loadAllData('123');
-
-      // Short range fails
-      shortCompleter.complete(ServiceResult.failure(
-          const ServiceException.network('Timeout')));
-      await Future.delayed(Duration.zero);
-      expect(provider.hourlyState, SectionLoadState.error);
-
-      // Medium and long still succeed
-      mediumCompleter.complete(
-          ServiceResult.success(_forecastWithMediumRange()));
-      longCompleter.complete(
-          ServiceResult.success(_forecastWithLongRange()));
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-
-      expect(provider.dailyState, SectionLoadState.loaded);
-      expect(provider.extendedState, SectionLoadState.loaded);
-    });
-  });
-
-  group('current flow recalculation after each merge', () {
-    test('current flow recalculates when section merges in', () async {
-      final shortCompleter = Completer<ServiceResult<ForecastResponse>>();
-      specificUseCase.handler = (reachId, type) {
-        if (type == 'short_range') return shortCompleter.future;
-        return Future.value(ServiceResult.success(_emptyForecast()));
-      };
-
-      await provider.loadAllData('123');
-
-      // After overview, cache is populated — read current flow to prime cache
-      provider.getCurrentFlow();
-
-      // Complete short range — should recalculate
-      shortCompleter.complete(
-          ServiceResult.success(_forecastWithShortRange()));
-      await Future.delayed(Duration.zero);
-
-      // getCurrentFlow should return fresh value (cache was cleared and repopulated)
-      final flowAfter = provider.getCurrentFlow();
-      expect(flowAfter, isNotNull);
+      // Drain so the test ends clean.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
     });
   });
 
   group('generation-based cancellation', () {
-    test('stale parallel loads are discarded when clearCurrentReach is called',
+    test('clearCurrentReach discards in-flight section results', () async {
+      final repo = _Repo(delay: const Duration(milliseconds: 50));
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
+
+      final loading = p.loadAllData('123');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      p.clear();
+      await loading;
+      await _settle();
+
+      expect(p.currentForecast, isNull,
+          reason: 'results from a cleared generation must not resurrect');
+      expect(p.hasData, isFalse);
+    });
+  });
+
+  group('guard 4 — a unit flip refetches nothing', () {
+    test('flipping the unit converts the displayed flow with zero reads',
         () async {
-      final shortCompleter = Completer<ServiceResult<ForecastResponse>>();
+      final unit = _Unit('CFS');
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: unit);
 
-      specificUseCase.handler = (reachId, type) {
-        if (type == 'short_range') return shortCompleter.future;
-        return Future.value(ServiceResult.success(_emptyForecast()));
-      };
+      await p.loadAllData('123');
+      await _settle();
+      final before = p.getCurrentFlow();
+      expect(before, isNotNull);
+      final readsBefore = repo.reads.length;
 
-      await provider.loadAllData('123');
-      final genBefore = provider.loadingGeneration;
+      // The user flips the preference; the settings page notifies providers.
+      unit.current = 'CMS';
+      p.recomputeForUnitChange();
 
-      // Navigate away — clears reach and increments generation
-      provider.clearCurrentReach();
-      expect(provider.loadingGeneration, greaterThan(genBefore));
-
-      // Now the stale short range completes — should be ignored
-      shortCompleter.complete(
-          ServiceResult.success(_forecastWithShortRange()));
-      await Future.delayed(Duration.zero);
-
-      // Provider should NOT have short range data (it was cleared)
-      expect(provider.currentForecast, isNull);
-      expect(provider.hourlyState, SectionLoadState.idle);
+      expect(repo.reads.length, readsBefore,
+          reason: 'a unit flip must never fetch — the entries are cached and '
+              'decode converts (Phase 2 guard 6, app-wide as of Phase 3)');
+      expect(repo.refreshes, isEmpty);
+      expect(p.getCurrentFlow(), closeTo(before! / 35.3147, 0.01),
+          reason: 'same cached bytes, re-derived in the new unit');
     });
 
-    test('second loadAllData call invalidates first call', () async {
-      final firstShortCompleter =
-          Completer<ServiceResult<ForecastResponse>>();
-      var callCount = 0;
+    test('clearUnitDependentCaches is the same zero-fetch recompute',
+        () async {
+      final unit = _Unit('CFS');
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: unit);
 
-      specificUseCase.handler = (reachId, type) {
-        callCount++;
-        if (callCount <= 3) {
-          // First batch (3 section calls from first loadAllData)
-          if (type == 'short_range') return firstShortCompleter.future;
-          return Future.value(ServiceResult.success(_emptyForecast()));
-        }
-        // Second batch returns immediately
-        return Future.value(ServiceResult.success(_emptyForecast()));
-      };
+      await p.loadAllData('123');
+      await _settle();
+      final readsBefore = repo.reads.length;
 
-      // Start first load
-      final future1 = provider.loadAllData('123');
-      await future1;
+      unit.current = 'CMS';
+      p.clearUnitDependentCaches(); // the legacy name the unit-flip handler calls
 
-      // Start second load for different reach — increments generation
-      overviewUseCase.handler = (reachId) async => ServiceResult.success(
-          _emptyForecast(reach: createTestReachData(reachId: '456')));
-      final future2 = provider.loadAllData('456');
-      await future2;
-
-      // Complete the stale short range from first call
-      firstShortCompleter.complete(
-          ServiceResult.success(_forecastWithShortRange()));
-      await Future.delayed(Duration.zero);
-
-      // Provider should show reach 456, not 123's data
-      expect(provider.currentReach?.reachId, '456');
+      expect(repo.reads.length, readsBefore);
+      expect(repo.refreshes, isEmpty,
+          reason: 'the OLD implementation of this method wiped the forecast '
+              'disk cache and forced refetches on every surface — the exact '
+              'behaviour Phase 3 deletes');
     });
   });
 
-  group('all sections empty — graceful handling', () {
-    test('all empty sections result in empty states, no crash', () async {
-      // Overview returns basic data, all specific forecasts return empty
-      specificUseCase.handler = (reachId, type) async =>
-          ServiceResult.success(_emptyForecast());
+  group('guard 2 mechanism — revalidations merge through watch()', () {
+    test('a background revalidation updates the open page', () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      supplementaryUseCase.handler = (reachId, existing) async =>
-          ServiceResult.success(_emptyForecast());
+      await p.loadAllData('123');
+      await _settle();
+      expect(p.getCurrentFlow(), closeTo(640, 0.1),
+          reason: 'short-range value of the first load');
 
-      final result = await provider.loadAllData('123');
-      expect(result, isTrue); // Overview succeeded
+      // Some other surface (the sheet, a favourites refresh) revalidated the
+      // same key and the cache notified.
+      repo.shortRangeFlow = 900;
+      repo.pushRevalidation(ForecastProduct.shortRange);
+      await _settle();
 
-      // Let parallel loads complete
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
+      expect(p.getCurrentFlow(), closeTo(900, 0.1),
+          reason: 'the provider must follow the shared cache, not a private '
+              'copy — this is how every surface shows the same value');
+    });
 
-      expect(provider.hourlyState, SectionLoadState.empty);
-      expect(provider.dailyState, SectionLoadState.empty);
-      expect(provider.extendedState, SectionLoadState.empty);
-      expect(provider.hasOverviewData, isTrue);
+    test('a revalidation for a CLEARED reach does not resurrect it', () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
+
+      await p.loadAllData('123');
+      await _settle();
+      p.clear();
+
+      repo.pushRevalidation(ForecastProduct.shortRange);
+      await _settle();
+
+      expect(p.currentForecast, isNull);
     });
   });
 
-  group('supplementary data merge preserves forecast sections', () {
-    test('supplementary merge does not overwrite short range data', () async {
-      // Overview first
-      overviewUseCase.handler = (reachId) async =>
-          ServiceResult.success(_emptyForecast());
+  group('the merge preserves return periods across watch events', () {
+    // SAME-PASS item from review round 1: _mergeForecastData keeps the richer
+    // reach, so a revalidation landing AFTER the return-period merge must not
+    // strip the thresholds — mutating the merge to always take newData.reach
+    // survived the whole suite.
+    test('a late revalidation does not drop merged return periods', () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      // Short range returns data
-      specificUseCase.handler = (reachId, type) async {
-        if (type == 'short_range') {
-          return ServiceResult.success(_forecastWithShortRange());
-        }
-        return ServiceResult.success(_emptyForecast());
-      };
+      await p.loadAllData('123');
+      await _settle();
+      expect(p.hasSupplementaryData, isTrue,
+          reason: 'precondition: the thresholds have merged');
 
-      // Supplementary returns reach with return periods
-      supplementaryUseCase.handler = (reachId, existing) async =>
-          ServiceResult.success(_forecastWithReturnPeriods());
+      // A background revalidation of short range arrives through the watch —
+      // its decoded reach carries NO return periods.
+      repo.pushRevalidation(ForecastProduct.shortRange);
+      await _settle();
 
-      await provider.loadAllData('123');
-      // Let all parallel loads complete
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-
-      // Short range data should be preserved
-      expect(provider.hasHourlyForecast, isTrue);
-      // Return periods should be merged in
-      expect(provider.hasSupplementaryData, isTrue);
+      expect(p.hasSupplementaryData, isTrue,
+          reason: 'the merge must keep the reach that has the thresholds — '
+              'taking the newcomer wholesale silently kills every flood '
+              'category on the open page');
     });
   });
 
   group('comprehensiveRefresh', () {
-    test('clears caches and delegates to loadAllData', () async {
-      // Populate cache first
-      await provider.loadAllData('123');
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
+    test('forces a refetch of all four products through the one cache',
+        () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      expect(provider.sessionCache.containsKey('123'), isTrue);
+      await p.loadAllData('123');
+      await _settle();
 
-      // Refresh should clear cache and re-fetch
-      overviewUseCase.callLog.clear();
-      await provider.comprehensiveRefresh('123');
+      final ok = await p.comprehensiveRefresh('123');
+      await _settle();
 
-      // Overview should have been called again (cache was cleared)
-      expect(overviewUseCase.callLog, ['123']);
+      expect(ok, isTrue);
+      expect(
+          repo.refreshes,
+          containsAll([
+            ForecastProduct.shortRange,
+            ForecastProduct.mediumRange,
+            ForecastProduct.longRange,
+            ForecastProduct.returnPeriods,
+          ]),
+          reason: 'pull-to-refresh is the ONE place a forced fetch is right');
     });
   });
 
-  group('loadAllData sets phase to complete when all done', () {
-    test('phase transitions to complete after all sections resolve', () async {
-      await provider.loadAllData('123');
-      // Let parallel loads complete
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
+  group('display derivations (ex-mixin API, now pure)', () {
+    test('getCurrentFlow / getFlowCategory / types derive from the response',
+        () async {
+      final repo = _Repo();
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
 
-      expect(provider.loadingPhase, 'complete');
-    });
-  });
+      await p.loadAllData('123');
+      await _settle();
 
-  // -------------------------------------------------------------------------
-  // Phase 5: Stale-while-revalidate disk cache
-  // -------------------------------------------------------------------------
-
-  group('SWR — fresh disk cache', () {
-    test('serves immediately, no overview use case call', () async {
-      final cachedResponse = ForecastResponse(
-        reach: createTestReachData(reachId: '999'),
-        shortRange: createTestForecastSeries(),
-        mediumRange: {'mean': createTestForecastSeries()},
-        longRange: {'mean': createTestForecastSeries()},
-      );
-
-      forecastCacheService.getWithFreshnessReturn = CacheResult(
-        data: cachedResponse,
-        freshness: CacheFreshness.fresh,
-        cachedAt: DateTime.now(),
-      );
-
-      final result = await provider.loadAllData('999');
-
-      expect(result, isTrue);
-      expect(provider.currentReach?.reachId, '999');
-      expect(provider.hasHourlyForecast, isTrue);
-      expect(provider.loadingPhase, 'complete');
-      expect(provider.isShowingStaleData, isFalse);
-      expect(provider.isBackgroundRefreshing, isFalse);
-
-      // Overview use case should NOT have been called
-      expect(overviewUseCase.callLog, isEmpty);
-      expect(specificUseCase.callLog, isEmpty);
-    });
-  });
-
-  group('SWR — stale disk cache', () {
-    test('serves immediately and fires background refresh', () async {
-      final cachedResponse = ForecastResponse(
-        reach: createTestReachData(reachId: '999'),
-        shortRange: createTestForecastSeries(),
-        mediumRange: {'mean': createTestForecastSeries()},
-        longRange: {'mean': createTestForecastSeries()},
-      );
-
-      final cacheTime = DateTime.now().subtract(const Duration(minutes: 45));
-      forecastCacheService.getWithFreshnessReturn = CacheResult(
-        data: cachedResponse,
-        freshness: CacheFreshness.stale,
-        cachedAt: cacheTime,
-      );
-
-      final result = await provider.loadAllData('999');
-
-      expect(result, isTrue);
-      expect(provider.currentReach?.reachId, '999');
-      expect(provider.isShowingStaleData, isTrue);
-      expect(provider.isBackgroundRefreshing, isTrue);
-      expect(provider.cacheTimestamp, cacheTime);
-      expect(provider.cacheAgeDescription, isNotNull);
-
-      // Overview use case still not called (background uses specific + supplementary)
-      expect(overviewUseCase.callLog, isEmpty);
-
-      // Background refresh should have fired section loads
-      expect(specificUseCase.callLog, isNotEmpty);
-    });
-
-    test('background refresh completes → clears stale state', () async {
-      final cachedResponse = ForecastResponse(
-        reach: createTestReachData(reachId: '999'),
-        shortRange: createTestForecastSeries(),
-        mediumRange: {'mean': createTestForecastSeries()},
-        longRange: {'mean': createTestForecastSeries()},
-      );
-
-      forecastCacheService.getWithFreshnessReturn = CacheResult(
-        data: cachedResponse,
-        freshness: CacheFreshness.stale,
-        cachedAt: DateTime.now().subtract(const Duration(minutes: 45)),
-      );
-
-      // Specific use cases return immediately
-      specificUseCase.handler = (reachId, type) async =>
-          ServiceResult.success(_emptyForecast(
-              reach: createTestReachData(reachId: reachId)));
-
-      supplementaryUseCase.handler = (reachId, existing) async =>
-          ServiceResult.success(_emptyForecast(
-              reach: createTestReachData(reachId: reachId)));
-
-      await provider.loadAllData('999');
-
-      // Let all background loads complete
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-
-      expect(provider.isShowingStaleData, isFalse);
-      expect(provider.isBackgroundRefreshing, isFalse);
-      expect(provider.cacheTimestamp, isNull);
-    });
-  });
-
-  group('SWR — disk cache miss', () {
-    test('falls through to network path', () async {
-      // Default: forecastCacheService returns null (cache miss)
-      final result = await provider.loadAllData('123');
-
-      expect(result, isTrue);
-      // Should have called overview (network path)
-      expect(overviewUseCase.callLog, ['123']);
-      expect(forecastCacheService.getWithFreshnessLog, ['123']);
-    });
-  });
-
-  group('SWR — comprehensiveRefresh clears disk cache', () {
-    test('calls clearReach on disk cache', () async {
-      await provider.loadAllData('123');
-      await Future.delayed(Duration.zero);
-      await Future.delayed(Duration.zero);
-
-      await provider.comprehensiveRefresh('123');
-
-      expect(forecastCacheService.clearReachLog, contains('123'));
-    });
-  });
-
-  group('SWR — clearCurrentReach resets SWR state', () {
-    test('resets all SWR flags', () async {
-      final cachedResponse = ForecastResponse(
-        reach: createTestReachData(reachId: '999'),
-        shortRange: createTestForecastSeries(),
-        mediumRange: {},
-        longRange: {},
-      );
-
-      forecastCacheService.getWithFreshnessReturn = CacheResult(
-        data: cachedResponse,
-        freshness: CacheFreshness.stale,
-        cachedAt: DateTime.now().subtract(const Duration(minutes: 45)),
-      );
-
-      await provider.loadAllData('999');
-      expect(provider.isShowingStaleData, isTrue);
-
-      provider.clearCurrentReach();
-
-      expect(provider.isShowingStaleData, isFalse);
-      expect(provider.isBackgroundRefreshing, isFalse);
-      expect(provider.cacheTimestamp, isNull);
-      expect(provider.currentForecast, isNull);
-    });
-  });
-
-  group('SWR — cacheAgeDescription', () {
-    test('returns null when no cache timestamp', () {
-      expect(provider.cacheAgeDescription, isNull);
+      expect(p.getCurrentFlow(), isNotNull);
+      expect(p.getFlowCategory(), isNot('Unknown'));
+      expect(p.getShortRangeHourlyData(), isNotEmpty);
     });
   });
 }

@@ -9,11 +9,9 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart' show MockUser;
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
+import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
-import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
-import 'package:rivr/models/1_domain/shared/forecast_chart_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_auth_service.dart';
 import 'package:rivr/services/4_infrastructure/auth/auth_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
@@ -26,7 +24,6 @@ import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_background_image_service.dart';
 import 'package:rivr/services/4_infrastructure/media/background_image_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
 
 // ---------------------------------------------------------------------------
 // MockAuthService
@@ -296,168 +293,11 @@ class MockForecastService implements IForecastService {
   }
 
   @override
-  Future<ForecastResponse> loadOverviewData(String reachId) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
-  Future<ForecastResponse> loadSupplementaryData(
-    String reachId,
-    ForecastResponse existingData,
-  ) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
-  Future<ForecastResponse> loadCompleteReachData(String reachId) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
-  Future<ForecastResponse> loadSpecificForecast(
-    String reachId,
-    String forecastType,
-  ) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
-  Future<ForecastResponse> refreshReachData(String reachId) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
-  Future<bool> isReachCached(String reachId) async => false;
-
-  @override
-  Future<Map<String, dynamic>> getCacheStats() async => {'size': 0};
-
-  @override
-  Future<ForecastResponse> loadCurrentFlowOnly(String reachId) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return _responseForReach(reachId);
-  }
-
-  @override
   Future<ReachData> loadBasicReachInfo(String reachId) async {
     await Future.delayed(delay);
     return _responseForReach(reachId).reach;
   }
 
-  @override
-  ForecastResponse mergeCurrentFlowData(
-    ForecastResponse existing,
-    ForecastResponse newFlowData,
-  ) =>
-      existing;
-
-  @override
-  double? getCurrentFlow(ForecastResponse forecast,
-      {String? preferredType}) =>
-      150.0;
-
-  @override
-  String getFlowCategory(ForecastResponse forecast,
-      {String? preferredType}) =>
-      'normal';
-
-  @override
-  List<String> getAvailableForecastTypes(ForecastResponse forecast) =>
-      ['analysis_assimilation', 'short_range', 'medium_range', 'long_range'];
-
-  @override
-  bool hasEnsembleData(ForecastResponse forecast) => true;
-
-  @override
-  Map<String, dynamic> getEnsembleSummary(
-    ForecastResponse forecast,
-    String forecastType,
-  ) =>
-      {'memberCount': 7, 'mean': 160.0};
-
-  @override
-  List<HourlyFlowDataPoint> getShortRangeHourlyData(
-      ForecastResponse forecast) {
-    return List.generate(
-      6,
-      (i) => HourlyFlowDataPoint(
-        validTime: DateTime.now().add(Duration(hours: i + 1)),
-        flow: 150.0 + i * 2.0,
-      ),
-    );
-  }
-
-  @override
-  List<HourlyFlowDataPoint> getAllShortRangeHourlyData(
-      ForecastResponse forecast) {
-    return List.generate(
-      18,
-      (i) => HourlyFlowDataPoint(
-        validTime: DateTime.now().add(Duration(hours: i)),
-        flow: 150.0 + i * 2.0,
-      ),
-    );
-  }
-
-  @override
-  List<EnsembleStatPoint> getEnsembleStatistics(
-    ForecastResponse forecast,
-    String forecastType,
-  ) =>
-      [];
-
-  @override
-  bool hasMultipleEnsembleMembers(
-    ForecastResponse forecast,
-    String forecastType,
-  ) =>
-      false;
-
-  @override
-  Map<String, List<ChartData>> getEnsembleSeriesForChart(
-    ForecastResponse forecast,
-    String forecastType,
-  ) =>
-      {};
-
-  @override
-  List<ChartDataPoint> getEnsembleReferenceData(
-    ForecastResponse forecast,
-    String forecastType,
-  ) =>
-      [];
-
-  @override
-  void clearUnitDependentCaches() {}
-
-  @override
-  void clearComputedCaches() {}
-
-  @override
-  Future<ReachDetailsData> loadReachDetailsData(String reachId) async {
-    await Future.delayed(delay);
-    if (shouldFail) throw Exception(failureMessage);
-    return const ReachDetailsData(
-      riverName: 'Deep Creek',
-      formattedLocation: 'Spokane, WA',
-      currentFlow: 150.0,
-      flowCategory: 'normal',
-      latitude: 47.6588,
-      longitude: -117.426,
-      isClassificationAvailable: true,
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,7 +473,6 @@ class MockFCMService implements IFCMService {
 
   @override
   Future<bool> requestPermission() async => true;
-
 
   @override
   Future<NotificationPermissionResult> osPermissionStatus() async =>
@@ -1131,26 +970,3 @@ class FakeVideoPlayerPlatform extends VideoPlayerPlatform {
 // MockForecastCacheService
 // ---------------------------------------------------------------------------
 
-class MockForecastCacheService implements IForecastCacheService {
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  bool get isReady => true;
-
-  @override
-  Future<CacheResult<ForecastResponse>?> getWithFreshness(
-      String reachId) async => null;
-
-  @override
-  Future<void> store(String reachId, ForecastResponse response) async {}
-
-  @override
-  Future<void> clearReach(String reachId) async {}
-
-  @override
-  Future<void> clearAll() async {}
-
-  @override
-  Future<Map<String, dynamic>> getCacheStats() async => {};
-}

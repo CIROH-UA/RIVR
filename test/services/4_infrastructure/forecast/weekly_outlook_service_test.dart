@@ -20,13 +20,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
@@ -36,6 +35,13 @@ import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.d
 class _Unit implements IFlowUnitPreferenceService {
   @override
   String get currentFlowUnit => 'CFS';
+  @override
+  String normalizeUnit(String unit) {
+    final u = unit.toUpperCase();
+    if (u.contains('CFS') || u.contains('FT')) return 'CFS';
+    if (u.contains('CMS') || u.contains('M')) return 'CMS';
+    return u;
+  }
   @override
   String getDisplayUnit() => 'ft³/s';
   @override
@@ -70,88 +76,125 @@ class _Geocoder implements IGeocodingService {
   }
 }
 
-/// Records call overlap so serial awaits cannot pass as parallel ones.
-class _Forecast implements IForecastService {
-  _Forecast({
-    this.returnPeriods,
-    this.delay,
-    this.failFor = const {},
-  });
-
-  final Map<int, double>? returnPeriods;
-  final Duration? delay;
-  final Set<String> failFor;
-
-  int _inFlight = 0;
-  int maxConcurrent = 0;
-
-  @override
-  Future<ForecastResponse> loadCompleteReachData(String reachId) async {
-    _inFlight++;
-    maxConcurrent = _inFlight > maxConcurrent ? _inFlight : maxConcurrent;
-    try {
-      if (delay != null) await Future<void>.delayed(delay!);
-      if (failFor.contains(reachId)) {
-        throw Exception('simulated upstream failure for $reachId');
-      }
-      final now = DateTime.now().toUtc();
-      return ForecastResponse(
-        reach: ReachData(
-          reachId: reachId,
-          riverName: 'Test River $reachId',
-          latitude: 40.2,
-          longitude: -111.6,
-          availableForecasts: const ['medium_range'],
-          returnPeriods: returnPeriods,
-          cachedAt: now,
-        ),
-        mediumRange: {
-          'mean': ForecastSeries(
-            units: 'ft³/s',
-            data: [
-              for (var i = 1; i <= 8; i++)
-                ForecastPoint(
-                  validTime: now.add(Duration(days: i)),
-                  // 640 CFS ≈ 18.1 CMS.
-                  flow: 640,
-                ),
-            ],
-          ),
-        },
-        longRange: const {},
-      );
-    } finally {
-      _inFlight--;
-    }
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
-}
-
+/// NWM rows now read the repository like everything else (Phase 3), so the
+/// concurrency counter and failure modes live on the repo fake.
 /// GEOGLOWS favourites go through the repository, not IForecastService. The
 /// branch had no coverage at all: `read` → `refresh` passed, so class (d) —
 /// read through the cache the sheet warmed — was asserted on three surfaces
 /// and not here.
 class _Repo implements IRiverDataRepository {
-  _Repo({this.forecast});
+  _Repo({
+    this.forecast,
+    this.nwmReturnPeriods,
+    this.delay,
+    this.failFor = const {},
+    this.serveNwm = false,
+  });
 
   final GeoglowsForecast? forecast;
+
+  /// NWM mode: serve medium-range/return-period/metadata payloads.
+  final bool serveNwm;
+
+  /// Native-CMS thresholds for the returnPeriods product, when set.
+  final Map<int, double>? nwmReturnPeriods;
+  final Duration? delay;
+
+  /// Reach ids whose reads throw — the per-favourite failure mode.
+  final Set<String> failFor;
+
   final List<RiverDataKey> reads = [];
   final List<RiverDataKey> refreshes = [];
+
+  int _inFlight = 0;
+  int maxConcurrent = 0;
 
   @override
   Future<RiverDataEntry?> read(RiverDataKey key) async {
     reads.add(key);
-    if (forecast == null) return null;
+    _inFlight++;
+    maxConcurrent = _inFlight > maxConcurrent ? _inFlight : maxConcurrent;
+    try {
+      if (delay != null) await Future<void>.delayed(delay!);
+      if (failFor.contains(key.reachId)) {
+        throw Exception('simulated upstream failure for ${key.reachId}');
+      }
+      if (key.product == ForecastProduct.geoglowsForecast) {
+        if (forecast == null) return null;
+        return RiverDataEntry(
+          key: key,
+          window: FreshnessWindow(
+            fetchedAt: DateTime.utc(2026, 8, 23, 12),
+            validUntil: DateTime.utc(2026, 8, 23, 13),
+          ),
+          unit: 'CFS',
+          payload: GeoglowsForecastPayload.encode(forecast!),
+        );
+      }
+      if (!serveNwm) return null;
+      return _nwmEntry(key);
+    } finally {
+      _inFlight--;
+    }
+  }
+
+  RiverDataEntry? _nwmEntry(RiverDataKey key) {
+    final now = DateTime.now().toUtc();
+    Map<String, dynamic>? payload;
+    switch (key.product) {
+      case ForecastProduct.mediumRange:
+        payload = {
+          'reach': {
+            'reachId': key.reachId,
+            'name': 'Test River ${key.reachId}',
+            'latitude': 40.2,
+            'longitude': -111.6,
+            'streamflow': ['medium_range'],
+          },
+          'mediumRange': {
+            'mean': {
+              'referenceTime': '2026-08-23T06:00:00',
+              'units': 'ft³/s',
+              'data': [
+                for (var i = 1; i <= 8; i++)
+                  {
+                    'validTime':
+                        now.add(Duration(days: i)).toIso8601String(),
+                    // 640 CFS ≈ 18.1 CMS.
+                    'flow': 640.0,
+                  },
+              ],
+            },
+          },
+        };
+      case ForecastProduct.returnPeriods:
+        if (nwmReturnPeriods == null) return null;
+        payload = {
+          'returnPeriods': [
+            {
+              'feature_id': key.reachId,
+              for (final e in nwmReturnPeriods!.entries)
+                'return_period_${e.key}': e.value,
+            },
+          ],
+        };
+      case ForecastProduct.reachMetadata:
+        payload = {
+          'riverName': 'Test River ${key.reachId}',
+          'latitude': 40.2,
+          'longitude': -111.6,
+        };
+      default:
+        return null;
+    }
     return RiverDataEntry(
       key: key,
       window: FreshnessWindow(
-        fetchedAt: DateTime.utc(2026, 8, 23, 12),
-        validUntil: DateTime.utc(2026, 8, 23, 13),
+        fetchedAt: now,
+        validUntil: now.add(const Duration(hours: 1)),
       ),
       unit: 'CFS',
-      payload: GeoglowsForecastPayload.encode(forecast!),
+      payload: payload,
     );
   }
 
@@ -203,13 +246,11 @@ FavoriteRiver _fav(String id, {int order = 0}) => FavoriteRiver(
     );
 
 WeeklyOutlookService _service({
-  required _Forecast forecast,
   required _Geocoder geocoder,
   _Repo? repo,
 }) =>
     WeeklyOutlookService(
-      forecastService: forecast,
-      riverData: repo ?? _Repo(),
+      riverData: repo ?? _Repo(serveNwm: true),
       unitService: _Unit(),
       geocoder: geocoder,
     );
@@ -221,7 +262,7 @@ void main() {
   // it was a 30 s HTTP timeout.
   test('building an outlook performs no geocoding at all', () async {
     final geocoder = _Geocoder();
-    final svc = _service(forecast: _Forecast(), geocoder: geocoder);
+    final svc = _service(geocoder: geocoder);
 
     final result = await svc.buildOutlook([_fav('1'), _fav('2', order: 1)]);
 
@@ -235,7 +276,7 @@ void main() {
   test('the label the page fills in afterwards still comes from here',
       () async {
     final geocoder = _Geocoder();
-    final svc = _service(forecast: _Forecast(), geocoder: geocoder);
+    final svc = _service(geocoder: geocoder);
 
     expect(await svc.placeLabelFor(40.2, -111.6), 'Provo, UT');
     expect(geocoder.calls, 1);
@@ -249,8 +290,9 @@ void main() {
     // Converted → below it → Normal. Unconverted → 640 > 30 → top category.
     test('a flow under the converted 2-year threshold is Normal', () async {
       final svc = _service(
-        forecast: _Forecast(
-          returnPeriods: const {2: 30.0, 5: 60.0, 10: 90.0, 25: 150.0},
+        repo: _Repo(
+          serveNwm: true,
+          nwmReturnPeriods: const {2: 30.0, 5: 60.0, 10: 90.0, 25: 150.0},
         ),
         geocoder: _Geocoder(),
       );
@@ -268,8 +310,9 @@ void main() {
     test('a flow above the converted 2-year threshold is not Normal', () async {
       final svc = _service(
         // 5 CMS ≈ 177 CFS, under the 640 CFS fixture flow.
-        forecast: _Forecast(
-          returnPeriods: const {2: 5.0, 5: 8.0, 10: 12.0, 25: 20.0},
+        repo: _Repo(
+          serveNwm: true,
+          nwmReturnPeriods: const {2: 5.0, 5: 8.0, 10: 12.0, 25: 20.0},
         ),
         geocoder: _Geocoder(),
       );
@@ -285,8 +328,8 @@ void main() {
   // in sequence is the 3-5 minute load that opened the whole workstream.
   test('every favourite is loaded concurrently, not one after another',
       () async {
-    final forecast = _Forecast(delay: const Duration(milliseconds: 60));
-    final svc = _service(forecast: forecast, geocoder: _Geocoder());
+    final repo = _Repo(serveNwm: true, delay: const Duration(milliseconds: 60));
+    final svc = _service(repo: repo, geocoder: _Geocoder());
 
     final sw = Stopwatch()..start();
     await svc.buildOutlook([
@@ -297,7 +340,7 @@ void main() {
     ]);
     sw.stop();
 
-    expect(forecast.maxConcurrent, greaterThan(1),
+    expect(repo.maxConcurrent, greaterThan(1),
         reason: 'a serial loop never has two loads in flight — this is the '
             'assertion that dies, the elapsed time below is corroboration');
     expect(sw.elapsedMilliseconds, lessThan(4 * 60),
@@ -310,7 +353,7 @@ void main() {
     // the most ordinary failure there is.
     test('a total outage is distinguishable from an empty week', () async {
       final svc = _service(
-        forecast: _Forecast(failFor: {'1', '2'}),
+        repo: _Repo(serveNwm: true, failFor: {'1', '2'}),
         geocoder: _Geocoder(),
       );
 
@@ -324,7 +367,7 @@ void main() {
 
     test('one bad reach does not blank the others', () async {
       final svc = _service(
-        forecast: _Forecast(failFor: {'2'}),
+        repo: _Repo(serveNwm: true, failFor: {'2'}),
         geocoder: _Geocoder(),
       );
 
@@ -341,7 +384,7 @@ void main() {
     });
 
     test('no favourites is an empty week, not a failure', () async {
-      final svc = _service(forecast: _Forecast(), geocoder: _Geocoder());
+      final svc = _service(geocoder: _Geocoder());
 
       final result = await svc.buildOutlook([]);
 
@@ -356,8 +399,7 @@ void main() {
   group('the GEOGLOWS branch', () {
     test('reads through the cache, never as a forced refresh', () async {
       final repo = _Repo(forecast: _geoglowsForecast());
-      final svc = _service(
-          forecast: _Forecast(), geocoder: _Geocoder(), repo: repo);
+      final svc = _service(geocoder: _Geocoder(), repo: repo);
 
       final result = await svc.buildOutlook([_geoFav('760021642')]);
 
@@ -380,8 +422,7 @@ void main() {
         forecast: _geoglowsForecast(
             returnPeriods: const {2: 500, 5: 800, 10: 1200, 25: 2000}),
       );
-      final svc = _service(
-          forecast: _Forecast(), geocoder: _Geocoder(), repo: repo);
+      final svc = _service(geocoder: _Geocoder(), repo: repo);
 
       final result = await svc.buildOutlook([_geoFav('760021642')]);
 
@@ -393,7 +434,7 @@ void main() {
 
     test('a repository that yields nothing is an empty week, not a failure',
         () async {
-      final svc = _service(forecast: _Forecast(), geocoder: _Geocoder());
+      final svc = _service(geocoder: _Geocoder());
 
       final result = await svc.buildOutlook([_geoFav('760021642')]);
 
@@ -403,9 +444,8 @@ void main() {
     });
 
     test('NWM and GEOGLOWS favourites build side by side', () async {
-      final repo = _Repo(forecast: _geoglowsForecast());
-      final svc = _service(
-          forecast: _Forecast(), geocoder: _Geocoder(), repo: repo);
+      final repo = _Repo(forecast: _geoglowsForecast(), serveNwm: true);
+      final svc = _service(geocoder: _Geocoder(), repo: repo);
 
       final result = await svc.buildOutlook([
         _fav('1'),
@@ -422,7 +462,7 @@ void main() {
   // favourites by reachId alone and, on no match, fall back to an arbitrary
   // favourite — labelling one river with another river's city.
   test('rows carry the coordinate their label will be resolved from', () async {
-    final svc = _service(forecast: _Forecast(), geocoder: _Geocoder());
+    final svc = _service(geocoder: _Geocoder());
 
     final result = await svc.buildOutlook([_fav('1')]);
 

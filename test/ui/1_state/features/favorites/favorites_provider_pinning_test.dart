@@ -20,7 +20,6 @@ import 'package:rivr/models/2_usecases/features/favorites/reorder_favorites_usec
 import 'package:rivr/services/1_contracts/features/favorites/i_favorites_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
@@ -70,11 +69,6 @@ class _StubFavService implements IFavoritesService {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
-class _StubForecast implements IForecastService {
-  @override
-  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
-}
-
 class _StubReachCache implements IReachCacheService {
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -97,7 +91,6 @@ void main() {
 
   FavoritesProvider provider(List<FavoriteRiver> favs) => FavoritesProvider(
         favoritesService: _StubFavService(),
-        forecastService: _StubForecast(),
         reachCacheService: _StubReachCache(),
         unitService: _StubUnit(),
         initializeFavorites: InitializeFavoritesUseCase(_Favorites(favs)),
@@ -146,7 +139,6 @@ void main() {
   test('a failed favourites load leaves the pins untouched', () async {
     final p = FavoritesProvider(
       favoritesService: _StubFavService(),
-      forecastService: _StubForecast(),
       reachCacheService: _StubReachCache(),
       unitService: _StubUnit(),
       initializeFavorites: InitializeFavoritesUseCase(_FailingFavorites()),

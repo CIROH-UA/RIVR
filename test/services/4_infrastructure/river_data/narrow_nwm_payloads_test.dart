@@ -19,9 +19,7 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
 
 const _cmsToCfs = 35.3147;
@@ -68,15 +66,6 @@ List<Map<String, dynamic>> _api({double twoYear = 100.0}) => [
 
 
 /// Returns a fixed flow so the codec's *conversion* is the only variable.
-class _StubForecast implements IForecastService {
-  @override
-  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
-      _stubFlow;
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-double? _stubFlow = 100.0;
 
 RiverDataEntry _flowEntry(String storedUnit) => RiverDataEntry(
       key: const RiverDataKey(
@@ -97,13 +86,30 @@ RiverDataEntry _flowEntry(String storedUnit) => RiverDataEntry(
           'longitude': -111.6,
           'streamflow': ['short_range'],
         },
-        'shortRange': <String, dynamic>{},
+        'shortRange': {
+          'series': {
+            'referenceTime': '2026-08-22T12:00:00',
+            'units': 'x',
+            // A real point: the extraction is now ForecastValues.currentFlow
+            // over the actual series (Phase 3 removed the IForecastService
+            // stub these tests used to feed), so the fixture must carry the
+            // value production would.
+            'data': [
+              {
+                'validTime': DateTime.now()
+                    .toUtc()
+                    .add(const Duration(hours: 1))
+                    .toIso8601String(),
+                'flow': 100.0,
+              },
+            ],
+          },
+        },
       },
     );
 
 void _currentFlowGuards() {
   group('CurrentFlowPayload — the stored unit is converted to the reader\'s', () {
-    setUp(() => _stubFlow = 100.0);
 
     // REGRESSION: deleting the conversion entirely from this codec left all 900
     // tests passing. The display sites append `currentFlowUnit` as a LABEL
@@ -114,11 +120,7 @@ void _currentFlowGuards() {
     // This matters specifically because the cloud store will hold NATIVE units
     // shared across users: a CMS-stored entry read by a CFS user must convert.
     test('a CMS-stored entry read by a CFS user is converted', () {
-      final flow = CurrentFlowPayload.decode(
-        _flowEntry('CMS'),
-        _StubForecast(),
-        _RealUnit('CFS'),
-      );
+      final flow = CurrentFlowPayload.decode(_flowEntry('CMS'), _RealUnit('CFS'));
       expect(flow, isNotNull);
       expect(flow!, closeTo(100.0 * _cmsToCfs, 0.01));
       expect(flow, isNot(closeTo(100.0, 0.01)),
@@ -126,30 +128,34 @@ void _currentFlowGuards() {
     });
 
     test('a CFS-stored entry read by a CMS user is converted the other way', () {
-      final flow = CurrentFlowPayload.decode(
-        _flowEntry('CFS'),
-        _StubForecast(),
-        _RealUnit('CMS'),
-      );
+      final flow = CurrentFlowPayload.decode(_flowEntry('CFS'), _RealUnit('CMS'));
       expect(flow!, closeTo(100.0 / _cmsToCfs, 0.0001));
     });
 
     test('matching units pass through untouched', () {
-      final flow = CurrentFlowPayload.decode(
-        _flowEntry('CFS'),
-        _StubForecast(),
-        _RealUnit('CFS'),
-      );
+      final flow = CurrentFlowPayload.decode(_flowEntry('CFS'), _RealUnit('CFS'));
       expect(flow!, closeTo(100.0, 0.0001));
     });
 
     test('no flow available yields null rather than a converted zero', () {
-      _stubFlow = null;
-      expect(
-        CurrentFlowPayload.decode(
-          _flowEntry('CMS'), _StubForecast(), _RealUnit('CFS')),
-        isNull,
+      // A parseable payload whose series is empty — upstream answered with
+      // nothing usable.
+      final entry = RiverDataEntry(
+        key: _flowEntry('CMS').key,
+        window: _flowEntry('CMS').window,
+        unit: 'CMS',
+        payload: {
+          'reach': {
+            'reachId': '9962444',
+            'name': 'Dead River',
+            'latitude': 40.2,
+            'longitude': -111.6,
+            'streamflow': ['short_range'],
+          },
+          'shortRange': <String, dynamic>{},
+        },
       );
+      expect(CurrentFlowPayload.decode(entry, _RealUnit('CFS')), isNull);
     });
 
     test('an unreadable payload degrades to null instead of throwing', () {
@@ -160,11 +166,11 @@ void _currentFlowGuards() {
         payload: const <String, dynamic>{},
       );
       expect(
-        () => CurrentFlowPayload.decode(broken, _StubForecast(), _RealUnit('CFS')),
+        () => CurrentFlowPayload.decode(broken, _RealUnit('CFS')),
         returnsNormally,
       );
       expect(
-        CurrentFlowPayload.decode(broken, _StubForecast(), _RealUnit('CFS')),
+        CurrentFlowPayload.decode(broken, _RealUnit('CFS')),
         isNull,
       );
     });

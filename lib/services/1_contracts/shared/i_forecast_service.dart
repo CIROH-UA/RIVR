@@ -1,90 +1,19 @@
 // lib/services/1_contracts/shared/i_forecast_service.dart
 
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
-import 'package:rivr/models/1_domain/shared/hourly_flow_data.dart';
-import 'package:rivr/models/1_domain/shared/forecast_chart_data.dart';
 
-/// Data bundle returned by [IForecastService.loadReachDetailsData].
-class ReachDetailsData {
-  final String? riverName;
-  final String? formattedLocation;
-  final double? currentFlow;
-  final String? flowCategory;
-  final double? latitude;
-  final double? longitude;
-  final bool isClassificationAvailable;
+export 'package:rivr/models/1_domain/features/forecast/reach_details_data.dart';
 
-  /// Raw return-period thresholds (return year -> flow, in native units), when
-  /// available. The map bottom sheet uses the pre-computed [flowCategory]; the
-  /// favorites cards need these raw thresholds to compute their own flood
-  /// category + risk video.
-  final Map<int, double>? returnPeriods;
-
-  const ReachDetailsData({
-    this.riverName,
-    this.formattedLocation,
-    this.currentFlow,
-    this.flowCategory,
-    this.latitude,
-    this.longitude,
-    this.isClassificationAvailable = false,
-    this.returnPeriods,
-  });
-}
-
-/// Interface for forecast data loading and processing
+/// The surviving sliver of the old forecast-loading contract.
+///
+/// ADR 0011 Phase 3 deleted everything else: the phased load methods, the
+/// bundle (`loadReachDetailsData`/`reachSummary`), the value helpers (moved to
+/// `ForecastValues`, pure), and the cache-clearing hooks (the caches are
+/// gone). Every surface reads through `IRiverDataRepository`; the one thing a
+/// data source still needs from this layer is the cheap reach-info fetch that
+/// backs the `reachMetadata` product.
 abstract class IForecastService {
-  Future<ForecastResponse> loadOverviewData(String reachId);
-  Future<ForecastResponse> loadSupplementaryData(
-    String reachId,
-    ForecastResponse existingData,
-  );
-  Future<ForecastResponse> loadCompleteReachData(String reachId);
-  Future<ForecastResponse> loadSpecificForecast(
-    String reachId,
-    String forecastType,
-  );
-  Future<ForecastResponse> refreshReachData(String reachId);
-  Future<bool> isReachCached(String reachId);
-  Future<Map<String, dynamic>> getCacheStats();
-  Future<ForecastResponse> loadCurrentFlowOnly(String reachId);
+  /// Basic reach info only — name and coordinates, no flow, no series, no
+  /// geocoding. Backs `NwmDataSource`'s `reachMetadata` product.
   Future<ReachData> loadBasicReachInfo(String reachId);
-  ForecastResponse mergeCurrentFlowData(
-    ForecastResponse existing,
-    ForecastResponse newFlowData,
-  );
-  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType});
-  String getFlowCategory(ForecastResponse forecast, {String? preferredType});
-  List<String> getAvailableForecastTypes(ForecastResponse forecast);
-  bool hasEnsembleData(ForecastResponse forecast);
-  Map<String, dynamic> getEnsembleSummary(
-    ForecastResponse forecast,
-    String forecastType,
-  );
-  List<HourlyFlowDataPoint> getShortRangeHourlyData(ForecastResponse forecast);
-  List<HourlyFlowDataPoint> getAllShortRangeHourlyData(
-    ForecastResponse forecast,
-  );
-  List<EnsembleStatPoint> getEnsembleStatistics(
-    ForecastResponse forecast,
-    String forecastType,
-  );
-  bool hasMultipleEnsembleMembers(
-    ForecastResponse forecast,
-    String forecastType,
-  );
-  Map<String, List<ChartData>> getEnsembleSeriesForChart(
-    ForecastResponse forecast,
-    String forecastType,
-  );
-  List<ChartDataPoint> getEnsembleReferenceData(
-    ForecastResponse forecast,
-    String forecastType,
-  );
-  void clearUnitDependentCaches();
-  void clearComputedCaches();
-
-  /// Load all data needed for the reach details bottom sheet in one call.
-  /// Returns overview data with return periods loaded (if available).
-  Future<ReachDetailsData> loadReachDetailsData(String reachId);
 }

@@ -23,7 +23,6 @@ import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
-import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart';
 
@@ -73,9 +72,6 @@ class _FakeGeocoder implements IGeocodingService {
 }
 
 class _StubForecastService implements IForecastService {
-  @override
-  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
-      640.0;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -261,7 +257,24 @@ Map<ForecastProduct, Map<String, dynamic>> _narrowPayloads() => {
           'longitude': -111.0,
           'streamflow': ['short_range'],
         },
-        'shortRange': <String, dynamic>{},
+        // A real series point: the current-flow extraction now runs over the
+        // actual payload (ForecastValues), not a stubbed IForecastService —
+        // Phase 3 removed that seam from the decode path entirely.
+        'shortRange': {
+          'series': {
+            'referenceTime': '2026-08-23T12:00:00',
+            'units': 'ft³/s',
+            'data': [
+              {
+                'validTime': DateTime.now()
+                    .toUtc()
+                    .add(const Duration(hours: 1))
+                    .toIso8601String(),
+                'flow': 640.0,
+              },
+            ],
+          },
+        },
       },
       ForecastProduct.returnPeriods: {
         'returnPeriods': [
@@ -350,23 +363,18 @@ void main() {
 
   testWidgets('NWM: gauge, name/location and range selector render',
       (tester) async {
-    const details = ReachDetailsData(
-      riverName: 'Test River',
-      formattedLocation: 'Testville, TS',
-      currentFlow: 640,
-      flowCategory: 'Normal',
-      returnPeriods: {2: 1200, 5: 2400, 10: 3600, 25: 5800},
-    );
     _registerRepo(
       RiverDataEntry(
         key: const RiverDataKey(
           source: ForecastSource.nwm,
           reachId: '123',
+          // A dead product id kept only as a dummy default key — the bundle
+          // itself was deleted in Phase 3; byProduct serves everything.
           product: ForecastProduct.reachSummary,
         ),
         window: _window(),
         unit: 'CFS',
-        payload: ReachSummaryPayload.encode(details),
+        payload: const <String, dynamic>{},
       ),
       byProduct: _narrowPayloads(),
     );
@@ -430,7 +438,21 @@ void main() {
             'longitude': -111.0,
             'streamflow': ['short_range'],
           },
-          'shortRange': <String, dynamic>{},
+          'shortRange': {
+            'series': {
+              'referenceTime': '2026-08-23T12:00:00',
+              'units': 'ft³/s',
+              'data': [
+                {
+                  'validTime': DateTime.now()
+                      .toUtc()
+                      .add(const Duration(hours: 1))
+                      .toIso8601String(),
+                  'flow': 640.0,
+                },
+              ],
+            },
+          },
         },
         ForecastProduct.returnPeriods: {
           'returnPeriods': [

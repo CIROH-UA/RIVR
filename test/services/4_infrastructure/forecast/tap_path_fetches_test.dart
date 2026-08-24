@@ -21,8 +21,11 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/4_infrastructure/forecast/forecast_service.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
 
 /// Records every endpoint the service actually reaches for.
 class _RecordingApi implements INoaaApiService {
@@ -113,23 +116,6 @@ class _NullReachCache implements IReachCacheService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-class _NullForecastCache implements IForecastCacheService {
-  @override
-  Future<void> initialize() async {}
-  @override
-  Future<CacheResult<ForecastResponse>?> getWithFreshness(String r) async =>
-      null;
-  @override
-  Future<void> store(String reachId, ForecastResponse response) async {}
-  @override
-  Future<void> clearReach(String reachId) async {}
-  @override
-  Future<void> clearAll() async {}
-  @override
-  Future<Map<String, dynamic>> getCacheStats() async => {};
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
 
 void main() {
   late _RecordingApi api;
@@ -142,9 +128,6 @@ void main() {
     service = ForecastService(
       apiService: api,
       cacheService: _NullReachCache(),
-      forecastCacheService: _NullForecastCache(),
-      unitService: _StubUnit(),
-      geocoder: geocoder,
     );
   });
 
@@ -176,27 +159,25 @@ void main() {
       expect(api.calls.where((c) => c.contains('long_range')), isEmpty);
     });
 
-    // REGRESSION: this file itself made a real Mapbox call. ForecastService
-    // now takes the geocoder, so a live call is impossible here by
-    // construction — and this asserts it rather than assuming it.
-    test('nothing on this path makes a live geocode', () async {
-      await service.loadBasicReachInfo('23021904');
-      await service.loadReachDetailsData('23021904');
-      expect(geocoder.calls, greaterThan(0),
-          reason: 'the bundle path does geocode — through the FAKE, not the '
-              'network. Zero here would mean the seam was bypassed.');
-    });
-
-    // The contrast that makes the guard meaningful: the bundle DOES pull it.
-    // If this ever stops being true the guard above has lost its teeth.
-    test('reachSummary by contrast does pull medium_range', () async {
-      await service.loadReachDetailsData('23021904');
-
+    // The bundle-fetches-medium canary that used to live here died WITH the
+    // bundle: Phase 3 deleted `reachSummary` and `loadReachDetailsData`
+    // outright, so the risk the canary guarded — a tap accidentally riding the
+    // 156 KB bundle — is structurally impossible. The remaining guard is the
+    // positive one above: the narrow path itself never fetches medium range.
+    test('the deleted bundle cannot come back silently', () {
+      // Compile-time truth pinned at run time: the source rejects the product.
       expect(
-        api.calls.where((c) => c.contains('medium_range')),
-        isNotEmpty,
-        reason: 'if the bundle stops fetching it, the guard above proves '
-            'nothing and this test is the canary',
+        () => NwmDataSource(
+          api: api,
+          unitService: _StubUnit(),
+          forecastService: service,
+          geocoder: geocoder,
+        ).fetch(const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: ForecastProduct.reachSummary,
+        )),
+        throwsArgumentError,
       );
     });
   });

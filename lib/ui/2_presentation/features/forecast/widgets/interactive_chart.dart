@@ -1,13 +1,14 @@
 // lib/ui/2_presentation/features/forecast/widgets/interactive_chart.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:rivr/services/4_infrastructure/forecast/forecast_values.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
 import 'dart:math' as math;
+import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:get_it/get_it.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/utils/flow_format.dart';
 
@@ -61,7 +62,6 @@ class _InteractiveChartState extends State<InteractiveChart> {
 
   // Store ensemble data for multiple series
   Map<String, List<ChartData>> _ensembleChartData = {};
-  final IForecastService _forecastService = GetIt.I<IForecastService>();
 
   // Color palette for ensemble members
   static const List<Color> _ensembleColors = [
@@ -86,7 +86,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
   }
 
   // REMOVED: _convertFlowToCurrentUnit() - no longer needed!
-  // The NoaaApiService already converts all forecast data to preferred units
+  // Forecast data is already converted to preferred units at the API layer
 
   @override
   void initState() {
@@ -106,6 +106,15 @@ class _InteractiveChartState extends State<InteractiveChart> {
     });
   }
 
+  /// The forecast object the current chart series were extracted from, so a
+  /// section landing AFTER this chart mounted re-extracts. Phase 3's provider
+  /// publishes the overview immediately and merges medium/long range as they
+  /// arrive (each merge is a new ForecastResponse identity); before this
+  /// check, a chart opened during that window extracted an empty series in
+  /// initState and showed "No chart data available" forever — review round 1
+  /// reproduced it with a gated medium-range read.
+  ForecastResponse? _extractedFrom;
+
   @override
   void didUpdateWidget(InteractiveChart oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -114,9 +123,13 @@ class _InteractiveChartState extends State<InteractiveChart> {
     final currentUnit = _getCurrentFlowUnit();
     final unitChanged = currentUnit != _lastKnownUnit;
 
+    final dataArrived =
+        !identical(widget.reachProvider.currentForecast, _extractedFrom);
+
     if (oldWidget.forecastType != widget.forecastType ||
         oldWidget.showReturnPeriods != widget.showReturnPeriods ||
         oldWidget.showEnsembleMembers != widget.showEnsembleMembers ||
+        dataArrived ||
         unitChanged) {
       // React to unit changes
 
@@ -217,6 +230,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
   }
 
   void _initializeChart() {
+    _extractedFrom = widget.reachProvider.currentForecast;
     _extractChartData();
 
     // ONLY proceed if we actually have forecast data
@@ -266,7 +280,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
     }
 
     // Use forecast service to get ensemble data
-    final ensembleData = _forecastService.getEnsembleSeriesForChart(
+    final ensembleData = ForecastValues.ensembleSeriesForChart(
       forecast,
       widget.forecastType,
     );
@@ -293,7 +307,7 @@ class _InteractiveChartState extends State<InteractiveChart> {
     }
 
     // FIXED: Convert between different ChartDataPoint types WITHOUT unit conversion
-    final serviceReferenceData = _forecastService.getEnsembleReferenceData(
+    final serviceReferenceData = ForecastValues.ensembleReferenceData(
       forecast,
       widget.forecastType,
     );

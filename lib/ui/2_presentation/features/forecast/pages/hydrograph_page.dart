@@ -3,12 +3,11 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/services/4_infrastructure/forecast/forecast_values.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:rivr/utils/forecast/export_functionality.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
-import 'package:get_it/get_it.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/interactive_chart.dart' hide ChartDataPoint;
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/flood_categories_info_sheet.dart';
 
@@ -43,8 +42,6 @@ class _HydrographPageState extends State<HydrographPage> {
   // Add ScreenshotController for chart export
   final ScreenshotController _screenshotController = ScreenshotController();
 
-  // NEW: Add forecast service
-  final IForecastService _forecastService = GetIt.I<IForecastService>();
 
   @override
   void initState() {
@@ -380,7 +377,7 @@ class _HydrographPageState extends State<HydrographPage> {
   Future<void> _exportEnsembleDataAsCSV(reach, forecast) async {
     try {
       // Get ensemble data using our service
-      final ensembleData = _forecastService.getEnsembleReferenceData(
+      final ensembleData = ForecastValues.ensembleReferenceData(
         forecast,
         _forecastType!,
       );
@@ -598,7 +595,7 @@ class _HydrographPageState extends State<HydrographPage> {
     final forecast = reachProvider.currentForecast;
     final hasEnsemble =
         forecast != null &&
-        _forecastService.hasMultipleEnsembleMembers(forecast, _forecastType!) &&
+        ForecastValues.hasMultipleEnsembleMembers(forecast, _forecastType!) &&
         (_forecastType == 'medium_range' || _forecastType == 'long_range');
 
     return Container(

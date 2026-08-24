@@ -7,8 +7,6 @@ import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/4_infrastructure/cache/reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_background_image_service.dart';
 import 'package:rivr/services/4_infrastructure/media/background_image_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
-import 'package:rivr/services/4_infrastructure/cache/forecast_cache_service.dart';
 
 void setupSharedDependencies() {
   final sl = GetIt.instance;
@@ -21,8 +19,5 @@ void setupSharedDependencies() {
   sl.registerLazySingleton<IReachCacheService>(() => ReachCacheService());
   sl.registerLazySingleton<IBackgroundImageService>(
     () => BackgroundImageService(),
-  );
-  sl.registerLazySingleton<IForecastCacheService>(
-    () => ForecastCacheService(),
   );
 }

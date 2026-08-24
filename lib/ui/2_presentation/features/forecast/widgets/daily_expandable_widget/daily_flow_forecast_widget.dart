@@ -110,7 +110,7 @@ class _DailyFlowForecastWidgetState extends State<DailyFlowForecastWidget> {
       final currentUnit = _getCurrentFlowUnit();
 
       // Process the forecast data based on type
-      // Data is already in correct units from NoaaApiService
+      // Data is already in correct units from the API layer
       List<DailyFlowForecast> dailyForecasts;
 
       if (widget.forecastType.toLowerCase() == 'medium_range') {

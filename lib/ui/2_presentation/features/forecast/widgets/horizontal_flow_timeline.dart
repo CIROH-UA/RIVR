@@ -50,7 +50,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
   }
 
   // REMOVED: _convertFlowToCurrentUnit() - no longer needed!
-  // The NoaaApiService already converts all forecast data to preferred units
+  // Forecast data is already converted to preferred units at the API layer
 
   // Check for unit changes and rebuild if necessary
   @override
@@ -127,7 +127,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     HourlyFlowDataPoint dataPoint,
     ReachDataProvider reachProvider,
   ) {
-    // Flow is already converted by NoaaApiService, no need to convert again
+    // Flow is already converted at the API layer, no need to convert again
     final flowCategory = _getFlowCategory(dataPoint.flow, reachProvider);
     final categoryColor = _getCategoryColor(flowCategory);
     final isCurrentHour = _isCurrentOrNearCurrentHour(dataPoint.validTime);
@@ -264,7 +264,7 @@ class _HorizontalFlowTimelineState extends State<HorizontalFlowTimeline> {
     return data.map((point) {
       return HourlyFlowDataPoint(
         validTime: point.validTime,
-        flow: point.flow, // Already in correct unit from NoaaApiService
+        flow: point.flow, // Already in correct unit from the API layer
         trend: point.trend,
         trendPercentage: point.trendPercentage,
         confidence: point.confidence,

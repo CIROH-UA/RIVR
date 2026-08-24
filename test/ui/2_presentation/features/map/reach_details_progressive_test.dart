@@ -21,7 +21,6 @@ import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payl
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
@@ -80,9 +79,6 @@ class _StubUnit implements IFlowUnitPreferenceService {
 /// Returns a fixed current flow regardless of payload — the extraction itself
 /// is ForecastService's job and is covered by its own tests.
 class _StubForecastService implements IForecastService {
-  @override
-  double? getCurrentFlow(ForecastResponse forecast, {String? preferredType}) =>
-      1234.0;
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -227,7 +223,21 @@ class _RecordingRepo implements IRiverDataRepository {
             'longitude': -111.6,
             'streamflow': ['short_range'],
           },
-          'shortRange': <String, dynamic>{},
+          'shortRange': {
+            'series': {
+              'referenceTime': '2026-08-23T12:00:00',
+              'units': 'ft³/s',
+              'data': [
+                {
+                  'validTime': DateTime.now()
+                      .toUtc()
+                      .add(const Duration(hours: 1))
+                      .toIso8601String(),
+                  'flow': 1234.0,
+                },
+              ],
+            },
+          },
         };
       default:
         return <String, dynamic>{};

@@ -10,7 +10,6 @@ import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/favorite_session_data.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/1_contracts/shared/i_favorites_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/features/forecast/i_geoglows_api_service.dart';
@@ -23,8 +22,9 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
+import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
-import 'package:rivr/services/4_infrastructure/river_data/reach_summary_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 
 /// State management for user's favorite rivers
@@ -39,7 +39,6 @@ class FavoritesProvider with ChangeNotifier {
 
   // Services kept for cross-cutting concerns
   final IFavoritesService _favoritesService;
-  final IForecastService _forecastService;
   final IReachCacheService _reachCacheService;
   final IFlowUnitPreferenceService _unitService;
   // Optional — used only to self-heal missing GEOGLOWS reach coordinates.
@@ -51,7 +50,6 @@ class FavoritesProvider with ChangeNotifier {
 
   FavoritesProvider({
     IFavoritesService? favoritesService,
-    IForecastService? forecastService,
     IReachCacheService? reachCacheService,
     IFlowUnitPreferenceService? unitService,
     InitializeFavoritesUseCase? initializeFavorites,
@@ -62,7 +60,6 @@ class FavoritesProvider with ChangeNotifier {
     IGeoglowsApiService? geoglowsApi,
   })  : _geoglowsApi = geoglowsApi,
         _favoritesService = favoritesService ?? GetIt.I<IFavoritesService>(),
-        _forecastService = forecastService ?? GetIt.I<IForecastService>(),
         _reachCacheService =
             reachCacheService ?? GetIt.I<IReachCacheService>(),
         _unitService =
@@ -494,8 +491,9 @@ class FavoritesProvider with ChangeNotifier {
     final gen = ++_refreshAllGeneration;
     _clearError();
 
-    // Clear computed caches to force fresh calculations
-    _forecastService.clearComputedCaches();
+    // No cache clearing: values are derived per render and the repository's
+    // refresh path below bypasses freshness itself (ADR 0011 Phase 3 — the
+    // competing ForecastService caches are deleted).
 
     // Refresh each favorite — abandon results if a newer refreshAll was started
     final refreshTasks = _favorites.map((favorite) async {
@@ -545,10 +543,25 @@ class FavoritesProvider with ChangeNotifier {
         return false;
       }
 
-      // Get basic reach info only (ultra-fast)
+      // Get basic reach info only (ultra-fast) — through the ONE data path,
+      // so a reach the sheet already loaded costs nothing here (Phase 3).
       ReachData reach;
       try {
-        reach = await _forecastService.loadBasicReachInfo(reachId);
+        final entry = await _repository.read(RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: reachId,
+          product: ForecastProduct.reachMetadata,
+        ));
+        if (entry == null) return false;
+        final meta = ReachMetadataPayload.decode(entry);
+        reach = ReachData(
+          reachId: reachId,
+          riverName: meta.riverName ?? '',
+          latitude: meta.latitude ?? 0,
+          longitude: meta.longitude ?? 0,
+          availableForecasts: const [],
+          cachedAt: DateTime.now(),
+        );
       } catch (e) {
         return false;
       }
@@ -605,7 +618,7 @@ class FavoritesProvider with ChangeNotifier {
       notifyListeners();
 
       // Read through the single-source-of-truth repository, branching on the
-      // favorite's source: NWM reach summary vs GEOGLOWS forecast.
+      // favorite's source: NWM narrow products vs GEOGLOWS forecast.
       final source = sourceForReach(reachId);
 
       String? riverName;
@@ -646,27 +659,46 @@ class FavoritesProvider with ChangeNotifier {
           }
         }
       } else {
-        final entry = await _repository.read(
-          RiverDataKey(
-            source: ForecastSource.nwm,
-            reachId: reachId,
-            product: ForecastProduct.reachSummary,
-          ),
-        );
+        // The SAME three narrow products the sheet and the forecast page read
+        // (Phase 3, guard 2): while this card read the legacy `reachSummary`
+        // bundle, its current flow lived in a different cache entry than the
+        // sheet's, fetched at a different moment — so the card and the sheet
+        // could legitimately disagree about the same river. Identical keys
+        // make them identical by construction. This also retired the bundle's
+        // 156 KB medium-range fetch from every favourites refresh.
+        RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
+              source: ForecastSource.nwm,
+              reachId: reachId,
+              product: p,
+            );
+        final entries = await Future.wait([
+          _repository.read(keyFor(ForecastProduct.reachMetadata)),
+          _repository.read(keyFor(ForecastProduct.analysisAssimilation)),
+          _repository.read(keyFor(ForecastProduct.returnPeriods)),
+        ]);
         if (_refreshGenerations[reachId] != gen) return;
-        if (entry == null) {
+        final metaEntry = entries[0];
+        final flowEntry = entries[1];
+        final rpEntry = entries[2];
+        if (metaEntry == null && flowEntry == null) {
           AppLogger.error(
             'FavoritesProvider',
-            'Failed to refresh $reachId: no reach summary',
+            'Failed to refresh $reachId: no reach data',
           );
           return;
         }
-        final details = ReachSummaryPayload.decode(entry, _unitService);
-        riverName = details.riverName;
-        currentFlow = details.currentFlow;
-        returnPeriods = details.returnPeriods;
-        lat = details.latitude;
-        lon = details.longitude;
+        if (metaEntry != null) {
+          final meta = ReachMetadataPayload.decode(metaEntry);
+          riverName = meta.riverName;
+          lat = meta.latitude;
+          lon = meta.longitude;
+        }
+        if (flowEntry != null) {
+          currentFlow = CurrentFlowPayload.decode(flowEntry, _unitService);
+        }
+        if (rpEntry != null) {
+          returnPeriods = ReturnPeriodPayload.decode(rpEntry, _unitService);
+        }
       }
 
       final currentUnit = _unitService.currentFlowUnit;

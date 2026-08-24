@@ -28,11 +28,11 @@ import 'package:rivr/utils/forecast_trend.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/return_periods_sheet.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/stream_map_sheet.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/features/forecast/reach_details_data.dart';
 import 'package:rivr/models/1_domain/shared/reach_data.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
@@ -131,7 +131,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   /// it still live on both branches here. Pinned by reach_forecast_page_test.
   late final IFlowUnitPreferenceService _unitService;
   late final IRiverDataRepository _repo;
-  late final IForecastService _forecastService;
   late final IGeocodingService _geocoder;
 
   @override
@@ -139,7 +138,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     super.initState();
     _unitService = GetIt.I<IFlowUnitPreferenceService>();
     _repo = GetIt.I<IRiverDataRepository>();
-    _forecastService = GetIt.I<IForecastService>();
     _geocoder = GetIt.I<IGeocodingService>();
     _range = _isGeoglows ? ForecastRange.fifteenDay : ForecastRange.tenDay;
     _load();
@@ -150,9 +148,9 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         if (!mounted) return;
         final provider = context.read<ReachDataProvider>();
         if (provider.currentReach?.reachId != widget.reachId) {
-          // loadReach (complete load) computes the ensemble 'mean' member and
-          // warms the session cache, so the embedded widgets AND the reused
-          // HydrographPage chart get a full ForecastResponse for every range.
+          // Overview awaited, sections merged as they land (Phase 3); the
+          // embedded widgets and the reused HydrographPage chart re-derive on
+          // provider notify — there is no session cache to warm any more.
           provider.loadReach(widget.reachId);
         }
       });
@@ -195,7 +193,6 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     // Dependencies come from initState — see the field declarations.
     final unitService = _unitService;
     final repo = _repo;
-    final forecastService = _forecastService;
 
     RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
           source: ForecastSource.nwm,
@@ -303,7 +300,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     unawaited(
         repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
       if (entry == null) return;
-      flow = CurrentFlowPayload.decode(entry, forecastService, unitService);
+      flow = CurrentFlowPayload.decode(entry, unitService);
       if (flow == null) {
         // Upstream answered but carried no usable value — a failure of this
         // product, not a success, or it is never named in the error card.

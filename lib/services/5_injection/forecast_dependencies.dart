@@ -8,17 +8,8 @@ import 'package:rivr/services/4_infrastructure/api/geoglows_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/4_infrastructure/forecast/forecast_service.dart';
+import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_cache_service.dart';
-import 'package:rivr/services/1_contracts/features/forecast/i_forecast_repository.dart';
-import 'package:rivr/services/2_coordinators/features/forecast/forecast_repository_impl.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_overview_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_forecast_supplementary_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_complete_forecast_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/refresh_forecast_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/get_reach_details_usecase.dart';
-import 'package:rivr/models/2_usecases/features/forecast/load_specific_forecast_usecase.dart';
-import 'package:rivr/models/2_usecases/features/map/get_reach_details_for_map_usecase.dart';
 import 'package:rivr/services/4_infrastructure/river_data/nwm_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
@@ -65,15 +56,7 @@ void setupForecastDependencies() {
     () => ForecastService(
       apiService: sl<INoaaApiService>(),
       cacheService: sl<IReachCacheService>(),
-      unitService: sl<IFlowUnitPreferenceService>(),
-      forecastCacheService: sl<IForecastCacheService>(),
-      geocoder: sl<IGeocodingService>(),
     ),
-  );
-
-  // Repository
-  sl.registerLazySingleton<IForecastRepository>(
-    () => ForecastRepositoryImpl(forecastService: sl<IForecastService>()),
   );
 
   // Pluggable data sources behind one registry (ADR 0001). Adding a source =
@@ -111,14 +94,16 @@ void setupForecastDependencies() {
     ),
   );
 
-  // Forecast use cases
-  sl.registerFactory(() => LoadForecastOverviewUseCase(sl<IForecastRepository>()));
-  sl.registerFactory(() => LoadForecastSupplementaryUseCase(sl<IForecastRepository>()));
-  sl.registerFactory(() => LoadCompleteForecastUseCase(sl<IForecastRepository>()));
-  sl.registerFactory(() => RefreshForecastUseCase(sl<IForecastRepository>()));
-  sl.registerFactory(() => GetReachDetailsUseCase(sl<IForecastRepository>()));
-  sl.registerFactory(() => LoadSpecificForecastUseCase(sl<IForecastRepository>()));
+  // Weekly Outlook assembly (ADR 0011 Phase 3): built HERE so the page
+  // resolves one service instead of assembling the fetch graph itself —
+  // lib/ui must not reference IForecastService (guard 1).
+  sl.registerLazySingleton<WeeklyOutlookService>(
+    () => WeeklyOutlookService(
+      riverData: sl<IRiverDataRepository>(),
+      unitService: sl<IFlowUnitPreferenceService>(),
+      geocoder: sl<IGeocodingService>(),
+    ),
+  );
 
-  // Map use case (depends on forecast repository)
-  sl.registerFactory(() => GetReachDetailsForMapUseCase(sl<IForecastRepository>()));
+
 }

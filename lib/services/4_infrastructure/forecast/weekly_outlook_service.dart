@@ -5,10 +5,12 @@ import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
-import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_forecast_payload.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
@@ -41,16 +43,14 @@ class OutlookResult {
 /// GEOGLOWS 15-day), then deriving trend, peak, and flood category. Rows are
 /// returned ranked most-newsworthy first.
 class WeeklyOutlookService {
-  final IForecastService _forecastService;
   final IRiverDataRepository _riverData;
   final IFlowUnitPreferenceService _unitService;
 
   WeeklyOutlookService({
-    required IForecastService forecastService,
     required IRiverDataRepository riverData,
     required IFlowUnitPreferenceService unitService,
     required IGeocodingService geocoder,
-  })  : _forecastService = forecastService,
+  })  :
         _riverData = riverData,
         _unitService = unitService,
         _geocoder = geocoder;
@@ -61,9 +61,9 @@ class WeeklyOutlookService {
   /// reported rather than dropped, so one bad fetch doesn't blank the page and a
   /// total outage is still distinguishable. Rows are newsworthiness-ranked.
   ///
-  /// The parallelism is the whole point of this method: N favourites each cost a
-  /// `loadCompleteReachData`, and running them in sequence is the 3-5 minute
-  /// stall ADR 0010 was opened for. Guarded in weekly_outlook_service_test.
+  /// The parallelism is the whole point of this method: N favourites each cost
+  /// repository reads, and running them in sequence is the 3-5 minute stall
+  /// ADR 0010 was opened for. Guarded in weekly_outlook_service_test.
   Future<OutlookResult> buildOutlook(List<FavoriteRiver> favorites) async {
     final outcomes = await Future.wait(favorites.map(_buildRow));
     final rows = [
@@ -99,35 +99,53 @@ class WeeklyOutlookService {
   }
 
   Future<OutlookRow?> _buildNwmRow(FavoriteRiver favorite) async {
-    final forecast = await _forecastService.loadCompleteReachData(
-      favorite.reachId,
-    );
+    // Through the repository, the same products every other surface reads
+    // (Phase 3): the previous `ForecastService.loadCompleteReachData` call was
+    // a second data path — a direct NOAA fetch per favourite per outlook open
+    // that never touched the shared cache, so the outlook could disagree with
+    // the card showing the same river and cost the full bundle each time.
+    RiverDataKey keyFor(ForecastProduct p) => RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: favorite.reachId,
+          product: p,
+        );
+    final entries = await Future.wait([
+      _riverData.read(keyFor(ForecastProduct.mediumRange)),
+      _riverData.read(keyFor(ForecastProduct.returnPeriods)),
+      _riverData.read(keyFor(ForecastProduct.reachMetadata)),
+    ]);
+    final mediumEntry = entries[0];
+    if (mediumEntry == null) return null;
+    final forecast = NwmForecastPayload.decode(mediumEntry, _unitService);
+    if (forecast == null) return null;
 
     // Medium-range ensemble mean covers ~10 days — the "week ahead".
-    final series = forecast.mediumRange['mean']?.data ?? const [];
+    final series = forecast.getPrimaryForecast('medium_range')?.data ?? const [];
     final points = [
       for (final p in series) (flow: p.flow, time: p.validTime),
     ];
     if (points.isEmpty) return null;
 
-    // Return periods are native CMS; convert to the user's unit to match the
-    // (already-converted) forecast flows before classifying.
-    final unit = _unitService.currentFlowUnit;
-    final thresholds = forecast.reach.returnPeriods?.map(
-      (year, flow) => MapEntry(year, _unitService.convertFlow(flow, 'CMS', unit)),
-    );
+    // Return periods are native CMS; the codec converts to the user's unit to
+    // match the (already-converted) forecast flows before classifying.
+    final thresholds = entries[1] == null
+        ? null
+        : ReturnPeriodPayload.decode(entries[1]!, _unitService);
+
+    final meta =
+        entries[2] == null ? null : ReachMetadataPayload.decode(entries[2]!);
 
     return _assemble(
       favorite: favorite,
       points: points,
       thresholds: thresholds,
       unitLabel: _unitService.getDisplayUnit(),
-      displayName: forecast.reach.riverName.isNotEmpty
-          ? forecast.reach.riverName
+      displayName: (meta?.riverName?.isNotEmpty ?? false)
+          ? meta!.riverName!
           : favorite.displayName,
       // Prefer the favorite's stored coords; fall back to the reach's.
-      lat: favorite.latitude ?? forecast.reach.latitude,
-      lon: favorite.longitude ?? forecast.reach.longitude,
+      lat: favorite.latitude ?? meta?.latitude,
+      lon: favorite.longitude ?? meta?.longitude,
     );
   }
 

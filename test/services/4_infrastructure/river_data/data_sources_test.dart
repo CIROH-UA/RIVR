@@ -112,19 +112,6 @@ class _FakeForecast implements IForecastService {
     );
   }
 
-  @override
-  Future<ReachDetailsData> loadReachDetailsData(String reachId) async {
-    detailCalls++;
-    return const ReachDetailsData(
-      riverName: 'Test River',
-      formattedLocation: 'Somewhere, UT',
-      currentFlow: 100.0,
-      flowCategory: 'Normal',
-      latitude: 40.0,
-      longitude: -111.0,
-      isClassificationAvailable: true,
-    );
-  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -361,18 +348,17 @@ void main() {
       expect(rp.payload['returnPeriods'], [2, 5, 10]);
     });
 
-    test('reachSummary delegates to ForecastService and tags the unit',
-        () async {
-      final result = await nwm.fetch(const RiverDataKey(
-        source: ForecastSource.nwm,
-        reachId: '23021904',
-        product: ForecastProduct.reachSummary,
-      ));
-      expect(forecast.detailCalls, 1);
-      expect(result.unit, 'CFS');
-      expect(result.payload['riverName'], 'Test River');
-      expect(result.payload['currentFlow'], 100.0);
-      expect(result.payload['flowCategory'], 'Normal');
+    test('reachSummary is a deleted product — the source rejects it', () {
+      expect(
+        () => nwm.fetch(const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: ForecastProduct.reachSummary,
+        )),
+        throwsArgumentError,
+        reason: 'the bundle died in Phase 3; a source quietly serving it '
+            'again would resurrect the 156 KB tap-path fetch',
+      );
     });
 
     test('fetch throws for an unsupported product', () {

@@ -32,7 +32,8 @@ import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/features/auth/auth_user.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
-import 'package:rivr/models/1_domain/shared/reach_data.dart';
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/freshness_window.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -40,6 +41,7 @@ import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/forecast/weekly_outlook_service.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/weekly_outlook_page.dart';
@@ -47,6 +49,13 @@ import 'package:rivr/ui/2_presentation/features/forecast/pages/weekly_outlook_pa
 class _StubUnit implements IFlowUnitPreferenceService {
   @override
   String get currentFlowUnit => 'CFS';
+  @override
+  String normalizeUnit(String unit) {
+    final u = unit.toUpperCase();
+    if (u.contains('CFS') || u.contains('FT')) return 'CFS';
+    if (u.contains('CMS') || u.contains('M')) return 'CMS';
+    return u;
+  }
   @override
   String getDisplayUnit() => 'ft³/s';
   @override
@@ -81,37 +90,6 @@ class _Forecast implements IForecastService {
   final Duration? delay;
   int calls = 0;
 
-  @override
-  Future<ForecastResponse> loadCompleteReachData(String reachId) async {
-    calls++;
-    if (delay != null) await Future<void>.delayed(delay!);
-    if (fail) throw Exception('simulated upstream failure');
-    final now = DateTime.now().toUtc();
-    return ForecastResponse(
-      reach: ReachData(
-        reachId: reachId,
-        riverName: unnamedReach ? '' : 'White River',
-        latitude: 40.2,
-        longitude: -111.6,
-        availableForecasts: const ['medium_range'],
-        returnPeriods: const {2: 30.0, 5: 60.0, 10: 90.0, 25: 150.0},
-        cachedAt: now,
-      ),
-      mediumRange: {
-        'mean': ForecastSeries(
-          units: 'ft³/s',
-          data: emptySeries
-              ? const []
-              : [
-                  for (var i = 1; i <= 8; i++)
-                    ForecastPoint(
-                        validTime: now.add(Duration(days: i)), flow: 640),
-                ],
-        ),
-      },
-      longRange: const {},
-    );
-  }
 
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -159,9 +137,88 @@ class _RecordingSettings implements IUserSettingsService {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+/// The repository IS the outlook's data path now (Phase 3), so the failure,
+/// delay and empty-series modes the old IForecastService fake carried live
+/// here.
 class _StubRepo implements IRiverDataRepository {
+  _StubRepo({this.fail = false, this.delay});
+
+  bool fail;
+
+  /// Flipped mid-test by the no-forecast Retry test.
+  bool emptySeries = false;
+  final Duration? delay;
+  int calls = 0;
+
   @override
-  Future<RiverDataEntry?> read(RiverDataKey key) async => null;
+  Future<RiverDataEntry?> read(RiverDataKey key) async {
+    calls++;
+    if (delay != null) await Future<void>.delayed(delay!);
+    if (fail) throw Exception('simulated upstream failure');
+    if (key.product != ForecastProduct.mediumRange &&
+        key.product != ForecastProduct.returnPeriods &&
+        key.product != ForecastProduct.reachMetadata) {
+      return null;
+    }
+    final now = DateTime.now().toUtc();
+    Map<String, dynamic> payload;
+    switch (key.product) {
+      case ForecastProduct.mediumRange:
+        payload = {
+          'reach': {
+            'reachId': key.reachId,
+            'name': _forecast.unnamedReach ? '' : 'White River',
+            'latitude': 40.2,
+            'longitude': -111.6,
+            'streamflow': ['medium_range'],
+          },
+          'mediumRange': {
+            'mean': {
+              'referenceTime': '2026-08-23T06:00:00',
+              'units': 'ft³/s',
+              'data': emptySeries
+                  ? <dynamic>[]
+                  : [
+                      for (var i = 1; i <= 8; i++)
+                        {
+                          'validTime':
+                              now.add(Duration(days: i)).toIso8601String(),
+                          'flow': 640.0,
+                        },
+                    ],
+            },
+          },
+        };
+      case ForecastProduct.returnPeriods:
+        payload = {
+          'returnPeriods': [
+            {
+              'feature_id': key.reachId,
+              'return_period_2': 30.0,
+              'return_period_5': 60.0,
+              'return_period_10': 90.0,
+              'return_period_25': 150.0,
+            },
+          ],
+        };
+      default:
+        payload = {
+          'riverName': _forecast.unnamedReach ? null : 'White River',
+          'latitude': 40.2,
+          'longitude': -111.6,
+        };
+    }
+    return RiverDataEntry(
+      key: key,
+      window: FreshnessWindow(
+        fetchedAt: now,
+        validUntil: now.add(const Duration(hours: 1)),
+      ),
+      unit: 'CFS',
+      payload: payload,
+    );
+  }
+
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -246,6 +303,7 @@ class _FakeAuth extends ChangeNotifier implements AuthProvider {
 late _FakeFavorites _favorites;
 late _Forecast _forecast;
 late _RecordingSettings _settings;
+late _StubRepo _repo;
 
 void _register({
   bool failUpstream = false,
@@ -254,14 +312,21 @@ void _register({
   bool geocodeFails = false,
 }) {
   final sl = GetIt.instance;
-  sl.registerSingleton<IRiverDataRepository>(_StubRepo());
-  sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   _forecast = _Forecast(fail: failUpstream, delay: loadDelay);
-  sl.registerSingleton<IForecastService>(_forecast);
+  _repo = _StubRepo(fail: failUpstream, delay: loadDelay);
+  sl.registerSingleton<IRiverDataRepository>(_repo);
+  sl.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
   _settings = _RecordingSettings();
   sl.registerSingleton<IUserSettingsService>(_settings);
   sl.registerSingleton<IGeocodingService>(
       _FakeGeocoder(delay: geocodeDelay, fails: geocodeFails));
+  // Phase 3: the page resolves the assembled service from DI rather than
+  // assembling the fetch graph itself; the repository is its one data path.
+  sl.registerSingleton<WeeklyOutlookService>(WeeklyOutlookService(
+    riverData: _repo,
+    unitService: _StubUnit(),
+    geocoder: _FakeGeocoder(delay: geocodeDelay, fails: geocodeFails),
+  ));
 }
 
 Widget _wrap(Widget w,
@@ -372,7 +437,9 @@ void main() {
   testWidgets('a missing registration surfaces as a wiring error, not a load '
       'failure', (t) async {
     _register();
-    GetIt.instance.unregister<IGeocodingService>();
+    // Phase 3: the page resolves ONE assembled service; that registration is
+    // now the load-bearing one.
+    GetIt.instance.unregister<WeeklyOutlookService>();
 
     await t.pumpWidget(_wrap(const WeeklyOutlookPage()));
     await _settle(t);
@@ -454,7 +521,7 @@ void main() {
     expect(find.textContaining('Could not load'), findsOneWidget);
 
     // Upstream comes back, and favourites notify — the recovery path.
-    _forecast.fail = false;
+    _repo.fail = false;
     _favorites.notifyListeners();
     await _settle(t);
 
@@ -653,7 +720,7 @@ void main() {
   testWidgets('the no-forecast state has a Retry that actually rebuilds',
       (t) async {
     _register();
-    _forecast.emptySeries = true;
+    _repo.emptySeries = true;
 
     await t.pumpWidget(_wrap(const WeeklyOutlookPage()));
     await _settle(t);
@@ -662,7 +729,7 @@ void main() {
     expect(find.text('Retry'), findsOneWidget,
         reason: 'a state the user may sit in for minutes needs a way out');
 
-    _forecast.emptySeries = false;
+    _repo.emptySeries = false;
     await t.tap(find.text('Retry'));
     await _settle(t);
 
