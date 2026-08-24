@@ -186,8 +186,13 @@ the sweep; changing the behaviour would regress freshness.
 12. **Unit conversion must survive intact and stay efficient** — see below.
 13. **Derived values are computed in exactly one place.**
     `weekly-digest.ts:242` has `categoryIndexFor()` server-side while the client
-    classifies independently. Two implementations of one rule is the drift
-    ADR 0002 exists to prevent.
+    classifies independently. `notification-service.ts` has a third,
+    `evaluateAlert()`, which compares against the raw `return_period_*` fields
+    instead of the 2/5/10/25 ladder. Three implementations of one rule is the
+    drift ADR 0002 exists to prevent — and they had already diverged: until
+    `28de63e` the alert path used a strictly-greater comparison, so a flow
+    landing exactly on a return period read as Action in the digest and
+    produced no alert at all. Phase 6 guard 3 is where these collapse into one.
 14. **Cached payloads carry a schema version.** Entries without a recognised
     version are discarded, not parsed.
 15. **Alerts read from the store and evaluate when a new run lands.** The
