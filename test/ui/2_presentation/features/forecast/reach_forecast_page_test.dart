@@ -26,7 +26,10 @@ import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payload.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
+import 'package:rivr/ui/1_state/shared/section_load_state.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart';
+
+import '../../../../helpers/fake_data.dart';
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -181,10 +184,19 @@ class _FakeReachDataProvider extends ChangeNotifier
   /// a GEOGLOWS id down it queries the wrong network entirely.
   final List<String> loaded = [];
 
+  /// R2-7 tests drive these directly; defaults keep every earlier test's
+  /// behaviour (no reach, no forecast, idle section) unchanged.
+  ReachData? reach;
+  ForecastResponse? forecast;
+  SectionLoadState daily = SectionLoadState.idle;
+
   @override
-  ReachData? get currentReach => null;
+  ReachData? get currentReach => reach;
   @override
-  ForecastResponse? get currentForecast => null;
+  ForecastResponse? get currentForecast => forecast;
+  @override
+  SectionLoadState getSectionState(String forecastType) =>
+      forecastType == 'medium_range' ? daily : SectionLoadState.idle;
   @override
   Future<bool> loadReach(String reachId) async {
     loaded.add(reachId);
@@ -224,7 +236,7 @@ _FakeRepo _registerRepo(
   return repo;
 }
 
-Widget _wrap(Widget page, {_FakeReachDataProvider? provider}) => CupertinoApp(
+Widget _wrap(Widget page, {ReachDataProvider? provider}) => CupertinoApp(
       home: ChangeNotifierProvider<ReachDataProvider>.value(
         value: provider ?? _FakeReachDataProvider(),
         child: page,
@@ -1463,6 +1475,8 @@ void main() {
             'widgets never get a forecast at all');
   });
 
+  _r2_7Tests();
+
   // ── The page's own flood palette (ADR 0007 follow-up) ──────────────────────
   //
   // The page keeps a file-private `_zoneColors` feeding four live call sites:
@@ -1563,6 +1577,84 @@ void main() {
             reason: '${kFloodCategories[rung]} rendered the pre-ADR-0007 '
                 'system colour — the local copy is back');
       }
+    });
+  });
+}
+
+void _r2_7Tests() {
+  // ── R2-7: a slow load must not look like an empty river ────────────────────
+  //
+  // The page defaults to the 10-day range for NWM, so the detail renders on
+  // the first frame. `nwm` being non-null only means the provider holds THIS
+  // reach; the medium-range products can still be in flight. Before the fix,
+  // _buildDetail mounted DailyFlowForecastWidget regardless and it drew its
+  // "No Forecast Data" card — the same card a river with no forecast gets.
+  //
+  // These drive the section state directly. The point under test is the branch
+  // in _buildDetail, and a fake state makes "loading" and "empty" exactly
+  // comparable, which is the whole claim. The real repo round-trip through the
+  // provider's state machine is covered in interactive_chart_test.
+  group('R2-7: loading and empty are distinguishable', () {
+    Future<void> pumpAt(WidgetTester tester, SectionLoadState daily) async {
+      // The detail sliver sits below a default 800px test viewport, so it is
+      // never built and every finder below would trivially pass.
+      await tester.binding.setSurfaceSize(const Size(1200, 3000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      _registerRepo(
+        RiverDataEntry(
+          key: const RiverDataKey(
+            source: ForecastSource.nwm,
+            reachId: '123',
+            product: ForecastProduct.reachSummary,
+          ),
+          window: _window(),
+          unit: 'CFS',
+          payload: const <String, dynamic>{},
+        ),
+        byProduct: _narrowPayloads(),
+      );
+
+      final provider = _FakeReachDataProvider()
+        ..reach = createTestReachData(reachId: '123')
+        ..forecast = ForecastResponse(
+          reach: createTestReachData(reachId: '123'),
+          mediumRange: const {},
+          longRange: const {},
+        )
+        ..daily = daily;
+
+      await tester.pumpWidget(_wrap(
+        const ReachForecastPage(reachId: '123', source: ForecastSource.nwm),
+        provider: provider,
+      ));
+      await _pumpLoaded(tester);
+    }
+
+    testWidgets('still loading shows the skeleton, not the empty card',
+        (tester) async {
+      await pumpAt(tester, SectionLoadState.loading);
+
+      expect(find.text('No Forecast Data'), findsNothing,
+          reason: 'THE defect: a fetch still running is not an empty river, '
+              'and this is the card an empty river gets');
+      expect(find.byType(Shimmer), findsWidgets,
+          reason: 'the in-flight window must render the loading skeleton');
+    });
+
+    testWidgets('genuinely empty still shows the empty card', (tester) async {
+      await pumpAt(tester, SectionLoadState.empty);
+
+      expect(find.text('No Forecast Data'), findsOneWidget,
+          reason: 'the fix must not suppress the real empty state — a reach '
+              'with no forecast still has to say so');
+    });
+
+    testWidgets('an error is also not the loading skeleton', (tester) async {
+      await pumpAt(tester, SectionLoadState.error);
+
+      expect(find.text('No Forecast Data'), findsOneWidget,
+          reason: 'error is done; the widget mounts and reports for itself');
     });
   });
 }
