@@ -1750,12 +1750,39 @@ not; four are still deployed and ACTIVE. Checked rather than assumed, because
 | | |
 |---|---|
 | `minInstanceCount` | **0** on all four — scales to zero, no warm instances |
-| invocations, last 30 days | **0** |
+| ~~invocations, last 30 days~~ | ~~**0**~~ — **wrong, see correction below** |
 | regions | `nwm_stream_conditions` is us-east1; the other three us-west1 |
 
 So the cost is nil and commit `3c95e052` ("Scale the conditions endpoints to
 zero to stop idle billing") did what it claimed. The earlier suspicion of idle
 billing was **Disproven**.
+
+> **CORRECTION (2026-08-24).** The "0 invocations" row was wrong on the day it
+> was written. Pulled from Cloud Monitoring
+> (`cloudfunctions.googleapis.com/function/execution_count`) for the same
+> 30-day window this entry used, 2026-07-21 → 08-20, the four still-deployed
+> functions recorded **253** invocations, not zero:
+>
+> | | 30d to 2026-08-20 | 5d to 2026-08-24 |
+> |---|---:|---:|
+> | `geoglows_stream_conditions` | 105 | 0 |
+> | `geoglows_conditions_latest` | 75 | 0 |
+> | `nwm_stream_conditions` | 54 | 0 |
+> | `nwm_conditions_latest` | 19 | 0 |
+> | **total** | **253** | **0** |
+>
+> **The conclusion stands.** `minInstanceCount: 0` is what makes idle billing
+> impossible, and 253 invocations over 30 days is far inside the free tier, so
+> "the cost is nil" remains true. Only the number was wrong. They have been
+> genuinely dormant since **2026-08-18**, when flood colours finished moving to
+> the daily tileset — which is why a window ending today reads zero and the
+> window this entry actually used did not.
+>
+> Separately, the now-deleted `geoglows_conditions_worker` / `_refresh` /
+> `_publish_global` fired ~1,044 times during the 08-11 → 08-18 wind-down. Any
+> 30-day usage figure spanning that period reflects the retirement, not
+> steady-state operation. Post-retirement steady state is **~21 function
+> executions/day** across the whole project.
 
 What is real is dead code on both sides: `stream_conditions_service.dart` and
 three `config.dart` URLs still point at endpoints the map stopped using when

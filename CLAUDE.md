@@ -390,8 +390,10 @@ firebase deploy --only functions:geoglows             # Deploy Python functions 
 firebase deploy --only functions:geoglows:<name>      # Deploy one Python function (e.g. nwm_stream_conditions)
 # NOTE: the geoglows_conditions_* schedulers are gone and flood colours come
 # from the daily rivr-flooded-YYYYMMDD tileset. Four *_conditions_* functions
-# are still deployed but dormant — minInstances 0, no invocations in 30 days,
-# so they cost nothing. Docs previously claimed they were deleted (ADR 0005).
+# are still deployed but dormant — minInstances 0, and no invocations since
+# 2026-08-18, so they cost nothing. NOT "none in the last 30 days": they
+# logged 253 in the 30 days to 2026-08-20 (correction in ADR 0005). Docs
+# previously claimed they were deleted (ADR 0005).
 ```
 
 ### iOS release — three things that have each cost a build
