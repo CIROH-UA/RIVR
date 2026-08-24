@@ -8,10 +8,18 @@
 // series and displayed "No chart data available" forever — the data arriving
 // seconds later rebuilt the Consumer with identical props, which the old
 // didUpdateWidget ignored.
+//
+// R2-7 (JAWRA) then showed the in-flight window was ALSO mislabelled: the
+// chart reported "No chart data available" while the fetch was still running,
+// the same message a reach with no forecast gets. This test used to assert
+// that message as its "precondition" — it was pinning the bug. It now asserts
+// the loading indicator during that window, and the same fill-on-arrival
+// behaviour afterwards.
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -167,8 +175,17 @@ void main() {
     ));
     await t.pump(const Duration(milliseconds: 50));
 
-    expect(find.textContaining('No chart data'), findsOneWidget,
-        reason: 'precondition: the chart mounted inside the in-flight window');
+    // The in-flight window. This is the R2-7 case: the section state says
+    // loading, so the chart must say so too rather than claiming there is no
+    // data. Asserting BOTH directions on purpose — the bug was that these two
+    // states rendered identically, so it is not enough to see the spinner.
+    expect(find.byType(CupertinoActivityIndicator), findsOneWidget,
+        reason: 'the chart mounted inside the in-flight window and must show '
+            'it is loading');
+    expect(find.textContaining('Loading chart data'), findsOneWidget);
+    expect(find.textContaining('No chart data'), findsNothing,
+        reason: 'a fetch still in flight is not an empty river — showing the '
+            'empty-state copy here is exactly the R2-7 defect');
 
     // Medium range lands — the provider merges and notifies.
     repo.releaseMedium();
@@ -179,5 +196,7 @@ void main() {
         reason: 'the data arrived; a chart that never re-extracts shows '
             '"No chart data available" forever — review round 1 reproduced '
             'exactly this by tapping the outlook mid-load');
+    expect(find.byType(CupertinoActivityIndicator), findsNothing,
+        reason: 'the section resolved; the spinner must give way to the chart');
   });
 }
