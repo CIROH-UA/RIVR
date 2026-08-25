@@ -223,12 +223,24 @@ class StoreSubscriptionService {
     _subs.clear();
   }
 
-  /// Detach every listener (guard 6). Idempotent.
-  Future<void> dispose() async {
-    _disposed = true;
+  /// Drop every listener but stay usable (guard 6).
+  ///
+  /// Distinct from [dispose] on purpose. The kill switch turning OFF must
+  /// release listeners AND leave the service able to resume when it turns back
+  /// ON. Using the terminal [dispose] for that made the switch one-way: once
+  /// off, the store never came back without an app restart, which is not a
+  /// switch. Idempotent.
+  Future<void> detach() async {
     await _cancelAll();
     _watched = <String>{};
-    AppLogger.info(_tag, 'disposed; all listeners detached');
+    AppLogger.info(_tag, 'detached; listeners released, service still usable');
+  }
+
+  /// Permanently stop. Nothing subscribes again after this. Idempotent.
+  Future<void> dispose() async {
+    _disposed = true;
+    await detach();
+    AppLogger.info(_tag, 'disposed');
   }
 
   static bool _setEquals(Set<String> a, Set<String> b) =>
