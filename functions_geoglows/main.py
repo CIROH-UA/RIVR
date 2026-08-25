@@ -546,7 +546,22 @@ def nwm_stream_conditions(req: https_fn.Request) -> https_fn.Response:
 
 @https_fn.on_request(
     region="us-west1",  # next to the GEOGLOWS S3 buckets (us-west-2) to cut read latency
-    memory=options.MemoryOption.GB_1,
+    # GB_2, not GB_1. At 1 GB this OOMed and the container was killed:
+    #
+    #   'Memory limit of 1024 MiB exceeded with 1065 MiB used'
+    #   'Memory limit of 1024 MiB exceeded with 1070 MiB used'
+    #   The container instance was found to be using too much memory and was
+    #   terminated.
+    #
+    # Observed 2026-08-25. A single cold request succeeds; a second one close
+    # behind gets HTTP 500 because the instance is dying or restarting. The app
+    # fetches one reach at a time interactively, so this stayed invisible until
+    # the ADR 0011 store called it twice in quick succession.
+    #
+    # It overshot by only ~40 MiB, and geoglows_reach_coords above already
+    # documents a "~1.1 GB transient parse peak" for the same xarray/zarr
+    # machinery — this function was simply the one left at the lower ceiling.
+    memory=options.MemoryOption.GB_2,
     timeout_sec=120,
     # min_instances=0 (scale to zero) — no idle cost. First tap after the
     # function sleeps eats a ~10-30s cold start (heavy geoglows/xarray/zarr
