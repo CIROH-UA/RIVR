@@ -370,9 +370,30 @@ export async function fetchReturnPeriods(reachId: string): Promise<FetchedProduc
       Object.keys(r).some((k) => k.startsWith("return_period_")));
 
   if (valid.length === 0) {
+    // "Upstream answered, and this reach genuinely has no thresholds" is not
+    // the same as "the fetch failed", and they need different outcomes.
+    // Round 4, non-blocking 1: throwing here meant such a reach failed EVERY
+    // day forever, sat permanently in reachesToRetry, and inflated the very
+    // failure rate the no-retry rule exists to keep honest.
+    //
+    // A 200 with a well-formed but threshold-free body is a real answer.
+    // Storing it — an empty array — is what the client already treats as "no
+    // thresholds", costing that reach its flood category and nothing else.
+    // A malformed body still throws, below.
+    if (Array.isArray(body)) {
+      logger.info(
+        `${reachId}: upstream has no return periods; storing an empty set ` +
+        "rather than failing this reach every day"
+      );
+      return {
+        payload: {returnPeriods: []},
+        unit: STORE_NATIVE_UNIT,
+        referenceTime: null,
+      };
+    }
     throw new Error(
-      `${reachId}: return-period API returned no usable thresholds — ` +
-      "refusing to store empty thresholds over real ones"
+      `${reachId}: return-period response was not an array — refusing to ` +
+      "store thresholds from a shape we cannot read"
     );
   }
   const usable = valid;

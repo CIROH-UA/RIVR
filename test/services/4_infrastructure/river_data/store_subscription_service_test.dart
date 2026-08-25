@@ -500,7 +500,95 @@ void main() {
       await svc.dispose();
     });
   });
+
+  group('round 4, B2 — a heal must never outlive a detach', () {
+    // _detachLocked cancelled the heal timer BEFORE awaiting _cancelAll, so a
+    // listener error delivered during that await armed a NEW timer the detach
+    // would never cancel — and detach did not clear _lastRequested. Seconds
+    // later the service re-subscribed with the kill switch OFF, and nothing
+    // was left to correct it: the coordinator only re-syncs on a favourites
+    // change or a switch flip. The re-attached listener kept calling ingest,
+    // and the repository served those entries as fresh WITHOUT consulting any
+    // source, so the decorator's switch check never ran. A kill-switch bypass,
+    // and the third distinct race in this area.
+    test('a listener error during detach does not resurrect the watch',
+        () async {
+      final db = _ErroringFirestore(failFirstOnly: true);
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      await svc.detach();
+      expect(svc.isSubscribed, isFalse);
+
+      // Longer than the first heal delay (2s).
+      await Future<void>.delayed(const Duration(milliseconds: 2400));
+
+      expect(svc.isSubscribed, isFalse,
+          reason: 'a heal armed before the detach must be refused when it '
+              'fires — otherwise the kill switch and sign-out are bypassed');
+      expect(svc.watchedIds, isEmpty);
+      await svc.dispose();
+    });
+
+    test('detach clears what a heal would re-subscribe to', () async {
+      final db = _ErroringFirestore(failFirstOnly: true);
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      await svc.detach();
+      await Future<void>.delayed(const Duration(milliseconds: 2400));
+
+      expect(svc.isSubscribed, isFalse);
+      await svc.dispose();
+    });
+
+    // Round 4, M3: restoring round 3's B3 defect — detach() calling
+    // _detachLocked() directly instead of chaining on _pending — passed all
+    // 1147 tests. The fix was correct and unguarded.
+    test('detach WAITS for an in-flight sync instead of racing it', () async {
+      final db = _ErroringFirestore(failFirstOnly: false);
+      db.failNext = false;
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      // Start a sync and do NOT await it, then detach immediately. If detach
+      // bypasses the lock it runs while the sync is between cancelling the old
+      // listeners and installing the new ones, tears down nothing, and the
+      // sync then installs listeners the kill switch asked to stop.
+      final syncing = svc.syncFavourites([_key('1'), _key('2')]);
+      final detaching = svc.detach();
+      await Future.wait([syncing, detaching]);
+
+      expect(svc.isSubscribed, isFalse,
+          reason: 'detach must observe whatever the sync built and remove it');
+      expect(svc.watchedIds, isEmpty);
+      await svc.dispose();
+    });
+
+    test('a heal still works when nothing detached', () async {
+      final db = _ErroringFirestore(failFirstOnly: true);
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(svc.isSubscribed, isFalse, reason: 'the first stream errored');
+
+      // The self-heal re-subscribes on its own, without the user touching
+      // anything — round 3, non-blocking 6.
+      await Future<void>.delayed(const Duration(milliseconds: 2400));
+      expect(svc.isSubscribed, isTrue,
+          reason: 'a mid-session PERMISSION_DENIED must not leave the store '
+              'silently off until the user happens to touch a favourite');
+      await svc.dispose();
+    });
+  });
 }
+
 
 // ── A Firestore whose snapshot stream fails ──────────────────────────────────
 //

@@ -327,7 +327,62 @@ void main() {
               'indistinguishably from an ordinary cache miss');
     });
   });
+
+  group('round 4, B6 — a NON-favourite must not pay a server round-trip', () {
+    // The ADR is explicit: "non-favourites continue to the live path". An
+    // ungated server read broke that in the way that hurts most — every
+    // non-favourite product paid an AWAITED network round-trip that could only
+    // ever return not-found, serialised in front of the NOAA fetch that was
+    // going to happen anyway. Tapping an unfavourited reach on the map is
+    // three products, so three such round-trips before any real work started,
+    // and Source.server does not fail fast on a flaky connection.
+    test('an unwatched reach never reaches Source.server', () async {
+      final db = _SourceAwareFirestore(
+        cacheHasIt: false,
+        serverHasIt: true,
+        storedDoc: _storeDoc(),
+      );
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+        inner: up,
+        readSwitch: _Switch(true),
+        firestore: db,
+        storeBackedIds: () => <String>{}, // nothing favourited
+      );
+
+      final r = await s.fetch(_key());
+
+      expect(db.sourcesAsked, [Source.cache],
+          reason: 'the local read is free; the SERVER read is the one that '
+              'blocks the live fetch behind it');
+      expect(r.payload['from'], 'upstream');
+      expect(up.fetches, 1);
+    });
+
+    test('a watched reach still gets the server read on a cold cache',
+        () async {
+      final db = _SourceAwareFirestore(
+        cacheHasIt: false,
+        serverHasIt: true,
+        storedDoc: _storeDoc(),
+      );
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+        inner: up,
+        readSwitch: _Switch(true),
+        firestore: db,
+        storeBackedIds: () => {_key().storageKey},
+      );
+
+      final r = await s.fetch(_key());
+
+      expect(db.sourcesAsked, [Source.cache, Source.server]);
+      expect(r.payload['from'], 'store');
+      expect(up.fetches, 0, reason: 'guard 1 must survive the B6 gate');
+    });
+  });
 }
+
 
 // ── A Firestore that can tell Source.cache from Source.server ───────────────
 //

@@ -137,6 +137,21 @@ class StoreSubscriptionService {
 
   Timer? _healTimer;
 
+  /// Bumped by every detach/dispose. A heal armed before a detach carries the
+  /// old generation and is refused when it fires.
+  ///
+  /// Round 4, B2: `_detachLocked` cancelled the heal timer BEFORE awaiting
+  /// `_cancelAll()`, so a listener error delivered during that await armed a
+  /// NEW timer the detach would never cancel — and `detach` did not clear
+  /// `_lastRequested`. Two seconds later the service re-subscribed, with the
+  /// kill switch off and nothing left to correct it, because the coordinator
+  /// only re-syncs on a favourites change or a switch flip. The re-attached
+  /// listener kept calling `ingest`, and the repository then served those
+  /// entries as fresh WITHOUT consulting any source — so the decorator's
+  /// switch check never ran. A genuine kill-switch bypass, and the third
+  /// distinct race in this area.
+  int _generation = 0;
+
   /// Documents ingested since construction. Exposed for the guards.
   int ingested = 0;
 
@@ -266,6 +281,7 @@ class StoreSubscriptionService {
   /// store silently off until the user happened to touch a favourite.
   void _scheduleHeal() {
     if (_disposed || _lastRequested.isEmpty) return;
+    final generation = _generation;
     if (_consecutiveErrors >= _healDelays.length) {
       AppLogger.warning(
         _tag,
@@ -278,7 +294,14 @@ class StoreSubscriptionService {
     _consecutiveErrors++;
     _healTimer?.cancel();
     _healTimer = Timer(delay, () {
-      if (_disposed) return;
+      // A detach or dispose between arming and firing invalidates this heal.
+      // Without the generation check, healing re-subscribes AFTER the kill
+      // switch said stop.
+      if (_disposed || generation != _generation) {
+        AppLogger.info(_tag, 'heal cancelled; the watch was torn down');
+        return;
+      }
+      if (_lastRequested.isEmpty) return;
       AppLogger.info(_tag, 're-subscribing after a listener failure');
       unawaited(syncFavourites(_lastRequested).catchError((Object _) {}));
     });
@@ -378,11 +401,18 @@ class StoreSubscriptionService {
   }
 
   Future<void> _detachLocked() async {
-    _healTimer?.cancel();
-    _healTimer = null;
+    // Bump FIRST: anything armed from here on — including an error delivered
+    // during the await below — carries a stale generation and is refused.
+    _generation++;
     _consecutiveErrors = 0;
+    // Cleared so a heal that somehow survives has nothing to re-subscribe to.
+    _lastRequested = const [];
     await _cancelAll();
     _watched = <String>{};
+    // Cancelled AFTER the await, not before: an error arriving mid-cancel used
+    // to arm a timer that the earlier cancel had already passed.
+    _healTimer?.cancel();
+    _healTimer = null;
     AppLogger.info(_tag, 'detached; listeners released, service still usable');
   }
 

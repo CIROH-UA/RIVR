@@ -911,6 +911,23 @@ days — if the store serves something wrong, the fix cannot wait on Apple.
 river, show the same number at the same time — and each renders within 3 seconds
 of a cold start, or instantly with no network at all.
 
+**Open, and owned by name.** These cannot be settled from a development machine
+and are not review failures:
+
+| Guard | Needs | Owner |
+|---|---|---|
+| 2 — two devices, two accounts, identical values | Deployed server + two devices | Jerson |
+| 3 — renders under 3 s on a cold cache | A device, timed | Jerson |
+| 4 — renders offline | A device, airplane mode | Jerson |
+| 9 (device half) — the kill switch, flipped for real | `store_read_enabled` created in Remote Config, then a device | Jerson |
+| The construction in `main.dart` | Pumping the root widget needs a live Firebase app | Covered by the device run |
+
+Two prerequisites gate all of them: **`storeStaticDaily` and the extended
+`CAN_FETCH` must be deployed** (without them the store holds no `reachMetadata`
+or `returnPeriods`, so guard 1 fails for any reach favourited before Phase 5),
+and **`store_read_enabled` must be created by hand** — nothing publishes it, and
+absent it every device reads `false` and the phase is inert.
+
 ---
 
 ## Phase 6 — Alerts on the store

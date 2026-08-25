@@ -429,8 +429,10 @@ class RiverDataCache implements IRiverDataCache {
     _releaseNotifier(key.storageKey);
     // The recency entry goes when the group's last product does — round 5
     // found this the one path that never dropped it (same growth shape as the
-    // notifier map, one path over). No caller exists in lib/ today; the guard
-    // exists so the first caller does not inherit a leak.
+    // notifier map, one path over). ADR 0011 Phase 5 created the first caller:
+    // StoreReadCoordinator evicts a favourite's entries when the kill switch
+    // turns off, so this path now runs in production and the guard is load-
+    // bearing rather than pre-emptive.
     final group = _groupOf(key);
     if (!_memory.keys.any((k) => k.startsWith('${group}__'))) {
       _lastAccess.remove(group);

@@ -82,6 +82,9 @@ void setupForecastDependencies() {
     () => SourceRegistry([
       StoreBackedDataSource(
         readSwitch: sl<StoreReadSwitch>(),
+        // Lazy: the subscription service depends on the repository, which
+        // depends on this registry, so resolving it here would be a cycle.
+        storeBackedIds: () => sl<StoreSubscriptionService>().watchedIds,
         inner: NwmDataSource(
           geocoder: sl<IGeocodingService>(),
           api: sl<INoaaApiService>(),
@@ -91,6 +94,7 @@ void setupForecastDependencies() {
       ),
       StoreBackedDataSource(
         readSwitch: sl<StoreReadSwitch>(),
+        storeBackedIds: () => sl<StoreSubscriptionService>().watchedIds,
         inner: GeoglowsDataSource(
           api: sl<IGeoglowsApiService>(),
           unitService: sl<IFlowUnitPreferenceService>(),

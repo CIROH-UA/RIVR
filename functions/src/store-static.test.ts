@@ -273,13 +273,30 @@ describe("the producers write the exact keys the client decodes", () => {
       }
     });
 
-  test("returnPeriods REFUSES a response with no thresholds", async () => {
-    stubFetch([{feature_id: "123"}]);
+  // Round 4, non-blocking 1: this used to assert a blanket refusal, which
+  // meant a reach that genuinely HAS no return periods failed every single
+  // day, forever — permanently in reachesToRetry, inflating the failure rate
+  // the Phase 0 probe exists to measure honestly. "Upstream has none" and
+  // "the fetch failed" are different answers and now have different outcomes.
+  test("a well-formed response with no thresholds stores an EMPTY set",
+    async () => {
+      stubFetch([{feature_id: "123"}]);
+      try {
+        const r = await fetchReturnPeriods("123");
+        assert.deepEqual(r.payload.returnPeriods, [],
+          "the client reads an empty list as 'no thresholds', which costs " +
+          "this reach its flood category and nothing else");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("a response that is not an array still THROWS", async () => {
+    // A shape we cannot read is a failure, not an answer. Storing from it
+    // would put thresholds of unknown meaning behind a 30-day window.
+    stubFetch({unexpected: "shape"});
     try {
-      await assert.rejects(() => fetchReturnPeriods("123"),
-        /no usable thresholds/,
-        "storing empty thresholds over real ones costs the flood category " +
-        "for 30 days");
+      await assert.rejects(() => fetchReturnPeriods("123"), /not an array/);
     } finally {
       globalThis.fetch = realFetch;
     }

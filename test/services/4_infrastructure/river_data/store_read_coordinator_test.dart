@@ -333,4 +333,65 @@ void main() {
       await c.dispose();
     });
   });
+
+  group('round 4, B1 — eviction is a TRANSITION, not a state', () {
+    // The round-3 eviction fix ran whenever the switch read false. False is
+    // the DEFAULT and `store_read_enabled` does not exist in Remote Config, so
+    // that was the shipping path — and FavoritesProvider notifies from eleven
+    // places, at least three times per launch. Every one wiped each
+    // favourite's entries from memory AND disk. Favourites are the PINNED
+    // reaches ADR 0011 Phase 2 exists to protect, so the phase made the app
+    // fetch MORE than before it, and an offline launch lost the last-known
+    // values for exactly the reaches the user cares about.
+    test('the default-OFF state never evicts, however often favourites notify',
+        () async {
+      final cache = _NoopCache();
+      favourites = _FakeFavourites([_nwm('1'), _nwm('2')]);
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(false),
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      for (var i = 0; i < 5; i++) {
+        favourites.set([_nwm('1'), _nwm('2')]);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(cache.evicted, isEmpty,
+          reason: 'the store was never on, so there is nothing to reclaim — '
+              'and wiping the pinned favourites is a REGRESSION on the live '
+              'path, not a no-op');
+      await c.dispose();
+    });
+
+    test('only the ON -> OFF transition evicts, and only once', () async {
+      final cache = _NoopCache();
+      final sw = _FakeSwitch(true);
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: sw,
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(cache.evicted, isEmpty);
+
+      sw.enabled = false;
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      final afterFlip = cache.evicted.length;
+      expect(afterFlip, greaterThan(0));
+
+      // Further churn while still off must not evict again.
+      favourites.set([_nwm('1')]);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(cache.evicted.length, afterFlip,
+          reason: 'eviction is the transition, not the state');
+      await c.dispose();
+    });
+  });
 }

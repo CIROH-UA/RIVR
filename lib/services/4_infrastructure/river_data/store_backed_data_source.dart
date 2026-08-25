@@ -43,13 +43,22 @@
 //     guard 1 holds — the guard is about upstream, which is what costs money,
 //     rate limit and latency.
 //
-// **The cost this accepts:** a NON-favourite now costs one Firestore read per
-// product that misses locally, and returns not-found. Tapping an unfavourited
-// reach on the map is ~3 such reads. At the ADR's current scale that is
-// nothing against a 50,000/day free tier, and it buys the phase's central
-// guard. If it ever stops being nothing, the lever is to gate the server read
-// on the subscription's watch set — the favourites are known — rather than to
-// go back to cache-only.
+// **The server read is gated on the reach being store-backed.** The ADR is
+// explicit that "non-favourites continue to the live path", and an ungated
+// server read broke that in the way that hurts most: every non-favourite
+// product paid an awaited network round-trip that could only ever return
+// not-found, serialised IN FRONT of the NOAA fetch that was going to happen
+// anyway. Tapping an unfavourited reach on the map is three products, so three
+// such round-trips before any real work started, on a connection that may be
+// slow — and `Source.server` does not fail fast. Round 4, B6 called the
+// billing cost correctly small and the latency cost unmentioned; the latency
+// was the real problem.
+//
+// The gate is the subscription service's watch set, which IS the favourites,
+// resolved lazily at call time — the subscription service depends on the
+// repository, which depends on this, so a constructor reference would be a
+// cycle. A local cache read is never gated: it is free, local, and cannot
+// block.
 //
 // A miss of any kind — no document, wrong schema, unreadable, expired — falls
 // through to the wrapped source. Degrading to the live path is always correct
@@ -71,14 +80,20 @@ class StoreBackedDataSource implements IRiverDataSource {
     required IRiverDataSource inner,
     required StoreReadSwitch readSwitch,
     FirebaseFirestore? firestore,
+    Set<String> Function()? storeBackedIds,
   })  : _inner = inner,
         _switch = readSwitch,
-        _injectedDb = firestore;
+        _injectedDb = firestore,
+        _storeBackedIds = storeBackedIds;
 
   static const String _tag = 'STORE_SOURCE';
 
   final IRiverDataSource _inner;
   final StoreReadSwitch _switch;
+
+  /// The document ids currently subscribed — the favourites. Null means "do
+  /// not gate", which only the tests use.
+  final Set<String> Function()? _storeBackedIds;
   final FirebaseFirestore? _injectedDb;
 
   /// Lazy, so constructing this does not require an initialised Firebase app.
@@ -92,10 +107,12 @@ class StoreBackedDataSource implements IRiverDataSource {
   /// Fetches that fell through to the wrapped source.
   int servedFromUpstream = 0;
 
-  /// Store reads that threw. A local miss is normal and counts here too, so
-  /// this is a diagnostic signal rather than an error count — but a number
-  /// that climbs while [servedFromStore] stays at zero means the store is
-  /// unreachable, not merely cold.
+  /// SERVER reads that threw — offline, or a rules failure.
+  ///
+  /// A `Source.cache` miss is a normal cold read and is deliberately NOT
+  /// counted here. Round 4, non-blocking 5: counting both made the number
+  /// climb on every ordinary cold read, so it could not distinguish the two
+  /// states its own comment claimed it distinguished.
   int storeReadFailures = 0;
 
   @override
@@ -131,8 +148,13 @@ class StoreBackedDataSource implements IRiverDataSource {
     final cached = await _readStoreFrom(key, Source.cache);
     if (cached != null) return cached;
 
-    // Cold cache. Ask the store's server rather than NOAA: this is what makes
-    // guard 1 hold on a first install. See the note at the top of this file.
+    // Cold cache. Ask the store's SERVER rather than NOAA — this is what makes
+    // guard 1 hold on a first install — but only for a reach the store
+    // actually holds. For anything else the round-trip could only return
+    // not-found, and it would sit in front of the live fetch.
+    final backed = _storeBackedIds?.call();
+    if (backed != null && !backed.contains(key.storageKey)) return null;
+
     return _readStoreFrom(key, Source.server);
   }
 
@@ -187,8 +209,8 @@ class StoreBackedDataSource implements IRiverDataSource {
       // silent, which made every decode bug, permission error and plugin fault
       // indistinguishable from an ordinary cache miss — in a project whose
       // stated non-negotiable is that these paths fail silently.
-      storeReadFailures++;
       if (source == Source.server) {
+        storeReadFailures++;
         AppLogger.info(
           _tag,
           'store server read failed for ${key.storageKey}; '

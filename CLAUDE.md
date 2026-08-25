@@ -462,10 +462,17 @@ device-side calls just to draw itself.
 published by the flood builder and does NOT exist yet — it must be created by
 hand in the Firebase console before the switch can be exercised at all. Absent,
 `getBool` returns false, which is the safe default: every device takes the live
-path. Set it to `true` to let devices read the store; flip to `false` and every
-open app detaches its listeners AND evicts the entries the store wrote, so the
-live path takes over within seconds rather than after the stored window
+path. Set it to `true` to let devices read the store; flip to `false` and every open
+app detaches its listeners and evicts every cached entry for a favourite, so
+the live path takes over within seconds rather than after the stored window
 expires (up to 30 days for river names and flood thresholds).
+
+That eviction is deliberately broader than "what the store wrote" — cache
+entries carry no provenance marker, and the switch means "the store may have
+poisoned this", so paying a refetch is the right price. It fires only on the
+ON -> OFF **transition** (persisted across launches), never while the switch is
+merely off: doing it on the off *state* wiped the pinned favourites on every
+`notifyListeners`, which made the app fetch more than it did before Phase 5.
 
 **The store's fetchers never retry** — including these two, which is why they
 do NOT go through `noaa-client`'s `fetchWithRetry` or `getReturnPeriods`. The

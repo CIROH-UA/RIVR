@@ -177,7 +177,13 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
     // The real end-of-life hook for the root widget. Cancelling a Firestore
     // subscription is fire-and-forget, so nothing is awaited.
     unawaited(_storeReads?.dispose());
-    unawaited(GetIt.I<StoreReadSwitch>().dispose());
+    // NOT the StoreReadSwitch. It is a GetIt singleton, and `detached` is
+    // RESUMABLE on Android — disposing it here left a permanently dead
+    // singleton whose notifier throws on the next config change, for the rest
+    // of the process. Round 4, non-blocking 7. Its one subscription dies with
+    // the process anyway, which is the only thing this hook could have been
+    // protecting.
+
   }
 
   @override
