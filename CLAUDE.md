@@ -431,5 +431,37 @@ silently migrates the deployed functions to a different runtime. Also note the
 function signatures, so it is imported lazily inside the one function that uses
 it. Moving it back to module scope will break deploys.
 
+### ADR 0011 cloud store (Phase 4, live since 2026-08-25)
+
+Six functions keep a Firestore `river_data` collection fresh for every
+favourited reach, so the app reads one shared value instead of every widget
+fetching its own. Server-only — the app does not read it until Phase 5.
+
+| Function | Cadence |
+|---|---|
+| `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
+| `storeGeoglowsDaily` | 01:30 UTC |
+| `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
+| `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
+| `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
+| `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
+
+**Document IDs ARE the client's cache key** (`nwm__<reachId>__<product>`,
+matching `RiverDataKey.storageKey`), and the envelope is exactly
+`RiverDataEntry.toJson()`. Both are cross-language contracts pinned by tests
+that read the Dart source off disk — a rename on either side fails the build
+rather than silently storing documents the app never reads.
+
+**Requires the composite index `river_data(product ASC, runId ASC)`.** Without
+it every hourly run aborts on FAILED_PRECONDITION. Declared in
+`firestore.indexes.json` and created in production.
+
+**"No new run means zero fetches" is the whole point.** If upstream has not
+published, the run does nothing — verified through a real five-hour NOAA stall.
+
+**Never add retries to the store's fetchers.** A transient failure is recorded
+per reach and retried next cycle. Retrying inside a run hides the failure rate
+the Phase 0 probe exists to measure, and hammers whatever is already failing.
+
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
 **Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.
