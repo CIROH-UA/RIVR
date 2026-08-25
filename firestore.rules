@@ -14,6 +14,21 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // river_data — the ADR 0011 cloud store (Phase 4).
+    //
+    // Readable by any signed-in user: these documents hold public river
+    // forecasts keyed by (source, reach, product) and carry nothing
+    // user-specific. Which reaches a given person follows stays in
+    // users/{userId}, which is already locked to its owner.
+    //
+    // NEVER client-writable. Only the Admin SDK writes here, and it bypasses
+    // these rules. A client write would let anyone poison the forecast every
+    // other user reads.
+    match /river_data/{documentId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // notification_logs — Cloud Functions write-only via Admin SDK.
     // No client access permitted.
     match /notification_logs/{logId} {

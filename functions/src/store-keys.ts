@@ -53,6 +53,16 @@ export const FORECAST_PRODUCTS = [
 ] as const;
 export type ForecastProductId = typeof FORECAST_PRODUCTS[number];
 
+/**
+ * The Firestore collection holding the cloud store (ADR 0011 Phase 4).
+ *
+ * Named for the app's RiverDataKey/RiverDataEntry pair, in the snake_case the
+ * project's other collections use (`users`, `publish_cadence_log`,
+ * `return_period_cache`). The ADR does not name it; this is the implementation
+ * choice, and firestore.rules must match it exactly or the client is denied.
+ */
+export const STORE_COLLECTION = "river_data";
+
 /** Separator between key segments. Two underscores, per RiverDataKey. */
 const SEPARATOR = "__";
 
