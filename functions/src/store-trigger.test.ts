@@ -19,6 +19,7 @@ import {
   ProbeRuns,
   assessStoreHealth,
   decideTriggers,
+  probeRunFor,
   quotaUsage,
 } from "./store-trigger.js";
 import {ForecastProductId} from "./store-keys.js";
@@ -165,5 +166,53 @@ describe("guard 11 — usage against the documented free tier", () => {
     const q = quotaUsage(150, 116);
     assert.ok(q.writesPctOfFree < 1,
       `expected well under 1% of the write allowance, got ${q.writesPctOfFree}`);
+  });
+});
+
+describe("the probe key is not always the product name", () => {
+  // Round 3, B3. The store's analysisAssimilation document holds a SHORT RANGE
+  // body with a shortRange run, because that is what the client derives
+  // current flow from. The probe's analysisAssimilation key comes from NOAA's
+  // ?series=analysis_assimilation endpoint — a genuinely different series,
+  // measured ~3 hours BEHIND short range.
+  //
+  // Compared directly, isRunNewer(AA 20:00Z, stored SR 23:00Z) is false, so
+  // the product read "unchanged" and never triggered again — while its own
+  // validUntil expired every hour.
+  const probeSample = probe({
+    analysisAssimilation: "2026-08-24T20:00:00Z",
+    shortRange: "2026-08-24T23:00:00Z",
+  });
+
+  test("analysisAssimilation is compared against the shortRange probe key",
+    () => {
+      assert.equal(probeRunFor(probeSample, "analysisAssimilation"),
+        "2026-08-24T23:00:00Z",
+        "the AA document carries a shortRange run, so it must be compared " +
+        "against the shortRange probe key");
+    });
+
+  test("a stored shortRange run does NOT read as unchanged", () => {
+    const d = decideTriggers(probeSample,
+      {analysisAssimilation: "2026-08-24T22:00:00Z"},
+      ["analysisAssimilation"]);
+
+    assert.deepEqual(d.triggered, ["analysisAssimilation"],
+      "comparing against the AA series made this product stop triggering " +
+      "after its first write");
+  });
+
+  test("it still does not trigger when genuinely level", () => {
+    const d = decideTriggers(probeSample,
+      {analysisAssimilation: "2026-08-24T23:00:00Z"},
+      ["analysisAssimilation"]);
+    assert.deepEqual(d.triggered, []);
+  });
+
+  test("every other product uses its own key", () => {
+    for (const p of ["shortRange", "mediumRange", "longRange"] as const) {
+      assert.equal(probeRunFor(probe({[p]: "2026-08-24T12:00:00Z"}), p),
+        "2026-08-24T12:00:00Z");
+    }
   });
 });

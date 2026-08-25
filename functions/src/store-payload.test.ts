@@ -158,3 +158,76 @@ describe("the size ceiling refuses before the write", () => {
       "ceiling needs headroom");
   });
 });
+
+describe("a REAL NOAA body, with its empty sibling sections", () => {
+  // NOAA returns ALL five section keys in every response, with the ones you
+  // did not request as `{}`. Every fixture above is a hand-made two-key body,
+  // which is why B2 was invisible: `section in raw` passed on an EMPTY section
+  // and the trim threw the real data away. Round 3, B2.
+  function realNoaaShortRangeBody() {
+    return {
+      reach: {reachId: "10376596", name: "Test River"},
+      analysisAssimilation: {},
+      shortRange: {
+        series: {
+          referenceTime: "2026-08-24T23:00:00Z",
+          units: "ft³/s",
+          data: [{validTime: "2026-08-25T00:00:00Z", flow: 640}],
+        },
+      },
+      mediumRange: {},
+      longRange: {},
+      mediumRangeBlend: {},
+    };
+  }
+
+  test("analysisAssimilation keeps the shortRange series, not the empty one",
+    () => {
+      const out = trimPayload("analysisAssimilation",
+        realNoaaShortRangeBody());
+
+      assert.ok("shortRange" in out,
+        "the client derives current flow from short range; without this " +
+        "section the document has a valid runId and NO flow data at all");
+      const sr = out.shortRange as Record<string, unknown>;
+      assert.ok("series" in sr);
+      assert.equal("analysisAssimilation" in out, false,
+        "the empty sibling section must not be stored as the payload");
+    });
+
+  test("shortRange itself is unaffected by the empty siblings", () => {
+    const out = trimPayload("shortRange", realNoaaShortRangeBody());
+    assert.deepEqual(Object.keys(out).sort(), ["reach", "shortRange"]);
+  });
+
+  // The failure mode B2 actually produced: a document that writes cleanly,
+  // carries a correct runId, and contains nothing the client can read.
+  //
+  // Scoped to the products this body genuinely carries data for. A body whose
+  // requested section is empty passes through untrimmed by design (next test),
+  // so asserting over every product would flag correct behaviour.
+  test("a product with real data is never trimmed to an empty section", () => {
+    const body = realNoaaShortRangeBody();
+    for (const p of ["analysisAssimilation", "shortRange"] as const) {
+      const out = trimPayload(p, body);
+      const dataKeys = Object.keys(out).filter((k) => k !== "reach");
+      assert.ok(dataKeys.length > 0, `${p} kept no data section at all`);
+
+      for (const k of dataKeys) {
+        const v = out[k];
+        const empty = v !== null && typeof v === "object" &&
+          Object.keys(v as Record<string, unknown>).length === 0;
+        assert.equal(empty, false,
+          `${p} was trimmed to an empty ${k} section — a document that ` +
+          "writes cleanly and delivers nothing");
+      }
+    }
+  });
+
+  test("a body whose requested section is empty passes through untrimmed",
+    () => {
+      // Better to store the whole body than a confidently-empty section.
+      const body = {reach: {reachId: "1"}, mediumRange: {}, shortRange: {}};
+      assert.deepEqual(trimPayload("mediumRange", body), body);
+    });
+});

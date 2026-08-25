@@ -18,11 +18,11 @@ import {resolve} from "node:path";
 
 import {
   CAN_FETCH,
-  SECTION_BY_PRODUCT,
   SERIES_BY_PRODUCT,
   canFetch,
   canonicalUnit,
 } from "./store-upstream.js";
+import {SECTION_BY_PRODUCT} from "./store-keys.js";
 import {PRODUCTS_BY_SOURCE} from "./store-run.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";

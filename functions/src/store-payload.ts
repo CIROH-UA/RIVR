@@ -20,7 +20,7 @@
 // not been taught about a product yet would be the silent-partial-data failure
 // the project keeps hitting.
 
-import {ForecastProductId} from "./store-keys.js";
+import {ForecastProductId, SECTION_BY_PRODUCT} from "./store-keys.js";
 
 /** Firestore's hard per-document ceiling. */
 export const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
@@ -31,15 +31,6 @@ export const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
  * names, type tags, index entries).
  */
 export const PAYLOAD_WARN_BYTES = 700 * 1024;
-
-/** The NOAA response section each product is decoded from. */
-const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
-  analysisAssimilation: "analysisAssimilation",
-  shortRange: "shortRange",
-  mediumRange: "mediumRange",
-  longRange: "longRange",
-  mediumRangeBlend: "mediumRangeBlend",
-};
 
 /**
  * Ensemble sections the app reads a single member from. `nwm_data_source`
@@ -84,7 +75,16 @@ export function trimPayload(
 
   const section = SECTION_BY_PRODUCT[product];
   // GEOGLOWS products and anything unrecognised pass through untouched.
-  if (!section || !(section in raw)) return raw;
+  //
+  // `section in raw` is not enough: NOAA returns ALL five section keys in
+  // every response, with the unrequested ones as `{}`. Keeping an empty
+  // section writes a document with a correct runId and no flow data at all.
+  if (!section) return raw;
+  const sectionBody = raw[section];
+  if (sectionBody === undefined || sectionBody === null) return raw;
+  if (isObject(sectionBody) && Object.keys(sectionBody).length === 0) {
+    return raw;
+  }
 
   const out: Record<string, unknown> = {};
   // `reach` carries the identity the DTO needs to parse the body; dropping it

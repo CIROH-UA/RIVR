@@ -63,6 +63,26 @@ export type ForecastProductId = typeof FORECAST_PRODUCTS[number];
  */
 export const STORE_COLLECTION = "river_data";
 
+/**
+ * Which NOAA response section each product's data and run identity live in.
+ *
+ * Shared, because two copies of this map disagreed and cost a whole product.
+ * `analysisAssimilation` maps to `shortRange` — the client derives current
+ * flow from the short-range series (NwmDataSource.fetchCurrentFlowOnly), so
+ * that is where both the payload and the run identity come from. A second copy
+ * in store-payload.ts still said `analysisAssimilation`, and because NOAA
+ * returns ALL five section keys in every response (unrequested ones as `{}`),
+ * the trim silently kept the empty one and threw the real data away. Round 3,
+ * B2 — the same defect as round 2's F2, moved one file downstream.
+ */
+export const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
+  analysisAssimilation: "shortRange",
+  shortRange: "shortRange",
+  mediumRange: "mediumRange",
+  longRange: "longRange",
+  mediumRangeBlend: "mediumRangeBlend",
+};
+
 /** Separator between key segments. Two underscores, per RiverDataKey. */
 const SEPARATOR = "__";
 

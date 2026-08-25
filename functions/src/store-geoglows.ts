@@ -168,8 +168,22 @@ export function normaliseForecastDate(raw: unknown): string {
     );
   }
   const s = raw.trim();
-  const asDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : s;
-  const parsed = new Date(asDateOnly);
+
+  // The proxy emits YYYYMMDD, not YYYY-MM-DD: functions_geoglows/main.py:99
+  // builds it with strftime("%Y%m%d"). `new Date("20260824")` is Invalid Date
+  // in Node, so accepting only the hyphenated form rejected EVERY real
+  // response — every GEOGLOWS reach failing, forever, while reporting a
+  // failure. The Dart client handles the same shape explicitly
+  // (geoglows_api_service.dart: `fd.length == 8`). Round 3, B1.
+  let normalised = s;
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+  if (compact) {
+    normalised = `${compact[1]}-${compact[2]}-${compact[3]}T00:00:00Z`;
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    normalised = `${s}T00:00:00Z`;
+  }
+
+  const parsed = new Date(normalised);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`GEOGLOWS forecast_date is unparseable: "${s}"`);
   }

@@ -14,7 +14,11 @@ import * as logger from "firebase-functions/logger";
 import {NOAA_CONFIG} from "./noaa-client.js";
 import {referenceTimeOf} from "./publish-cadence-probe.js";
 import {FetchedProduct} from "./store-run.js";
-import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
+import {
+  ForecastProductId,
+  ForecastSourceId,
+  SECTION_BY_PRODUCT,
+} from "./store-keys.js";
 import {fetchGeoglowsForStore} from "./store-geoglows.js";
 
 /** NOAA's `series` parameter for each product this file can fetch. */
@@ -30,15 +34,6 @@ export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
   shortRange: "short_range",
   mediumRange: "medium_range",
   longRange: "long_range",
-};
-
-/** The response section each product's run identity lives in. */
-export const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
-  // Same reason as above: the run identity comes from the shortRange section.
-  analysisAssimilation: "shortRange",
-  shortRange: "shortRange",
-  mediumRange: "mediumRange",
-  longRange: "longRange",
 };
 
 /**
@@ -162,10 +157,19 @@ export async function fetchProductFromUpstream(
     `/streamflow?series=${series}`;
   const body = await getJson(url);
 
-  // A 200 carrying an empty series is a real NOAA failure mode — observed live
+  // A 200 carrying an EMPTY series is a real NOAA failure mode — observed live
   // on 2026-08-22 and the reason the probe counts it as a failure rather than
   // health. Storing it would overwrite good data with nothing.
-  if (!(section in body)) {
+  //
+  // Testing `section in body` alone could never catch that: NOAA includes all
+  // five section keys in every response, with the unrequested (and the failed)
+  // ones as `{}`. Round 3, B4 — the comment described a mechanism the code did
+  // not have.
+  const sectionBody = body[section];
+  const sectionIsEmpty = sectionBody === undefined || sectionBody === null ||
+    (typeof sectionBody === "object" && !Array.isArray(sectionBody) &&
+      Object.keys(sectionBody as Record<string, unknown>).length === 0);
+  if (sectionIsEmpty) {
     throw new Error(
       `${reachId}/${product}: 200 with no ${section} section — treating as a ` +
       "failed fetch rather than storing an empty forecast"

@@ -24,6 +24,35 @@ export interface ProbeRuns {
   sampledAt: Date;
 }
 
+/**
+ * Which probe key actually describes each product's stored run.
+ *
+ * These are not always the same name. The store's `analysisAssimilation`
+ * document holds a SHORT RANGE body with a shortRange run, because that is
+ * what the client derives current flow from. The probe's
+ * `analysisAssimilation` key, however, comes from NOAA's
+ * `?series=analysis_assimilation` endpoint — a genuinely different series,
+ * measured ~3 hours behind short range.
+ *
+ * Comparing them directly made the product stop triggering after its first
+ * write: `isRunNewer(AA 20:00Z, stored SR 23:00Z)` is false, so it read
+ * "unchanged" for hours while its own validUntil expired every hour. Round 3,
+ * B3.
+ */
+export const PROBE_KEY_BY_PRODUCT: Partial<Record<ForecastProductId, string>> =
+  {
+    analysisAssimilation: "shortRange",
+  };
+
+/** The probe run to compare a product's stored run against. */
+export function probeRunFor(
+  probe: ProbeRuns,
+  product: ForecastProductId
+): string | null {
+  const key = PROBE_KEY_BY_PRODUCT[product] ?? product;
+  return probe.referenceTimes[key] ?? null;
+}
+
 /** What the store currently holds, per product. */
 export type StoredRuns = Partial<Record<ForecastProductId, string | null>>;
 
@@ -56,7 +85,8 @@ export function decideTriggers(
   const decision: TriggerDecision = {triggered: [], reasons: {}};
 
   for (const product of candidates) {
-    const upstream = probe.referenceTimes[product] ?? null;
+    // Not probe.referenceTimes[product] — see PROBE_KEY_BY_PRODUCT.
+    const upstream = probeRunFor(probe, product);
     const held = stored[product] ?? null;
 
     if (upstream === null) {

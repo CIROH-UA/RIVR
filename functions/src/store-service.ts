@@ -23,6 +23,7 @@ import {
 import {
   assessStoreHealth,
   decideTriggers,
+  probeRunFor,
   quotaUsage,
 } from "./store-trigger.js";
 import {
@@ -137,9 +138,14 @@ export async function runStoreRefresh(
   const workList = await buildWorkList(usage);
   // The probe's runs go in so guard 3 can tell a lagging reach from a settled
   // one — see lagsProbe.
+  // Remapped, for the same reason decideTriggers remaps: handing the raw
+  // probe keys to lagsProbe would compare a product's stored run against a
+  // different NOAA series.
+  const probeRuns: Partial<Record<ForecastProductId, string | null>> = {};
+  for (const p of decision.triggered) probeRuns[p] = probeRunFor(probe, p);
+
   const report = await runStoreUpdate(
-    workList, decision.triggered, firestoreDeps(io, usage),
-    probe.referenceTimes as Partial<Record<ForecastProductId, string | null>>);
+    workList, decision.triggered, firestoreDeps(io, usage), probeRuns);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 store refresh: Firestore usage vs documented free tier", {

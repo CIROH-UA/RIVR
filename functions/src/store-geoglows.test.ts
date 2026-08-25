@@ -34,7 +34,10 @@ const REPO = resolve(__dirname, "..", "..") + "/";
 function proxyBody(over: Record<string, unknown> = {}) {
   return {
     river_id: 760021642,
-    forecast_date: "2026-08-24",
+    // YYYYMMDD — the format functions_geoglows/main.py:99 actually emits.
+    // The original fixture used "2026-08-24", a format the proxy never sends,
+    // so the whole suite passed while every real response threw. Round 3, B1.
+    forecast_date: "20260824",
     units: "m3/s",
     source: "GEOGLOWS RFS v2",
     forecast: {
@@ -151,7 +154,14 @@ describe("an incomplete step is dropped, never nulled", () => {
 });
 
 describe("the run identity is the forecast date, never invented", () => {
-  test("a date-only forecast_date widens to that day's 00Z", () => {
+  test("the proxy's YYYYMMDD widens to that day's 00Z", () => {
+    // `new Date("20260824")` is Invalid Date in Node. Rejecting this format
+    // failed 100% of GEOGLOWS reaches, forever, while reporting failures.
+    assert.equal(normaliseForecastDate("20260824"),
+      "2026-08-24T00:00:00.000Z");
+  });
+
+  test("a hyphenated date is still accepted", () => {
     assert.equal(normaliseForecastDate("2026-08-24"),
       "2026-08-24T00:00:00.000Z");
   });
@@ -190,6 +200,15 @@ describe("GEOGLOWS is wired into the store, not excluded", () => {
 });
 
 describe("the Python contract has not drifted", () => {
+  // Pinning the FORMAT, not just the field name. The old drift test asserted
+  // only that the string "forecast_date" appeared in main.py, which is why a
+  // format mismatch that broke every fetch sailed straight through it.
+  test("the proxy still formats forecast_date as YYYYMMDD", () => {
+    const src = readFileSync(REPO + "functions_geoglows/main.py", "utf8");
+    assert.ok(src.includes("strftime(\"%Y%m%d\")"),
+      "forecast_date's format changed; normaliseForecastDate must follow");
+  });
+
   // The belief that the proxy returned only the median is what nearly dropped
   // the band. Pinned here so it cannot quietly become true.
   test("the proxy still returns both uncertainty columns", () => {
