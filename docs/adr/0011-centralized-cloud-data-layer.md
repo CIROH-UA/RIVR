@@ -683,10 +683,56 @@ and no widget can fetch on its own even if someone tries.
 
 ---
 
-## Phase 4 — Cloud store: write path, with monitoring ▶ CODE COMPLETE, NOT DEPLOYED
+## Phase 4 — Cloud store: write path, with monitoring ▶ DEPLOYED, RUNNING
 
-**Review gate passed 2026-08-24, under the 3-round cap. NOT closed: the
-"done when" requires the store running, and nothing is deployed.**
+**Review gate passed under the 3-round cap; deployed and verified in
+production 2026-08-25.** Six functions live in `ciroh-rivr-app`:
+`storeRefreshHourly` (:20 past), `storeGeoglowsDaily` (01:30 UTC),
+`storeGcDaily` (03:40 UTC), `storeHeartbeat` (2-hourly), `storeHealth`
+(HTTPS), `storeWriteThroughOnFavourite` (Firestore trigger). Composite index
+`river_data(product ASC, runId ASC)` created and READY — without it every
+hourly run aborts on FAILED_PRECONDITION.
+
+**Every guard observed on live data, not inferred.** 121 documents stored.
+
+| Guard | Observed |
+|---|---|
+| 1 no advance → no fetches | two unattended runs, 5 reads / **0 writes** each |
+| 2 advance → every reach | 116 written first run; 4 on write-through |
+| 3 own run, retried | each product on its own runId (23:00Z / 18:00Z / 12:00Z) |
+| 4 failure keeps prior record | GEOGLOWS 500s left the stored document intact, twice |
+| 5 native unit | CFS for NWM, CMS for GEOGLOWS; no user preference reachable |
+| 6 no backwards writes | supersession skipped correctly under the transaction |
+| 7 grace then delete | GC scanned 117, **deleted 0**, retained 4 unfollowed |
+| 8 one document, one fetch | 29 reaches → 116 documents, no duplication |
+| 9 favourite → seconds | **8.9 s, 4/4 written** on a real favourite |
+| 10 schema version | `schema: 1` on every document |
+| 11 usage vs free quota | GC 135 reads/0 writes; refresh 5/0; GEOGLOWS 20/1 — all **<1%** of daily free tier |
+| 12 silent failure impossible | count assertion balanced on every run, including a mixed 1-written/1-failed |
+
+**Guard 1 was proven by an upstream stall, which is a better test than a
+normal cycle.** NOAA short range stopped advancing at `2026-08-24T23:00:00Z`
+and was still there five hours later — confirmed by querying NOAA directly,
+not just the probe. Both scheduled runs correctly did nothing. A naive
+implementation would have refetched 116 documents every hour for data that
+had not changed; that is the cost this phase exists to remove, and it was
+removed in the only conditions that can demonstrate it.
+
+**Still open, declared not hidden:**
+- **No unattended NWM *write* cycle yet** — it needs NOAA to publish, which is
+  outside our control. The write path itself is proven three ways: a manual
+  trigger (116 documents), the GEOGLOWS daily run, and write-through.
+- **Guard 6's own method is unexercised in CI.** The transaction is correct and
+  was verified by hand in review, but there is no `store-firestore.test.ts`, so
+  "test by interleaving two runs" has no automated test. Same for
+  `store-service` and the trigger.
+- **`geoglows_forecast` (Python) OOMs at its 1 GiB limit** — `1065/1024 MiB`,
+  container killed, HTTP 500 on back-to-back requests. A pre-existing defect in
+  a different codebase, surfaced because the store is the first caller to hit it
+  twice in quick succession. Deliberately NOT hotfixed here; it needs a 2 GiB
+  bump on its own branch. Phase 4 behaved correctly under it (guard 4).
+- `readExisting` maps any read error to `FatalRunError`, so one transient
+  Firestore hiccup aborts the whole hourly run. Loud, but wide.
 
 Round 1 found the whole phase was a library — five pure modules with no entry
 points, no Firestore adapter and no monitoring, so two guards came back CANNOT
