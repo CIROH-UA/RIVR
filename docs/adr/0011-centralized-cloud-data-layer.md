@@ -678,7 +678,75 @@ and no widget can fetch on its own even if someone tries.
 
 ---
 
-## Phase 4 — Cloud store: write path, with monitoring
+## Phase 4 — Cloud store: write path, with monitoring ▶ CODE COMPLETE, NOT DEPLOYED
+
+**Review gate passed 2026-08-24, under the 3-round cap. NOT closed: the
+"done when" requires the store running, and nothing is deployed.**
+
+Round 1 found the whole phase was a library — five pure modules with no entry
+points, no Firestore adapter and no monitoring, so two guards came back CANNOT
+VERIFY. It also found guard 3's retry half missing, and a test whose name
+("a run killed part-way through throws") asserted the opposite of its body.
+
+Round 2 found five: lagging measured against the stored document rather than
+the probe (and `sampleStoredRun` taking the NEWEST run, so a straggler was
+never revisited); `analysisAssimilation` fetched as NOAA's
+`analysis_assimilation` while the client stores and decodes a `short_range`
+body under that key; write-through planning products upstream cannot serve;
+usage counting refused transactions and missing the transaction's own read; and
+a required composite index neither declared nor deployed.
+
+Round 3 found three, two reproduced against live upstreams: the GEOGLOWS proxy
+emits `forecast_date` as `YYYYMMDD` and the parser accepted only `YYYY-MM-DD`,
+so every GEOGLOWS fetch would have failed forever; a SECOND `SECTION_BY_PRODUCT`
+map in `store-payload.ts` still pointed `analysisAssimilation` at its own
+section, and because NOAA returns all five section keys with the unrequested
+ones as `{}`, the trim kept the empty one and threw the real data away — round
+2's F2 again, one file downstream, because one rule had two implementations;
+and the `analysisAssimilation` trigger compared the probe's AA run against the
+store's shortRange run, two different series ~3 h apart, so the product stopped
+triggering after its first write.
+
+**The pattern across all three rounds: every defect was a place where two
+things that had to agree were written down twice.**
+
+**Built.** `store-keys` (the document-ID and section contracts, pinned against
+the Dart enums by tests that read them off disk), `store-work-list` (dedupe on
+`(source, reachId)` — the phase's whole cost argument), `store-document`
+(envelope, publish schedule, supersession), `store-run` (plan → fetch →
+supersede → write, with the count assertion inside), `store-payload` (trimming;
+>10× on medium range), `store-trigger` (probe→advance decision, heartbeat,
+quota), `store-gc` (7-day grace, refuses a wipe), `store-upstream` +
+`store-geoglows` (fetchers), `store-firestore` (the only DB file; supersession
+re-checked inside a transaction), `store-service` + `index.ts` (hourly refresh,
+write-through on favourite, daily GEOGLOWS, daily GC, heartbeat, health
+endpoint). 194 tests.
+
+**GEOGLOWS was briefly excluded on a false premise and put back.** The
+exclusion claimed the proxy returned only the median. It does not —
+`functions_geoglows/main.py` returns `flow_uncertainty_lower` and
+`flow_uncertainty_upper` too. The existing `geoglows-client.ts` parses only the
+median because it serves the ALERT path, and "my client ignores it" was misread
+as "the proxy does not send it". GEOGLOWS is stored with all three bands, on
+its own daily schedule keyed on `forecast_date`.
+
+**Still open, declared not hidden:**
+- **Nothing is deployed.** Guard 11 (reads/writes per day measured against the
+  free quota) cannot be met until it is, and neither can the "done when".
+- **The composite index is declared, not deployed.** `river_data`: `product`
+  ASC, `runId` ASC. Without it every hourly run aborts on FAILED_PRECONDITION.
+  Phase 6's guard already warns to verify indexes are deployed, not declared.
+- **Guard 6's own method is unexercised.** The transaction is correct and was
+  verified by hand in review, but there is no `store-firestore.test.ts`, so
+  "test by interleaving two runs" has no CI test. Same for `store-service` and
+  the write-through trigger.
+- `readExisting` maps any read error to `FatalRunError`, so one transient
+  Firestore hiccup aborts the whole hourly run. Loud, but wide.
+- `sampleStoredRun` orders by `runId`; Firestore excludes documents missing
+  that field, so a product whose documents all lack one would read as null and
+  fan out hourly. Not reachable for the four managed products today.
+
+---
 
 Server-only; no app changes; fully verifiable before any client depends on it.
 
