@@ -191,8 +191,13 @@ orders of magnitude clear.)*
 > is **93 reads/day and 57 writes/day**, 0 deletes. So the projection sits
 > inside the same order of magnitude as today's whole workload, and the
 > headroom is wider than assumed here: **~535× on reads, ~350× on writes**
-> against the documented free tier. Nothing in this entry needs revising; this
-> is the number to quote when asked what the app actually uses today.
+> against the documented free tier. Nothing in this entry needs revising.
+>
+> **This baseline PREDATES the ADR 0011 Phase 4 store**, which went live on
+> 2026-08-25 and writes one document per followed reach per product whenever
+> upstream advances (116 on its first run). Quote these numbers as "the app's
+> own traffic before the store", not as current total usage — the store's
+> share is reported separately by `storeRefreshHourly`'s own usage log.
 
 **The scaling law matters more than today's number:** cost grows with *distinct
 favourited reaches × cadence*, not with users and not with the 2.7M channel
