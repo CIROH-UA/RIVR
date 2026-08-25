@@ -141,7 +141,6 @@ confirms processing:
 | `flood_tileset_id` | which tileset the app should load |
 | `flood_data_date` | the date shown above the legend |
 | `flood_show_lake_reaches` | lake-artefact switch; set once, never overwritten |
-| `store_read_enabled` | ADR 0011 Phase 5 kill switch; **defaults OFF**, forces every device back to the live path |
 
 Flipping `flood_show_lake_reaches` in the Firebase console changes every user's
 map within seconds and survives subsequent builds — which matters because the
@@ -436,7 +435,9 @@ it. Moving it back to module scope will break deploys.
 
 Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
-fetching its own.
+fetching its own. **Six are deployed; `storeStaticDaily` is written and tested
+but NOT yet deployed** — check with `firebase functions:list` before assuming
+the near-static products are being refreshed.
 
 | Function | Cadence |
 |---|---|
@@ -456,6 +457,15 @@ is "a favourite renders with ZERO upstream calls from the device", and every
 surface that renders a favourite reads the river's NAME and its THRESHOLDS —
 without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
+
+**Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
+published by the flood builder and does NOT exist yet — it must be created by
+hand in the Firebase console before the switch can be exercised at all. Absent,
+`getBool` returns false, which is the safe default: every device takes the live
+path. Set it to `true` to let devices read the store; flip to `false` and every
+open app detaches its listeners AND evicts the entries the store wrote, so the
+live path takes over within seconds rather than after the stored window
+expires (up to 30 days for river names and flood thresholds).
 
 **The store's fetchers never retry** — including these two, which is why they
 do NOT go through `noaa-client`'s `fetchWithRetry` or `getReturnPeriods`. The

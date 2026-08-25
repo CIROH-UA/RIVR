@@ -390,6 +390,24 @@ formality.
 Hunt this project's known failure modes: fake guards; unearned "measured"; silent
 success; stale docs; a second way to do the thing just centralised.
 
+**Phase 5 is an exception: six rounds.** Decided 2026-08-25 by Jerson, on the
+evidence of its first three rounds — which did not follow the pattern below.
+Rounds 1-3 each found live, user-visible defects rather than hygiene: guard 1
+unreachable because the store held no river names or flood thresholds; a kill
+switch that never reached a running app; concurrent syncs duplicating every
+listener and every bill; store fetchers retrying against an explicit
+prohibition; and a kill switch that stops new ingests without reclaiming the
+values already ingested. Phase 5 is the phase where the app starts trusting the
+cloud store, so the cost of a defect surviving is a wrong number on a river
+someone is standing in. The cap returns to three for Phase 6 onward unless
+similarly re-argued.
+
+**No phase advances until a round comes back with no blocking findings.**
+Guards that can only be settled with a deployed server or a physical device
+(Phase 5's guards 2, 3, 4 and the device half of 9) are recorded as OPEN and
+owned by name — they are not review failures and must not be counted as
+rounds spent.
+
 **The cap: three rounds per phase, maximum.** Decided 2026-08-23, after Phase 1
 took 17 rounds and Phase 2 eight. The ledger was clear: rounds 1-3 caught real,
 user-visible defects that a 1,000-test green suite missed (a digest label
@@ -686,8 +704,9 @@ and no widget can fetch on its own even if someone tries.
 ## Phase 4 — Cloud store: write path, with monitoring ▶ DEPLOYED, RUNNING
 
 **Review gate passed under the 3-round cap; deployed and verified in
-production 2026-08-25.** Seven functions live in `ciroh-rivr-app` (the
-seventh, `storeStaticDaily`, was added by Phase 5 — see below):
+production 2026-08-25.** Six functions are deployed in `ciroh-rivr-app`. A
+seventh, `storeStaticDaily`, was added by Phase 5 and is written and tested but
+**not yet deployed**:
 `storeRefreshHourly` (:20 past), `storeGeoglowsDaily` (01:30 UTC),
 `storeGcDaily` (03:40 UTC), `storeHeartbeat` (2-hourly), `storeHealth`
 (HTTPS), `storeWriteThroughOnFavourite` (Firestore trigger). Composite index

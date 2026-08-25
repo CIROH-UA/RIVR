@@ -12,6 +12,7 @@ import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_coordinator.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
@@ -159,11 +160,13 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
     _storeReads = StoreReadCoordinator(
       subscriptions: GetIt.I<StoreSubscriptionService>(),
       readSwitch: GetIt.I<StoreReadSwitch>(),
+      cache: GetIt.I<IRiverDataCache>(),
+      favouritesListenable: _favorites,
       favourites: () => [
         for (final f in _favorites.favorites)
           (source: f.source, reachId: f.reachId),
       ],
-    )..attach(_favorites);
+    );
 
     WidgetsBinding.instance.addObserver(this);
   }

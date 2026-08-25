@@ -92,7 +92,12 @@ class RiverDataRepository implements IRiverDataRepository {
       key: key,
       window: FreshnessWindow(
         fetchedAt: now,
-        validUntil: source.validUntil(key.product, now),
+        // The source's own window wins when it has one. Only the cloud store
+        // supplies it, and only because its value was fetched earlier by the
+        // server: recomputing from the read clock would extend the server's
+        // expiry every time a device read it. Everything else passes null and
+        // gets the publish-aligned window as before.
+        validUntil: result.validUntil ?? source.validUntil(key.product, now),
       ),
       unit: result.unit,
       runId: result.runId,

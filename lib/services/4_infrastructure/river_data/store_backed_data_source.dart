@@ -26,15 +26,30 @@
 // the store holds a usable document the upstream call is never made, and that
 // is true regardless of listener timing, provider refresh order or staleness.
 //
-// **It reads the LOCAL cache only** (`Source.cache`). That is not a
-// compromise, it is the point:
-//   - a favourite's document is already in Firestore's local persistence,
-//     put there by the subscription listener, so the read is instant and
-//     costs no billed server read (guard 3)
-//   - it works with the network off (guard 4)
-//   - a NON-favourite is a local miss that falls straight through to the live
-//     path, so tapping a random reach on the map cannot bill a server read
-//     looking for a document the store was never going to hold
+// **It reads the local cache FIRST, then the server.** The first version read
+// `Source.cache` only, which review round 3 showed still failed guard 1 on the
+// case the guard is written about: a genuinely cold cache — first install,
+// cleared data, an eviction — has no document, so the read missed and the
+// device called NOAA. Guard 3 says "cold device cache" in as many words, and
+// the ADR's *You are done when* says "within 3 seconds of a cold start", so
+// cold is in scope, not an excused edge case.
+//
+// Two reads, in this order, for reasons that do not collapse into one:
+//   - `Source.cache` first: a warm favourite is instant, works with the
+//     network off (guard 4), and costs NO billed read. This is the steady
+//     state and it is the common case.
+//   - `Source.server` on a miss: a cold favourite is fetched from the store
+//     rather than from NOAA. It is a Firestore read, not an upstream call, so
+//     guard 1 holds — the guard is about upstream, which is what costs money,
+//     rate limit and latency.
+//
+// **The cost this accepts:** a NON-favourite now costs one Firestore read per
+// product that misses locally, and returns not-found. Tapping an unfavourited
+// reach on the map is ~3 such reads. At the ADR's current scale that is
+// nothing against a 50,000/day free tier, and it buys the phase's central
+// guard. If it ever stops being nothing, the lever is to gate the server read
+// on the subscription's watch set — the favourites are known — rather than to
+// go back to cache-only.
 //
 // A miss of any kind — no document, wrong schema, unreadable, expired — falls
 // through to the wrapped source. Degrading to the live path is always correct
@@ -58,13 +73,17 @@ class StoreBackedDataSource implements IRiverDataSource {
     FirebaseFirestore? firestore,
   })  : _inner = inner,
         _switch = readSwitch,
-        _db = firestore ?? FirebaseFirestore.instance;
+        _injectedDb = firestore;
 
   static const String _tag = 'STORE_SOURCE';
 
   final IRiverDataSource _inner;
   final StoreReadSwitch _switch;
-  final FirebaseFirestore _db;
+  final FirebaseFirestore? _injectedDb;
+
+  /// Lazy, so constructing this does not require an initialised Firebase app.
+  /// See the note on StoreReadSwitch._rc.
+  FirebaseFirestore get _db => _injectedDb ?? FirebaseFirestore.instance;
 
   /// Store reads that produced a usable entry. Exposed for the guards — this
   /// is the number that says an upstream call did NOT happen.
@@ -72,6 +91,12 @@ class StoreBackedDataSource implements IRiverDataSource {
 
   /// Fetches that fell through to the wrapped source.
   int servedFromUpstream = 0;
+
+  /// Store reads that threw. A local miss is normal and counts here too, so
+  /// this is a diagnostic signal rather than an error count — but a number
+  /// that climbs while [servedFromStore] stays at zero means the store is
+  /// unreachable, not merely cold.
+  int storeReadFailures = 0;
 
   @override
   ForecastSource get source => _inner.source;
@@ -102,12 +127,24 @@ class StoreBackedDataSource implements IRiverDataSource {
 
   /// The store's answer for [key], or null to use the live path.
   Future<SourceFetchResult?> _readStore(RiverDataKey key) async {
+    // Local first — instant, free, and works offline.
+    final cached = await _readStoreFrom(key, Source.cache);
+    if (cached != null) return cached;
+
+    // Cold cache. Ask the store's server rather than NOAA: this is what makes
+    // guard 1 hold on a first install. See the note at the top of this file.
+    return _readStoreFrom(key, Source.server);
+  }
+
+  Future<SourceFetchResult?> _readStoreFrom(
+    RiverDataKey key,
+    Source source,
+  ) async {
     try {
       final snap = await _db
           .collection(kStoreCollection)
           .doc(key.storageKey)
-          // Local persistence only. See the note at the top of this file.
-          .get(const GetOptions(source: Source.cache));
+          .get(GetOptions(source: source));
 
       if (!snap.exists) return null;
 
@@ -135,11 +172,29 @@ class StoreBackedDataSource implements IRiverDataSource {
         payload: entry.payload,
         unit: entry.unit,
         runId: entry.runId,
+        // The SERVER's window, not a fresh one computed from this read. The
+        // document was fetched upstream when the server fetched it, and
+        // re-stamping it here would let each device extend its life.
+        validUntil: entry.window.validUntil,
       );
     } catch (e) {
-      // A cache miss with no local persistence throws rather than returning an
-      // empty snapshot. That is a normal outcome here, not an error worth
-      // surfacing (guard 8).
+      // A local miss throws rather than returning an empty snapshot, so this
+      // is a NORMAL outcome for Source.cache and never worth surfacing
+      // (guard 8). It is not normal for Source.server, where it means offline
+      // or a rules failure.
+      //
+      // Counted and logged either way. Round 3, non-blocking 3: this catch was
+      // silent, which made every decode bug, permission error and plugin fault
+      // indistinguishable from an ordinary cache miss — in a project whose
+      // stated non-negotiable is that these paths fail silently.
+      storeReadFailures++;
+      if (source == Source.server) {
+        AppLogger.info(
+          _tag,
+          'store server read failed for ${key.storageKey}; '
+          'using the live path: $e',
+        );
+      }
       return null;
     }
   }

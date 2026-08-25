@@ -39,7 +39,7 @@ import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
 class StoreReadSwitch {
   StoreReadSwitch({FirebaseRemoteConfig? remoteConfig})
-      : _rc = remoteConfig ?? FirebaseRemoteConfig.instance;
+      : _injected = remoteConfig;
 
   static const String _tag = 'STORE_SWITCH';
 
@@ -53,7 +53,15 @@ class StoreReadSwitch {
   /// [FloodTilesetService] follows.
   static const Duration _fetchTimeout = Duration(seconds: 3);
 
-  final FirebaseRemoteConfig _rc;
+  final FirebaseRemoteConfig? _injected;
+
+  /// Resolved lazily, NOT in the constructor. Building the DI graph must not
+  /// require an initialised Firebase app: `FirebaseRemoteConfig.instance`
+  /// throws without one, so a constructor reference made
+  /// `setupForecastDependencies()` unresolvable in any plain unit test — which
+  /// is why the Phase 5 wiring went unguarded long enough for review round 3
+  /// to delete it wholesale with every test still green.
+  FirebaseRemoteConfig get _rc => _injected ?? FirebaseRemoteConfig.instance;
 
   StreamSubscription<RemoteConfigUpdate>? _updates;
 

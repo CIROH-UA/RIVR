@@ -5,14 +5,27 @@
 //
 // **This is delivery, not fetching.** The app subscribes to its favourites'
 // documents with a Firestore snapshot listener and pushes whatever arrives into
-// the repository via `ingest`. Everything downstream is unchanged: the entry
-// lands in the shared cache carrying the server's own freshness window, so
-// `RiverDataRepository.read` finds it FRESH and makes no network call. Guard 1
-// falls out of the existing freshness logic rather than needing a new branch.
+// the repository via `ingest`, so a server write reaches an open app without
+// the app asking (guard 5) and warms Firestore's local cache for the next cold
+// start.
+//
+// **It is NOT what makes guard 1 hold.** An earlier version of this comment
+// said the opposite — that an ingested entry lands in the shared cache and
+// `RiverDataRepository.read` therefore finds it fresh and makes no network
+// call, so "guard 1 falls out of the existing freshness logic". Review round 2
+// showed that cannot be true: `read` ALSO revalidates upstream on a stale
+// entry and fetches on a miss, and nothing arbitrated whether an ingest or the
+// favourites refresh landed first. Guard 1 is held by
+// [StoreBackedDataSource], which moves the decision to where the upstream call
+// actually happens. Round 3, B1: the two claims sat in one commit,
+// contradicting each other.
 //
 // Three properties come free from Firestore's local persistence, which is on by
 // default on iOS and Android:
-//   - a cold start renders from disk before any network round-trip (guard 3)
+//   - a WARM cold start renders from disk before any network round-trip
+//     (guard 3) — warm meaning local persistence already holds the document;
+//     a first install does not, which is why StoreBackedDataSource falls back
+//     to a server read rather than to upstream
 //   - with the network off, favourites still render (guard 4)
 //   - a server write reaches an open app without the app asking (guard 5)
 //
@@ -75,12 +88,16 @@ class StoreSubscriptionService {
     required IRiverDataRepository repository,
     FirebaseFirestore? firestore,
   })  : _repository = repository,
-        _db = firestore ?? FirebaseFirestore.instance;
+        _injectedDb = firestore;
 
   static const String _tag = 'STORE_SUB';
 
   final IRiverDataRepository _repository;
-  final FirebaseFirestore _db;
+  final FirebaseFirestore? _injectedDb;
+
+  /// Lazy, so constructing this does not require an initialised Firebase app.
+  /// See the note on StoreReadSwitch._rc.
+  FirebaseFirestore get _db => _injectedDb ?? FirebaseFirestore.instance;
 
   final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _subs = [];
 
@@ -98,6 +115,27 @@ class StoreSubscriptionService {
   /// Two favourite changes in one turn is enough (each ends in
   /// notifyListeners), and swipe-deleting two cards does it.
   Future<void> _pending = Future<void>.value();
+
+  /// The last set [syncFavourites] was asked for, so a listener that dies can
+  /// re-subscribe to it without waiting for the user to touch a favourite.
+  Iterable<RiverDataKey> _lastRequested = const [];
+
+  /// Consecutive listener failures, to bound the self-heal. Reset on a
+  /// successful subscribe.
+  int _consecutiveErrors = 0;
+
+  /// Backoff for the self-heal. Bounded and short: the failure this recovers
+  /// from is a token refresh racing a sign-in, which settles in seconds. After
+  /// the last delay it stops and waits for a favourites change or a switch
+  /// flip, because a PERMISSION_DENIED that survives 40s is a rules problem
+  /// that retrying will not fix.
+  static const List<Duration> _healDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 8),
+    Duration(seconds: 30),
+  ];
+
+  Timer? _healTimer;
 
   /// Documents ingested since construction. Exposed for the guards.
   int ingested = 0;
@@ -143,6 +181,7 @@ class StoreSubscriptionService {
   /// [reaches] carries source + reachId; the product on each key is ignored,
   /// because the service subscribes to every product the store holds.
   Future<void> syncFavourites(Iterable<RiverDataKey> reaches) {
+    _lastRequested = List.of(reaches);
     // Chain rather than run: whatever is already reconciling finishes before
     // the next reconciliation reads `_watched`.
     final next = _pending.then((_) => _syncLocked(reaches));
@@ -184,6 +223,7 @@ class StoreSubscriptionService {
           );
       _subs.add(sub);
     }
+    _consecutiveErrors = 0;
     AppLogger.info(
       _tag,
       'subscribed to ${wanted.length} documents in ${_subs.length} listener(s)',
@@ -215,6 +255,33 @@ class StoreSubscriptionService {
     _subs.remove(sub);
     unawaited(sub.cancel().catchError((Object _) {}));
     _watched = <String>{};
+    _scheduleHeal();
+  }
+
+  /// Re-subscribe after a listener death, without waiting for the user.
+  ///
+  /// Round 3, non-blocking 6: clearing `_watched` made the failure
+  /// RECOVERABLE but nothing triggered the recovery, so a mid-session
+  /// PERMISSION_DENIED with no favourites change and no switch flip left the
+  /// store silently off until the user happened to touch a favourite.
+  void _scheduleHeal() {
+    if (_disposed || _lastRequested.isEmpty) return;
+    if (_consecutiveErrors >= _healDelays.length) {
+      AppLogger.warning(
+        _tag,
+        'listener failed ${_consecutiveErrors + 1}x; giving up until '
+        'favourites or the kill switch change',
+      );
+      return;
+    }
+    final delay = _healDelays[_consecutiveErrors];
+    _consecutiveErrors++;
+    _healTimer?.cancel();
+    _healTimer = Timer(delay, () {
+      if (_disposed) return;
+      AppLogger.info(_tag, 're-subscribing after a listener failure');
+      unawaited(syncFavourites(_lastRequested).catchError((Object _) {}));
+    });
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
@@ -297,7 +364,23 @@ class StoreSubscriptionService {
   /// ON. Using the terminal [dispose] for that made the switch one-way: once
   /// off, the store never came back without an app restart, which is not a
   /// switch. Idempotent.
-  Future<void> detach() async {
+  Future<void> detach() {
+    // Through the SAME lock as syncFavourites. Round 3, B3: detach ran outside
+    // it, and `_syncLocked` awaits `_cancelAll()` before installing the new
+    // listeners — so during that gap `_subs` is empty. A kill switch flipping
+    // OFF in that window detached nothing and the in-flight sync then
+    // installed listeners anyway, leaving the app ingesting with the switch
+    // off and nothing left to correct it. Structurally round 1's B1, one layer
+    // up.
+    final next = _pending.then((_) => _detachLocked());
+    _pending = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _detachLocked() async {
+    _healTimer?.cancel();
+    _healTimer = null;
+    _consecutiveErrors = 0;
     await _cancelAll();
     _watched = <String>{};
     AppLogger.info(_tag, 'detached; listeners released, service still usable');
@@ -305,7 +388,10 @@ class StoreSubscriptionService {
 
   /// Permanently stop. Nothing subscribes again after this. Idempotent.
   Future<void> dispose() async {
+    // Set BEFORE awaiting: anything already queued on the lock sees it and
+    // early-returns rather than installing listeners behind our back.
     _disposed = true;
+    _lastRequested = const [];
     await detach();
     AppLogger.info(_tag, 'disposed');
   }

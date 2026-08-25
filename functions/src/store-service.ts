@@ -353,9 +353,14 @@ export interface GcOutcome {
  * {@link STATIC_REFRESH_LEAD_MS} of expiring. On a steady state that is one
  * Firestore READ per reach per product per day and no fetch at all.
  *
- * Read cost is stated rather than assumed: 2 reads per favourited reach per
- * day. At the ADR's current scale (tens of reaches) that is under a hundred
- * reads a day against a 50,000/day free tier.
+ * Read cost, stated in full rather than rounded in our favour: 2 reads per
+ * favourited reach per day for the freshness checks, PLUS one `readAllUsers`
+ * scan per run (~18 documents today), PLUS a second read of each DUE document
+ * inside `runStoreUpdate`'s supersession check. Steady state at the ADR's
+ * current scale is under a hundred reads a day against a 50,000/day free tier.
+ * An earlier version of this sentence claimed the 2-per-reach figure was the
+ * whole cost; review round 3 pointed out it was the whole cost only of the
+ * loop directly below it.
  *
  * NWM only. GEOGLOWS reaches carry no NOAA metadata or NWM thresholds; its
  * forecast payload already carries its own return periods.

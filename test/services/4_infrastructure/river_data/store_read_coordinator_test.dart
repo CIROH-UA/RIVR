@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_coordinator.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
@@ -39,6 +40,16 @@ class _NoopRepo implements IRiverDataRepository {
 
 /// A switch whose value the test drives directly, standing in for Remote
 /// Config. The real class is a thin wrapper over `getBool`.
+/// The kill switch evicts store-written entries so the live path takes over
+/// immediately; these tests care about subscriptions, not eviction.
+class _NoopCache implements IRiverDataCache {
+  final List<RiverDataKey> evicted = [];
+  @override
+  Future<void> evict(RiverDataKey key) async => evicted.add(key);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
 class _FakeSwitch implements StoreReadSwitch {
   _FakeSwitch(this._enabled);
   bool _enabled;
@@ -91,13 +102,14 @@ void main() {
   StoreReadCoordinator build(_FakeSwitch sw) => StoreReadCoordinator(
         subscriptions: subs,
         readSwitch: sw,
+        cache: _NoopCache(),
+        favouritesListenable: favourites,
         favourites: () => favourites.reaches,
       );
 
   group('the kill switch decides whether this device reads the store', () {
     test('enabled: attaching subscribes to the favourites', () async {
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       expect(c.isActive, isTrue);
@@ -107,7 +119,6 @@ void main() {
 
     test('disabled: attaching subscribes to nothing', () async {
       final c = build(_FakeSwitch(false));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       expect(c.isActive, isFalse);
@@ -121,7 +132,6 @@ void main() {
         () async {
       final sw = _FakeSwitch(true);
       final c = build(sw);
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(c.isActive, isTrue);
 
@@ -139,7 +149,6 @@ void main() {
     test('turning it OFF then ON again resumes, without a restart', () async {
       final sw = _FakeSwitch(true);
       final c = build(sw);
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       sw.enabled = false;
@@ -160,7 +169,6 @@ void main() {
   group('following the favourites', () {
     test('adding a favourite extends the watch set', () async {
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       favourites.set([_nwm('1'), _nwm('2')]);
@@ -173,7 +181,6 @@ void main() {
 
     test('removing every favourite leaves nothing subscribed', () async {
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       favourites.set(const []);
@@ -188,7 +195,6 @@ void main() {
         (source: ForecastSource.geoglows, reachId: '9'),
       ]);
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       expect(subs.watchedIds, {'geoglows__9__geoglowsForecast'});
@@ -199,7 +205,6 @@ void main() {
   group('lifecycle', () {
     test('dispose stops following the favourites', () async {
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       await c.dispose();
@@ -214,7 +219,6 @@ void main() {
 
     test('dispose is idempotent', () async {
       final c = build(_FakeSwitch(true));
-      c.attach(favourites);
       await c.dispose();
       expect(c.dispose(), completes);
     });
@@ -236,7 +240,6 @@ void main() {
     test('a flip to ON activates without any favourites change', () async {
       final sw = _FakeSwitch(false);
       final c = build(sw);
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(c.isActive, isFalse);
 
@@ -253,7 +256,6 @@ void main() {
     test('a flip to OFF detaches without any favourites change', () async {
       final sw = _FakeSwitch(true);
       final c = build(sw);
-      c.attach(favourites);
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(c.isActive, isTrue);
 
@@ -269,12 +271,66 @@ void main() {
     test('dispose stops following the switch too', () async {
       final sw = _FakeSwitch(false);
       final c = build(sw);
-      c.attach(favourites);
       await c.dispose();
 
       sw.enabled = true;
       await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(c.isActive, isFalse);
+    });
+  });
+
+  group('round 3, B2 — the switch must RECLAIM, not just stop ingesting', () {
+    // Detaching stops new writes and reclaims nothing. Entries the listener
+    // already put in the shared cache are served by RiverDataRepository.read
+    // as fresh, with no source call — for up to an hour for the flow products
+    // and THIRTY DAYS for the river name and the flood thresholds. So a store
+    // serving a wrong threshold survived its own kill switch by a month, while
+    // StoreReadSwitch's class comment promised every open app returns to the
+    // live path "within seconds".
+    test('flipping OFF evicts every product the store could have written',
+        () async {
+      final cache = _NoopCache();
+      final sw = _FakeSwitch(true);
+      favourites = _FakeFavourites([_nwm('1'), _nwm('2')]);
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: sw,
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(c.isActive, isTrue);
+
+      sw.enabled = false;
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      final keys = cache.evicted.map((k) => k.storageKey).toSet();
+      expect(keys, hasLength(12),
+          reason: '2 reaches x 6 stored products must all be reclaimed');
+      expect(keys, contains('nwm__1__returnPeriods'),
+          reason: 'the 30-day thresholds are the entry that outlives the '
+              'switch by the longest, so they matter most');
+      expect(keys, contains('nwm__1__reachMetadata'));
+      expect(keys, contains('nwm__2__shortRange'));
+      await c.dispose();
+    });
+
+    test('with the switch ON nothing is evicted', () async {
+      final cache = _NoopCache();
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(true),
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(cache.evicted, isEmpty,
+          reason: 'evicting on the happy path would throw away every value '
+              'the store just delivered and refetch it upstream');
+      await c.dispose();
     });
   });
 }

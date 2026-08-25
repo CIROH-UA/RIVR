@@ -11,6 +11,7 @@
 // Every test here counts calls on the WRAPPED SOURCE. That is the layer the
 // upstream call actually happens at, so a count of zero means zero.
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -245,4 +246,181 @@ void main() {
       );
     });
   });
+
+  // ── Guard 1 on a genuinely COLD cache ────────────────────────────────────
+  //
+  // Round 3 ruled guard 1 NOT MET for exactly this case: the decorator read
+  // `Source.cache` only, so a first install / cleared data / evicted entry
+  // found nothing locally and fell through to NOAA. `FakeFirebaseFirestore`
+  // ignores GetOptions entirely, so it cannot tell the two reads apart — which
+  // is why deleting the server fallback left every test green. The fake below
+  // records which Source was asked for and can answer differently per source.
+  group('guard 1 holds on a cold cache, not just a warm one', () {
+    test('a cold cache reads the STORE server, never upstream', () async {
+      final db = _SourceAwareFirestore(
+        cacheHasIt: false,
+        serverHasIt: true,
+        storedDoc: _storeDoc(),
+      );
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+          inner: up, readSwitch: _Switch(true), firestore: db);
+
+      final r = await s.fetch(_key());
+
+      expect(up.fetches, 0,
+          reason: 'THE guard: a cold cache must cost a Firestore read, not a '
+              'NOAA call. This is the case a first install always hits.');
+      expect(r.payload['from'], 'store');
+      expect(db.sourcesAsked, [Source.cache, Source.server],
+          reason: 'cache first — a warm favourite must stay free and offline-'
+              'capable — then the server only on a miss');
+    });
+
+    test('a warm cache never touches the server', () async {
+      final db = _SourceAwareFirestore(
+        cacheHasIt: true,
+        serverHasIt: true,
+        storedDoc: _storeDoc(),
+      );
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+          inner: up, readSwitch: _Switch(true), firestore: db);
+
+      await s.fetch(_key());
+
+      expect(up.fetches, 0);
+      expect(db.sourcesAsked, [Source.cache],
+          reason: 'the steady state must cost no billed read at all');
+    });
+
+    test('neither has it: falls through to the live path', () async {
+      final db = _SourceAwareFirestore(cacheHasIt: false, serverHasIt: false);
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+          inner: up, readSwitch: _Switch(true), firestore: db);
+
+      final r = await s.fetch(_key());
+
+      expect(r.payload['from'], 'upstream');
+      expect(up.fetches, 1);
+      expect(db.sourcesAsked, [Source.cache, Source.server]);
+    });
+
+    test('offline with a cold cache degrades instead of hanging', () async {
+      // Source.server throws when there is no network; the live path must take
+      // over rather than the error surfacing (guard 8).
+      final db = _SourceAwareFirestore(
+        cacheHasIt: false,
+        serverHasIt: true,
+        storedDoc: _storeDoc(),
+        serverThrows: true,
+      );
+      final up = _CountingSource();
+      final s = StoreBackedDataSource(
+          inner: up, readSwitch: _Switch(true), firestore: db);
+
+      final r = await s.fetch(_key());
+      expect(r.payload['from'], 'upstream');
+      expect(s.storeReadFailures, greaterThan(0),
+          reason: 'a server read that threw must be counted, not swallowed '
+              'indistinguishably from an ordinary cache miss');
+    });
+  });
+}
+
+// ── A Firestore that can tell Source.cache from Source.server ───────────────
+//
+// fake_cloud_firestore ignores GetOptions, so it cannot express "cold cache,
+// warm server" — the exact state a first install is in.
+
+// ignore: subtype_of_sealed_class
+class _SourceAwareFirestore implements FirebaseFirestore {
+  _SourceAwareFirestore({
+    required this.cacheHasIt,
+    required this.serverHasIt,
+    this.storedDoc,
+    this.serverThrows = false,
+  });
+
+  final bool cacheHasIt;
+  final bool serverHasIt;
+  final Map<String, dynamic>? storedDoc;
+  final bool serverThrows;
+
+  /// Every Source asked for, in order.
+  final List<Source> sourcesAsked = [];
+
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String path) =>
+      _SourceAwareCollection(this);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _SourceAwareCollection
+    implements CollectionReference<Map<String, dynamic>> {
+  _SourceAwareCollection(this.db);
+  final _SourceAwareFirestore db;
+
+  @override
+  DocumentReference<Map<String, dynamic>> doc([String? path]) =>
+      _SourceAwareDoc(db, path ?? '');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _SourceAwareDoc implements DocumentReference<Map<String, dynamic>> {
+  _SourceAwareDoc(this.db, this._id);
+  final _SourceAwareFirestore db;
+  final String _id;
+
+  @override
+  String get id => _id;
+
+  @override
+  Future<DocumentSnapshot<Map<String, dynamic>>> get([GetOptions? options]) async {
+    final source = options?.source ?? Source.serverAndCache;
+    db.sourcesAsked.add(source);
+
+    if (source == Source.cache) {
+      if (!db.cacheHasIt) {
+        // What the real plugin does on a local miss: it throws.
+        throw FirebaseException(
+            plugin: 'cloud_firestore', code: 'unavailable');
+      }
+      return _Snap(_id, db.storedDoc);
+    }
+
+    if (db.serverThrows) {
+      throw FirebaseException(plugin: 'cloud_firestore', code: 'unavailable');
+    }
+    return _Snap(_id, db.serverHasIt ? db.storedDoc : null);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _Snap implements DocumentSnapshot<Map<String, dynamic>> {
+  _Snap(this._id, this._data);
+  final String _id;
+  final Map<String, dynamic>? _data;
+
+  @override
+  String get id => _id;
+
+  @override
+  bool get exists => _data != null;
+
+  @override
+  Map<String, dynamic>? data() => _data;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
