@@ -12,8 +12,11 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
 
 import {
+  FatalRunError,
   FetchedProduct,
   StoreRunAssertionError,
   StoreRunDeps,
@@ -26,6 +29,10 @@ import {
 import {StoreDocument, buildStoreDocument} from "./store-document.js";
 import {ForecastProductId} from "./store-keys.js";
 import {WorkList, deriveWorkList} from "./store-work-list.js";
+import {PRODUCTS_BY_SOURCE} from "./store-run.js";
+import {STORE_COLLECTION} from "./store-keys.js";
+
+const REPO = resolve(__dirname, "..", "..") + "/";
 
 const NOW = new Date("2026-08-24T13:10:00.000Z");
 
@@ -109,8 +116,9 @@ describe("guard 1 — no new run means zero fetches", () => {
 
   test("the assertion catches a fetch on an empty plan", () => {
     const bogus: StoreRunReport = {
-      productsTriggered: [], planned: 0, written: 0, skippedSuperseded: 0,
-      failed: 0, reachesToRetry: [], results: [], fetches: 3,
+      productsTriggered: [], planned: 0, written: 0,
+      failed: 0, skippedSameRun: 0, skippedLagging: 0,
+      reachesToRetry: [], results: [], fetches: 3,
     };
     assert.throws(() => assertStoreRunConsistent(bogus),
       StoreRunAssertionError);
@@ -227,10 +235,14 @@ describe("guard 6 — overlapping runs cannot write backwards", () => {
     const report = await runStoreUpdate(workListOf({favoriteReachIds: ["1"]}),
       ["shortRange"], d.deps);
 
-    assert.equal(report.skippedSuperseded, 1);
+    assert.equal(report.skippedLagging, 1);
     assert.equal(report.written, 0);
     assert.equal(d.writes["nwm__1__shortRange"], undefined,
       "a late run carrying older data must not overwrite newer data");
+    // Guard 3's second half: leaving it alone is correct, forgetting it is not.
+    assert.deepEqual(report.reachesToRetry, ["1"],
+      "a reach behind the cycle must be retried, or it stays stale until " +
+      "something unrelated happens to trigger it");
   });
 
   test("an unchanged run is skipped rather than rewritten", async () => {
@@ -242,41 +254,74 @@ describe("guard 6 — overlapping runs cannot write backwards", () => {
     const d = deps({existing: {"nwm__1__shortRange": same}});
     const report = await runStoreUpdate(workListOf({favoriteReachIds: ["1"]}),
       ["shortRange"], d.deps);
-    assert.equal(report.skippedSuperseded, 1);
+    assert.equal(report.skippedSameRun, 1);
     assert.equal(report.written, 0);
+    assert.deepEqual(report.reachesToRetry, [],
+      "upstream having nothing newer is not a reason to retry");
   });
 });
 
 describe("guard 12 — silent failure is impossible", () => {
-  // The guard verbatim: kill the fetch mid-run, confirm the assertion fires.
-  test("a run killed part-way through throws instead of reporting success",
+  // Round 1 caught this test asserting the OPPOSITE of its own title: it was
+  // called "a run killed part-way through throws" while asserting the run did
+  // not throw. Both behaviours are real and different, so they are now two
+  // tests, each named for what it actually checks.
+
+  // Per-reach failures are caught and counted, so the run balances. That is
+  // the honest outcome and it is reported, not hidden.
+  test("upstream failures are counted, and the run still balances",
     async () => {
       let calls = 0;
       const d = deps({
         fetchProduct: async () => {
           calls++;
-          if (calls > 2) throw Object.assign(new Error("process killed"), {
-            fatal: true,
-          });
+          if (calls > 2) throw new Error("upstream 504");
           return {payload: {}, unit: "CFS", referenceTime: null};
         },
       } as Partial<StoreRunDeps>);
 
-      // Failures are counted, so the run still balances — this is the honest
-      // outcome and it is reported, not hidden.
       const report = await runStoreUpdate(
         workListOf({favoriteReachIds: ["1", "2", "3", "4"]}),
         ["shortRange"], d.deps);
       assert.equal(report.written, 2);
       assert.equal(report.failed, 2);
       assert.equal(report.planned, 4);
+      assert.doesNotThrow(() => assertStoreRunConsistent(report));
+    });
+
+  // The guard verbatim: kill the run mid-flight, confirm the count assertion
+  // FIRES. A fatal escape is not a per-reach failure — it kills the iteration
+  // itself, leaving outcomes short of the plan. The raw error must not be
+  // allowed to propagate alone, because nothing in it says the store is now in
+  // a partial state.
+  test("a run killed mid-flight fires the count assertion, not the raw error",
+    async () => {
+      let calls = 0;
+      const d = deps({
+        fetchProduct: async () => {
+          calls++;
+          // FatalRunError escapes the per-reach handler by design.
+          if (calls > 2) throw new FatalRunError("credentials expired mid-run");
+          return {payload: {}, unit: "CFS", referenceTime: null};
+        },
+      } as Partial<StoreRunDeps>);
+
+      await assert.rejects(
+        () => runStoreUpdate(
+          workListOf({favoriteReachIds: ["1", "2", "3", "4"]}),
+          ["shortRange"], d.deps),
+        (e: unknown) => e instanceof StoreRunAssertionError &&
+          /unknown state/.test(e.message),
+        "the assertion must fire and name the partial state; a run that died " +
+        "half way must never return a report that looks like success"
+      );
     });
 
   test("outcomes that do not sum to the plan throw", () => {
     const bogus: StoreRunReport = {
       productsTriggered: ["shortRange"], planned: 10, written: 3,
-      skippedSuperseded: 1, failed: 1, reachesToRetry: [], results: [],
-      fetches: 5,
+      skippedSameRun: 1, skippedLagging: 0, failed: 1, reachesToRetry: [],
+      results: [], fetches: 5,
     };
     assert.throws(() => assertStoreRunConsistent(bogus),
       (e: unknown) => e instanceof StoreRunAssertionError &&
@@ -286,7 +331,7 @@ describe("guard 12 — silent failure is impossible", () => {
   test("more fetches than planned writes throws", () => {
     const bogus: StoreRunReport = {
       productsTriggered: ["shortRange"], planned: 1, written: 1,
-      skippedSuperseded: 0, failed: 0,
+      skippedSameRun: 0, skippedLagging: 0, failed: 0,
       reachesToRetry: [],
       results: [{
         documentId: "nwm__1__shortRange", reachId: "1", source: "nwm",
@@ -302,7 +347,7 @@ describe("guard 12 — silent failure is impossible", () => {
   test("a dropped retry entry throws", () => {
     const bogus: StoreRunReport = {
       productsTriggered: ["shortRange"], planned: 1, written: 0,
-      skippedSuperseded: 0, failed: 1,
+      skippedSameRun: 0, skippedLagging: 0, failed: 1,
       reachesToRetry: [], // the failure was silently not queued
       results: [{
         documentId: "nwm__1__shortRange", reachId: "1", source: "nwm",
@@ -337,4 +382,38 @@ describe("guard 5 — the stored unit is upstream's, not a user's", () => {
       assert.equal(d.writes["nwm__1__shortRange"].unit, "CFS");
       assert.equal(d.writes["geoglows__2__geoglowsForecast"].unit, "CMS");
     });
+});
+
+describe("the Dart contract has not drifted", () => {
+  /** Enum member names from a Dart `Set<ForecastProduct> get supportedProducts`. */
+  function supportedProducts(file: string): string[] {
+    const src = readFileSync(
+      REPO + "lib/services/4_infrastructure/river_data/" + file, "utf8");
+    const start = src.indexOf("get supportedProducts");
+    assert.notEqual(start, -1, `supportedProducts not found in ${file}`);
+    const body = src.slice(start, src.indexOf("}", start));
+    return [...body.matchAll(/ForecastProduct\.([A-Za-z0-9]+)/g)]
+      .map((m) => m[1]);
+  }
+
+  // Round 1 flagged this as the one cross-language contract with no drift
+  // test. A product added to a Dart source but not here would simply never be
+  // stored — the app would fetch upstream for it forever, with no error.
+  test("PRODUCTS_BY_SOURCE matches supportedProducts on both sources", () => {
+    assert.deepEqual([...PRODUCTS_BY_SOURCE.nwm].sort(),
+      supportedProducts("nwm_data_source.dart").sort());
+    assert.deepEqual([...PRODUCTS_BY_SOURCE.geoglows].sort(),
+      supportedProducts("geoglows_data_source.dart").sort());
+  });
+
+  // The collection name lives in two files that cannot see each other. A
+  // mismatch denies every client read, silently, forever.
+  test("STORE_COLLECTION is the collection firestore.rules grants", () => {
+    const rules = readFileSync(REPO + "firestore.rules", "utf8");
+    assert.ok(
+      rules.includes(`match /${STORE_COLLECTION}/{documentId}`),
+      `firestore.rules has no rule for "${STORE_COLLECTION}" — the client ` +
+      "would be denied on every read"
+    );
+  });
 });

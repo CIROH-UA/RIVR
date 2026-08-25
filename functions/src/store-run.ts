@@ -33,7 +33,12 @@ import {
   documentIdFor,
   shouldWrite,
 } from "./store-document.js";
-import {ForecastProductId, ForecastSourceId, storageKey} from "./store-keys.js";
+import {
+  ForecastProductId,
+  ForecastSourceId,
+  storageKey,
+} from "./store-keys.js";
+import {isRunNewer} from "./store-document.js";
 import {WorkList, WorkListEntry} from "./store-work-list.js";
 
 /** What a source returned for one (reach, product). */
@@ -70,7 +75,15 @@ export interface PlannedWrite {
 
 export type WriteOutcome =
   | "written"
-  | "skipped-superseded"
+  /** Upstream returned the run already stored — same data, nothing to do. */
+  | "skipped-same-run"
+  /**
+   * Upstream returned an OLDER run than the one stored: this reach lags the
+   * cycle. The stored value is left alone (guard 6) and the reach is retried
+   * (guard 3's second half) — without the retry it would be silently dropped
+   * until something else happened to trigger it.
+   */
+  | "skipped-lagging"
   | "failed";
 
 export interface WriteResult {
@@ -90,10 +103,15 @@ export interface StoreRunReport {
   productsTriggered: ForecastProductId[];
   planned: number;
   written: number;
-  skippedSuperseded: number;
   failed: number;
-  /** Reaches with at least one failure — the retry set for the next cycle. */
+  /**
+   * Reaches to retry next cycle: those that FAILED, plus those that came back
+   * LAGGING behind the run already stored. Guard 3 requires the lagging case
+   * explicitly — "stored with its own value and retried".
+   */
   reachesToRetry: string[];
+  skippedSameRun: number;
+  skippedLagging: number;
   results: WriteResult[];
   fetches: number;
 }
@@ -105,6 +123,25 @@ export interface StoreRunReport {
  * produced an unknown partial state, and reporting success would be exactly
  * the silent failure this project has hit five times.
  */
+/**
+ * Raised by infrastructure when continuing the run is pointless — credentials
+ * expired, the Firestore client is closed, the process is going down.
+ *
+ * Distinct from a per-reach failure ON PURPOSE. A 504 for one river is normal
+ * and the run carries on; losing the database is not, and treating it as N
+ * per-reach failures would produce a report that balances and reads like a
+ * bad-weather day upstream. This escapes the per-reach handler so the count
+ * assertion sees a run short of its plan and says so.
+ */
+export class FatalRunError extends Error {
+  readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "FatalRunError";
+    this.cause = cause;
+  }
+}
+
 export class StoreRunAssertionError extends Error {
   constructor(message: string) {
     super(message);
@@ -185,7 +222,8 @@ export async function runStoreUpdate(
     productsTriggered: [...triggered],
     planned: planned.length,
     written: 0,
-    skippedSuperseded: 0,
+    skippedSameRun: 0,
+    skippedLagging: 0,
     failed: 0,
     reachesToRetry: [],
     results: [],
@@ -204,79 +242,110 @@ export async function runStoreUpdate(
 
   const retry = new Set<string>();
 
-  for (const plan of planned) {
-    const {entry, product, documentId} = plan;
-    try {
-      report.fetches++;
-      const fetched = await deps.fetchProduct(
-        entry.source, entry.reachId, product);
+  // The loop is wrapped so that a fatal escape — anything that kills the
+  // iteration itself rather than one reach — still reaches the count
+  // assertion. Without this, a run that died half way would propagate its raw
+  // error and nothing would ever state that the store is now in a partial,
+  // unknown state. Guard 12 is literally "kill the fetch mid-run and confirm
+  // the count assertion fires"; this is what makes that true.
+  let fatal: unknown = null;
+  try {
+    for (const plan of planned) {
+      const {entry, product, documentId} = plan;
+      try {
+        report.fetches++;
+        const fetched = await deps.fetchProduct(
+          entry.source, entry.reachId, product);
 
-      const doc = buildStoreDocument({
-        source: entry.source,
-        reachId: entry.reachId,
-        product,
-        payload: fetched.payload,
-        unit: fetched.unit,
-        // Guard 3: the reach's OWN referenceTime, never the probe's. A reach
-        // that came back on an older run is stored honestly under that run and
-        // retried, which is what makes atomic publication irrelevant.
-        referenceTime: fetched.referenceTime,
-        fetchedAt: deps.now(),
-      });
+        const doc = buildStoreDocument({
+          source: entry.source,
+          reachId: entry.reachId,
+          product,
+          payload: fetched.payload,
+          unit: fetched.unit,
+          // Guard 3: the reach's OWN referenceTime, never the probe's. A reach
+          // that came back on an older run is stored honestly under that run and
+          // retried, which is what makes atomic publication irrelevant.
+          referenceTime: fetched.referenceTime,
+          fetchedAt: deps.now(),
+        });
 
-      const existing = await deps.readExisting(documentId);
-      if (!shouldWrite(existing, doc)) {
-        report.skippedSuperseded++;
+        const existing = await deps.readExisting(documentId);
+        if (!shouldWrite(existing, doc)) {
+        // Both skips leave the stored value alone, but they mean opposite
+        // things. Same run = upstream has nothing newer, we are done. Older
+        // run = this reach is BEHIND the cycle, and dropping it here is how a
+        // lagging reach stays stale until something unrelated triggers it.
+          const lagging = Boolean(
+            existing?.runId && doc.runId && isRunNewer(existing.runId, doc.runId)
+          );
+          if (lagging) {
+            report.skippedLagging++;
+            retry.add(entry.reachId);
+          } else {
+            report.skippedSameRun++;
+          }
+          report.results.push({
+            documentId,
+            reachId: entry.reachId,
+            source: entry.source,
+            product,
+            outcome: lagging ? "skipped-lagging" : "skipped-same-run",
+            storedRun: existing?.runId ?? null,
+          });
+          continue;
+        }
+
+        await deps.writeDocument(documentId, doc);
+        report.written++;
         report.results.push({
           documentId,
           reachId: entry.reachId,
           source: entry.source,
           product,
-          outcome: "skipped-superseded",
-          storedRun: existing?.runId ?? null,
+          outcome: "written",
+          storedRun: doc.runId ?? null,
         });
-        continue;
-      }
+      } catch (error) {
+      // Not this reach's problem: the run itself is over. Rethrow so the loop
+      // wrapper catches it and the count assertion fires.
+        if (error instanceof FatalRunError) throw error;
 
-      await deps.writeDocument(documentId, doc);
-      report.written++;
-      report.results.push({
-        documentId,
-        reachId: entry.reachId,
-        source: entry.source,
-        product,
-        outcome: "written",
-        storedRun: doc.runId ?? null,
-      });
-    } catch (error) {
-      // Guard 4: the previous record is left intact — nothing was written —
-      // and the reach is retried next cycle.
-      report.failed++;
-      retry.add(entry.reachId);
-      report.results.push({
-        documentId,
-        reachId: entry.reachId,
-        source: entry.source,
-        product,
-        outcome: "failed",
-        error: error instanceof Error ? error.message : String(error),
-      });
-      logger.warn("⚠️ store run: reach failed, previous record left intact", {
-        documentId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+        // Guard 4: the previous record is left intact — nothing was written —
+        // and the reach is retried next cycle.
+        report.failed++;
+        retry.add(entry.reachId);
+        report.results.push({
+          documentId,
+          reachId: entry.reachId,
+          source: entry.source,
+          product,
+          outcome: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        logger.warn("⚠️ store run: reach failed, previous record left intact", {
+          documentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
+  } catch (e) {
+    fatal = e;
   }
 
   report.reachesToRetry = Array.from(retry);
 
   // Guard 2 and guard 12. Throws rather than returns — see the class comment.
+  // Runs even after a fatal escape: outcomes will not sum to the plan, so this
+  // fires and names the partial state instead of letting the raw error hide it.
   assertStoreRunConsistent(report);
+  if (fatal) throw fatal;
 
   logger.info("✅ store run complete", {
     planned: report.planned,
     written: report.written,
-    skipped: report.skippedSuperseded,
+    skippedSameRun: report.skippedSameRun,
+    skippedLagging: report.skippedLagging,
     failed: report.failed,
     reachesToRetry: report.reachesToRetry.length,
   });
@@ -291,14 +360,15 @@ export async function runStoreUpdate(
  * @throws {StoreRunAssertionError} When the outcomes cannot all be true.
  */
 export function assertStoreRunConsistent(report: StoreRunReport): void {
-  const accounted =
-    report.written + report.skippedSuperseded + report.failed;
+  const accounted = report.written + report.skippedSameRun +
+    report.skippedLagging + report.failed;
 
   if (accounted !== report.planned) {
     throw new StoreRunAssertionError(
       `planned ${report.planned} writes but only ${accounted} outcomes were ` +
-      `recorded (${report.written} written, ${report.skippedSuperseded} ` +
-      `skipped, ${report.failed} failed) — the run ended in an unknown state`
+      `recorded (${report.written} written, ${report.skippedSameRun} ` +
+      `same-run, ${report.skippedLagging} lagging, ${report.failed} failed) ` +
+      "— the run ended in an unknown state"
     );
   }
 
@@ -326,14 +396,19 @@ export function assertStoreRunConsistent(report: StoreRunReport): void {
     );
   }
 
+  // Guard 3 and guard 4 together: BOTH a failure and a lagging reach must be
+  // retried. Checking only failures is what let a lagging reach fall out of
+  // the cycle unnoticed.
   const retryFromResults = new Set(
-    report.results.filter((r) => r.outcome === "failed").map((r) => r.reachId)
+    report.results
+      .filter((r) => r.outcome === "failed" || r.outcome === "skipped-lagging")
+      .map((r) => r.reachId)
   );
   if (retryFromResults.size !== report.reachesToRetry.length) {
     throw new StoreRunAssertionError(
-      `${retryFromResults.size} reaches failed but ` +
-      `${report.reachesToRetry.length} were queued for retry — a failure ` +
-      "would be dropped"
+      `${retryFromResults.size} reaches failed or lagged but ` +
+      `${report.reachesToRetry.length} were queued for retry — a reach that ` +
+      "needs another attempt would be dropped"
     );
   }
 }
