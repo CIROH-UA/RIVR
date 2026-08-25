@@ -184,6 +184,21 @@ enabled and RIVR is on Blaze; the per-write list price could not be extracted �
 the pricing page truncates. The conclusion is insensitive to this, being three
 orders of magnitude clear.)*
 
+> **MEASURED BASELINE (2026-08-24).** The 116/day above is a *projection* of
+> what persisting would add, not a reading. For reference, actual Firestore
+> traffic before that work ships — Cloud Monitoring,
+> `firestore.googleapis.com/document/{read,write}_count`, 2026-08-19 → 08-24 —
+> is **93 reads/day and 57 writes/day**, 0 deletes. So the projection sits
+> inside the same order of magnitude as today's whole workload, and the
+> headroom is wider than assumed here: **~535× on reads, ~350× on writes**
+> against the documented free tier. Nothing in this entry needs revising.
+>
+> **This baseline PREDATES the ADR 0011 Phase 4 store**, which went live on
+> 2026-08-25 and writes one document per followed reach per product whenever
+> upstream advances (116 on its first run). Quote these numbers as "the app's
+> own traffic before the store", not as current total usage — the store's
+> share is reported separately by `storeRefreshHourly`'s own usage log.
+
 **The scaling law matters more than today's number:** cost grows with *distinct
 favourited reaches × cadence*, not with users and not with the 2.7M channel
 network. Overlap between users is free. This is the same economics as the flood
