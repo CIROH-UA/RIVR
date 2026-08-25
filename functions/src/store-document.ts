@@ -39,17 +39,28 @@ import {
 export const STORE_SCHEMA_VERSION = 1;
 
 /**
- * Slack past a publish boundary before a value counts as stale, mirroring
- * `NwmDataSource._skew`. Without it the client invalidates the instant a cycle
- * rolls over and refetches before the new run has actually published.
+ * Slack past a publish boundary before a value counts as stale.
  *
- * PROVISIONAL — 5 minutes is the app's current guess, not a measurement. The
+ * THE TWO SOURCES DO NOT USE THE SAME VALUE, and treating them as one is a
+ * live defect: the server stamps a validUntil the client disagrees with, so
+ * the client treats a just-written document as already stale and refetches
+ * upstream — defeating the store, with no error anywhere. A single shared
+ * constant here shipped exactly that bug for GEOGLOWS before review caught it.
+ *
+ *   NWM      `NwmDataSource._skew`      = 5 minutes
+ *   GEOGLOWS `GeoglowsDataSource._skew` = 15 minutes
+ *              ("Slack past 00Z: the proxy has a cold start and the run isn't
+ *               instant" — a different physical reason, hence a different
+ *               number.)
+ *
+ * PROVISIONAL — both are the app's current guesses, not measurements. The
  * Phase 0 probe is collecting publication lag per series (median and worst);
- * once seven consecutive days are in, this must be re-derived from the worst
- * observed lag and changed in BOTH places. Gate: ADR 0011 Phase 0 guard 2,
- * expected ~2026-08-31.
+ * once seven consecutive days are in, each must be re-derived from the worst
+ * observed lag for ITS source and changed in all THREE places: the two Dart
+ * data sources and here. Gate: ADR 0011 Phase 0 guard 2, expected ~2026-08-31.
  */
-export const PUBLISH_SKEW_MS = 5 * 60 * 1000;
+export const NWM_SKEW_MS = 5 * 60 * 1000;
+export const GEOGLOWS_SKEW_MS = 15 * 60 * 1000;
 
 /** The freshness window, exactly as `FreshnessWindow.toJson()` writes it. */
 export interface StoreWindow {
@@ -112,7 +123,8 @@ const STATIC_PRODUCT_MS = 30 * 24 * 3600_000;
 /**
  * When a product could next possibly publish, plus skew.
  *
- * Mirrors `NwmDataSource.validUntil` and `GeoglowsDataSource.validUntil`. A
+ * Mirrors `NwmDataSource.validUntil` and `GeoglowsDataSource.validUntil`,
+ * including their DIFFERENT skews. A
  * disagreement means the client considers a just-written document already
  * stale (refetching upstream, defeating the store) or fresh past its run
  * (showing yesterday's water).
@@ -131,7 +143,7 @@ export function validUntil(
     switch (product) {
     case "geoglowsForecast":
     case "geoglowsEnsemble":
-      return new Date(nextUtcMidnight(now).getTime() + PUBLISH_SKEW_MS);
+      return new Date(nextUtcMidnight(now).getTime() + GEOGLOWS_SKEW_MS);
     default:
       throw new Error(`GEOGLOWS does not support ${product}`);
     }
@@ -141,11 +153,11 @@ export function validUntil(
   case "analysisAssimilation":
   case "shortRange":
     // Hourly, driven by current flow.
-    return new Date(nextTopOfHour(now).getTime() + PUBLISH_SKEW_MS);
+    return new Date(nextTopOfHour(now).getTime() + NWM_SKEW_MS);
   case "mediumRange":
   case "longRange":
     // Every 6 hours (00/06/12/18Z).
-    return new Date(nextCycle(now, 6).getTime() + PUBLISH_SKEW_MS);
+    return new Date(nextCycle(now, 6).getTime() + NWM_SKEW_MS);
   case "returnPeriods":
   case "reachMetadata":
     // Thresholds do not change day to day; a river's name does not change.

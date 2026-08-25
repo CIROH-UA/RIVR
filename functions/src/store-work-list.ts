@@ -6,8 +6,9 @@
 // The ADR's cost model rests on this being a *deduplicated* set:
 //
 //   "Cost scales with distinct favourited reaches × cadence, not with users."
+//                        (ADR 0011, "Current scale", under Existing assets)
 //   "Two users favouriting one reach produce one document and one fetch."
-//                                        (ADR 0011, decision list / guard 8)
+//                                                  (ADR 0011 Phase 4 guard 8)
 //
 // So the whole economic claim of the phase is that this function collapses
 // overlap. It is pure — plain records in, plain records out, no Firestore — so

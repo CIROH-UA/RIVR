@@ -113,7 +113,7 @@ export class StoreRunAssertionError extends Error {
 }
 
 /**
- * Which products a source serves. Mirrors the `supports` sets on
+ * Which products a source serves. Mirrors `supportedProducts` on
  * NwmDataSource and GeoglowsDataSource — a product a source cannot serve must
  * never be planned, or every reach on that source would count as failed.
  */

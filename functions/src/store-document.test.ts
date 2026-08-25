@@ -20,7 +20,8 @@ import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
 import {
-  PUBLISH_SKEW_MS,
+  GEOGLOWS_SKEW_MS,
+  NWM_SKEW_MS,
   STORE_SCHEMA_VERSION,
   StoreDocument,
   buildStoreDocument,
@@ -108,32 +109,33 @@ describe("the envelope matches RiverDataEntry.toJson", () => {
 });
 
 describe("the publish schedule mirrors the client's", () => {
-  test("hourly products round up to the next hour, plus skew", () => {
-    const v = validUntil("nwm", "shortRange", AT);
-    assert.equal(
-      v.toISOString(),
-      new Date(Date.parse("2026-08-24T14:00:00Z") + PUBLISH_SKEW_MS)
-        .toISOString()
-    );
+  // Literal instants, not `... + NWM_SKEW_MS`. Asserting against the same
+  // constant the implementation uses is tautological — it holds for any value,
+  // which is how a wrong GEOGLOWS skew passed review-free until round 1.
+  test("hourly products round up to the next hour, plus the NWM skew", () => {
+    assert.equal(validUntil("nwm", "shortRange", AT).toISOString(),
+      "2026-08-24T14:05:00.000Z");
   });
 
-  test("6-hourly products round up to 00/06/12/18Z, plus skew", () => {
+  test("6-hourly products round up to 00/06/12/18Z, plus the NWM skew", () => {
     // 13:10 -> 18:00.
-    const v = validUntil("nwm", "mediumRange", AT);
-    assert.equal(
-      v.toISOString(),
-      new Date(Date.parse("2026-08-24T18:00:00Z") + PUBLISH_SKEW_MS)
-        .toISOString()
-    );
+    assert.equal(validUntil("nwm", "mediumRange", AT).toISOString(),
+      "2026-08-24T18:05:00.000Z");
   });
 
-  test("GEOGLOWS rounds up to the next UTC midnight, plus skew", () => {
-    const v = validUntil("geoglows", "geoglowsForecast", AT);
-    assert.equal(
-      v.toISOString(),
-      new Date(Date.parse("2026-08-25T00:00:00Z") + PUBLISH_SKEW_MS)
-        .toISOString()
-    );
+  // GEOGLOWS skews by 15 minutes, not NWM's 5 — a different physical reason
+  // (00Z proxy cold start). Sharing one constant made every GEOGLOWS document
+  // expire 10 minutes before the client expected, so the client refetched
+  // upstream on every read and the store did nothing.
+  test("GEOGLOWS rounds up to the next UTC midnight, plus the GEOGLOWS skew",
+    () => {
+      assert.equal(validUntil("geoglows", "geoglowsForecast", AT).toISOString(),
+        "2026-08-25T00:15:00.000Z");
+    });
+
+  test("the two sources do NOT share a skew", () => {
+    assert.notEqual(NWM_SKEW_MS, GEOGLOWS_SKEW_MS,
+      "collapsing these is the defect round 1 found");
   });
 
   // "Next" is strictly after now — a value fetched exactly on a boundary is
@@ -240,17 +242,25 @@ describe("the Dart contract has not drifted", () => {
       "every document written is silently dropped on read");
   });
 
-  test("the client still skews by the same amount", () => {
-    const src = readFileSync(
-      REPO + "lib/services/4_infrastructure/river_data/nwm_data_source.dart",
-      "utf8");
-    const m = /static const Duration _skew = Duration\(minutes: (\d+)\);/
-      .exec(src);
-    assert.notEqual(m, null, "_skew not found in Dart");
-    assert.equal(Number(m![1]) * 60_000, PUBLISH_SKEW_MS,
-      "server and client must expire a document at the same instant; this " +
-      "constant is PROVISIONAL and must be re-derived from probe data in " +
-      "BOTH places");
+  // Reads BOTH data sources. The original only read nwm_data_source.dart,
+  // which is why the GEOGLOWS mismatch survived: the drift test was blind to
+  // the source that had drifted.
+  test("each client source still skews by the amount this file uses", () => {
+    const cases: [string, number][] = [
+      ["nwm_data_source.dart", NWM_SKEW_MS],
+      ["geoglows_data_source.dart", GEOGLOWS_SKEW_MS],
+    ];
+    for (const [file, expected] of cases) {
+      const src = readFileSync(
+        REPO + "lib/services/4_infrastructure/river_data/" + file, "utf8");
+      const m = /static const Duration _skew = Duration\(minutes: (\d+)\);/
+        .exec(src);
+      assert.notEqual(m, null, `_skew not found in ${file}`);
+      assert.equal(Number(m![1]) * 60_000, expected,
+        `${file} and this file must expire a document at the same instant; ` +
+        "both constants are PROVISIONAL and must be re-derived from probe " +
+        "data in all THREE places");
+    }
   });
 
   test("the client still names the envelope fields this file writes", () => {
