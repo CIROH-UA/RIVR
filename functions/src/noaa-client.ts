@@ -320,6 +320,68 @@ export async function getReturnPeriods(
 }
 
 /**
+ * A reach's identity, as the ADR 0011 store's `reachMetadata` product.
+ *
+ * Mirrors Dart `ReachMetadataPayload.encode` / `ReachMetadata` exactly:
+ *   lib/services/4_infrastructure/river_data/reach_metadata_payload.dart
+ *
+ * `formattedLocation` is deliberately absent here. The client's live path does
+ * not geocode either — `NwmDataSource` injects a geocoder and pointedly leaves
+ * it unused, because `reverseGeocode` swallows its own errors and is bounded
+ * only by a 30 s HTTP timeout, which would put an unbounded second hop in front
+ * of the one call this product exists to keep fast. The place name is
+ * decoration, filled off the critical path by the consumer. Adding it server
+ * side would make the stored value DIFFER from the live one, which is guard 7.
+ */
+export interface ReachMetadataRecord {
+  riverName: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * Fetch a reach's identity for the store.
+ *
+ * Unlike {@link getRiverName}, this THROWS rather than falling back to
+ * `Reach <id>`. A fallback name is right for a notification, which must go out
+ * with something; it is wrong for the store, where writing a placeholder would
+ * overwrite the real name for 30 days (this product's freshness window) and
+ * every device would render "Reach 23021904" with no error anywhere. Failing
+ * leaves the previous document untouched, which is Phase 4 guard 4.
+ *
+ * @param {string} reachId - The reach identifier.
+ * @return {Promise<ReachMetadataRecord>} Name and coordinates.
+ */
+export async function getReachMetadata(
+  reachId: string
+): Promise<ReachMetadataRecord> {
+  const url = buildReachUrl(reachId);
+  const response = await fetchWithRetry(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Reach info API error: ${response.status} - ${response.statusText}`
+    );
+  }
+
+  const data = await response.json() as ReachResponse;
+
+  const name = typeof data.name === "string" && data.name.trim() !== "" ?
+    data.name :
+    null;
+  if (!name) {
+    // The one field this product exists to carry. Storing a nameless record
+    // would satisfy the schema and render blank.
+    throw new Error(`${reachId}: reach info carried no name`);
+  }
+
+  const lat = typeof data.latitude === "number" ? data.latitude : null;
+  const lon = typeof data.longitude === "number" ? data.longitude : null;
+
+  return {riverName: name, latitude: lat, longitude: lon};
+}
+
+/**
  * Get river name for notification display (always fetches fresh data)
  * @param {string} reachId - The reach identifier
  * @return {Promise<string>} River name or fallback

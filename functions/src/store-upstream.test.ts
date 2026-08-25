@@ -24,6 +24,7 @@ import {
 } from "./store-upstream.js";
 import {SECTION_BY_PRODUCT} from "./store-keys.js";
 import {PRODUCTS_BY_SOURCE} from "./store-run.js";
+import {MANAGED_PRODUCTS, STATIC_PRODUCTS} from "./store-service.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";
 
@@ -78,9 +79,48 @@ describe("only fetchable work is advertised as fetchable", () => {
     assert.equal(canFetch("nwm", "geoglowsForecast"), false);
   });
 
-  test("the near-static products are not on the hourly cycle", () => {
-    assert.equal(canFetch("nwm", "returnPeriods"), false);
-    assert.equal(canFetch("nwm", "reachMetadata"), false);
+  // This test previously asserted these two were NOT fetchable at all, which
+  // pinned the defect Phase 5 review round 1 found (B3): with them missing
+  // from the store, guard 1 — "a favourite renders with ZERO upstream calls
+  // from the device" — was unreachable, because every surface that renders a
+  // favourite reads the river's name and its flood thresholds. They are now
+  // fetchable. What must stay true is the part the old test's NAME described:
+  // they do not belong on the HOURLY cycle.
+  test("the near-static products are fetchable", () => {
+    assert.equal(canFetch("nwm", "returnPeriods"), true);
+    assert.equal(canFetch("nwm", "reachMetadata"), true);
+  });
+
+  test("the near-static products are NOT on the hourly cycle", () => {
+    // They carry no run identity, so the probe has nothing to compare and
+    // decideTriggers could never fire them; and they hold a 30-day window, so
+    // hourly refetching would re-read an unchanging river name 24x a day per
+    // favourite. The daily static pass owns them instead.
+    for (const p of ["returnPeriods", "reachMetadata"] as const) {
+      assert.ok(!MANAGED_PRODUCTS.includes(p),
+        `${p} must not be on the hourly cycle`);
+      assert.ok(STATIC_PRODUCTS.includes(p),
+        `${p} must be owned by the daily static pass`);
+    }
+  });
+
+  // Guard 1 holds only if the app subscribes to exactly what the server
+  // writes. Drift either way fails silently: a listener that can never fire,
+  // or a document written and never delivered.
+  test("CAN_FETCH.nwm matches the app's kStoredProducts", () => {
+    const src = readFileSync(
+      REPO +
+      "lib/services/4_infrastructure/river_data/store_subscription_service.dart",
+      "utf8");
+    const block = src.slice(
+      src.indexOf("ForecastSource.nwm: ["),
+      src.indexOf("ForecastSource.geoglows: ["));
+    assert.ok(block.length > 0, "could not locate the NWM block");
+
+    const watched = new Set(
+      [...block.matchAll(/ForecastProduct\.(\w+)/g)].map((m) => m[1]));
+    assert.deepEqual([...watched].sort(), [...CAN_FETCH.nwm].sort(),
+      "the app watches a different NWM product set than the server writes");
   });
 
   test("the four hourly NWM products are fetchable", () => {

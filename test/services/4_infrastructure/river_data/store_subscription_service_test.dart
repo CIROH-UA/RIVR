@@ -166,18 +166,47 @@ void main() {
   });
 
   group('which documents get watched', () {
-    test('an NWM reach watches the four stored products, not all six', () {
+    // This test used to assert the OPPOSITE — that returnPeriods and
+    // reachMetadata are NOT watched, on the reasoning that "the store never
+    // writes them, so a listener could only cost money and never fire". The
+    // reasoning was sound; the premise was the defect. The server did not
+    // write them because CAN_FETCH omitted them, and that omission is exactly
+    // what made guard 1 ("a favourite renders with ZERO upstream calls from
+    // the device") unreachable: name and thresholds are read by every surface
+    // that renders a favourite, so each one still made two device-side calls.
+    // Phase 5 review round 1, B3. The server now writes both.
+    test('an NWM reach watches all six stored products', () {
       final ids = StoreSubscriptionService.documentIdsFor([_key('1')]);
       expect(ids, {
         'nwm__1__analysisAssimilation',
         'nwm__1__shortRange',
         'nwm__1__mediumRange',
         'nwm__1__longRange',
+        'nwm__1__reachMetadata',
+        'nwm__1__returnPeriods',
       });
-      // The source supports these, but the store never writes them, so a
-      // listener on them could only ever cost money and never fire.
-      expect(ids, isNot(contains('nwm__1__returnPeriods')));
-      expect(ids, isNot(contains('nwm__1__reachMetadata')));
+    });
+
+    // Guard 1 depends on the app subscribing to exactly what the server
+    // writes. A product in one list and not the other fails silently in both
+    // directions: a listener that can never fire (billed, useless), or a
+    // document written and never delivered.
+    test('every watched NWM product is one the server can write', () {
+      // Mirrors functions/src/store-upstream.ts CAN_FETCH.nwm. Kept as a
+      // literal so drift shows up here rather than on a device.
+      const serverWrites = {
+        'analysisAssimilation',
+        'shortRange',
+        'mediumRange',
+        'longRange',
+        'returnPeriods',
+        'reachMetadata',
+      };
+      final watched = kStoredProducts[ForecastSource.nwm]!
+          .map((p) => p.id)
+          .toSet();
+      expect(watched, serverWrites,
+          reason: 'kStoredProducts and CAN_FETCH.nwm must name the same set');
     });
 
     test('a GEOGLOWS reach watches its one product', () {
@@ -199,7 +228,7 @@ void main() {
     test('the same reach twice does not double the watch set', () {
       expect(
         StoreSubscriptionService.documentIdsFor([_key('1'), _key('1')]).length,
-        4,
+        6,
       );
     });
   });
@@ -363,13 +392,88 @@ void main() {
     // listeners rather than silently truncating the watch set.
     test('more than 30 documents are split across listeners, none dropped',
         () async {
-      final many = List.generate(20, (i) => _key('r$i')); // 20 x 4 = 80 ids
+      final many = List.generate(20, (i) => _key('r$i')); // 20 x 6 = 120 ids
       await svc.syncFavourites(many);
 
-      expect(svc.watchedIds, hasLength(80));
+      expect(svc.watchedIds, hasLength(120));
       for (var i = 0; i < 20; i++) {
         expect(svc.watchedIds, contains('nwm__r${i}__shortRange'));
       }
+      await svc.dispose();
+    });
+  });
+
+  group('round 1, B1 — concurrent syncs must not duplicate listeners', () {
+    late FakeFirebaseFirestore db;
+    late _CapturingRepo repo;
+    late StoreSubscriptionService svc;
+
+    setUp(() {
+      db = FakeFirebaseFirestore();
+      repo = _CapturingRepo();
+      svc = StoreSubscriptionService(repository: repo, firestore: db);
+    });
+
+    tearDown(() => svc.dispose());
+
+    // The bug: syncFavourites awaited _cancelAll() BEFORE assigning _watched.
+    // A second call entering that gap still saw the old set, so both calls
+    // subscribed and both appended to _subs. The duplicates persisted for the
+    // session, so every later write was ingested — and billed — N times.
+    //
+    // Two favourite changes in one turn is enough to trigger it: each
+    // addFavorite/removeFavorite ends in notifyListeners.
+    test('two syncs fired without awaiting deliver each write ONCE', () async {
+      // Deliberately NOT awaited individually — that is the race.
+      final a = svc.syncFavourites([_key('1')]);
+      final b = svc.syncFavourites([_key('1'), _key('2')]);
+      await Future.wait([a, b]);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      repo.ingested.clear();
+      await db
+          .collection(kStoreCollection)
+          .doc('nwm__1__shortRange')
+          .set(_doc(reachId: '1'));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(repo.ingested, hasLength(1),
+          reason: 'a duplicated listener ingests and bills the same write '
+              'once per duplicate, for the rest of the session');
+    });
+
+    test('rapid-fire syncs settle on the LAST favourite set', () async {
+      final futures = [
+        svc.syncFavourites([_key('1')]),
+        svc.syncFavourites([_key('2')]),
+        svc.syncFavourites([_key('3')]),
+      ];
+      await Future.wait(futures);
+
+      expect(svc.watchedIds, StoreSubscriptionService.documentIdsFor([_key('3')]),
+          reason: 'the last call wins; interleaved calls must not merge sets');
+    });
+  });
+
+  group('round 1, B5 — a listener error must not be terminal', () {
+    test('after an error the watch set is cleared so a later sync re-subscribes',
+        () async {
+      final db = FakeFirebaseFirestore();
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      expect(svc.watchedIds, isNotEmpty);
+
+      // The failure path clears _watched. Without that, _setEquals sees an
+      // equal set on the next sync and early-returns forever — which is what
+      // made signing out and back in silently disable the store.
+      await svc.detach();
+      expect(svc.watchedIds, isEmpty);
+
+      await svc.syncFavourites([_key('1')]);
+      expect(svc.isSubscribed, isTrue,
+          reason: 'the same favourite set must re-subscribe after a teardown');
       await svc.dispose();
     });
   });

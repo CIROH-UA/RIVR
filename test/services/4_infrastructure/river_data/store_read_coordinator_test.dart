@@ -40,12 +40,27 @@ class _NoopRepo implements IRiverDataRepository {
 /// A switch whose value the test drives directly, standing in for Remote
 /// Config. The real class is a thin wrapper over `getBool`.
 class _FakeSwitch implements StoreReadSwitch {
-  _FakeSwitch(this.enabled);
-  bool enabled;
+  _FakeSwitch(this._enabled);
+  bool _enabled;
+
   @override
-  bool get isStoreReadEnabled => enabled;
+  final ChangeNotifier changes = ChangeNotifier();
+
+  bool get enabled => _enabled;
+
+  /// Flip it the way Remote Config does: change the value AND announce it.
+  set enabled(bool v) {
+    _enabled = v;
+    // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+    changes.notifyListeners();
+  }
+
+  @override
+  bool get isStoreReadEnabled => _enabled;
   @override
   Future<void> initialize() async {}
+  @override
+  Future<void> dispose() async => changes.dispose();
 }
 
 /// Stands in for the favourites provider: a Listenable whose contents the test
@@ -152,7 +167,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 40));
 
       expect(subs.watchedIds, contains('nwm__2__shortRange'));
-      expect(subs.watchedIds, hasLength(8)); // 2 reaches x 4 products
+      expect(subs.watchedIds, hasLength(12)); // 2 reaches x 6 products
       await c.dispose();
     });
 
@@ -208,6 +223,57 @@ void main() {
       final c = build(_FakeSwitch(true));
       await c.dispose();
       await c.sync();
+      expect(c.isActive, isFalse);
+    });
+  });
+
+  group('round 1, B2/B4 — the switch must reach a RUNNING app', () {
+    // The bug: sync() ran only from attach() and the favourites listener, and
+    // attach() happens at startup while Remote Config is still resolving — so
+    // the switch read false almost every time. Nothing re-synced when it
+    // changed. A flip to false never reached the devices it exists to rescue,
+    // and a late-resolving fetch left the store silently off for the session.
+    test('a flip to ON activates without any favourites change', () async {
+      final sw = _FakeSwitch(false);
+      final c = build(sw);
+      c.attach(favourites);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(c.isActive, isFalse);
+
+      // Remote Config resolves late. Nobody touches favourites.
+      sw.enabled = true;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(c.isActive, isTrue,
+          reason: 'the store must activate when the switch does, not only '
+              'when a favourite happens to change');
+      await c.dispose();
+    });
+
+    test('a flip to OFF detaches without any favourites change', () async {
+      final sw = _FakeSwitch(true);
+      final c = build(sw);
+      c.attach(favourites);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(c.isActive, isTrue);
+
+      sw.enabled = false;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
+      expect(c.isActive, isFalse,
+          reason: 'this is the whole point of a kill switch: it has to reach '
+              'devices already reading the store');
+      await c.dispose();
+    });
+
+    test('dispose stops following the switch too', () async {
+      final sw = _FakeSwitch(false);
+      final c = build(sw);
+      c.attach(favourites);
+      await c.dispose();
+
+      sw.enabled = true;
+      await Future<void>.delayed(const Duration(milliseconds: 40));
       expect(c.isActive, isFalse);
     });
   });

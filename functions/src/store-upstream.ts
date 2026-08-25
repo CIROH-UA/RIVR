@@ -11,7 +11,11 @@
 
 import * as logger from "firebase-functions/logger";
 
-import {NOAA_CONFIG} from "./noaa-client.js";
+import {
+  NOAA_CONFIG,
+  getReachMetadata,
+  getReturnPeriods,
+} from "./noaa-client.js";
 import {referenceTimeOf} from "./publish-cadence-probe.js";
 import {FetchedProduct} from "./store-run.js";
 import {
@@ -44,9 +48,22 @@ export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
  * threw, and one GEOGLOWS product that always threw — so every GEOGLOWS
  * favourite produced zero documents, forever, while reporting failures.
  *
- * returnPeriods and reachMetadata are absent on purpose: they come from a
- * different upstream (the CIROH return-period API, and the reaches endpoint)
- * and are near-static, so they do not belong on the hourly publish cycle.
+ * returnPeriods and reachMetadata ARE fetchable, from a different upstream
+ * (the CIROH return-period API, and the reaches endpoint). They were omitted
+ * until Phase 5 review round 1, which found the omission made Phase 5 guard 1
+ * — "a favourite renders with ZERO upstream calls from the device" —
+ * unreachable: every surface that renders a favourite reads the river's name
+ * and its flood thresholds, so with those two products missing from the store
+ * each favourite still made two device-side calls. The ADR anticipated this
+ * ("Declared, Phase 5's problem: ReachCacheService still stores reach info ...
+ * It follows the metadata product into the repository when Phase 5 touches
+ * this seam").
+ *
+ * Fetchable is NOT the same as hourly. Both are near-static — a 30-day
+ * freshness window, and no run identity to advance — so they are excluded from
+ * MANAGED_PRODUCTS and refreshed by the daily static pass instead. Putting
+ * them on the hourly cycle would re-fetch an unchanging river name 24 times a
+ * day per favourite.
  *
  * GEOGLOWS is fetched by store-geoglows.ts, on its own daily schedule — it
  * publishes one run per UTC day and is not on the NWM probe's cycle.
@@ -59,7 +76,14 @@ export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
  */
 export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
   = {
-    nwm: ["analysisAssimilation", "shortRange", "mediumRange", "longRange"],
+    nwm: [
+      "analysisAssimilation",
+      "shortRange",
+      "mediumRange",
+      "longRange",
+      "returnPeriods",
+      "reachMetadata",
+    ],
     geoglows: ["geoglowsForecast"],
   };
 
@@ -147,6 +171,11 @@ export async function fetchProductFromUpstream(
     );
   }
 
+  // The two near-static products come from different upstreams and carry no
+  // run identity, so they route out before the streamflow logic below.
+  if (product === "reachMetadata") return fetchReachMetadata(reachId);
+  if (product === "returnPeriods") return fetchReturnPeriods(reachId);
+
   const series = SERIES_BY_PRODUCT[product];
   const section = SECTION_BY_PRODUCT[product];
   if (!series || !section) {
@@ -195,6 +224,78 @@ export async function fetchProductFromUpstream(
   }
 
   return {payload: body, unit, referenceTime};
+}
+
+/**
+ * The reach's identity, in the exact payload shape the client decodes.
+ *
+ * Field names mirror Dart `ReachMetadataPayload.encode`. They are not
+ * negotiable: `ReachMetadataPayload.decode` reads `riverName`,
+ * `formattedLocation`, `latitude` and `longitude` by name and casts, so a
+ * renamed field decodes as null and the reach renders untitled with nothing
+ * wrong server-side.
+ *
+ * `formattedLocation` is written as null on purpose — see ReachMetadataRecord.
+ * The live path does not geocode here either, so storing a geocoded string
+ * would make the stored value differ from the live one (guard 7).
+ *
+ * The unit is "CMS" only to satisfy the envelope: nothing in this payload is a
+ * flow value, and `ReachMetadataPayload.decode` never looks at `entry.unit`.
+ *
+ * @param {string} reachId - The reach.
+ * @return {Promise<FetchedProduct>} The metadata payload.
+ */
+async function fetchReachMetadata(reachId: string): Promise<FetchedProduct> {
+  const m = await getReachMetadata(reachId);
+  return {
+    payload: {
+      riverName: m.riverName,
+      formattedLocation: null,
+      latitude: m.latitude,
+      longitude: m.longitude,
+    },
+    unit: "CMS",
+    // A river's name has no model run. Inventing one would make every refresh
+    // look like new data and defeat supersession.
+    referenceTime: null,
+  };
+}
+
+/**
+ * Return-period thresholds, in the raw array shape the client decodes.
+ *
+ * The payload is `{returnPeriods: [...]}` wrapping the API's own array,
+ * because `ReturnPeriodPayload.decode` hands `payload['returnPeriods']`
+ * straight to `ReachDataDto.fromReturnPeriodApi`, which expects the upstream
+ * array of `{feature_id, return_period_2, ...}` objects. Reshaping it here
+ * would decode to no thresholds, and no thresholds costs the flood category
+ * silently — the number still renders, just never coloured.
+ *
+ * The unit is "CMS" because that is what this API actually serves, regardless
+ * of any user preference, and the client converts FROM CMS unconditionally.
+ * Decision 12: store the native upstream unit, never a preference.
+ *
+ * An empty result THROWS. `getReturnPeriods` returns `[]` both when upstream
+ * has no thresholds for a reach and when the fetch failed and no cache was
+ * available; storing that would replace real thresholds with none for the
+ * 30-day window. Failing leaves the previous document untouched (guard 4).
+ *
+ * @param {string} reachId - The reach.
+ * @return {Promise<FetchedProduct>} The thresholds payload.
+ */
+async function fetchReturnPeriods(reachId: string): Promise<FetchedProduct> {
+  const rows = await getReturnPeriods(reachId);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error(
+      `${reachId}: return-period API returned nothing — refusing to store ` +
+      "empty thresholds over real ones"
+    );
+  }
+  return {
+    payload: {returnPeriods: rows as unknown as Record<string, unknown>[]},
+    unit: "CMS",
+    referenceTime: null,
+  };
 }
 
 /**

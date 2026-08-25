@@ -38,7 +38,12 @@ import {
   sampleStoredRun,
 } from "./store-firestore.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
-import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
+import {StoreDocument} from "./store-document.js";
+import {
+  ForecastProductId,
+  ForecastSourceId,
+  storageKey,
+} from "./store-keys.js";
 import {canFetch} from "./store-upstream.js";
 import {
   WorkList,
@@ -62,6 +67,66 @@ export const MANAGED_PRODUCTS: readonly ForecastProductId[] = [
  */
 export const GEOGLOWS_PRODUCTS: readonly ForecastProductId[] =
   ["geoglowsForecast"];
+
+/**
+ * The near-static NWM products: a river's name and its flood thresholds.
+ *
+ * Kept OUT of MANAGED_PRODUCTS deliberately. They carry no run identity, so
+ * the probe has nothing to compare and `decideTriggers` could never fire them;
+ * and they hold a 30-day freshness window, so putting them on the hourly cycle
+ * would refetch an unchanging river name 24 times a day per favourite.
+ *
+ * They exist in the store because Phase 5 guard 1 is "a favourite renders with
+ * ZERO upstream calls from the device", and every surface that renders a
+ * favourite reads its name and its thresholds. Without these two products the
+ * hourly cycle keeps the flow numbers fresh while each favourite still makes
+ * two device-side calls to render at all — the store present, and the guard
+ * unreachable. Phase 5 review round 1 found exactly that.
+ */
+export const STATIC_PRODUCTS: readonly ForecastProductId[] = [
+  "reachMetadata",
+  "returnPeriods",
+];
+
+/**
+ * Refresh a static product this long before it expires.
+ *
+ * Not zero. A document refreshed only once already stale leaves a window in
+ * which every device sees it as expired and falls back to fetching upstream —
+ * silently undoing guard 1 for a day, once a month, with nothing in any log to
+ * say so. Seven days of lead on a 30-day window means the daily pass has 7
+ * chances to succeed before any device notices.
+ */
+export const STATIC_REFRESH_LEAD_MS = 7 * 24 * 3600_000;
+
+/**
+ * Whether a static document must be refetched now.
+ *
+ * Pure, and separated from the run so the decision is testable without
+ * Firestore — the same reason deriveWorkList, planWrites and shouldWrite are
+ * pure. It is the whole cost story of the daily pass: return false and the
+ * pass performs a read and no fetch.
+ *
+ * Refetches when there is no document, when the window is missing or
+ * unparseable, or when it expires within {@link STATIC_REFRESH_LEAD_MS}. An
+ * unreadable window is NOT evidence of freshness: trusting it would leave a
+ * document that can never be renewed, and the device would fall back to
+ * fetching upstream forever with nothing in any log.
+ *
+ * @param {StoreDocument | null} existing - The stored document, if any.
+ * @param {Date} now - Reference instant.
+ * @return {boolean} True when the product should be refetched.
+ */
+export function staticRefreshDue(
+  existing: StoreDocument | null,
+  now: Date
+): boolean {
+  const validUntil = existing?.window?.validUntil;
+  if (typeof validUntil !== "string") return true;
+  const expiresAt = Date.parse(validUntil);
+  if (Number.isNaN(expiresAt)) return true;
+  return expiresAt <= now.getTime() + STATIC_REFRESH_LEAD_MS;
+}
 
 /** Upstream fetchers, injected so nothing here reaches NOAA during tests. */
 export interface UpstreamIo {
@@ -275,6 +340,119 @@ export interface GcOutcome {
   deleted: number;
   refused: string | null;
   usage: FirestoreUsage;
+}
+
+/**
+ * The daily refresh of the near-static products (Phase 5 guard 1).
+ *
+ * Unlike the hourly refresh this is NOT probe-driven — there is no run to
+ * advance — so "has it changed?" is unanswerable without fetching, and
+ * fetching every reach every day to find out is the cost guard 1 forbids.
+ * Instead the decision is made on the stored freshness window: a document is
+ * refetched only when it is missing, unreadable, or within
+ * {@link STATIC_REFRESH_LEAD_MS} of expiring. On a steady state that is one
+ * Firestore READ per reach per product per day and no fetch at all.
+ *
+ * Read cost is stated rather than assumed: 2 reads per favourited reach per
+ * day. At the ADR's current scale (tens of reaches) that is under a hundred
+ * reads a day against a 50,000/day free tier.
+ *
+ * NWM only. GEOGLOWS reaches carry no NOAA metadata or NWM thresholds; its
+ * forecast payload already carries its own return periods.
+ *
+ * @param {UpstreamIo} io - Upstream fetchers.
+ * @return {Promise<RefreshOutcome>} What happened.
+ */
+export async function runStoreStaticRefresh(
+  io: UpstreamIo
+): Promise<RefreshOutcome> {
+  const usage = newUsage();
+  const deps = firestoreDeps(io, usage);
+  const now = deps.now();
+
+  const workList = await buildWorkList(usage);
+  const nwm = workList.entries.filter((e) => e.source === "nwm");
+
+  if (nwm.length === 0) {
+    return {
+      ran: false,
+      reason: "no NWM favourites; nothing static to refresh",
+      report: null,
+      usage,
+    };
+  }
+
+  const merged: StoreRunReport = {
+    productsTriggered: [],
+    planned: 0,
+    written: 0,
+    skippedSameRun: 0,
+    skippedLagging: 0,
+    failed: 0,
+    reachesToRetry: [],
+    results: [],
+    fetches: 0,
+  };
+
+  for (const product of STATIC_PRODUCTS) {
+    if (!canFetch("nwm", product)) continue;
+
+    const due: typeof nwm = [];
+    for (const entry of nwm) {
+      const id = storageKey("nwm", entry.reachId, product);
+      const existing = await deps.readExisting(id);
+      if (staticRefreshDue(existing, now)) due.push(entry);
+    }
+
+    if (due.length === 0) {
+      logger.info("⏭️ static refresh: all current", {
+        product, reaches: nwm.length,
+      });
+      continue;
+    }
+
+    const scoped: WorkList = {
+      entries: due,
+      summary: {
+        ...workList.summary,
+        distinctReaches: due.length,
+        bySource: {nwm: due.length, geoglows: 0},
+      },
+    };
+
+    const report = await runStoreUpdate(scoped, [product], deps);
+
+    merged.productsTriggered.push(product);
+    merged.planned += report.planned;
+    merged.written += report.written;
+    merged.skippedSameRun += report.skippedSameRun;
+    merged.skippedLagging += report.skippedLagging;
+    merged.failed += report.failed;
+    merged.fetches += report.fetches;
+    merged.results.push(...report.results);
+    for (const r of report.reachesToRetry) {
+      if (!merged.reachesToRetry.includes(r)) merged.reachesToRetry.push(r);
+    }
+  }
+
+  logger.info("🪨 static refresh complete", {
+    products: merged.productsTriggered,
+    planned: merged.planned,
+    written: merged.written,
+    failed: merged.failed,
+    reads: usage.reads,
+  });
+
+  if (merged.planned === 0) {
+    return {
+      ran: false,
+      reason: "every static document is still current",
+      report: merged,
+      usage,
+    };
+  }
+  return {ran: true, reason: "static products due for refresh", report: merged,
+    usage};
 }
 
 /**

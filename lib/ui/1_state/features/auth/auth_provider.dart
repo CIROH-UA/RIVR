@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 import 'package:rivr/models/1_domain/features/auth/auth_user.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
@@ -278,7 +279,25 @@ class AuthProvider with ChangeNotifier {
   /// deleteAccount, and the server-side auth-state drop. Review round 2 found
   /// the first fix applied to signOut alone, with deleteAccount's own comment
   /// promising a mirror it did not perform.
+  /// Release the ADR 0011 store listeners on identity change.
+  ///
+  /// Round 1, B5: without this, signing out left the Firestore listeners
+  /// attached. They then hit PERMISSION_DENIED under firestore.rules and died,
+  /// and because the favourite set was unchanged the next sync saw an equal
+  /// set and never re-subscribed — the store silently off for the rest of the
+  /// session, on exactly the two-accounts-one-device path guard 2 cares about.
+  void _detachStoreListeners() {
+    if (!GetIt.I.isRegistered<StoreSubscriptionService>()) return;
+    try {
+      // detach, not dispose: the same service must serve the next sign-in.
+      unawaited(GetIt.I<StoreSubscriptionService>().detach());
+    } catch (e) {
+      AppLogger.warning('AuthProvider', 'store detach failed: $e');
+    }
+  }
+
   void _clearRiverDataCache() {
+    _detachStoreListeners();
     if (GetIt.I.isRegistered<IRiverDataCache>()) {
       unawaited(GetIt.I<IRiverDataCache>().clear());
     }

@@ -52,6 +52,7 @@ class StoreReadCoordinator {
 
   Listenable? _source;
   bool _disposed = false;
+  bool _listeningToSwitch = false;
 
   /// Whether the store is currently being read on this device.
   bool get isActive => _subs.isSubscribed;
@@ -63,6 +64,19 @@ class StoreReadCoordinator {
     if (_disposed) return;
     _source = source;
     source.addListener(_onChanged);
+
+    // Also follow the switch itself. Round 1, B2/B4: attaching happens at
+    // startup while Remote Config is still resolving, so the switch reads
+    // false here almost every time. Without this the store activated only if a
+    // favourites change happened to arrive after RC resolved — order-dependent,
+    // and when it lost, the feature was silently off for the whole session.
+    // The same subscription is what lets a mid-session flip to false reach a
+    // device that is already reading the store.
+    if (!_listeningToSwitch) {
+      _switch.changes.addListener(_onChanged);
+      _listeningToSwitch = true;
+    }
+
     unawaited(sync());
   }
 
@@ -106,6 +120,10 @@ class StoreReadCoordinator {
     _disposed = true;
     _source?.removeListener(_onChanged);
     _source = null;
+    if (_listeningToSwitch) {
+      _switch.changes.removeListener(_onChanged);
+      _listeningToSwitch = false;
+    }
     await _subs.dispose();
   }
 }

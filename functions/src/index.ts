@@ -8,6 +8,7 @@ import {
   checkStoreHealth,
   runGeoglowsRefresh,
   runStoreGc,
+  runStoreStaticRefresh,
   runStoreRefresh,
   runStoreWriteThrough,
 } from "./store-service.js";
@@ -429,6 +430,32 @@ export const storeGeoglowsDaily = functions
   .onRun(async () => {
     const outcome = await runGeoglowsRefresh({fetchProduct: fetchForStore});
     logger.info("🌍 storeGeoglowsDaily", {
+      ran: outcome.ran,
+      reason: outcome.reason,
+      written: outcome.report?.written ?? 0,
+      failed: outcome.report?.failed ?? 0,
+    });
+  });
+
+/**
+ * Daily refresh of the near-static products — river names and flood
+ * thresholds (Phase 5 guard 1).
+ *
+ * Separate from the hourly cycle on purpose: these carry no run identity for
+ * the probe to compare and hold a 30-day window, so they are refetched only
+ * when a stored document is missing or within a week of expiring. Most days
+ * this performs reads and no fetches at all.
+ *
+ * 02:30 UTC — after the GEOGLOWS pass at 01:30 and before GC at 03:40, so the
+ * three daily jobs do not overlap.
+ */
+export const storeStaticDaily = functions
+  .runWith({memory: "512MB", timeoutSeconds: 540})
+  .pubsub.schedule("30 2 * * *")
+  .timeZone("UTC")
+  .onRun(async () => {
+    const outcome = await runStoreStaticRefresh({fetchProduct: fetchForStore});
+    logger.info("🪨 storeStaticDaily", {
       ran: outcome.ran,
       reason: outcome.reason,
       written: outcome.report?.written ?? 0,

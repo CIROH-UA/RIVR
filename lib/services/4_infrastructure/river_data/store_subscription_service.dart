@@ -48,6 +48,18 @@ const Map<ForecastSource, List<ForecastProduct>> kStoredProducts = {
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
     ForecastProduct.longRange,
+    // The near-static pair. Not decoration: guard 1 is "a favourite renders
+    // with ZERO upstream calls from the device", and every surface that
+    // renders a favourite reads the river's NAME and its flood THRESHOLDS.
+    // Subscribing only to the flow products keeps the numbers fresh while
+    // each favourite still makes two device-side calls just to draw itself —
+    // the store present, the guard unreachable. Phase 5 review round 1.
+    //
+    // Written by the daily `storeStaticDaily` pass, not the hourly cycle
+    // (they hold a 30-day window and carry no run to advance), and by
+    // write-through the moment a reach is favourited.
+    ForecastProduct.reachMetadata,
+    ForecastProduct.returnPeriods,
   ],
   ForecastSource.geoglows: [
     ForecastProduct.geoglowsForecast,
@@ -78,6 +90,14 @@ class StoreSubscriptionService {
   Set<String> _watched = <String>{};
 
   bool _disposed = false;
+
+  /// Serialises [syncFavourites]. Round 1, B1: two calls entering across the
+  /// `await _cancelAll()` gap both saw the OLD `_watched`, both subscribed, and
+  /// both appended to `_subs` — permanently duplicating every listener for the
+  /// session, so each server write was ingested N times and billed N times.
+  /// Two favourite changes in one turn is enough (each ends in
+  /// notifyListeners), and swipe-deleting two cards does it.
+  Future<void> _pending = Future<void>.value();
 
   /// Documents ingested since construction. Exposed for the guards.
   int ingested = 0;
@@ -112,7 +132,15 @@ class StoreSubscriptionService {
   ///
   /// [reaches] carries source + reachId; the product on each key is ignored,
   /// because the service subscribes to every product the store holds.
-  Future<void> syncFavourites(Iterable<RiverDataKey> reaches) async {
+  Future<void> syncFavourites(Iterable<RiverDataKey> reaches) {
+    // Chain rather than run: whatever is already reconciling finishes before
+    // the next reconciliation reads `_watched`.
+    final next = _pending.then((_) => _syncLocked(reaches));
+    _pending = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _syncLocked(Iterable<RiverDataKey> reaches) async {
     if (_disposed) return;
 
     final wanted = documentIdsFor(reaches);
@@ -142,11 +170,20 @@ class StoreSubscriptionService {
               // A permission error or a missing index must degrade to the live
               // path, not surface to the user (guard 8). The repository still
               // fetches upstream on a cache miss.
-              onError: (Object e, StackTrace s) => AppLogger.error(
-                _tag,
-                'store listener failed; falling back to the live path',
-                e,
-              ),
+              onError: (Object e, StackTrace s) {
+                AppLogger.error(
+                  _tag,
+                  'store listener failed; falling back to the live path',
+                  e,
+                );
+                // Round 1, B5: without this the failure is terminal. The dead
+                // stream stayed in `_subs` and `_watched` kept its ids, so the
+                // next sync saw an equal set and early-returned — never
+                // re-subscribing for the rest of the session. Signing out and
+                // back in reproduces it: the listeners hit PERMISSION_DENIED,
+                // die, and the store is silently off with the same favourites.
+                _watched = <String>{};
+              },
             ),
       );
     }
@@ -217,10 +254,16 @@ class StoreSubscriptionService {
   }
 
   Future<void> _cancelAll() async {
-    for (final s in _subs) {
+    // Swap the list out BEFORE awaiting. Iterating `_subs` across an await
+    // while detach() or dispose() clears it throws "Concurrent modification
+    // during iteration" — these paths run outside syncFavourites' lock, so
+    // they genuinely interleave. Found by the kill-switch tests, which flip the
+    // switch (triggering a sync) and detach in the same turn.
+    final taken = List.of(_subs);
+    _subs.clear();
+    for (final s in taken) {
       await s.cancel();
     }
-    _subs.clear();
   }
 
   /// Drop every listener but stay usable (guard 6).
