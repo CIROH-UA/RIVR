@@ -28,9 +28,30 @@ interface UserSettings {
 
 export type ReachSource = "nwm" | "geoglows";
 
+/**
+ * Resolve a favorite's source from the per-reach map on a user document;
+ * anything not "geoglows" is treated as NWM.
+ *
+ * Exported in this narrow shape so the ADR 0011 store work list applies the
+ * SAME rule rather than restating it. Two implementations of "which network is
+ * this reach on" is the drift decision 13 exists to prevent, and it would show
+ * up as the store fetching a GEOGLOWS reach from NWM.
+ *
+ * @param {Record<string, string> | undefined} favoriteSources - The user
+ *   document's per-reach source map; only non-NWM entries are stored.
+ * @param {string} reachId - The reach to resolve.
+ * @return {ReachSource} The resolved source.
+ */
+export function sourceOfFavourite(
+  favoriteSources: Record<string, string> | undefined,
+  reachId: string
+): ReachSource {
+  return favoriteSources?.[reachId] === "geoglows" ? "geoglows" : "nwm";
+}
+
 /** Resolve a favorite's source; anything not "geoglows" is treated as NWM. */
 function sourceOf(user: UserSettings, reachId: string): ReachSource {
-  return user.favoriteSources[reachId] === "geoglows" ? "geoglows" : "nwm";
+  return sourceOfFavourite(user.favoriteSources, reachId);
 }
 
 /**
