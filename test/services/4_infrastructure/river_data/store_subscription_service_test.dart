@@ -11,6 +11,7 @@
 //     keeps billing Firestore reads forever, which nothing in the UI would ever
 //     surface. Cancellation is asserted, not assumed.
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -456,25 +457,132 @@ void main() {
   });
 
   group('round 1, B5 — a listener error must not be terminal', () {
-    test('after an error the watch set is cleared so a later sync re-subscribes',
-        () async {
-      final db = FakeFirebaseFirestore();
+    // Round 2, B2: this test used to call `detach()` and assert on that,
+    // while its NAME claimed to exercise the error path. Deleting the fix it
+    // was named after left all 99 tests green. It now drives the REAL onError
+    // callback through a Firestore whose snapshot stream fails, which is what
+    // PERMISSION_DENIED looks like on sign-out.
+    test('after a listener ERROR the watch set is cleared so a later sync '
+        're-subscribes', () async {
+      final db = _ErroringFirestore();
       final svc =
           StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
 
       await svc.syncFavourites([_key('1')]);
-      expect(svc.watchedIds, isNotEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      // The failure path clears _watched. Without that, _setEquals sees an
-      // equal set on the next sync and early-returns forever — which is what
-      // made signing out and back in silently disable the store.
-      await svc.detach();
-      expect(svc.watchedIds, isEmpty);
+      expect(svc.watchedIds, isEmpty,
+          reason: 'a dead listener must not leave its ids in the watch set, '
+              'or the next sync sees an equal set and early-returns forever');
+      expect(svc.isSubscribed, isFalse,
+          reason: 'isSubscribed must not report true for a dead stream');
 
+      // The real point: the SAME favourite set must be able to re-subscribe.
+      db.failNext = false;
       await svc.syncFavourites([_key('1')]);
       expect(svc.isSubscribed, isTrue,
-          reason: 'the same favourite set must re-subscribe after a teardown');
+          reason: 'signing out and back in must not disable the store for the '
+              'rest of the session');
+      await svc.dispose();
+    });
+
+    test('an error on one batch does not tear down the others', () async {
+      final db = _ErroringFirestore(failFirstOnly: true);
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      // 20 reaches x 6 products = 120 ids -> 4 batches of 30.
+      await svc.syncFavourites(List.generate(20, (i) => _key('r$i')));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(svc.isSubscribed, isTrue,
+          reason: 'one failing batch must not cost the other three');
       await svc.dispose();
     });
   });
+}
+
+// ── A Firestore whose snapshot stream fails ──────────────────────────────────
+//
+// fake_cloud_firestore has no way to make a listener error, and the error path
+// is the one that made the store silently terminal (round 1, B5). These three
+// classes implement only the chain the service actually uses —
+// collection().where().snapshots() — and let the test decide whether the
+// resulting stream errors. `noSuchMethod` absorbs the rest of the surface.
+
+class _ErroringFirestore implements FirebaseFirestore {
+  _ErroringFirestore({this.failFirstOnly = false});
+
+  /// Whether the next stream created should fail.
+  bool failNext = true;
+
+  /// Fail only the first stream, leaving later batches healthy.
+  final bool failFirstOnly;
+
+  int streamsCreated = 0;
+
+  bool takeShouldFail() {
+    streamsCreated++;
+    if (failFirstOnly) return streamsCreated == 1;
+    return failNext;
+  }
+
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String path) =>
+      _ErroringCollection(this);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// `CollectionReference` and `Query` are sealed. Implementing them is
+// deliberate and confined to this file: the alternative is no test at all for
+// the listener-error path, which is the path that made the store silently
+// terminal (round 1, B5) and which fake_cloud_firestore cannot produce.
+// ignore: subtype_of_sealed_class
+class _ErroringCollection implements CollectionReference<Map<String, dynamic>> {
+  _ErroringCollection(this.db);
+  final _ErroringFirestore db;
+
+  @override
+  Query<Map<String, dynamic>> where(
+    Object field, {
+    Object? isEqualTo,
+    Object? isNotEqualTo,
+    Object? isLessThan,
+    Object? isLessThanOrEqualTo,
+    Object? isGreaterThan,
+    Object? isGreaterThanOrEqualTo,
+    Object? arrayContains,
+    Iterable<Object?>? arrayContainsAny,
+    Iterable<Object?>? whereIn,
+    Iterable<Object?>? whereNotIn,
+    bool? isNull,
+  }) =>
+      _ErroringQuery(db);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _ErroringQuery implements Query<Map<String, dynamic>> {
+  _ErroringQuery(this.db);
+  final _ErroringFirestore db;
+
+  @override
+  Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
+    bool includeMetadataChanges = false,
+    ListenSource source = ListenSource.defaultSource,
+  }) {
+    if (db.takeShouldFail()) {
+      return Stream<QuerySnapshot<Map<String, dynamic>>>.error(
+        FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied'),
+      );
+    }
+    return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

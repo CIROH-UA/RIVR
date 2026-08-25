@@ -11,11 +11,7 @@
 
 import * as logger from "firebase-functions/logger";
 
-import {
-  NOAA_CONFIG,
-  getReachMetadata,
-  getReturnPeriods,
-} from "./noaa-client.js";
+import {NOAA_CONFIG} from "./noaa-client.js";
 import {referenceTimeOf} from "./publish-cadence-probe.js";
 import {FetchedProduct} from "./store-run.js";
 import {
@@ -24,6 +20,22 @@ import {
   SECTION_BY_PRODUCT,
 } from "./store-keys.js";
 import {fetchGeoglowsForStore} from "./store-geoglows.js";
+
+/**
+ * The unit the store records for products whose values are NOT flow, and for
+ * return-period thresholds.
+ *
+ * "CMS" because the return-period API serves native cubic metres per second
+ * regardless of any user preference, and `ReturnPeriodPayload.decode` converts
+ * FROM the literal 'CMS', ignoring `entry.unit`. Storing anything else
+ * silently misclassifies every flood category — the number still renders, just
+ * in the wrong colour. Decision 12: store the native upstream unit, never a
+ * preference.
+ *
+ * Named rather than inlined so a test can assert on it: round 2 changed it to
+ * "CFS" as a mutation and all 207 tests passed.
+ */
+export const STORE_NATIVE_UNIT = "CMS";
 
 /** NOAA's `series` parameter for each product this file can fetch. */
 export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
@@ -127,6 +139,32 @@ function unitOf(body: Record<string, unknown>, section: string): unknown {
     }
   }
   return inner.units;
+}
+
+/**
+ * Non-retrying JSON fetch that tolerates any top-level shape.
+ *
+ * The return-period API answers with an ARRAY, so it cannot go through
+ * {@link getJson}, whose signature promises an object.
+ *
+ * @param {string} url - The URL to fetch.
+ * @return {Promise<unknown>} The decoded body.
+ */
+async function getJsonAny(url: string): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NOAA_CONFIG.timeout);
+  try {
+    const res = await fetch(url, {
+      headers: NOAA_CONFIG.headers,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} for ${url}`);
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function getJson(url: string): Promise<Record<string, unknown>> {
@@ -245,16 +283,46 @@ export async function fetchProductFromUpstream(
  * @param {string} reachId - The reach.
  * @return {Promise<FetchedProduct>} The metadata payload.
  */
-async function fetchReachMetadata(reachId: string): Promise<FetchedProduct> {
-  const m = await getReachMetadata(reachId);
+export async function fetchReachMetadata(reachId: string): Promise<FetchedProduct> {
+  // Fetched HERE rather than through noaa-client's getRiverName, and
+  // deliberately not through its fetchWithRetry. Two reasons, both rules this
+  // file already states:
+  //
+  //   - No retries in the store's fetchers. CLAUDE.md puts it absolutely
+  //     ("Never add retries to the store's fetchers"), and the comment on
+  //     fetchProductFromUpstream gives the reason: a transient failure is
+  //     recorded per reach and retried next cycle, and retrying inside the run
+  //     hides the failure rate the Phase 0 probe exists to measure. Round 2,
+  //     B3 — the first version of this function called fetchWithRetry, which
+  //     retries 3x with backoff, directly contradicting both.
+  //   - No fallback value. getRiverName returns `Reach <id>` when the fetch
+  //     fails, which is right for a notification that must go out with
+  //     something and wrong for the store: a placeholder would be stamped
+  //     fresh for 30 days and every device would render it.
+  const body = await getJson(
+    `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${reachId}`);
+
+  const rawName = body.name;
+  const riverName =
+    typeof rawName === "string" && rawName.trim() !== "" ? rawName : null;
+  if (!riverName) {
+    // The one field this product exists to carry. A nameless record satisfies
+    // the schema and renders blank.
+    throw new Error(`${reachId}: reach info carried no name`);
+  }
+
   return {
     payload: {
-      riverName: m.riverName,
+      riverName,
+      // Null on purpose: the live path does not geocode here either
+      // (NwmDataSource injects a geocoder and pointedly leaves it unused), so
+      // geocoding server-side would make the stored value differ from the live
+      // one — guard 7.
       formattedLocation: null,
-      latitude: m.latitude,
-      longitude: m.longitude,
+      latitude: typeof body.latitude === "number" ? body.latitude : null,
+      longitude: typeof body.longitude === "number" ? body.longitude : null,
     },
-    unit: "CMS",
+    unit: STORE_NATIVE_UNIT,
     // A river's name has no model run. Inventing one would make every refresh
     // look like new data and defeat supersession.
     referenceTime: null,
@@ -283,17 +351,34 @@ async function fetchReachMetadata(reachId: string): Promise<FetchedProduct> {
  * @param {string} reachId - The reach.
  * @return {Promise<FetchedProduct>} The thresholds payload.
  */
-async function fetchReturnPeriods(reachId: string): Promise<FetchedProduct> {
-  const rows = await getReturnPeriods(reachId);
-  if (!Array.isArray(rows) || rows.length === 0) {
+export async function fetchReturnPeriods(reachId: string): Promise<FetchedProduct> {
+  // Fetched HERE rather than through noaa-client's getReturnPeriods, for the
+  // no-retry rule above and for one more reason specific to this product:
+  // getReturnPeriods falls back to the `return_period_cache` collection of ANY
+  // age when the API fails. Writing that into the store would stamp an
+  // arbitrarily old value with a fresh fetchedAt and a 30-day validUntil —
+  // the store asserting currency it does not have, which is the one thing
+  // Phase 7's trust model cannot survive. Round 2, non-blocking 4.
+  const body = await getJsonAny(
+    `${NOAA_CONFIG.nwmReturnPeriodUrl}?comids=${reachId}` +
+    `&key=${NOAA_CONFIG.nwmApiKey}`);
+
+  const rows = Array.isArray(body) ? body : [body];
+  const valid = rows.filter(
+    (r): r is Record<string, unknown> =>
+      typeof r === "object" && r !== null && !Array.isArray(r) &&
+      Object.keys(r).some((k) => k.startsWith("return_period_")));
+
+  if (valid.length === 0) {
     throw new Error(
-      `${reachId}: return-period API returned nothing — refusing to store ` +
-      "empty thresholds over real ones"
+      `${reachId}: return-period API returned no usable thresholds — ` +
+      "refusing to store empty thresholds over real ones"
     );
   }
+  const usable = valid;
   return {
-    payload: {returnPeriods: rows as unknown as Record<string, unknown>[]},
-    unit: "CMS",
+    payload: {returnPeriods: usable},
+    unit: STORE_NATIVE_UNIT,
     referenceTime: null,
   };
 }

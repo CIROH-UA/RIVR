@@ -17,6 +17,7 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.d
 import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_backed_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 
@@ -65,17 +66,35 @@ void setupForecastDependencies() {
   // one entry here + an IRiverDataSource impl. Consumed by the
   // RiverDataRepository, which the map sheet, both forecast-page branches and
   // the weekly outlook all read through as of ADR 0011 Phase 1.
+  //
+  // ADR 0011 Phase 5: each source is WRAPPED so a favourite is served from the
+  // cloud store instead of upstream. This wrapping is what makes guard 1 — "a
+  // favourite renders with zero upstream calls from the device" — structural
+  // rather than a race. Phase 5's first implementation pushed store documents
+  // into the shared cache and relied on the repository finding them fresh, but
+  // the repository ALSO revalidates upstream on a stale entry and fetches on a
+  // miss, and nothing arbitrated which landed first. Review round 2.
+  //
+  // The wrapper is transparent: same ForecastSource, same supportedProducts,
+  // same validUntil. Nothing downstream can tell which path served a value,
+  // which is guard 7.
   sl.registerLazySingleton<SourceRegistry>(
     () => SourceRegistry([
-      NwmDataSource(
-        geocoder: sl<IGeocodingService>(),
-        api: sl<INoaaApiService>(),
-        forecastService: sl<IForecastService>(),
-        unitService: sl<IFlowUnitPreferenceService>(),
+      StoreBackedDataSource(
+        readSwitch: sl<StoreReadSwitch>(),
+        inner: NwmDataSource(
+          geocoder: sl<IGeocodingService>(),
+          api: sl<INoaaApiService>(),
+          forecastService: sl<IForecastService>(),
+          unitService: sl<IFlowUnitPreferenceService>(),
+        ),
       ),
-      GeoglowsDataSource(
-        api: sl<IGeoglowsApiService>(),
-        unitService: sl<IFlowUnitPreferenceService>(),
+      StoreBackedDataSource(
+        readSwitch: sl<StoreReadSwitch>(),
+        inner: GeoglowsDataSource(
+          api: sl<IGeoglowsApiService>(),
+          unitService: sl<IFlowUnitPreferenceService>(),
+        ),
       ),
     ]),
   );

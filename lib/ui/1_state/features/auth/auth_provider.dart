@@ -271,14 +271,6 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-  /// Sign out current user
-  /// Drop the river-data cache and its pins on any identity change: cached
-  /// data is not sensitive, but the PINS belong to the account — carried over,
-  /// they shield the previous user's favourites from the next user's retention
-  /// cap (ADR 0011 Phase 2). ONE helper for the whole class of exits: signOut,
-  /// deleteAccount, and the server-side auth-state drop. Review round 2 found
-  /// the first fix applied to signOut alone, with deleteAccount's own comment
-  /// promising a mirror it did not perform.
   /// Release the ADR 0011 store listeners on identity change.
   ///
   /// Round 1, B5: without this, signing out left the Firestore listeners
@@ -296,6 +288,13 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  /// Drop the river-data cache and its pins on any identity change: cached
+  /// data is not sensitive, but the PINS belong to the account — carried over,
+  /// they shield the previous user's favourites from the next user's retention
+  /// cap (ADR 0011 Phase 2). ONE helper for the whole class of exits: signOut,
+  /// deleteAccount, and the server-side auth-state drop. A Phase 2 review
+  /// round found the first fix applied to signOut alone, with deleteAccount's
+  /// own comment promising a mirror it did not perform.
   void _clearRiverDataCache() {
     _detachStoreListeners();
     if (GetIt.I.isRegistered<IRiverDataCache>()) {

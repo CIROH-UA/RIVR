@@ -124,7 +124,7 @@ class RivrApp extends StatefulWidget {
   State<RivrApp> createState() => _RivrAppState();
 }
 
-class _RivrAppState extends State<RivrApp> {
+class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
   bool _hasSeenOnboarding = true; // Default true so failure skips onboarding
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
@@ -134,8 +134,17 @@ class _RivrAppState extends State<RivrApp> {
   final FavoritesProvider _favorites = FavoritesProvider();
 
   /// ADR 0011 Phase 5. Reads the cloud store for favourited reaches when the
-  /// kill switch allows it. Disposed with the app so no Firestore listener
-  /// outlives it — an orphaned listener bills reads forever.
+  /// kill switch allows it.
+  ///
+  /// Released on [AppLifecycleState.detached], NOT in [dispose]. This is the
+  /// root widget passed to `runApp`, and Flutter never disposes it — the
+  /// process is killed instead — so a `dispose` that claimed to release
+  /// listeners would be describing a path that does not run. Review round 2
+  /// found exactly that claim here.
+  ///
+  /// Within a session the releases that actually matter are elsewhere and are
+  /// tested: sign-out (`AuthProvider._detachStoreListeners`), the kill switch
+  /// turning off, and a changed favourite set.
   StoreReadCoordinator? _storeReads;
 
   @override
@@ -155,12 +164,26 @@ class _RivrAppState extends State<RivrApp> {
           (source: f.source, reachId: f.reachId),
       ],
     )..attach(_favorites);
+
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.detached) return;
+    // The real end-of-life hook for the root widget. Cancelling a Firestore
+    // subscription is fire-and-forget, so nothing is awaited.
+    unawaited(_storeReads?.dispose());
+    unawaited(GetIt.I<StoreReadSwitch>().dispose());
   }
 
   @override
   void dispose() {
-    // Guard 6: detach before the app goes away. Awaiting is not possible here,
-    // and not needed — cancelling a Firestore subscription is fire-and-forget.
+    // Flutter does not dispose the root widget, so this runs only in tests
+    // that pump RivrApp directly. Kept correct rather than removed: it is the
+    // honest teardown for those, and the lifecycle observer above is what
+    // covers the real app.
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_storeReads?.dispose());
     _favorites.dispose();
     super.dispose();

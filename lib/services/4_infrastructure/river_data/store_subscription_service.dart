@@ -130,6 +130,16 @@ class StoreSubscriptionService {
   /// Safe to call whenever favourites change. An unchanged set does nothing —
   /// re-attaching would re-read every document and bill for it.
   ///
+  /// **A CHANGED set re-subscribes everything, and that is a real cost.**
+  /// Adding one favourite to 20 tears down and rebuilds all 4 batches: 126
+  /// document reads where an incremental diff would bill 6. Accepted for now
+  /// rather than hidden — at the ADR's current scale (a handful of developers
+  /// and some BYU students) this is a few hundred reads a day against a
+  /// 50,000/day free tier, and subscription bookkeeping keyed per batch is
+  /// more machinery than the saving justifies today. Revisit before any real
+  /// user growth; this is the first thing that stops being cheap. Named by
+  /// review round 2 (non-blocking 3).
+  ///
   /// [reaches] carries source + reachId; the product on each key is ignored,
   /// because the service subscribes to every product the store holds.
   Future<void> syncFavourites(Iterable<RiverDataKey> reaches) {
@@ -160,37 +170,51 @@ class StoreSubscriptionService {
         i,
         i + kWhereInBatchSize > ids.length ? ids.length : i + kWhereInBatchSize,
       );
-      _subs.add(
-        _db
-            .collection(kStoreCollection)
-            .where(FieldPath.documentId, whereIn: batch)
-            .snapshots()
-            .listen(
-              _onSnapshot,
-              // A permission error or a missing index must degrade to the live
-              // path, not surface to the user (guard 8). The repository still
-              // fetches upstream on a cache miss.
-              onError: (Object e, StackTrace s) {
-                AppLogger.error(
-                  _tag,
-                  'store listener failed; falling back to the live path',
-                  e,
-                );
-                // Round 1, B5: without this the failure is terminal. The dead
-                // stream stayed in `_subs` and `_watched` kept its ids, so the
-                // next sync saw an equal set and early-returned — never
-                // re-subscribing for the rest of the session. Signing out and
-                // back in reproduces it: the listeners hit PERMISSION_DENIED,
-                // die, and the store is silently off with the same favourites.
-                _watched = <String>{};
-              },
-            ),
-      );
+      late final StreamSubscription<QuerySnapshot<Map<String, dynamic>>> sub;
+      sub = _db
+          .collection(kStoreCollection)
+          .where(FieldPath.documentId, whereIn: batch)
+          .snapshots()
+          .listen(
+            _onSnapshot,
+            // A permission error or a missing index must degrade to the live
+            // path, not surface to the user (guard 8). The repository still
+            // fetches upstream on a cache miss.
+            onError: (Object e, StackTrace s) => _onListenerError(sub, e),
+          );
+      _subs.add(sub);
     }
     AppLogger.info(
       _tag,
       'subscribed to ${wanted.length} documents in ${_subs.length} listener(s)',
     );
+  }
+
+  /// A listener died. Degrade to the live path and stay recoverable.
+  ///
+  /// Round 1, B5: without clearing `_watched` the failure is TERMINAL. The
+  /// dead stream stayed in `_subs` and `_watched` kept its ids, so the next
+  /// sync saw an equal set and early-returned — never re-subscribing for the
+  /// rest of the session. Signing out and back in reproduces it: every
+  /// listener hits PERMISSION_DENIED, dies, and the store is silently off with
+  /// the same favourites showing.
+  ///
+  /// Round 2 added dropping the dead subscription itself. Leaving it in
+  /// `_subs` made `isSubscribed` — and through it `StoreReadCoordinator`'s
+  /// `isActive`, which the guards read — report true for a stream that is
+  /// dead.
+  void _onListenerError(
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>> sub,
+    Object e,
+  ) {
+    AppLogger.error(
+      _tag,
+      'store listener failed; falling back to the live path',
+      e,
+    );
+    _subs.remove(sub);
+    unawaited(sub.cancel().catchError((Object _) {}));
+    _watched = <String>{};
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {

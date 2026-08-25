@@ -141,6 +141,7 @@ confirms processing:
 | `flood_tileset_id` | which tileset the app should load |
 | `flood_data_date` | the date shown above the legend |
 | `flood_show_lake_reaches` | lake-artefact switch; set once, never overwritten |
+| `store_read_enabled` | ADR 0011 Phase 5 kill switch; **defaults OFF**, forces every device back to the live path |
 
 Flipping `flood_show_lake_reaches` in the Firebase console changes every user's
 map within seconds and survives subsequent builds — which matters because the
@@ -433,18 +434,34 @@ it. Moving it back to module scope will break deploys.
 
 ### ADR 0011 cloud store (Phase 4, live since 2026-08-25)
 
-Six functions keep a Firestore `river_data` collection fresh for every
+Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
-fetching its own. Server-only — the app does not read it until Phase 5.
+fetching its own.
 
 | Function | Cadence |
 |---|---|
 | `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
 | `storeGeoglowsDaily` | 01:30 UTC |
+| `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
 | `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
 | `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
 | `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
+
+**The near-static products are not on the hourly cycle.** `reachMetadata` and
+`returnPeriods` carry no run identity for the probe to compare and hold a
+30-day window, so `storeStaticDaily` owns them and refetches only what is
+missing or nearly expired. They are in the store at all because Phase 5 guard 1
+is "a favourite renders with ZERO upstream calls from the device", and every
+surface that renders a favourite reads the river's NAME and its THRESHOLDS —
+without them the flow numbers stay fresh while each favourite still makes two
+device-side calls just to draw itself.
+
+**The store's fetchers never retry** — including these two, which is why they
+do NOT go through `noaa-client`'s `fetchWithRetry` or `getReturnPeriods`. The
+latter also falls back to a `return_period_cache` entry of any age, and writing
+that into the store would stamp an arbitrarily old value with a fresh 30-day
+window.
 
 **Document IDs ARE the client's cache key** (`nwm__<reachId>__<product>`,
 matching `RiverDataKey.storageKey`), and the envelope is exactly

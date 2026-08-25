@@ -30,7 +30,12 @@ import {
 } from "./store-service.js";
 import {StoreDocument, validUntil} from "./store-document.js";
 import {trimPayload} from "./store-payload.js";
-import {CAN_FETCH} from "./store-upstream.js";
+import {
+  CAN_FETCH,
+  STORE_NATIVE_UNIT,
+  fetchReachMetadata,
+  fetchReturnPeriods,
+} from "./store-upstream.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";
 const NOW = new Date("2026-08-25T12:00:00Z");
@@ -59,14 +64,30 @@ describe("the static products are actually reachable", () => {
     }
   });
 
+  // Round 2, non-blocking 5: this test's NAME said "matching
+  // NwmDataSource.validUntil" while it only asserted the server constant
+  // against a literal. It now reads the Dart source, so the two genuinely
+  // cannot drift.
   test("both carry a 30-day window, matching NwmDataSource.validUntil", () => {
-    // The client refetches upstream the moment it considers a document stale, so
-    // a shorter window here silently reintroduces the device-side call.
+    // The client refetches upstream the moment it considers a document stale,
+    // so a shorter window here silently reintroduces the device-side call.
     for (const p of STATIC_PRODUCTS) {
       const until = validUntil("nwm", p, NOW);
       const days = (until.getTime() - NOW.getTime()) / (24 * 3600_000);
       assert.equal(days, 30, `${p} should be valid for 30 days`);
     }
+
+    const dart = readFileSync(
+      REPO + "lib/services/4_infrastructure/river_data/nwm_data_source.dart",
+      "utf8");
+    const branch = dart.slice(
+      dart.indexOf("case ForecastProduct.returnPeriods:"),
+      dart.indexOf("case ForecastProduct.mediumRangeBlend:"));
+    assert.ok(branch.includes("ForecastProduct.reachMetadata"),
+      "the client no longer groups these two products together");
+    assert.ok(/Duration\(days:\s*30\)/.test(branch),
+      "the client's static window is no longer 30 days — the server's must " +
+      "change with it, in this file and in store-document.ts");
   });
 });
 
@@ -154,17 +175,133 @@ describe("payload shapes match the Dart decoders, field by field", () => {
     assert.deepEqual(stored.returnPeriods, rows);
   });
 
+  // Round 2, non-blocking 6: this asserted only the CLIENT half, so changing
+  // the SERVER's stored unit to "CFS" passed all 207 tests. Both halves now.
   test("thresholds are stored in CMS, which is what the client converts from",
     () => {
+      assert.equal(STORE_NATIVE_UNIT, "CMS",
+        "the server must store the API's native unit; anything else " +
+        "silently misclassifies every flood category");
+
       const dart = readFileSync(
         REPO +
         "lib/services/4_infrastructure/river_data/narrow_nwm_payloads.dart",
         "utf8");
       const decode = dart.slice(dart.indexOf("class ReturnPeriodPayload"));
       // The client converts FROM the literal 'CMS', ignoring entry.unit,
-      // because the API serves native units regardless of preference. Storing
-      // anything else silently misclassifies every flood category.
-      assert.ok(decode.includes("'CMS'"),
-        "the client no longer converts from CMS; the stored unit must follow");
+      // because the API serves native units regardless of preference.
+      assert.ok(decode.includes(`'${STORE_NATIVE_UNIT}'`),
+        "the client no longer converts from the unit the server stores");
     });
+});
+
+// ── The WRITER, not just the trim table ─────────────────────────────────────
+//
+// Round 2, mutation 5: renaming `riverName` -> `river_name` inside
+// fetchReachMetadata passed all 207 tests and `tsc` cleanly. trimPayload keeps
+// whichever of the four names it finds and returns `found ? out : raw`, so
+// with three names still correct it silently DROPPED the name and wrote a
+// schema-valid document that ingests fine and renders every favourite
+// untitled. The tests defended the trim table; nothing defended the producer.
+//
+// These stub global fetch so the real producer runs.
+
+describe("the producers write the exact keys the client decodes", () => {
+  const realFetch = globalThis.fetch;
+
+  /** Install a stub. @param {unknown} body - JSON body. @param {object} o -
+   * Options. @return {() => number} Call counter. */
+  function stubFetch(body: unknown, o: {ok?: boolean} = {}): () => number {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return {
+        ok: o.ok ?? true,
+        status: (o.ok ?? true) ? 200 : 500,
+        statusText: "stub",
+        json: async () => body,
+      };
+    }) as unknown as typeof fetch;
+    return () => calls;
+  }
+
+  test("reachMetadata writes riverName/formattedLocation/latitude/longitude",
+    async () => {
+      stubFetch({name: "Provo River", latitude: 40.2, longitude: -111.6});
+      try {
+        const r = await fetchReachMetadata("123");
+        assert.deepEqual(Object.keys(r.payload).sort(),
+          ["formattedLocation", "latitude", "longitude", "riverName"],
+          "a renamed key here decodes as null and renders blank, with " +
+          "nothing wrong server-side");
+        assert.equal(r.payload.riverName, "Provo River");
+        assert.equal(r.payload.formattedLocation, null);
+        assert.equal(r.unit, STORE_NATIVE_UNIT);
+        assert.equal(r.referenceTime, null,
+          "a river's name has no model run; inventing one defeats " +
+          "supersession");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("reachMetadata REFUSES a nameless response rather than storing it",
+    async () => {
+      stubFetch({latitude: 40.2, longitude: -111.6});
+      try {
+        await assert.rejects(() => fetchReachMetadata("123"), /carried no name/,
+          "a nameless record satisfies the schema and renders blank for 30 " +
+          "days");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("returnPeriods writes the raw upstream ARRAY under 'returnPeriods'",
+    async () => {
+      const rows = [{feature_id: "123", return_period_2: 10}];
+      stubFetch(rows);
+      try {
+        const r = await fetchReturnPeriods("123");
+        assert.deepEqual(Object.keys(r.payload), ["returnPeriods"]);
+        assert.ok(Array.isArray(r.payload.returnPeriods),
+          "ReachDataDto.fromReturnPeriodApi indexes jsonArray.first");
+        assert.deepEqual(r.payload.returnPeriods, rows);
+        assert.equal(r.unit, STORE_NATIVE_UNIT);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("returnPeriods REFUSES a response with no thresholds", async () => {
+    stubFetch([{feature_id: "123"}]);
+    try {
+      await assert.rejects(() => fetchReturnPeriods("123"),
+        /no usable thresholds/,
+        "storing empty thresholds over real ones costs the flood category " +
+        "for 30 days");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  // CLAUDE.md states this absolutely: "Never add retries to the store's
+  // fetchers." Round 2, B3 — the first version of both functions went through
+  // noaa-client's fetchWithRetry, which retries 3x with backoff.
+  test("neither producer retries a failed fetch", async () => {
+    for (const [name, fn] of [
+      ["reachMetadata", fetchReachMetadata],
+      ["returnPeriods", fetchReturnPeriods],
+    ] as const) {
+      const calls = stubFetch({}, {ok: false});
+      try {
+        await assert.rejects(() => fn("123"));
+        assert.equal(calls(), 1,
+          `${name} retried; retrying inside the run hides the failure rate ` +
+          "the Phase 0 probe exists to measure");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    }
+  });
 });

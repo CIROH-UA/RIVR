@@ -686,7 +686,8 @@ and no widget can fetch on its own even if someone tries.
 ## Phase 4 — Cloud store: write path, with monitoring ▶ DEPLOYED, RUNNING
 
 **Review gate passed under the 3-round cap; deployed and verified in
-production 2026-08-25.** Six functions live in `ciroh-rivr-app`:
+production 2026-08-25.** Seven functions live in `ciroh-rivr-app` (the
+seventh, `storeStaticDaily`, was added by Phase 5 — see below):
 `storeRefreshHourly` (:20 past), `storeGeoglowsDaily` (01:30 UTC),
 `storeGcDaily` (03:40 UTC), `storeHeartbeat` (2-hourly), `storeHealth`
 (HTTPS), `storeWriteThroughOnFavourite` (Firestore trigger). Composite index

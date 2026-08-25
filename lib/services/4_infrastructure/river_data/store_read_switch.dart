@@ -10,11 +10,25 @@
 // a wrong number, the remedy has to reach every device in seconds. Shipping a
 // build does not; a Remote Config parameter does.
 //
-// **Defaults to OFF.** A device that cannot reach Remote Config — offline first
-// launch, Firebase hiccup, a fetch slower than the timeout — takes the live
-// path, which is exactly today's behaviour. The failure mode of this switch is
-// "the app works as it did before", never "the app trusts a store it could not
-// ask about".
+// **Defaults to OFF.** A device that has never successfully fetched — offline
+// first launch, Firebase hiccup, a fetch slower than the timeout — takes the
+// live path, which is exactly today's behaviour. The failure mode of this
+// switch is "the app works as it did before", never "the app trusts a store it
+// could not ask about".
+//
+// **But a value already activated is trusted, even when today's fetch fails.**
+// Remote Config persists activated values across launches, and an earlier
+// version of this class gated every read behind a `_ready` flag that was only
+// set after a SUCCESSFUL fetch. That inverted guard 4: a user who was online
+// yesterday with the store enabled, launching offline today, had the switch
+// read false and rendered nothing from the store — the one circumstance the
+// offline guard exists for. Round 2. `getBool` on a key that was never
+// fetched already returns false, so the safe default costs no extra gate.
+//
+// **It does not call `setDefaults`.** `FloodTilesetService` initialises the
+// same `FirebaseRemoteConfig.instance` from `main` at the same moment, and
+// `setDefaults` REPLACES the defaults map rather than merging, so whichever
+// landed second wiped the other's. Round 2, B6.
 
 import 'dart:async';
 
@@ -41,7 +55,6 @@ class StoreReadSwitch {
 
   final FirebaseRemoteConfig _rc;
 
-  bool _ready = false;
   StreamSubscription<RemoteConfigUpdate>? _updates;
 
   /// Fires whenever the switch's value may have changed, so a running app can
@@ -55,26 +68,23 @@ class StoreReadSwitch {
   /// nothing of the sort.
   final ChangeNotifier changes = ChangeNotifier();
 
-  /// Whether devices may read the store. False until proven otherwise.
-  bool get isStoreReadEnabled => _ready && _rc.getBool(keyStoreReadEnabled);
+  /// Whether devices may read the store.
+  ///
+  /// False until a fetch has activated a true value — `getBool` returns false
+  /// for a key that was never fetched — and true thereafter, including on a
+  /// later offline launch, because Remote Config persists activated values.
+  /// See the note on trusting activated values at the top of this file.
+  bool get isStoreReadEnabled => _rc.getBool(keyStoreReadEnabled);
 
   /// Fetch the current value. Safe to call repeatedly; never throws.
   Future<void> initialize() async {
+    // Subscribed FIRST, and in its own try, so that a failed fetch cannot cost
+    // us the listener. Previously both lived in one try with the listener
+    // registered after `fetchAndActivate`, so a single failed launch-time
+    // fetch left the switch unable to change for the rest of the session — in
+    // BOTH directions. For a mechanism whose stated purpose is "the fix cannot
+    // wait on Apple", that is the failure that matters most. Round 2.
     try {
-      await _rc.setConfigSettings(RemoteConfigSettings(
-        fetchTimeout: _fetchTimeout,
-        // Zero, deliberately. A kill switch that takes an hour to propagate is
-        // not a kill switch. The request is tiny and Remote Config serves its
-        // cached value while this is in flight, so nothing blocks.
-        minimumFetchInterval: Duration.zero,
-      ));
-      await _rc.setDefaults(const {keyStoreReadEnabled: false});
-      await _rc.fetchAndActivate();
-      _ready = true;
-
-      // Real-time updates: Firebase pushes a config change to running apps.
-      // This is what makes the switch a kill switch rather than a preference
-      // read once at launch.
       _updates ??= _rc.onConfigUpdated.listen(
         (update) async {
           if (!update.updatedKeys.contains(keyStoreReadEnabled)) return;
@@ -86,33 +96,53 @@ class StoreReadSwitch {
           AppLogger.info(
             _tag,
             'switch changed live -> '
-            '${_rc.getBool(keyStoreReadEnabled) ? "ENABLED" : "disabled"}',
+            '${isStoreReadEnabled ? "ENABLED" : "disabled"}',
           );
-          // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
-          changes.notifyListeners();
+          _announce();
         },
         onError: (Object e) =>
             AppLogger.warning(_tag, 'config update stream failed: $e'),
       );
+    } catch (e) {
+      AppLogger.warning(_tag, 'could not subscribe to config updates: $e');
+    }
 
-      // The startup fetch itself is a change from the default, and it resolves
-      // AFTER attach(). Without this the store never activated on a cold start
-      // unless a favourites change happened to follow (B4).
-      // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
-      changes.notifyListeners();
+    try {
+      await _rc.setConfigSettings(RemoteConfigSettings(
+        fetchTimeout: _fetchTimeout,
+        // Zero, deliberately. A kill switch that takes an hour to propagate is
+        // not a kill switch. The request is tiny and Remote Config serves its
+        // cached value while this is in flight, so nothing blocks.
+        minimumFetchInterval: Duration.zero,
+      ));
+      // No setDefaults — see the note at the top of this file. A missing key
+      // already reads as false, which is the default this switch wants.
+      await _rc.fetchAndActivate();
+
+      // The fetch itself is a change from whatever was read before, and it
+      // resolves AFTER attach(). Without announcing it the store never
+      // activated on a cold start unless a favourites change happened to
+      // follow.
+      _announce();
       AppLogger.info(
         _tag,
-        'store read ${_rc.getBool(keyStoreReadEnabled) ? "ENABLED" : "disabled"}',
+        'store read ${isStoreReadEnabled ? "ENABLED" : "disabled"}',
       );
     } catch (e) {
       // Not rethrown. Failing to reach Remote Config means the app behaves
       // exactly as it did before Phase 5 — degraded to correct, not broken.
-      _ready = false;
+      // Any value activated by an earlier launch still stands.
       AppLogger.warning(
         _tag,
-        'remote config unavailable; staying on the live path: $e',
+        'remote config fetch failed; keeping the last activated value: $e',
       );
+      _announce();
     }
+  }
+
+  void _announce() {
+    // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+    changes.notifyListeners();
   }
 
   /// Stop listening for config changes.
