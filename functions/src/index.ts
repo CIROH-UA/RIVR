@@ -4,6 +4,15 @@
 import * as functions from "firebase-functions/v1";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
+import {
+  checkStoreHealth,
+  runStoreGc,
+  runStoreRefresh,
+  runStoreWriteThrough,
+} from "./store-service.js";
+import {fetchProductFromUpstream} from "./store-upstream.js";
+import {sourceOfFavourite} from "./notification-service.js";
+
 
 // Initialize Firebase Admin if not already done
 if (!admin.apps.length) {
@@ -327,3 +336,111 @@ export const cleanupNotificationLogs = functions
 // probe interval and monitoring thresholds rest on a week of data rather than
 // on one sitting during a 504 window.
 export {probePublishCadence} from "./publish-cadence-probe.js";
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR 0011 Phase 4 — the cloud store.
+//
+// Server-only. No client reads these documents until Phase 5, so a fault here
+// degrades to "the store is stale", never to a broken app.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Hourly refresh. Reads the Phase 0 probe, refreshes ONLY the products whose
+ * upstream run advanced, and does nothing at all otherwise (guard 1).
+ *
+ * Runs at :20 past, deliberately after the probe's top-of-hour sample so it
+ * decides on this hour's evidence rather than last hour's.
+ */
+export const storeRefreshHourly = functions
+  .runWith({memory: "1GB", timeoutSeconds: 540})
+  .pubsub.schedule("20 * * * *")
+  .timeZone("UTC")
+  .onRun(async () => {
+    const outcome = await runStoreRefresh({
+      fetchProduct: fetchProductFromUpstream,
+    });
+    logger.info("🗄️ storeRefreshHourly", {
+      ran: outcome.ran,
+      reason: outcome.reason,
+      written: outcome.report?.written ?? 0,
+      failed: outcome.report?.failed ?? 0,
+      lagging: outcome.report?.skippedLagging ?? 0,
+      usage: outcome.usage,
+    });
+  });
+
+/**
+ * Write-through on favourite (guard 9).
+ *
+ * Fires when a user document changes and their favourites GREW. A newly
+ * favourited reach must have a document within seconds; waiting up to an hour
+ * is the experience this exists to remove.
+ *
+ * Only the added ids are refreshed — a removal must not trigger fetches, and
+ * an unrelated settings change must trigger nothing at all.
+ */
+export const storeWriteThroughOnFavourite = functions
+  .runWith({memory: "512MB", timeoutSeconds: 120})
+  .firestore.document("users/{userId}")
+  .onWrite(async (change) => {
+    const before: string[] = change.before.exists ?
+      (change.before.data()?.favoriteReachIds ?? []) : [];
+    const after: string[] = change.after.exists ?
+      (change.after.data()?.favoriteReachIds ?? []) : [];
+
+    const beforeSet = new Set(before.filter((r) => typeof r === "string"));
+    const added = after.filter(
+      (r) => typeof r === "string" && r !== "" && !beforeSet.has(r));
+    if (added.length === 0) return;
+
+    const sources: Record<string, string> =
+      change.after.data()?.favoriteSources ?? {};
+
+    for (const reachId of added) {
+      const source = sourceOfFavourite(sources, reachId);
+      try {
+        const outcome = await runStoreWriteThrough(
+          {fetchProduct: fetchProductFromUpstream}, source, reachId);
+        logger.info("⚡ write-through", {
+          reachId, source, written: outcome.report?.written ?? 0,
+        });
+      } catch (error) {
+        // A write-through failure must not fail the user's favourite action.
+        // The hourly refresh picks the reach up on its next tick.
+        logger.error("write-through failed; hourly refresh will cover it", {
+          reachId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  });
+
+/** Daily garbage collection (guard 7). Refuses implausible deletes itself. */
+export const storeGcDaily = functions
+  .runWith({memory: "512MB", timeoutSeconds: 540})
+  .pubsub.schedule("40 3 * * *")
+  .timeZone("UTC")
+  .onRun(async () => {
+    const outcome = await runStoreGc();
+    logger.info("🧹 storeGcDaily", outcome);
+  });
+
+/**
+ * Heartbeat. Logs at error level when the store has not been written for
+ * longer than a publish cycle allows, so a store that silently stopped
+ * surfaces without anybody watching.
+ */
+export const storeHeartbeat = functions
+  .runWith({memory: "256MB", timeoutSeconds: 120})
+  .pubsub.schedule("0 */2 * * *")
+  .timeZone("UTC")
+  .onRun(async () => {
+    await checkStoreHealth();
+  });
+
+/** On-demand health read, for answering "is the store fresh right now?". */
+export const storeHealth = functions.https.onRequest(async (_req, res) => {
+  const health = await checkStoreHealth();
+  res.status(health.status === "healthy" ? 200 : 503).json(health);
+});
