@@ -63,11 +63,19 @@ describe("only fetchable work is advertised as fetchable", () => {
     }
   });
 
-  test("GEOGLOWS is declared unfetchable, not silently attempted", () => {
-    assert.deepEqual(CAN_FETCH.geoglows, [],
-      "the server proxy does not expose the uncertainty band, so storing " +
-      "what it gives would silently drop it from every GEOGLOWS chart");
-    assert.equal(canFetch("geoglows", "geoglowsForecast"), false);
+  // This test previously asserted GEOGLOWS was UNfetchable, on the belief that
+  // the proxy returned only the median. That belief was wrong —
+  // functions_geoglows/main.py returns flow_uncertainty_lower and
+  // flow_uncertainty_upper too — and the test was pinning the mistake in
+  // place. GEOGLOWS is fetched by store-geoglows.ts on its own daily schedule.
+  test("GEOGLOWS is fetchable, on its own daily path", () => {
+    assert.deepEqual(CAN_FETCH.geoglows, ["geoglowsForecast"]);
+    assert.equal(canFetch("geoglows", "geoglowsForecast"), true);
+  });
+
+  test("the NWM fetcher refuses GEOGLOWS rather than half-serving it", () => {
+    // Routing is fetchForStore's job; store-upstream must not quietly try.
+    assert.equal(canFetch("nwm", "geoglowsForecast"), false);
   });
 
   test("the near-static products are not on the hourly cycle", () => {

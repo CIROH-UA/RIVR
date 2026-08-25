@@ -15,6 +15,7 @@ import {NOAA_CONFIG} from "./noaa-client.js";
 import {referenceTimeOf} from "./publish-cadence-probe.js";
 import {FetchedProduct} from "./store-run.js";
 import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
+import {fetchGeoglowsForStore} from "./store-geoglows.js";
 
 /** NOAA's `series` parameter for each product this file can fetch. */
 export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
@@ -52,18 +53,19 @@ export const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
  * different upstream (the CIROH return-period API, and the reaches endpoint)
  * and are near-static, so they do not belong on the hourly publish cycle.
  *
- * GEOGLOWS is absent because the server-side proxy
- * (functions/src/geoglows-client.ts) returns only the median series and return
- * periods — it does NOT expose the lower/upper uncertainty band that
- * GeoglowsForecastPayload carries. Storing what the proxy gives would silently
- * drop the band from every GEOGLOWS chart, which is worse than not storing.
- * DECLARED, not forgotten: GEOGLOWS joins the store when the proxy exposes the
- * band.
+ * GEOGLOWS is fetched by store-geoglows.ts, on its own daily schedule — it
+ * publishes one run per UTC day and is not on the NWM probe's cycle.
+ *
+ * It was briefly excluded here on the belief that the proxy returned only the
+ * median. That was wrong: functions_geoglows/main.py returns
+ * flow_uncertainty_lower and flow_uncertainty_upper too. The existing
+ * geoglows-client.ts parses only the median because it serves the ALERT path,
+ * and "my client ignores it" was misread as "the proxy does not send it".
  */
 export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
   = {
     nwm: ["analysisAssimilation", "shortRange", "mediumRange", "longRange"],
-    geoglows: [],
+    geoglows: ["geoglowsForecast"],
   };
 
 /** Whether a (source, product) pair can be fetched at all. */
@@ -144,9 +146,9 @@ export async function fetchProductFromUpstream(
   product: ForecastProductId
 ): Promise<FetchedProduct> {
   if (source !== "nwm") {
-    // GEOGLOWS is deliberately not stored yet — see CAN_FETCH below.
+    // GEOGLOWS has its own fetcher and schedule; routing is fetchForStore's job.
     throw new Error(
-      `store-upstream does not fetch ${source}; see CAN_FETCH`
+      `store-upstream does not fetch ${source}; use store-geoglows`
     );
   }
 
@@ -189,4 +191,27 @@ export async function fetchProductFromUpstream(
   }
 
   return {payload: body, unit, referenceTime};
+}
+
+/**
+ * The store's single fetch entry point, routing by source.
+ *
+ * Callers should use this rather than picking a fetcher, so a new source is
+ * added in one place and nothing downstream has to know which module serves
+ * which network.
+ *
+ * @param {ForecastSourceId} source - Which network.
+ * @param {string} reachId - The reach.
+ * @param {ForecastProductId} product - Which product.
+ * @return {Promise<FetchedProduct>} Payload, native unit and run identity.
+ */
+export async function fetchForStore(
+  source: ForecastSourceId,
+  reachId: string,
+  product: ForecastProductId
+): Promise<FetchedProduct> {
+  if (source === "geoglows") {
+    return fetchGeoglowsForStore(source, reachId, product);
+  }
+  return fetchProductFromUpstream(source, reachId, product);
 }

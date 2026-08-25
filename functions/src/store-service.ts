@@ -53,12 +53,14 @@ export const MANAGED_PRODUCTS: readonly ForecastProductId[] = [
   "longRange",
 ];
 
-// GEOGLOWS is NOT stored yet, and there is deliberately no constant pretending
-// otherwise. Round 2 found a GEOGLOWS_PRODUCTS list with no reader — the shape
-// of a feature that looks implemented and is not. The reason it is absent is
-// recorded on CAN_FETCH in store-upstream.ts: the server-side proxy does not
-// expose the uncertainty band the client's payload carries, so a stored
-// GEOGLOWS document would silently drop it.
+/**
+ * GEOGLOWS publishes one run per UTC day, so it is NOT driven by the NWM
+ * probe. ADR Build: "GEOGLOWS on its own daily schedule, keyed on
+ * forecast_date." The run identity IS that date, so supersession still works:
+ * a second run on the same day is skipped as same-run.
+ */
+export const GEOGLOWS_PRODUCTS: readonly ForecastProductId[] =
+  ["geoglowsForecast"];
 
 /** Upstream fetchers, injected so nothing here reaches NOAA during tests. */
 export interface UpstreamIo {
@@ -217,6 +219,49 @@ export async function runStoreWriteThrough(
     failed: report.failed,
   });
   return {ran: true, reason: "write-through on favourite", report, usage};
+}
+
+/**
+ * The daily GEOGLOWS refresh.
+ *
+ * No probe gate: GEOGLOWS has no hourly probe, and its once-daily cadence is
+ * the schedule itself. Supersession still prevents redundant writes — a run
+ * carrying the forecast_date already stored is skipped as same-run, so running
+ * twice in a day costs reads, not writes.
+ *
+ * @param {UpstreamIo} io - Upstream fetchers.
+ * @return {Promise<RefreshOutcome>} What happened.
+ */
+export async function runGeoglowsRefresh(
+  io: UpstreamIo
+): Promise<RefreshOutcome> {
+  const usage = newUsage();
+  const full = await buildWorkList(usage);
+
+  // Only the GEOGLOWS reaches. Passing the whole work list would plan
+  // geoglowsForecast for NWM reaches, which planWrites drops anyway — but
+  // filtering here keeps the reported counts about GEOGLOWS.
+  const workList: WorkList = {
+    entries: full.entries.filter((e) => e.source === "geoglows"),
+    summary: full.summary,
+  };
+
+  if (workList.entries.length === 0) {
+    logger.info("🟰 GEOGLOWS refresh: nobody follows a GEOGLOWS reach");
+    return {ran: false, reason: "no GEOGLOWS reaches followed", report: null,
+      usage};
+  }
+
+  const report = await runStoreUpdate(
+    workList, GEOGLOWS_PRODUCTS, firestoreDeps(io, usage));
+
+  const quota = quotaUsage(usage.reads, usage.writes);
+  logger.info("📊 GEOGLOWS refresh: Firestore usage vs free tier", {
+    ...quota,
+    written: report.written,
+    failed: report.failed,
+  });
+  return {ran: true, reason: "daily GEOGLOWS run", report, usage};
 }
 
 export interface GcOutcome {

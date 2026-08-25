@@ -6,11 +6,12 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import {
   checkStoreHealth,
+  runGeoglowsRefresh,
   runStoreGc,
   runStoreRefresh,
   runStoreWriteThrough,
 } from "./store-service.js";
-import {fetchProductFromUpstream} from "./store-upstream.js";
+import {fetchForStore} from "./store-upstream.js";
 import {sourceOfFavourite} from "./notification-service.js";
 
 
@@ -358,7 +359,7 @@ export const storeRefreshHourly = functions
   .timeZone("UTC")
   .onRun(async () => {
     const outcome = await runStoreRefresh({
-      fetchProduct: fetchProductFromUpstream,
+      fetchProduct: fetchForStore,
     });
     logger.info("🗄️ storeRefreshHourly", {
       ran: outcome.ran,
@@ -401,7 +402,7 @@ export const storeWriteThroughOnFavourite = functions
       const source = sourceOfFavourite(sources, reachId);
       try {
         const outcome = await runStoreWriteThrough(
-          {fetchProduct: fetchProductFromUpstream}, source, reachId);
+          {fetchProduct: fetchForStore}, source, reachId);
         logger.info("⚡ write-through", {
           reachId, source, written: outcome.report?.written ?? 0,
         });
@@ -414,6 +415,25 @@ export const storeWriteThroughOnFavourite = functions
         });
       }
     }
+  });
+
+/**
+ * Daily GEOGLOWS refresh. GEOGLOWS publishes once per UTC day, so it runs on
+ * its own schedule rather than on the NWM probe's hourly cycle. 01:30 UTC
+ * leaves the 00Z run time to publish.
+ */
+export const storeGeoglowsDaily = functions
+  .runWith({memory: "1GB", timeoutSeconds: 540})
+  .pubsub.schedule("30 1 * * *")
+  .timeZone("UTC")
+  .onRun(async () => {
+    const outcome = await runGeoglowsRefresh({fetchProduct: fetchForStore});
+    logger.info("🌍 storeGeoglowsDaily", {
+      ran: outcome.ran,
+      reason: outcome.reason,
+      written: outcome.report?.written ?? 0,
+      failed: outcome.report?.failed ?? 0,
+    });
   });
 
 /** Daily garbage collection (guard 7). Refuses implausible deletes itself. */
