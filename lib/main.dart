@@ -11,6 +11,9 @@ import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_coordinator.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
 import 'package:rivr/services/5_injection/dependency_container.dart';
 import 'package:provider/provider.dart';
@@ -85,6 +88,11 @@ Future<void> main() async {
   // and the service falls back to deriving the id from today's date.
   unawaited(GetIt.I<FloodTilesetService>().initialize());
 
+  // ADR 0011 Phase 5's kill switch. Same rule: startup never waits on the
+  // network. Until it resolves the switch reads its default (false), so the
+  // app takes the live path — exactly today's behaviour.
+  unawaited(GetIt.I<StoreReadSwitch>().initialize());
+
   // Catch Flutter framework errors (widget build failures, layout errors, etc.)
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -120,6 +128,16 @@ class _RivrAppState extends State<RivrApp> {
   bool _hasSeenOnboarding = true; // Default true so failure skips onboarding
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
+  /// Owned here rather than created inside MultiProvider, because the ADR 0011
+  /// store coordinator has to follow it and therefore needs a reference. Owning
+  /// it also means owning its disposal — see [dispose].
+  final FavoritesProvider _favorites = FavoritesProvider();
+
+  /// ADR 0011 Phase 5. Reads the cloud store for favourited reaches when the
+  /// kill switch allows it. Disposed with the app so no Firestore listener
+  /// outlives it — an orphaned listener bills reads forever.
+  StoreReadCoordinator? _storeReads;
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +146,24 @@ class _RivrAppState extends State<RivrApp> {
     // Provide the navigator key to the FCM service so notification taps
     // can route to the relevant forecast page.
     GetIt.I<IFCMService>().navigatorKey = _navigatorKey;
+
+    _storeReads = StoreReadCoordinator(
+      subscriptions: GetIt.I<StoreSubscriptionService>(),
+      readSwitch: GetIt.I<StoreReadSwitch>(),
+      favourites: () => [
+        for (final f in _favorites.favorites)
+          (source: f.source, reachId: f.reachId),
+      ],
+    )..attach(_favorites);
+  }
+
+  @override
+  void dispose() {
+    // Guard 6: detach before the app goes away. Awaiting is not possible here,
+    // and not needed — cancelling a Firestore subscription is fire-and-forget.
+    unawaited(_storeReads?.dispose());
+    _favorites.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeServices() async {
@@ -149,7 +185,7 @@ class _RivrAppState extends State<RivrApp> {
       providers: [
         ChangeNotifierProvider(create: (context) => AuthProvider()),
         ChangeNotifierProvider(create: (context) => ReachDataProvider()),
-        ChangeNotifierProvider(create: (context) => FavoritesProvider()),
+        ChangeNotifierProvider<FavoritesProvider>.value(value: _favorites),
         ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
       ],
       child: CupertinoApp(

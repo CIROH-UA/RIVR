@@ -17,6 +17,8 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.d
 import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 
 void setupForecastDependencies() {
   final sl = GetIt.instance;
@@ -92,6 +94,15 @@ void setupForecastDependencies() {
       cache: sl<IRiverDataCache>(),
       registry: sl<SourceRegistry>(),
     ),
+  );
+
+  // ADR 0011 Phase 5 — the store read path. Registered here next to the
+  // repository it feeds. Singletons: two subscription services would hold two
+  // sets of Firestore listeners and bill for both, and the coordinator is the
+  // only thing allowed to attach them.
+  sl.registerLazySingleton<StoreReadSwitch>(() => StoreReadSwitch());
+  sl.registerLazySingleton<StoreSubscriptionService>(
+    () => StoreSubscriptionService(repository: sl<IRiverDataRepository>()),
   );
 
   // Weekly Outlook assembly (ADR 0011 Phase 3): built HERE so the page
