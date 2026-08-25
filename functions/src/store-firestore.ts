@@ -104,9 +104,13 @@ export async function sampleStoredRun(
   product: ForecastProductId,
   usage: FirestoreUsage
 ): Promise<string | null> {
+  // ASCENDING: the OLDEST run wins. Sampling the newest meant one reach
+  // writing the current run made the next hour report "unchanged", so a reach
+  // still behind was never revisited — for medium/long range, up to six hours
+  // stale with no failure and no log. Round 2, F1 follow-on.
   const snap = await db.collection(STORE_COLLECTION)
     .where("product", "==", product)
-    .orderBy("runId", "desc")
+    .orderBy("runId", "asc")
     .limit(1)
     .get();
   usage.reads += snap.size;
@@ -160,8 +164,11 @@ export function firestoreDeps(
 
       const ref = db.collection(STORE_COLLECTION).doc(documentId);
       try {
+        let committed = false;
         await db.runTransaction(async (tx) => {
           const snap = await tx.get(ref);
+          // Billed, and previously uncounted: a second read per planned write.
+          usage.reads++;
           const current = snap.exists ?
             (snap.data() as StoreDocument) :
             null;
@@ -177,8 +184,12 @@ export function firestoreDeps(
             return;
           }
           tx.set(ref, trimmed);
+          committed = true;
         });
-        usage.writes++;
+        // Only a real commit is a write. Counting refusals inflated the figure
+        // guard 11 reports and made it disagree with report.written by
+        // construction. Round 2, F4.
+        if (committed) usage.writes++;
       } catch (e) {
         if (e instanceof Error && /PERMISSION_DENIED|UNAUTHENTICATED/
           .test(e.message)) {

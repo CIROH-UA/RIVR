@@ -38,6 +38,7 @@ import {
 } from "./store-firestore.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
 import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
+import {canFetch} from "./store-upstream.js";
 import {
   WorkList,
   assertWorkListConsistent,
@@ -52,12 +53,12 @@ export const MANAGED_PRODUCTS: readonly ForecastProductId[] = [
   "longRange",
 ];
 
-/**
- * GEOGLOWS publishes once per UTC day, so it is not driven by the NWM probe.
- * ADR Build: "GEOGLOWS on its own daily schedule, keyed on forecast_date."
- */
-export const GEOGLOWS_PRODUCTS: readonly ForecastProductId[] =
-  ["geoglowsForecast"];
+// GEOGLOWS is NOT stored yet, and there is deliberately no constant pretending
+// otherwise. Round 2 found a GEOGLOWS_PRODUCTS list with no reader — the shape
+// of a feature that looks implemented and is not. The reason it is absent is
+// recorded on CAN_FETCH in store-upstream.ts: the server-side proxy does not
+// expose the uncertainty band the client's payload carries, so a stored
+// GEOGLOWS document would silently drop it.
 
 /** Upstream fetchers, injected so nothing here reaches NOAA during tests. */
 export interface UpstreamIo {
@@ -132,8 +133,11 @@ export async function runStoreRefresh(
   }
 
   const workList = await buildWorkList(usage);
+  // The probe's runs go in so guard 3 can tell a lagging reach from a settled
+  // one — see lagsProbe.
   const report = await runStoreUpdate(
-    workList, decision.triggered, firestoreDeps(io, usage));
+    workList, decision.triggered, firestoreDeps(io, usage),
+    probe.referenceTimes as Partial<Record<ForecastProductId, string | null>>);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 store refresh: Firestore usage vs documented free tier", {
@@ -184,7 +188,25 @@ export async function runStoreWriteThrough(
     },
   };
 
-  const products = PRODUCTS_BY_SOURCE[source];
+  // Only what upstream can actually serve. Planning the full
+  // PRODUCTS_BY_SOURCE set meant every NWM favourite recorded two guaranteed
+  // failures, and every GEOGLOWS favourite produced nothing at all while
+  // reporting a failure. Round 2, F3.
+  const products = PRODUCTS_BY_SOURCE[source].filter(
+    (p) => canFetch(source, p));
+
+  if (products.length === 0) {
+    logger.info("⏭️ write-through skipped: nothing fetchable for this source", {
+      source, reachId,
+    });
+    return {
+      ran: false,
+      reason: `no fetchable products for ${source}`,
+      report: null,
+      usage,
+    };
+  }
+
   const report = await runStoreUpdate(
     workList, products, firestoreDeps(io, usage));
 

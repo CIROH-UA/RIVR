@@ -17,20 +17,62 @@ import {FetchedProduct} from "./store-run.js";
 import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
 
 /** NOAA's `series` parameter for each product this file can fetch. */
-const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
-  analysisAssimilation: "analysis_assimilation",
+export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
+  // NOT "analysis_assimilation". The client derives current flow from the
+  // SHORT RANGE series — nwm_data_source.dart fetches fetchCurrentFlowOnly,
+  // which is fetchForecast(reachId, 'short_range'), and takes its run from the
+  // shortRange section. ForecastValues.currentFlow only ever looks at
+  // short/medium/long range, so an analysis_assimilation body stored under
+  // this key decodes to a null flow on every surface that reads it — the
+  // store present and delivering nothing. Round 2, F2.
+  analysisAssimilation: "short_range",
   shortRange: "short_range",
   mediumRange: "medium_range",
   longRange: "long_range",
 };
 
 /** The response section each product's run identity lives in. */
-const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
-  analysisAssimilation: "analysisAssimilation",
+export const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
+  // Same reason as above: the run identity comes from the shortRange section.
+  analysisAssimilation: "shortRange",
   shortRange: "shortRange",
   mediumRange: "mediumRange",
   longRange: "longRange",
 };
+
+/**
+ * Which (source, product) pairs this file can actually fetch.
+ *
+ * Planning work this cannot serve guarantees a failure per reach per run.
+ * Round 2 found write-through planning six NWM products of which two always
+ * threw, and one GEOGLOWS product that always threw — so every GEOGLOWS
+ * favourite produced zero documents, forever, while reporting failures.
+ *
+ * returnPeriods and reachMetadata are absent on purpose: they come from a
+ * different upstream (the CIROH return-period API, and the reaches endpoint)
+ * and are near-static, so they do not belong on the hourly publish cycle.
+ *
+ * GEOGLOWS is absent because the server-side proxy
+ * (functions/src/geoglows-client.ts) returns only the median series and return
+ * periods — it does NOT expose the lower/upper uncertainty band that
+ * GeoglowsForecastPayload carries. Storing what the proxy gives would silently
+ * drop the band from every GEOGLOWS chart, which is worse than not storing.
+ * DECLARED, not forgotten: GEOGLOWS joins the store when the proxy exposes the
+ * band.
+ */
+export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
+  = {
+    nwm: ["analysisAssimilation", "shortRange", "mediumRange", "longRange"],
+    geoglows: [],
+  };
+
+/** Whether a (source, product) pair can be fetched at all. */
+export function canFetch(
+  source: ForecastSourceId,
+  product: ForecastProductId
+): boolean {
+  return CAN_FETCH[source].includes(product);
+}
 
 /**
  * Canonicalise NOAA's unit string to the CFS/CMS token the client converts
@@ -102,10 +144,9 @@ export async function fetchProductFromUpstream(
   product: ForecastProductId
 ): Promise<FetchedProduct> {
   if (source !== "nwm") {
-    // GEOGLOWS is served by the Python functions and is on its own daily
-    // schedule; wiring it here would put two fetchers behind one product.
+    // GEOGLOWS is deliberately not stored yet — see CAN_FETCH below.
     throw new Error(
-      `store-upstream does not fetch ${source}; GEOGLOWS has its own path`
+      `store-upstream does not fetch ${source}; see CAN_FETCH`
     );
   }
 

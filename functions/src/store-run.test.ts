@@ -235,14 +235,10 @@ describe("guard 6 — overlapping runs cannot write backwards", () => {
     const report = await runStoreUpdate(workListOf({favoriteReachIds: ["1"]}),
       ["shortRange"], d.deps);
 
-    assert.equal(report.skippedLagging, 1);
+    assert.equal(report.skippedSameRun, 1);
     assert.equal(report.written, 0);
     assert.equal(d.writes["nwm__1__shortRange"], undefined,
       "a late run carrying older data must not overwrite newer data");
-    // Guard 3's second half: leaving it alone is correct, forgetting it is not.
-    assert.deepEqual(report.reachesToRetry, ["1"],
-      "a reach behind the cycle must be retried, or it stays stale until " +
-      "something unrelated happens to trigger it");
   });
 
   test("an unchanged run is skipped rather than rewritten", async () => {
@@ -415,5 +411,70 @@ describe("the Dart contract has not drifted", () => {
       `firestore.rules has no rule for "${STORE_COLLECTION}" — the client ` +
       "would be denied on every read"
     );
+  });
+});
+
+describe("guard 3 — lagging is measured against the PROBE, not the store", () => {
+  // Round 2, F1. The guard's wording is "a reach returning an older
+  // referenceTime THAN THE PROBE". Measuring against the stored document
+  // answers a different question and misses the real case entirely: a reach
+  // still serving the run the store already holds, while upstream has moved
+  // on, is indistinguishable from "nothing to do".
+  const PROBE = {shortRange: "2026-08-24T12:00:00Z"};
+
+  test("a reach behind the probe is retried even when nothing is written",
+    async () => {
+      const stored = buildStoreDocument({
+        source: "nwm", reachId: "1", product: "shortRange",
+        payload: {}, unit: "CFS",
+        referenceTime: "2026-08-24T06:00:00Z", fetchedAt: NOW,
+      });
+      // Upstream still serves 06Z; the store already holds 06Z; the probe says
+      // 12Z. Nothing to write, but this reach is stale and must come back.
+      const d = deps({
+        existing: {"nwm__1__shortRange": stored},
+        runFor: () => "2026-08-24T06:00:00Z",
+      });
+
+      const report = await runStoreUpdate(
+        workListOf({favoriteReachIds: ["1"]}), ["shortRange"], d.deps, PROBE);
+
+      assert.equal(report.written, 0);
+      assert.equal(report.skippedLagging, 1);
+      assert.deepEqual(report.reachesToRetry, ["1"],
+        "without this the reach sits on the previous run for a whole cycle " +
+        "with no failure, no retry and no log");
+    });
+
+  test("a reach WRITTEN but still behind the probe is also retried",
+    async () => {
+      const d = deps({runFor: () => "2026-08-24T06:00:00Z"});
+      const report = await runStoreUpdate(
+        workListOf({favoriteReachIds: ["1"]}), ["shortRange"], d.deps, PROBE);
+
+      assert.equal(report.written, 1, "its own value is stored, as guard 3 says");
+      assert.equal(d.writes["nwm__1__shortRange"].runId, "2026-08-24T06:00:00Z",
+        "stored under its OWN run, never the probe's");
+      assert.deepEqual(report.reachesToRetry, ["1"],
+        "written and lagging are not alternatives");
+    });
+
+  test("a reach level with the probe is not retried", async () => {
+    const d = deps({runFor: () => "2026-08-24T12:00:00Z"});
+    const report = await runStoreUpdate(
+      workListOf({favoriteReachIds: ["1"]}), ["shortRange"], d.deps, PROBE);
+    assert.equal(report.skippedLagging, 0);
+    assert.deepEqual(report.reachesToRetry, []);
+  });
+
+  // Guessing would queue every reach forever on any product the probe could
+  // not sample.
+  test("an unknown probe run means 'cannot tell', not 'lagging'", async () => {
+    const d = deps({runFor: () => "2026-08-24T06:00:00Z"});
+    const report = await runStoreUpdate(
+      workListOf({favoriteReachIds: ["1"]}), ["shortRange"], d.deps,
+      {shortRange: null});
+    assert.equal(report.skippedLagging, 0);
+    assert.deepEqual(report.reachesToRetry, []);
   });
 });

@@ -75,16 +75,36 @@ export interface PlannedWrite {
 
 export type WriteOutcome =
   | "written"
-  /** Upstream returned the run already stored — same data, nothing to do. */
+  /** Nothing newer than what is stored — no write needed. */
   | "skipped-same-run"
-  /**
-   * Upstream returned an OLDER run than the one stored: this reach lags the
-   * cycle. The stored value is left alone (guard 6) and the reach is retried
-   * (guard 3's second half) — without the retry it would be silently dropped
-   * until something else happened to trigger it.
-   */
-  | "skipped-lagging"
   | "failed";
+
+/**
+ * Whether the run a reach returned is behind what the PROBE reported.
+ *
+ * Guard 3 is about lagging the probe, not lagging the stored document.
+ * Comparing against storage answers a different question and misses the real
+ * case: a reach still serving the run the store already holds while upstream
+ * has moved on looks identical to "nothing to do". Round 2, F1.
+ *
+ * Unknown probe run or unknown reach run means "cannot tell", which must read
+ * as NOT lagging — guessing would queue every reach for retry forever on any
+ * product the probe could not sample.
+ *
+ * @param {object} probeRuns - Runs the probe reported, per product.
+ * @param {ForecastProductId} product - Product being written.
+ * @param {string | undefined} reachRun - Run this reach returned.
+ * @return {boolean} True when the reach is behind the probe.
+ */
+export function lagsProbe(
+  probeRuns: Partial<Record<ForecastProductId, string | null>>,
+  product: ForecastProductId,
+  reachRun: string | undefined
+): boolean {
+  const probeRun = probeRuns[product];
+  if (!probeRun || !reachRun) return false;
+  return isRunNewer(probeRun, reachRun);
+}
 
 export interface WriteResult {
   documentId: string;
@@ -94,6 +114,11 @@ export interface WriteResult {
   outcome: WriteOutcome;
   /** The run actually stored, when one was. */
   storedRun?: string | null;
+  /**
+   * True when this reach returned a run older than the probe's. Independent of
+   * outcome — a reach can be written and still lag.
+   */
+  laggingBehindProbe?: boolean;
   /** Present when outcome is "failed". */
   error?: string;
 }
@@ -214,7 +239,9 @@ export function planWrites(
 export async function runStoreUpdate(
   workList: WorkList,
   triggered: readonly ForecastProductId[],
-  deps: StoreRunDeps
+  deps: StoreRunDeps,
+  /** Runs the probe reported per product; see lagsProbe. */
+  probeRuns: Partial<Record<ForecastProductId, string | null>> = {}
 ): Promise<StoreRunReport> {
   const planned = planWrites(workList, triggered);
 
@@ -233,9 +260,17 @@ export async function runStoreUpdate(
   if (planned.length === 0) {
     // Guard 1. Logged rather than silent so "nothing advanced" is auditable
     // and distinguishable from "the run never ran".
-    logger.info("🟰 store run: nothing advanced, zero fetches", {
-      workListSize: workList.entries.length,
-    });
+    // Two different situations reach here and the log must distinguish them:
+    // nothing advanced upstream (normal), versus something advanced but the
+    // work list is empty (nobody follows anything — worth noticing).
+    logger.info(
+      triggered.length === 0 ?
+        "🟰 store run: nothing advanced, zero fetches" :
+        "🈳 store run: products advanced but the work list is EMPTY",
+      {
+        workListSize: workList.entries.length,
+        triggered: [...triggered],
+      });
     assertStoreRunConsistent(report);
     return report;
   }
@@ -272,32 +307,36 @@ export async function runStoreUpdate(
 
         const existing = await deps.readExisting(documentId);
         if (!shouldWrite(existing, doc)) {
-        // Both skips leave the stored value alone, but they mean opposite
-        // things. Same run = upstream has nothing newer, we are done. Older
-        // run = this reach is BEHIND the cycle, and dropping it here is how a
-        // lagging reach stays stale until something unrelated triggers it.
-          const lagging = Boolean(
-            existing?.runId && doc.runId && isRunNewer(existing.runId, doc.runId)
-          );
+          // Nothing newer than what is stored, so no write. That is NOT the
+          // same as "done": the reach may still be behind the probe, which is
+          // guard 3's actual case and needs a retry.
+          const lagging = lagsProbe(probeRuns, product, doc.runId);
+          report.skippedSameRun++;
           if (lagging) {
             report.skippedLagging++;
             retry.add(entry.reachId);
-          } else {
-            report.skippedSameRun++;
           }
           report.results.push({
             documentId,
             reachId: entry.reachId,
             source: entry.source,
             product,
-            outcome: lagging ? "skipped-lagging" : "skipped-same-run",
+            outcome: "skipped-same-run",
             storedRun: existing?.runId ?? null,
+            laggingBehindProbe: lagging,
           });
           continue;
         }
 
         await deps.writeDocument(documentId, doc);
         report.written++;
+        // A reach can be written AND still lag the probe: guard 3 says store
+        // its own value and retry it. Those are not alternatives.
+        const wroteLagging = lagsProbe(probeRuns, product, doc.runId);
+        if (wroteLagging) {
+          report.skippedLagging++;
+          retry.add(entry.reachId);
+        }
         report.results.push({
           documentId,
           reachId: entry.reachId,
@@ -305,6 +344,7 @@ export async function runStoreUpdate(
           product,
           outcome: "written",
           storedRun: doc.runId ?? null,
+          laggingBehindProbe: wroteLagging,
         });
       } catch (error) {
       // Not this reach's problem: the run itself is over. Rethrow so the loop
@@ -360,15 +400,17 @@ export async function runStoreUpdate(
  * @throws {StoreRunAssertionError} When the outcomes cannot all be true.
  */
 export function assertStoreRunConsistent(report: StoreRunReport): void {
-  const accounted = report.written + report.skippedSameRun +
-    report.skippedLagging + report.failed;
+  // skippedLagging is a FLAG on a result, not an outcome — a reach can be
+  // written AND lagging. Summing it double-counts, which the assertion itself
+  // caught while this was being written.
+  const accounted = report.written + report.skippedSameRun + report.failed;
 
   if (accounted !== report.planned) {
     throw new StoreRunAssertionError(
       `planned ${report.planned} writes but only ${accounted} outcomes were ` +
       `recorded (${report.written} written, ${report.skippedSameRun} ` +
-      `same-run, ${report.skippedLagging} lagging, ${report.failed} failed) ` +
-      "— the run ended in an unknown state"
+      `same-run, ${report.failed} failed; ${report.skippedLagging} of them ` +
+      "lagging the probe) — the run ended in an unknown state"
     );
   }
 
@@ -396,12 +438,21 @@ export function assertStoreRunConsistent(report: StoreRunReport): void {
     );
   }
 
+  const laggingFlags = report.results.filter(
+    (r) => r.laggingBehindProbe === true).length;
+  if (laggingFlags !== report.skippedLagging) {
+    throw new StoreRunAssertionError(
+      `${laggingFlags} results are flagged as lagging but the counter says ` +
+      `${report.skippedLagging}`
+    );
+  }
+
   // Guard 3 and guard 4 together: BOTH a failure and a lagging reach must be
   // retried. Checking only failures is what let a lagging reach fall out of
   // the cycle unnoticed.
   const retryFromResults = new Set(
     report.results
-      .filter((r) => r.outcome === "failed" || r.outcome === "skipped-lagging")
+      .filter((r) => r.outcome === "failed" || r.laggingBehindProbe === true)
       .map((r) => r.reachId)
   );
   if (retryFromResults.size !== report.reachesToRetry.length) {
