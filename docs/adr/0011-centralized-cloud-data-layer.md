@@ -704,9 +704,8 @@ and no widget can fetch on its own even if someone tries.
 ## Phase 4 — Cloud store: write path, with monitoring ▶ DEPLOYED, RUNNING
 
 **Review gate passed under the 3-round cap; deployed and verified in
-production 2026-08-25.** Six functions are deployed in `ciroh-rivr-app`. A
-seventh, `storeStaticDaily`, was added by Phase 5 and is written and tested but
-**not yet deployed**:
+production 2026-08-25.** Seven functions are deployed in `ciroh-rivr-app`; the
+seventh, `storeStaticDaily`, was added and deployed by Phase 5:
 `storeRefreshHourly` (:20 past), `storeGeoglowsDaily` (01:30 UTC),
 `storeGcDaily` (03:40 UTC), `storeHeartbeat` (2-hourly), `storeHealth`
 (HTTPS), `storeWriteThroughOnFavourite` (Firestore trigger). Composite index
@@ -921,12 +920,17 @@ and are not review failures:
 | 4 — renders offline | A device, airplane mode | Jerson |
 | 9 (device half) — the kill switch, flipped for real | `store_read_enabled` created in Remote Config, then a device | Jerson |
 | The construction in `main.dart` | Pumping the root widget needs a live Firebase app | Covered by the device run |
+| The `main.dart` lifecycle handler (release on `detached`, re-sync on `resumed`) | Same — and `detached`/`resumed` cannot be driven in a unit test | Covered by the device run |
 
-Two prerequisites gate all of them: **`storeStaticDaily` and the extended
-`CAN_FETCH` must be deployed** (without them the store holds no `reachMetadata`
-or `returnPeriods`, so guard 1 fails for any reach favourited before Phase 5),
-and **`store_read_enabled` must be created by hand** — nothing publishes it, and
-absent it every device reads `false` and the phase is inert.
+**`storeStaticDaily` and the extended `CAN_FETCH` are deployed** (2026-08-25;
+Firestore holds 29 `reachMetadata` and 29 `returnPeriods` documents, counted
+back out through the REST API rather than believed from the run's own logs).
+
+One prerequisite remains: **`store_read_enabled` must be created by hand** in
+the Firebase console — nothing publishes it, the Remote Config API returns no
+ETag here so publishing it programmatically would mean force-overwriting the
+template the flood map depends on, and absent the parameter every device reads
+`false` and the phase is inert.
 
 ---
 

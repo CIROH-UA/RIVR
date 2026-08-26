@@ -36,6 +36,7 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
@@ -162,6 +163,12 @@ class StoreSubscriptionService {
 
   /// Documents rejected as unreadable. Exposed for the guards.
   int rejected = 0;
+
+  /// Consecutive listener failures, for the backoff tests. Reading it is the
+  /// only way to assert that a healthy snapshot CLEARS the ladder rather than
+  /// merely that a failing one climbs it.
+  @visibleForTesting
+  int get debugConsecutiveErrors => _consecutiveErrors;
 
   /// Whether anything is currently subscribed.
   bool get isSubscribed => _subs.isNotEmpty;
@@ -319,19 +326,26 @@ class StoreSubscriptionService {
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
-    // Success is a SNAPSHOT ARRIVING, not a subscribe call returning.
+    // Success is a snapshot FROM THE SERVER — not a subscribe call returning,
+    // and not a snapshot from the local cache.
     //
-    // Round 5, B1: this reset lived in `_syncLocked` right after `listen(...)`,
+    // Round 5, B1: the reset lived in `_syncLocked` right after `listen(...)`,
     // which runs synchronously, while Firestore delivers listen errors
-    // asynchronously — so `_consecutiveErrors` was ALWAYS 0 by the time
-    // `_scheduleHeal` read it. The second and third backoff delays were
-    // unreachable and the give-up branch was dead code, so a listener that
-    // kept failing was re-created every 2 seconds forever: measured at 8
-    // subscribe attempts in 15 s where the bound is 3. Reachable on sign-out,
-    // because `river_data` requires an authenticated request and any
-    // favourites notification while signed out re-subscribes straight into
-    // PERMISSION_DENIED. The comment on _healDelays claimed the opposite.
-    _consecutiveErrors = 0;
+    // asynchronously — so `_consecutiveErrors` was ALWAYS 0 when
+    // `_scheduleHeal` read it. The 2nd and 3rd delays were unreachable and the
+    // give-up branch was dead code, so a failing listener was re-created every
+    // 2 seconds forever. Reachable on sign-out: `river_data` requires an
+    // authenticated request, so any favourites notification while signed out
+    // re-subscribes straight into PERMISSION_DENIED.
+    //
+    // Round 6 then pointed out that moving it here was not enough, because
+    // Firestore with local persistence delivers a CACHED snapshot before
+    // failing a query whose documents it already holds — which is exactly the
+    // sign-out case — so the counter would reset on every re-subscribe and the
+    // 2-second loop would return. A unit test confirmed it rather than leaving
+    // it a hypothesis. Only a server snapshot proves the subscription is
+    // actually healthy.
+    if (!snap.metadata.isFromCache) _consecutiveErrors = 0;
     for (final change in snap.docChanges) {
       if (change.type == DocumentChangeType.removed) continue;
       final entry = decodeDocument(change.doc.id, change.doc.data());

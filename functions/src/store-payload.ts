@@ -33,11 +33,24 @@ export const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
 export const PAYLOAD_WARN_BYTES = 700 * 1024;
 
 /**
- * Ensemble sections the app reads a single member from. `nwm_data_source`
- * takes `mean`; keeping 20+ members would store two orders of magnitude more
- * than anything reads.
+ * The ensemble members are KEPT. This used to be a `MEAN_ONLY_SECTIONS` set
+ * that reduced `mediumRange` and `longRange` to `{mean}`, on the stated
+ * premise that "the app reads `mediumRange['mean']`". That premise was false,
+ * and Phase 5 turned it into a user-visible defect: `HydrographPage` gates its
+ * ensemble-spread toggle on `ForecastValues.hasMultipleEnsembleMembers`, which
+ * counts keys starting with `member` and needs more than one
+ * (forecast_values.dart:70-76, hydrograph_page.dart:598). Once a favourite is
+ * served from the store, that count is zero — so favouriting a reach made the
+ * spread toggle vanish from its medium and long-range hydrograph, and
+ * unfavouriting it brought the toggle back. Guard 7, failing where a user can
+ * see it. Review round 6.
+ *
+ * Measured before changing it, on reach 10092062 (2026-08-25):
+ *   medium range  mean-only 16 KB -> full 100 KB (6 members)
+ *   long range    mean-only  8 KB -> full  41 KB (4 members)
+ * Both are far below PAYLOAD_WARN_BYTES (700 KB) and the 1 MB hard ceiling,
+ * and `assertPayloadFits` still refuses anything that is not.
  */
-const MEAN_ONLY_SECTIONS = new Set(["mediumRange", "longRange"]);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -91,12 +104,8 @@ export function trimPayload(
   // makes fromApiResponse throw, which the client reports as "no value".
   if ("reach" in raw) out.reach = raw.reach;
 
-  const body = raw[section];
-  if (MEAN_ONLY_SECTIONS.has(section) && isObject(body) && "mean" in body) {
-    out[section] = {mean: body.mean};
-  } else {
-    out[section] = body;
-  }
+  // The whole section, members included. See the note above.
+  out[section] = raw[section];
   return out;
 }
 

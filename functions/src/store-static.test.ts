@@ -28,6 +28,7 @@ import {
   STATIC_REFRESH_LEAD_MS,
   staticRefreshDue,
 } from "./store-service.js";
+import {assertStoreRunConsistent} from "./store-run.js";
 import {StoreDocument, validUntil} from "./store-document.js";
 import {trimPayload} from "./store-payload.js";
 import {
@@ -336,5 +337,81 @@ describe("the producers write the exact keys the client decodes", () => {
         globalThis.fetch = realFetch;
       }
     }
+  });
+});
+
+// The reporting hole, not just the fetcher. The first deployed run of
+// storeStaticDaily returned "ok" while failing 3 of 29 reaches; only reading
+// the document counts back out of Firestore caught it. Round 6.
+//
+// The per-run assertion already existed; what was missing was that
+// runStoreStaticRefresh runs the products in SEPARATE runs and merged their
+// reports without re-checking the totals, and logged `failed` at INFO.
+describe("a run that loses work cannot report success", () => {
+  /**
+   * @param {number} written - Written records.
+   * @param {number} failed - Failed records.
+   * @return {object[]} Result records.
+   */
+  function results(written: number, failed: number): object[] {
+    const out: object[] = [];
+    for (let i = 0; i < written; i++) {
+      out.push({
+        documentId: `nwm__w${i}__reachMetadata`,
+        reachId: `w${i}`,
+        source: "nwm",
+        product: "reachMetadata",
+        outcome: "written",
+        storedRun: null,
+        laggingBehindProbe: false,
+      });
+    }
+    for (let i = 0; i < failed; i++) {
+      out.push({
+        documentId: `nwm__f${i}__reachMetadata`,
+        reachId: `f${i}`,
+        source: "nwm",
+        product: "reachMetadata",
+        outcome: "failed",
+        error: "reach info carried no name",
+        storedRun: null,
+        laggingBehindProbe: false,
+      });
+    }
+    return out;
+  }
+
+  test("outcomes that do not add up to the plan are refused", () => {
+    assert.throws(
+      () => assertStoreRunConsistent({
+        productsTriggered: ["reachMetadata"],
+        planned: 29,
+        written: 26,
+        skippedSameRun: 0,
+        skippedLagging: 0,
+        failed: 0, // three reaches vanished without being counted
+        reachesToRetry: [],
+        results: results(26, 3),
+        fetches: 29,
+      } as never),
+      /unknown state/,
+      "a run whose totals do not add up must refuse to look clean"
+    );
+  });
+
+  test("a fully accounted run passes", () => {
+    // Exactly the shape of the first deployed run: 26 written, 3 failed on
+    // reaches NOAA has no name for, all three queued for another attempt.
+    assert.doesNotThrow(() => assertStoreRunConsistent({
+      productsTriggered: ["reachMetadata"],
+      planned: 29,
+      written: 26,
+      skippedSameRun: 0,
+      skippedLagging: 0,
+      failed: 3,
+      reachesToRetry: ["f0", "f1", "f2"],
+      results: results(26, 3),
+      fetches: 29,
+    } as never));
   });
 });

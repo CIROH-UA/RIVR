@@ -17,6 +17,7 @@ import * as logger from "firebase-functions/logger";
 import {
   FetchedProduct,
   PRODUCTS_BY_SOURCE,
+  StoreRunAssertionError,
   StoreRunReport,
   runStoreUpdate,
 } from "./store-run.js";
@@ -438,6 +439,33 @@ export async function runStoreStaticRefresh(
     for (const r of report.reachesToRetry) {
       if (!merged.reachesToRetry.includes(r)) merged.reachesToRetry.push(r);
     }
+  }
+
+  // Counts, asserted — not an exit status. CLAUDE.md's non-negotiable for
+  // these pipelines is that they fail SILENTLY, and the first deployed run of
+  // this very function proved it again: it reported "ok" while failing 3 of 29
+  // reaches, caught only because a human read the document counts back out of
+  // Firestore. Review round 6 pointed out the fetcher was fixed and the
+  // REPORTING hole that let it pass was not.
+  if (merged.written + merged.failed !== merged.planned) {
+    throw new StoreRunAssertionError(
+      `static refresh planned ${merged.planned} writes but accounted for ` +
+      `${merged.written} written + ${merged.failed} failed — the run lost ` +
+      "work it never reported"
+    );
+  }
+
+  // A failure is never an INFO-level detail here: every one is a reach whose
+  // river name or flood thresholds are now up to 30 days stale on device.
+  if (merged.failed > 0) {
+    logger.error("🚨 static refresh FAILED for some reaches", {
+      failed: merged.failed,
+      planned: merged.planned,
+      written: merged.written,
+      reaches: merged.results
+        .filter((r) => r.outcome === "failed")
+        .map((r) => r.documentId),
+    });
   }
 
   logger.info("🪨 static refresh complete", {

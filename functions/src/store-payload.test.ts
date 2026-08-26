@@ -89,16 +89,35 @@ describe("what trimming keeps", () => {
 });
 
 describe("what trimming drops", () => {
-  test("ensemble members go; the payload shrinks by an order of magnitude",
-    () => {
-      const raw = mediumBody();
-      const out = trimPayload("mediumRange", raw);
+  // This test used to assert the OPPOSITE — that members are dropped and the
+  // payload shrinks 10x — and it was pinning a user-visible defect in place.
+  // HydrographPage gates its ensemble-spread toggle on
+  // `ForecastValues.hasMultipleEnsembleMembers`, which counts `member*` keys
+  // and needs more than one. With the members trimmed away, favouriting a
+  // reach made that toggle vanish from its medium and long-range hydrograph
+  // and unfavouriting it brought the toggle back. Review round 6.
+  test("ensemble members are KEPT — the app renders them", () => {
+    const raw = mediumBody();
+    const out = trimPayload("mediumRange", raw);
+    const section = out.mediumRange as Record<string, unknown>;
 
-      assert.equal("member1" in (out.mediumRange as object), false);
-      assert.ok(payloadBytes(out) * 10 < payloadBytes(raw),
-        `expected >10x reduction, got ${payloadBytes(raw)} -> ` +
-        `${payloadBytes(out)}`);
-    });
+    assert.ok("member1" in section,
+      "dropping members removes the ensemble toggle for favourites only, " +
+      "which is guard 7 failing where a user can see it");
+    assert.ok("mean" in section);
+
+    const members = Object.keys(section).filter((k) => k.startsWith("member"));
+    assert.ok(members.length > 1,
+      `hasMultipleEnsembleMembers needs >1, got ${members.length}`);
+  });
+
+  test("the kept ensemble still fits well inside the size guard", () => {
+    // Measured on reach 10092062 (2026-08-25): medium range full is ~100 KB,
+    // long range ~41 KB, against a 700 KB refusal threshold.
+    const out = trimPayload("mediumRange", mediumBody());
+    assert.ok(payloadBytes(out) < PAYLOAD_WARN_BYTES,
+      `payload ${payloadBytes(out)} must stay under ${PAYLOAD_WARN_BYTES}`);
+  });
 
   test("sections other than the product's own are dropped", () => {
     const body = {

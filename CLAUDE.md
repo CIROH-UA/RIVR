@@ -435,9 +435,8 @@ it. Moving it back to module scope will break deploys.
 
 Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
-fetching its own. **Six are deployed; `storeStaticDaily` is written and tested
-but NOT yet deployed** — check with `firebase functions:list` before assuming
-the near-static products are being refreshed.
+fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
+6 -> 7, not by the deploy's exit status).
 
 | Function | Cadence |
 |---|---|

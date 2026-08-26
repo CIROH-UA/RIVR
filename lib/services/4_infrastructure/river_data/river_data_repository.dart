@@ -99,12 +99,20 @@ class RiverDataRepository implements IRiverDataRepository {
   @override
   Future<void> ingest(RiverDataEntry entry) {
     final k = entry.key.storageKey;
-    final next = (_ingesting[k] ?? Future<void>.value())
+    final chained = (_ingesting[k] ?? Future<void>.value())
         .then((_) => _ingestLocked(entry));
-    _ingesting[k] = next.catchError((Object _) {});
-    return next.whenComplete(() {
-      if (identical(_ingesting[k], next)) _ingesting.remove(k);
-    });
+    // Kept separately from `chained`: the map holds the error-swallowing
+    // wrapper so one bad ingest cannot poison the chain, while the CALLER gets
+    // the real future. Round 6 found the previous cleanup compared the wrapper
+    // with `chained` — never identical — so the entry was never removed and
+    // the map grew one completed chain per key for the process lifetime. Small
+    // and bounded, but it was dead code that read as live.
+    final guarded = chained.catchError((Object _) {});
+    _ingesting[k] = guarded;
+    unawaited(guarded.whenComplete(() {
+      if (identical(_ingesting[k], guarded)) _ingesting.remove(k);
+    }));
+    return chained;
   }
 
   Future<void> _ingestLocked(RiverDataEntry entry) async {

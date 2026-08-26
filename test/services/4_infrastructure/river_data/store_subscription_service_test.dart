@@ -627,6 +627,53 @@ void main() {
       await svc.dispose();
     });
 
+    // Round 6, B4: deleting the reset from `_onSnapshot` left the suite green,
+    // so nothing pinned that it happens at all — and with it gone a device
+    // that accumulates three listener errors loses self-heal permanently. The
+    // reverse also needed pinning: real Firestore delivers a CACHED snapshot
+    // before failing an already-cached query, and if that reset the counter on
+    // every re-subscribe the 2-second loop would be back.
+    test('a snapshot arriving before each error still lets the backoff climb',
+        () async {
+      final db = _ErroringFirestore(failFirstOnly: false);
+      db.failNext = true;
+      db.snapshotBeforeError = true;
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      await Future<void>.delayed(const Duration(seconds: 12));
+
+      expect(db.streamsCreated, lessThanOrEqualTo(3),
+          reason: 'a cached snapshot preceding the failure must not reset the '
+              'ladder — that is the sign-out case, and resetting turns the '
+              'backoff back into a 2-second retry loop');
+      await svc.dispose();
+    });
+
+    // The other direction: a genuinely healthy subscription MUST clear the
+    // ladder, or a device that hits three transient errors over a long session
+    // loses self-heal permanently — the terminal-failure class of round 1's
+    // B5 and round 3's non-blocking 6, reintroduced by the fix for round 6.
+    test('a SERVER snapshot does reset the ladder', () async {
+      final db = _ErroringFirestore(failFirstOnly: true);
+      db.serverSnapshotOnSuccess = true;
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      // First stream errors; the heal re-subscribes and the second succeeds
+      // with a SERVER snapshot.
+      await Future<void>.delayed(const Duration(milliseconds: 2400));
+      expect(svc.isSubscribed, isTrue);
+
+      // A later failure must start from the FIRST delay again, not the third.
+      expect(svc.debugConsecutiveErrors, 0,
+          reason: 'a healthy server snapshot means the subscription works; '
+              'holding the old error count would exhaust the ladder early');
+      await svc.dispose();
+    });
+
     test('a heal still works when nothing detached', () async {
       final db = _ErroringFirestore(failFirstOnly: true);
       final svc =
@@ -671,6 +718,16 @@ class _ErroringFirestore implements FirebaseFirestore {
   /// Which stream errors on a delay, timed to land inside that window.
   int errorDuringCancelIndex = -1;
   Duration errorDelay = const Duration(milliseconds: 100);
+
+  /// Deliver a SERVER snapshot on a stream that does not fail.
+  bool serverSnapshotOnSuccess = false;
+
+  /// Emit a (cached, empty) SNAPSHOT before erroring — what real Firestore
+  /// does with local persistence on a query whose documents it already holds,
+  /// which is exactly the sign-out case. Round 6, B4: the fake emitted either
+  /// a snapshot or an error and never both, so nothing pinned that the
+  /// backoff still escalates when a snapshot precedes each failure.
+  bool snapshotBeforeError = false;
 
   int streamsCreated = 0;
 
@@ -750,9 +807,15 @@ class _ErroringQuery implements Query<Map<String, dynamic>> {
 
     if (shouldFail) {
       scheduleMicrotask(() {
+        if (controller.isClosed) return;
+        if (db.snapshotBeforeError) controller.add(_EmptySnapshot());
+        controller.addError(FirebaseException(
+            plugin: 'cloud_firestore', code: 'permission-denied'));
+      });
+    } else if (db.serverSnapshotOnSuccess) {
+      scheduleMicrotask(() {
         if (!controller.isClosed) {
-          controller.addError(FirebaseException(
-              plugin: 'cloud_firestore', code: 'permission-denied'));
+          controller.add(_EmptySnapshot(fromCache: false));
         }
       });
     } else if (db.errorDuringCancelIndex == index) {
@@ -767,6 +830,36 @@ class _ErroringQuery implements Query<Map<String, dynamic>> {
     return controller.stream;
   }
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// An empty query snapshot, as Firestore's local cache delivers before a
+/// permission failure on an already-cached query.
+// ignore: subtype_of_sealed_class
+class _EmptySnapshot implements QuerySnapshot<Map<String, dynamic>> {
+  _EmptySnapshot({this.fromCache = true});
+  final bool fromCache;
+
+  @override
+  List<DocumentChange<Map<String, dynamic>>> get docChanges => const [];
+  @override
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> get docs => const [];
+  @override
+  int get size => 0;
+  @override
+  SnapshotMetadata get metadata => _Meta(fromCache);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _Meta implements SnapshotMetadata {
+  _Meta(this.isFromCache);
+  @override
+  final bool isFromCache;
+  @override
+  bool get hasPendingWrites => false;
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
