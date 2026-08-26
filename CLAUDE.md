@@ -473,6 +473,18 @@ ON -> OFF **transition** (persisted across launches), never while the switch is
 merely off: doing it on the off *state* wiped the pinned favourites on every
 `notifyListeners`, which made the app fetch more than it did before Phase 5.
 
+**A change to the stored PAYLOAD SHAPE does not propagate until the upstream
+run advances.** Supersession is keyed on `runId` alone: if the stored document
+already carries the current run, `shouldWrite` refuses the rewrite even though
+the new code would store a different shape. Observed 2026-08-25 — after the
+ensemble-truncation fix, a forced refresh reported `written: 2,
+skippedSameRun: 110` and every `mediumRange` document kept its old mean-only
+payload until the next 6-hourly run. Plan for it: either wait for the cycle
+(hourly products ≤1 h, medium/long ≤6 h, static products 30 days), or delete
+the affected documents so they are re-fetched. Bumping
+`RiverDataEntry.schemaVersion` also works but is a cross-language contract
+change that makes every client discard every document.
+
 **The store's fetchers never retry** — including these two, which is why they
 do NOT go through `noaa-client`'s `fetchWithRetry` or `getReturnPeriods`. The
 latter also falls back to a `return_period_cache` entry of any age, and writing
