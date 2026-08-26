@@ -11,6 +11,8 @@
 //     keeps billing Firestore reads forever, which nothing in the UI would ever
 //     surface. Cancellation is asserted, not assumed.
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -569,6 +571,62 @@ void main() {
       await svc.dispose();
     });
 
+    // THE scenario round 4's fix was written for, and which no test entered:
+    // the error arrives INSIDE `await _cancelAll()`, after the plain
+    // timer-cancel would have run. Only the generation gate catches it.
+    test('an error arriving DURING the cancel cannot resurrect the watch',
+        () async {
+      final db = _ErroringFirestore(failFirstOnly: false);
+      db.failNext = false; // both batches start healthy
+      db.slowCancelIndex = 0; // batch 0 holds _cancelAll open...
+      db.errorDuringCancelIndex = 1; // ...while batch 1 dies inside it
+      db.errorDelay = const Duration(milliseconds: 80);
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      // 20 reaches x 6 products = 120 ids -> 4 batches of 30.
+      await svc.syncFavourites(List.generate(20, (i) => _key('r$i')));
+      expect(svc.isSubscribed, isTrue);
+
+      // The kill switch turns off. Batch 1's error lands inside this await.
+      await svc.detach();
+      expect(svc.isSubscribed, isFalse);
+
+      // Past the first heal delay (2s).
+      await Future<void>.delayed(const Duration(milliseconds: 2600));
+
+      expect(svc.isSubscribed, isFalse,
+          reason: 'a heal armed while the detach was cancelling must be '
+              'refused — otherwise the kill switch is bypassed seconds after '
+              'it fired, with nothing left to correct it');
+      expect(svc.watchedIds, isEmpty);
+      await svc.dispose();
+    });
+
+    // Round 5, B1: `_consecutiveErrors` was reset synchronously on every
+    // subscribe, while Firestore delivers listen errors asynchronously — so it
+    // was always 0 when the heal was scheduled. The 2nd and 3rd delays were
+    // unreachable and the give-up branch was dead code, so a permanently
+    // failing listener was re-created every 2 seconds forever. Measured at 8
+    // attempts in 15s where the bound is 3.
+    test('a permanently failing listener gives up instead of looping forever',
+        () async {
+      final db = _ErroringFirestore(failFirstOnly: false);
+      db.failNext = true;
+      final svc =
+          StoreSubscriptionService(repository: _CapturingRepo(), firestore: db);
+
+      await svc.syncFavourites([_key('1')]);
+      // Past all three delays (2s + 8s + 30s would be the full ladder); 12s
+      // covers the first two and proves escalation rather than a 2s loop.
+      await Future<void>.delayed(const Duration(seconds: 12));
+
+      expect(db.streamsCreated, lessThanOrEqualTo(3),
+          reason: 'the backoff must ESCALATE: an unbounded 2s retry loop '
+              'hammers a signed-out device against PERMISSION_DENIED');
+      await svc.dispose();
+    });
+
     test('a heal still works when nothing detached', () async {
       final db = _ErroringFirestore(failFirstOnly: true);
       final svc =
@@ -606,6 +664,13 @@ class _ErroringFirestore implements FirebaseFirestore {
 
   /// Fail only the first stream, leaving later batches healthy.
   final bool failFirstOnly;
+
+  /// Which stream takes a long time to cancel, holding `_cancelAll()` open.
+  int slowCancelIndex = -1;
+
+  /// Which stream errors on a delay, timed to land inside that window.
+  int errorDuringCancelIndex = -1;
+  Duration errorDelay = const Duration(milliseconds: 100);
 
   int streamsCreated = 0;
 
@@ -663,12 +728,43 @@ class _ErroringQuery implements Query<Map<String, dynamic>> {
     bool includeMetadataChanges = false,
     ListenSource source = ListenSource.defaultSource,
   }) {
-    if (db.takeShouldFail()) {
-      return Stream<QuerySnapshot<Map<String, dynamic>>>.error(
-        FirebaseException(plugin: 'cloud_firestore', code: 'permission-denied'),
-      );
+    final index = db.streamsCreated;
+    final shouldFail = db.takeShouldFail();
+
+    final controller = StreamController<QuerySnapshot<Map<String, dynamic>>>();
+
+    // Round 5, B4. The scenario round 4's fix exists for is an error arriving
+    // INSIDE `await _cancelAll()`. A single batch cannot produce it: once
+    // `cancel()` starts, Dart stops delivering to that listener. It needs TWO
+    // batches, because _cancelAll cancels SEQUENTIALLY — so batch 1 can be
+    // slow to cancel while batch 0's live stream is still delivering.
+    //
+    // The earlier version of this test used one batch and therefore never
+    // entered the window, which is why reverting round 4's whole fix left
+    // every test green.
+    if (db.slowCancelIndex == index) {
+      controller.onCancel = () async {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      };
     }
-    return const Stream<QuerySnapshot<Map<String, dynamic>>>.empty();
+
+    if (shouldFail) {
+      scheduleMicrotask(() {
+        if (!controller.isClosed) {
+          controller.addError(FirebaseException(
+              plugin: 'cloud_firestore', code: 'permission-denied'));
+        }
+      });
+    } else if (db.errorDuringCancelIndex == index) {
+      // Fires later, timed to land while the slow batch above is cancelling.
+      Future<void>.delayed(db.errorDelay, () {
+        if (!controller.isClosed) {
+          controller.addError(FirebaseException(
+              plugin: 'cloud_firestore', code: 'permission-denied'));
+        }
+      });
+    }
+    return controller.stream;
   }
 
   @override

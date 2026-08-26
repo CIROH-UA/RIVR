@@ -24,6 +24,7 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.
 import 'package:rivr/services/4_infrastructure/river_data/store_backed_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
 import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
+import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 
 /// The live path. Every call to this is a call to NOAA in production.
 class _CountingSource implements IRiverDataSource {
@@ -142,6 +143,41 @@ void main() {
       }
       expect(upstream.fetches, 0);
       expect(s.servedFromStore, 5);
+    });
+
+    // Round 5, B6: the repository half of this was tested with a fake source,
+    // but the only PRODUCTION code that ever sets the field was not — deleting
+    // it passed all 1162 tests. Without it every device re-stamps the store's
+    // 30-day static window from its own read clock, indefinitely extending the
+    // exact worst case the kill switch has to reclaim.
+    test('the SERVER\'s freshness window is passed through, not re-stamped',
+        () async {
+      final now = DateTime.now().toUtc();
+      final serverExpiry = now.add(const Duration(days: 12));
+      final db = FakeFirebaseFirestore();
+      final key = _key();
+      final json = RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(fetchedAt: now, validUntil: serverExpiry),
+        unit: 'CMS',
+        runId: 'store-run',
+        payload: const {'from': 'store'},
+      ).toJson();
+      await db.collection(kStoreCollection).doc(key.storageKey).set(json);
+
+      final s = StoreBackedDataSource(
+          inner: upstream, readSwitch: _Switch(true), firestore: db);
+      final r = await s.fetch(key);
+
+      expect(r.validUntil, isNotNull,
+          reason: 'null here means the repository recomputes from the READ '
+              'clock and silently extends the server window on every read');
+      expect(
+        r.validUntil!.toIso8601String(),
+        serverExpiry.toIso8601String(),
+        reason: 'the document was fetched upstream when the SERVER fetched '
+            'it; a device reading it later must not renew it',
+      );
     });
 
     test('the near-static products are served too', () async {
@@ -381,8 +417,70 @@ void main() {
       expect(up.fetches, 0, reason: 'guard 1 must survive the B6 gate');
     });
   });
-}
 
+  group('guard 7 — the two paths agree where a consumer can tell', () {
+    // Round 5 ruled this CANNOT VERIFY: nothing compared a decoded store
+    // payload against a decoded live one. There IS a raw field difference —
+    // the server writes formattedLocation: null, the live path writes
+    // ReachData.formattedLocation, which is '' unless city AND state are
+    // known. What matters is whether a consumer can tell, so that is what
+    // this asserts, rather than a raw deepEqual that would fail on a
+    // distinction no screen can render.
+    //
+    // Every consumer gates on emptiness:
+    //   reach_forecast_page.dart:227  meta?.formattedLocation?.isNotEmpty == true
+    //   reach_forecast_page.dart:293  m.formattedLocation == null || isEmpty
+    //   reach_details_bottom_sheet.dart:287  _formattedLocation?.isNotEmpty == true
+    ReachMetadata decodeOf(Map<String, dynamic> payload) =>
+        ReachMetadataPayload.decode(RiverDataEntry(
+          key: _key(ForecastProduct.reachMetadata),
+          window: FreshnessWindow(
+            fetchedAt: DateTime.now().toUtc(),
+            validUntil: DateTime.now().toUtc().add(const Duration(days: 30)),
+          ),
+          unit: 'CMS',
+          payload: payload,
+        ));
+
+    test('store null and live empty-string are indistinguishable downstream',
+        () {
+      // Exactly what functions/src/store-upstream.ts fetchReachMetadata writes.
+      final fromStore = decodeOf(const {
+        'riverName': 'Provo River',
+        'formattedLocation': null,
+        'latitude': 40.2,
+        'longitude': -111.6,
+      });
+      // Exactly what NwmDataSource writes for a reach with no city/state.
+      final fromLive = decodeOf(const {
+        'riverName': 'Provo River',
+        'formattedLocation': '',
+        'latitude': 40.2,
+        'longitude': -111.6,
+      });
+
+      expect(fromStore.riverName, fromLive.riverName);
+      expect(fromStore.latitude, fromLive.latitude);
+      expect(fromStore.longitude, fromLive.longitude);
+      expect(
+        fromStore.formattedLocation?.isNotEmpty == true,
+        fromLive.formattedLocation?.isNotEmpty == true,
+        reason: 'the only raw difference between the paths must be one no '
+            'consumer can observe — every one of them gates on emptiness',
+      );
+    });
+
+    test('an unnamed reach decodes the same from both paths', () {
+      // NOAA returns name: "" for some real reaches; the first deployed run
+      // hit 3 of 29. The store now stores "" verbatim, as the live path does.
+      expect(
+        decodeOf(const {'riverName': '', 'formattedLocation': null})
+            .riverName,
+        decodeOf(const {'riverName': '', 'formattedLocation': ''}).riverName,
+      );
+    });
+  });
+}
 
 // ── A Firestore that can tell Source.cache from Source.server ───────────────
 //

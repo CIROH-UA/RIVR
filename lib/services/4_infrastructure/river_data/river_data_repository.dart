@@ -89,8 +89,25 @@ class RiverDataRepository implements IRiverDataRepository {
   /// a guaranteed network call caused by the store, which is the opposite of
   /// what the store is for. `StoreBackedDataSource` already refuses expired
   /// documents at the other door; this closes the pair.
+  /// Serialises [ingest] per key. Round 5, non-blocking 1: ingest became a
+  /// read-modify-write (get, compare runs, put) and `_onSnapshot` fires them
+  /// unawaited per document, so two snapshots for the same key could both read
+  /// the old value and the OLDER write could land last — reintroducing exactly
+  /// the backwards-walk the supersession check exists to stop.
+  final Map<String, Future<void>> _ingesting = {};
+
   @override
-  Future<void> ingest(RiverDataEntry entry) async {
+  Future<void> ingest(RiverDataEntry entry) {
+    final k = entry.key.storageKey;
+    final next = (_ingesting[k] ?? Future<void>.value())
+        .then((_) => _ingestLocked(entry));
+    _ingesting[k] = next.catchError((Object _) {});
+    return next.whenComplete(() {
+      if (identical(_ingesting[k], next)) _ingesting.remove(k);
+    });
+  }
+
+  Future<void> _ingestLocked(RiverDataEntry entry) async {
     if (!entry.window.validUntil.isAfter(_now().toUtc())) {
       AppLogger.info(
         _tag,

@@ -302,14 +302,26 @@ export async function fetchReachMetadata(reachId: string): Promise<FetchedProduc
   const body = await getJson(
     `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${reachId}`);
 
+  // Accept whatever NOAA gives, INCLUDING an empty string, because that is
+  // exactly what the live path accepts: `ReachDataDto.fromNoaaApi` does
+  // `riverName: json['name'] as String`, which is happy with "" and throws
+  // only when the field is absent or not a string. Matching it is guard 7.
+  //
+  // Rejecting "" was a real defect, found by checking the first deployed run's
+  // COUNTS rather than its exit status: 3 of 29 reaches failed with "carried
+  // no name". Those reaches exist and have valid coordinates — NOAA simply
+  // has no name for them — so they would have failed every single day
+  // forever, sat permanently in reachesToRetry, and inflated the failure rate
+  // the Phase 0 probe exists to measure. Same distinction as returnPeriods:
+  // "upstream has none" is an answer, not a failure.
   const rawName = body.name;
-  const riverName =
-    typeof rawName === "string" && rawName.trim() !== "" ? rawName : null;
-  if (!riverName) {
-    // The one field this product exists to carry. A nameless record satisfies
-    // the schema and renders blank.
-    throw new Error(`${reachId}: reach info carried no name`);
+  if (typeof rawName !== "string") {
+    throw new Error(
+      `${reachId}: reach info carried no name field — refusing to store ` +
+      "identity from a shape we cannot read"
+    );
   }
+  const riverName = rawName;
 
   return {
     payload: {

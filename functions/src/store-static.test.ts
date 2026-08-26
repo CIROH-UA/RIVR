@@ -245,17 +245,33 @@ describe("the producers write the exact keys the client decodes", () => {
       }
     });
 
-  test("reachMetadata REFUSES a nameless response rather than storing it",
+  // Found on the first deployed run: 3 of 29 reaches came back with
+  // `name: ""`. They are real reaches with valid coordinates that NOAA simply
+  // has no name for. Rejecting them failed those reaches every day forever.
+  // The live path accepts "" (`json['name'] as String`), so the store must.
+  test("an EMPTY name is stored, exactly as the live path accepts it",
     async () => {
-      stubFetch({latitude: 40.2, longitude: -111.6});
+      stubFetch({name: "", latitude: 45.5679, longitude: -122.444});
       try {
-        await assert.rejects(() => fetchReachMetadata("123"), /carried no name/,
-          "a nameless record satisfies the schema and renders blank for 30 " +
-          "days");
+        const r = await fetchReachMetadata("23735719");
+        assert.equal(r.payload.riverName, "",
+          "matching the live path is guard 7; failing daily is not an option");
+        assert.equal(r.payload.latitude, 45.5679);
       } finally {
         globalThis.fetch = realFetch;
       }
     });
+
+  test("a response with NO name field still throws", async () => {
+    // Absent is a shape we cannot read; empty is an answer.
+    stubFetch({latitude: 40.2, longitude: -111.6});
+    try {
+      await assert.rejects(
+        () => fetchReachMetadata("123"), /no name field/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 
   test("returnPeriods writes the raw upstream ARRAY under 'returnPeriods'",
     async () => {

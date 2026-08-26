@@ -15,6 +15,7 @@
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
@@ -391,6 +392,74 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 60));
       expect(cache.evicted.length, afterFlip,
           reason: 'eviction is the transition, not the state');
+      await c.dispose();
+    });
+  });
+
+  group('round 5, B5 — the reclaim must survive a relaunch', () {
+    // The transition gate is only useful if it persists: a device that WAS
+    // reading the store and is force-quit must still reclaim on next launch,
+    // rather than serving poisoned entries from disk until they expire — up to
+    // 30 days for names and thresholds. Every other coordinator test runs
+    // without the SharedPreferences plugin and therefore exercises the catch
+    // branch, so this mechanism was entirely unguarded: round 5 made the flag
+    // write-only and all 1162 tests passed.
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    test('a flag left true by a previous session evicts on the next launch',
+        () async {
+      SharedPreferences.setMockInitialValues(
+          {'adr0011_store_was_active': true});
+      final cache = _NoopCache();
+
+      // Fresh process, switch already OFF — nothing in memory says the store
+      // was ever on, so only the persisted flag can drive the reclaim.
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(false),
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isNotEmpty,
+          reason: 'a force-quit must not let poisoned entries outlive the '
+              'kill switch');
+      await c.dispose();
+    });
+
+    test('no flag means no eviction on a fresh install', () async {
+      SharedPreferences.setMockInitialValues({});
+      final cache = _NoopCache();
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(false),
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isEmpty);
+      await c.dispose();
+    });
+
+    test('turning the store ON persists the flag for the next launch',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(true),
+        cache: _NoopCache(),
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('adr0011_store_was_active'), isTrue,
+          reason: 'without this the next launch cannot know to reclaim');
       await c.dispose();
     });
   });

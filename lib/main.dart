@@ -173,16 +173,24 @@ class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // `detached` is RESUMABLE on Android, so NOTHING here may be terminal.
+    //
+    // Round 5, B2: this called `_storeReads.dispose()`, which disposes the
+    // shared StoreSubscriptionService singleton — permanently, since
+    // `initState` does not run again. After a detached -> resumed, Phase 5 was
+    // dead for the rest of the process and the kill switch could not turn it
+    // back on. The comment right below already explained that exact hazard for
+    // the StoreReadSwitch and did not apply the same reasoning one line up.
+    //
+    // `detach()` releases every listener and stays usable; `resumed` puts them
+    // back. The listeners die with the process anyway, so releasing them is
+    // the only thing this hook was ever protecting.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_storeReads?.sync());
+      return;
+    }
     if (state != AppLifecycleState.detached) return;
-    // The real end-of-life hook for the root widget. Cancelling a Firestore
-    // subscription is fire-and-forget, so nothing is awaited.
-    unawaited(_storeReads?.dispose());
-    // NOT the StoreReadSwitch. It is a GetIt singleton, and `detached` is
-    // RESUMABLE on Android — disposing it here left a permanently dead
-    // singleton whose notifier throws on the next config change, for the rest
-    // of the process. Round 4, non-blocking 7. Its one subscription dies with
-    // the process anyway, which is the only thing this hook could have been
-    // protecting.
+    unawaited(_storeReads?.release());
 
   }
 

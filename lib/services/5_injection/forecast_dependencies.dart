@@ -76,8 +76,16 @@ void setupForecastDependencies() {
   // miss, and nothing arbitrated which landed first. Review round 2.
   //
   // The wrapper is transparent: same ForecastSource, same supportedProducts,
-  // same validUntil. Nothing downstream can tell which path served a value,
-  // which is guard 7.
+  // same validUntil.
+  //
+  // Guard 7 is "values match what the old path produced, field by field", and
+  // there is ONE raw difference: the server writes `formattedLocation: null`
+  // while the live path writes `ReachData.formattedLocation`, which is '' when
+  // city and state are unknown. It is not observable — every consumer gates on
+  // emptiness — and store_backed_data_source_test's "guard 7" group asserts
+  // that rather than asserting a raw equality no screen could render. An
+  // earlier version of this comment claimed flatly that nothing downstream can
+  // tell, which was an assertion with no test behind it (round 5).
   sl.registerLazySingleton<SourceRegistry>(
     () => SourceRegistry([
       StoreBackedDataSource(

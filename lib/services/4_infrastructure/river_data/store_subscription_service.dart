@@ -129,6 +129,11 @@ class StoreSubscriptionService {
   /// the last delay it stops and waits for a favourites change or a switch
   /// flip, because a PERMISSION_DENIED that survives 40s is a rules problem
   /// that retrying will not fix.
+  ///
+  /// The bound is real only because [_consecutiveErrors] is reset when a
+  /// SNAPSHOT arrives rather than when a subscribe call returns — see
+  /// [_onSnapshot]. Resetting on subscribe made every delay read as the first
+  /// one, so this comment described a ladder the code did not climb.
   static const List<Duration> _healDelays = [
     Duration(seconds: 2),
     Duration(seconds: 8),
@@ -224,6 +229,7 @@ class StoreSubscriptionService {
         i,
         i + kWhereInBatchSize > ids.length ? ids.length : i + kWhereInBatchSize,
       );
+      final batchIds = batch.toSet();
       late final StreamSubscription<QuerySnapshot<Map<String, dynamic>>> sub;
       sub = _db
           .collection(kStoreCollection)
@@ -234,11 +240,11 @@ class StoreSubscriptionService {
             // A permission error or a missing index must degrade to the live
             // path, not surface to the user (guard 8). The repository still
             // fetches upstream on a cache miss.
-            onError: (Object e, StackTrace s) => _onListenerError(sub, e),
+            onError: (Object e, StackTrace s) =>
+                _onListenerError(sub, batchIds, e),
           );
       _subs.add(sub);
     }
-    _consecutiveErrors = 0;
     AppLogger.info(
       _tag,
       'subscribed to ${wanted.length} documents in ${_subs.length} listener(s)',
@@ -260,6 +266,7 @@ class StoreSubscriptionService {
   /// dead.
   void _onListenerError(
     StreamSubscription<QuerySnapshot<Map<String, dynamic>>> sub,
+    Set<String> batchIds,
     Object e,
   ) {
     AppLogger.error(
@@ -269,7 +276,11 @@ class StoreSubscriptionService {
     );
     _subs.remove(sub);
     unawaited(sub.cancel().catchError((Object _) {}));
-    _watched = <String>{};
+    // Only THIS batch's ids. Round 5, non-blocking 3: clearing the whole set
+    // meant one failing batch reported an empty watch set while the other
+    // three were still live — and that same set is the `storeBackedIds` gate,
+    // so every favourite's cold read fell to upstream until a heal landed.
+    _watched = _watched.difference(batchIds);
     _scheduleHeal();
   }
 
@@ -308,6 +319,19 @@ class StoreSubscriptionService {
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
+    // Success is a SNAPSHOT ARRIVING, not a subscribe call returning.
+    //
+    // Round 5, B1: this reset lived in `_syncLocked` right after `listen(...)`,
+    // which runs synchronously, while Firestore delivers listen errors
+    // asynchronously — so `_consecutiveErrors` was ALWAYS 0 by the time
+    // `_scheduleHeal` read it. The second and third backoff delays were
+    // unreachable and the give-up branch was dead code, so a listener that
+    // kept failing was re-created every 2 seconds forever: measured at 8
+    // subscribe attempts in 15 s where the bound is 3. Reachable on sign-out,
+    // because `river_data` requires an authenticated request and any
+    // favourites notification while signed out re-subscribes straight into
+    // PERMISSION_DENIED. The comment on _healDelays claimed the opposite.
+    _consecutiveErrors = 0;
     for (final change in snap.docChanges) {
       if (change.type == DocumentChangeType.removed) continue;
       final entry = decodeDocument(change.doc.id, change.doc.data());

@@ -100,6 +100,16 @@ class StoreReadCoordinator {
   /// disk until they expire — up to 30 days for names and thresholds.
   static const String _prefsWasActive = 'adr0011_store_was_active';
 
+  /// Serialises [sync]. Round 5, B3: `sync()` had no lock at all, and round
+  /// 4's own fix put an `await _setActive(true)` — a SharedPreferences
+  /// platform round-trip on a real device — in front of `syncFavourites`. A
+  /// switch flip landing in that window (which is precisely what Remote
+  /// Config's late `fetchAndActivate` does at launch) left the app subscribed
+  /// with the switch OFF, with nothing to correct it until the next favourites
+  /// change. Same shape as round 3's B3 and round 4's B2, one layer up,
+  /// reopened by the fix for the layer below.
+  Future<void> _pending = Future<void>.value();
+
   /// Whether the store is currently being read on this device.
   bool get isActive => _subs.isSubscribed;
 
@@ -129,7 +139,13 @@ class StoreReadCoordinator {
   ///
   /// Idempotent and safe to call as often as favourites change; the
   /// subscription service treats an unchanged set as a no-op.
-  Future<void> sync() async {
+  Future<void> sync() {
+    final next = _pending.then((_) => _syncLocked());
+    _pending = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _syncLocked() async {
     if (_disposed) return;
 
     if (!_switch.isStoreReadEnabled) {
@@ -157,6 +173,14 @@ class StoreReadCoordinator {
     }
 
     await _setActive(true);
+
+    // Re-read AFTER the await. The value that mattered is the one true when we
+    // actually subscribe, not the one true when we were called.
+    if (!_switch.isStoreReadEnabled) {
+      AppLogger.info(_tag, 'switch flipped off mid-sync; not subscribing');
+      await _subs.detach();
+      return;
+    }
 
     final keys = [
       for (final f in _favourites())
@@ -239,6 +263,16 @@ class StoreReadCoordinator {
       'kill switch off; evicted ${keys.length} favourite entries so the live '
       'path takes over immediately',
     );
+  }
+
+  /// Release every listener but stay usable.
+  ///
+  /// For `AppLifecycleState.detached`, which is RESUMABLE on Android. Using
+  /// the terminal [dispose] there killed the shared subscription singleton for
+  /// the rest of the process (round 5, B2).
+  Future<void> release() async {
+    if (_disposed) return;
+    await _subs.detach();
   }
 
   /// Detach from the favourites source and drop every listener (guard 6).
