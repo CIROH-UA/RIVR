@@ -719,6 +719,11 @@ export async function checkStoreHealth(): Promise<{
       lastWriteAgeMs: health.lastWriteAgeMs,
       products: health.products.map(
         (p) => `${p.product}:${Math.round(p.ageMs / 3600_000)}h`),
+      // Written age vs run age, side by side, because the pair is what makes
+      // "healthy" checkable: punctual writes carrying yesterday's water look
+      // perfect in the first list and wrong in the second.
+      runs: health.runs.map(
+        (r) => `${r.product}:${Math.round(r.runAgeMs / 3600_000)}h`),
     });
   } else {
     // error level so it surfaces without anybody watching, which is the

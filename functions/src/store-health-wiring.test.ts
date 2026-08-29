@@ -30,6 +30,8 @@ import {resolve} from "node:path";
 
 const SOURCE = readFileSync(
   resolve(__dirname, "..", "src", "store-service.ts"), "utf8");
+const FIRESTORE_SOURCE = readFileSync(
+  resolve(__dirname, "..", "src", "store-firestore.ts"), "utf8");
 
 /** The body of checkStoreHealth, which is what these assertions are about. */
 function checkStoreHealthBody(): string {
@@ -85,3 +87,31 @@ describe("Phase 7 — the health check is actually fed its per-product data",
         "verdict cannot be told apart from a check that read nothing");
     });
   });
+
+describe("Phase 7 — the samples actually carry a run identity", () => {
+  // Found by mutation: removing `runId` from the projection left all 369
+  // tests green. `assessRunCurrency` is tested exhaustively as a pure
+  // function, but every one of those tests builds its own samples, so none of
+  // them notices that the real ones arrive with no run at all — in which case
+  // the function skips every document and reports a spotless store.
+  //
+  // That is the failure mode this whole check exists to prevent, arriving by
+  // the back door: a monitor that is silent because it was fed nothing.
+  test("sampleStoredWindows projects runId from Firestore", () => {
+    const start = FIRESTORE_SOURCE.indexOf(
+      "export async function sampleStoredWindows");
+    assert.notEqual(start, -1, "sampleStoredWindows is gone or renamed");
+    const after = FIRESTORE_SOURCE.indexOf("\nexport ", start + 1);
+    const body = FIRESTORE_SOURCE.slice(
+      start, after === -1 ? FIRESTORE_SOURCE.length : after);
+
+    assert.match(body, /\.select\([^)]*"runId"/,
+      "the query must SELECT runId — a projection that omits it returns " +
+      "documents with no run, and run-currency checking silently becomes a " +
+      "no-op that reports every store healthy");
+
+    assert.match(body, /runId:\s*data\.runId/,
+      "the selected runId must be carried onto the sample. Reading it from " +
+      "Firestore and then dropping it is the same no-op with an extra step.");
+  });
+});

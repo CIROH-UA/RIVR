@@ -21,6 +21,7 @@ import {
   ProbeRuns,
   assessStoreHealth,
   assessProductFreshness,
+  assessRunCurrency,
   decideTriggers,
   probeRunFor,
   quotaUsage,
@@ -294,6 +295,150 @@ describe("per-product freshness — the hole the heartbeat had", () => {
       NOW);
     assert.equal(h.status, "healthy");
     assert.deepEqual(h.products, []);
+  });
+});
+
+describe("run currency — the failure write recency cannot see", () => {
+  /**
+   * A stored document written NOW but carrying a run from `runAgeHours` ago.
+   * @param {string} product - Product id.
+   * @param {number} runAgeHours - How old the run is.
+   * @param {number} fetchedAgeHours - How long ago it was written.
+   * @param {string} id - Document id.
+   * @return {object} A StoredWindowSample.
+   */
+  function held(
+    product: string,
+    runAgeHours: number,
+    fetchedAgeHours = 0.5,
+    id = "d"
+  ) {
+    return {
+      documentId: `${product}__${id}`,
+      source: product.startsWith("geoglows") ? "geoglows" : "nwm",
+      product,
+      fetchedAt:
+        new Date(NOW.getTime() - fetchedAgeHours * 3600_000).toISOString(),
+      validUntil: NOW.toISOString(),
+      runId: new Date(NOW.getTime() - runAgeHours * 3600_000).toISOString(),
+    };
+  }
+
+  // THE incident, reconstructed. On 2026-08-29 the GEOGLOWS job ran at 01:30
+  // every day, fetched, got a forecast_date one day newer than the stored one,
+  // and wrote it. Writes were punctual — `fetchedAt` minutes old — while the
+  // water was a day stale. Both the old collection-wide heartbeat AND the
+  // per-product write-recency check report that as perfectly healthy. Only run
+  // currency sees it, and it took a device log to notice at the time.
+  test("punctual writes carrying yesterday's run are caught", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000), // written minutes ago
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("geoglowsForecast", 40, 0.25)] as never); // run 40h old, cap 36h
+
+    assert.notEqual(h.status, "healthy",
+      "written 15 minutes ago and still a day out of date — this is the " +
+      "exact shape that ran undetected for days");
+    assert.match(h.problems.join(" "), /geoglowsForecast is serving a run/);
+  });
+
+  test("a punctual write of a CURRENT run is healthy", () => {
+    // The same document shape, one day younger. Guards against a cap so tight
+    // that normal operation alarms.
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("geoglowsForecast", 16, 0.25)] as never);
+
+    assert.equal(h.status, "healthy", h.problems.join("; "));
+  });
+
+  // GEOGLOWS stamps its run at the day's 00Z and publishes 10:15-10:30 UTC, so
+  // the oldest a legitimate run gets is ~34.5h just before the next lands.
+  test("a GEOGLOWS run just before the next publication is still healthy",
+    () => {
+      const h = assessStoreHealth(
+        new Date(NOW.getTime() - 600_000),
+        new Date(NOW.getTime() - 600_000),
+        NOW,
+        [held("geoglowsForecast", 34, 0.25)] as never);
+      assert.equal(h.status, "healthy",
+        "34h is a normal GEOGLOWS run age; alarming here would cry wolf " +
+        "every single morning");
+    });
+
+  test("the cap is per product, not one number", () => {
+    // 30h: past shortRange's 8h, inside longRange's 36h.
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("shortRange", 30), held("longRange", 30)] as never);
+
+    const joined = h.problems.join(" ");
+    assert.match(joined, /shortRange is serving a run/);
+    assert.ok(!joined.includes("longRange"),
+      "long range runs legitimately stay current far longer — its 12Z run " +
+      "was observed landing at 21:20Z");
+  });
+
+  // A documented five-hour NOAA stall is normal operation in this repo.
+  test("a five-hour NOAA quiet period does not alarm", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("shortRange", 5), held("analysisAssimilation", 5)] as never);
+    assert.equal(h.status, "healthy", h.problems.join("; "));
+  });
+
+  test("products with no run identity are skipped, not defaulted", () => {
+    // reachMetadata and returnPeriods have no run at all. Inheriting another
+    // product's cadence is exactly how the hold cap called a healthy store
+    // down within a minute of reaching production.
+    const runs = assessRunCurrency([
+      {
+        documentId: "nwm__1__returnPeriods",
+        source: "nwm",
+        product: "returnPeriods",
+        fetchedAt: NOW.toISOString(),
+        validUntil: NOW.toISOString(),
+      },
+    ] as never, NOW);
+    assert.deepEqual(runs, []);
+  });
+
+  test("an unparseable runId is ignored, not read as age zero", () => {
+    const runs = assessRunCurrency([
+      {
+        documentId: "x", source: "nwm", product: "shortRange",
+        fetchedAt: NOW.toISOString(), validUntil: NOW.toISOString(),
+        runId: "not-a-date",
+      },
+    ] as never, NOW);
+    assert.deepEqual(runs, []);
+  });
+
+  test("the NEWEST run per product is judged, not the oldest", () => {
+    const runs = assessRunCurrency(
+      [held("shortRange", 40, 0.5, "lagging"),
+        held("shortRange", 1, 0.5, "current")] as never,
+      NOW);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].stale, false);
+  });
+
+  // Both dimensions are reported, so a healthy log proves both were checked.
+  test("write recency and run currency are reported separately", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("shortRange", 1)] as never);
+    assert.equal(h.products.length, 1);
+    assert.equal(h.runs.length, 1);
   });
 });
 

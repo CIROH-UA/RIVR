@@ -267,7 +267,7 @@ export async function sampleStoredWindows(
   for (const product of products) {
     const snap = await db.collection(STORE_COLLECTION)
       .where("product", "==", product)
-      .select("source", "product", "window")
+      .select("source", "product", "window", "runId")
       .get();
     usage.reads += snap.size;
     for (const d of snap.docs) {
@@ -278,6 +278,7 @@ export async function sampleStoredWindows(
         product: data.product as ForecastProductId,
         fetchedAt: (data.window?.fetchedAt as string) ?? "",
         validUntil: (data.window?.validUntil as string) ?? "",
+        runId: data.runId as string | undefined,
       });
     }
   }

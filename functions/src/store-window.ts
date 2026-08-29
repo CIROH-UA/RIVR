@@ -77,6 +77,69 @@ export interface StoredWindowSample {
   fetchedAt: string;
   /** ISO instant the document currently expires at. */
   validUntil: string;
+  /**
+   * The upstream run this value came from, when it has one.
+   *
+   * Absent for the near-static products, which carry no run identity — that
+   * is precisely why they are not on the hourly trigger cycle.
+   */
+  runId?: string;
+}
+
+/**
+ * How old the RUN ITSELF may be, per product.
+ *
+ * **Not the same question as [MAX_HOLD_MS], and the distinction is the whole
+ * point.** `MAX_HOLD_MS` measures how long ago we last WROTE. This measures
+ * how old the water is that we wrote. A refresher that runs perfectly on
+ * schedule, fetching and storing punctually every single time, can hold
+ * yesterday's forecast forever and look flawless by the first measure.
+ *
+ * That is not hypothetical. It is what GEOGLOWS did every day until
+ * 2026-08-29: the 01:30 job fetched, received a `forecast_date` one day newer
+ * than the stored one, wrote it, and moved on. `fetchedAt` was never more than
+ * a few hours old. The store served yesterday's water while writing on time,
+ * and it took a device log to notice.
+ *
+ * Every `runId` is an ISO instant — NWM uses the run's `referenceTime`, and
+ * GEOGLOWS's date-only `forecast_date` is widened to that day's 00Z by
+ * `normaliseForecastDate` — so run age is comparable across both sources.
+ *
+ * The numbers are publish cadence plus the observed lag, not guesses:
+ *
+ * - **8 h** for the hourly NWM products. A five-hour NOAA stall is recorded in
+ *   this repo as normal, so a tighter cap would cry wolf on a known-good day.
+ * - **24 h / 36 h** for medium and long range. Nominally 6-hourly, but the 12Z
+ *   run was observed landing at 21:20Z (2026-08-28), so a run stays current
+ *   far longer than its cycle suggests. Long range gets more because its lag
+ *   is worse.
+ * - **36 h** for GEOGLOWS. One run per UTC day, stamped 00Z, published
+ *   10:15-10:30 UTC (measured on two consecutive days). So the oldest a
+ *   legitimate run gets is ~34.5 h, just before the next one lands. 36 h
+ *   clears that and still catches yesterday's run from noon onward — which is
+ *   the incident above.
+ */
+export const MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
+  analysisAssimilation: 8 * 3600_000,
+  shortRange: 8 * 3600_000,
+  mediumRange: 24 * 3600_000,
+  longRange: 36 * 3600_000,
+  geoglowsForecast: 36 * 3600_000,
+};
+
+/**
+ * How old [product]'s run may be, or null when it is not judged.
+ *
+ * Returns null rather than a default on purpose. An unknown product here must
+ * NOT inherit someone else's cadence: the near-static products have no run at
+ * all, and a wrong default is how the hold cap reported a healthy store as
+ * down within a minute of reaching production.
+ *
+ * @param {ForecastProductId} product - The product.
+ * @return {number | null} Cap in milliseconds, or null if not applicable.
+ */
+export function maxRunAgeMs(product: ForecastProductId): number | null {
+  return MAX_RUN_AGE_MS[product] ?? null;
 }
 
 /** A window to re-stamp. */

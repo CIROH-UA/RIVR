@@ -15,7 +15,11 @@
 
 import {ForecastProductId} from "./store-keys.js";
 import {isRunNewer} from "./store-document.js";
-import {StoredWindowSample, maxHoldMs} from "./store-window.js";
+import {
+  StoredWindowSample,
+  maxHoldMs,
+  maxRunAgeMs,
+} from "./store-window.js";
 
 /** The probe's view of what upstream has published. */
 export interface ProbeRuns {
@@ -180,6 +184,8 @@ export interface StoreHealth {
   probeAgeMs: number | null;
   /** Per-product freshness, stalest first. Empty when not supplied. */
   products: ProductFreshness[];
+  /** Per-product run currency, stalest first. Empty when not supplied. */
+  runs: ProductRunCurrency[];
 }
 
 /**
@@ -290,6 +296,66 @@ export function assessProductFreshness(
   return out;
 }
 
+/** One product's run currency, as the health check sees it. */
+export interface ProductRunCurrency {
+  product: ForecastProductId;
+  /** Age of the NEWEST run held for this product. */
+  runAgeMs: number;
+  capMs: number;
+  stale: boolean;
+}
+
+/**
+ * Assess how old the WATER is, as distinct from how recently we wrote.
+ *
+ * `assessProductFreshness` above catches a refresher that stopped. This
+ * catches the failure it structurally cannot see: a refresher that keeps
+ * writing, on schedule, carrying yesterday's run. That is what GEOGLOWS did
+ * every day until 2026-08-29, and why a device log rather than the monitoring
+ * found it.
+ *
+ * The newest RUN across the product's documents is judged, for the same reason
+ * the newest fetch is: one reach lagging is a per-reach failure the run
+ * already records and retries, not a stalled product.
+ *
+ * Products with no `MAX_RUN_AGE_MS` entry are skipped rather than defaulted —
+ * the near-static products carry no run identity at all, and inheriting
+ * somebody else's cadence is exactly how the hold cap called a healthy store
+ * down within a minute of reaching production.
+ *
+ * Pure, so a store full of yesterday's water can be tested without waiting a
+ * day for one.
+ *
+ * @param {readonly StoredWindowSample[]} samples - Every stored document.
+ * @param {Date} now - Reference instant.
+ * @return {ProductRunCurrency[]} One entry per judged product, stalest first.
+ */
+export function assessRunCurrency(
+  samples: readonly StoredWindowSample[],
+  now: Date
+): ProductRunCurrency[] {
+  const newestRun = new Map<ForecastProductId, number>();
+
+  for (const s of samples) {
+    if (!s.runId) continue;
+    const runAt = Date.parse(s.runId);
+    if (Number.isNaN(runAt)) continue;
+    const seen = newestRun.get(s.product);
+    if (seen === undefined || runAt > seen) newestRun.set(s.product, runAt);
+  }
+
+  const out: ProductRunCurrency[] = [];
+  for (const [product, runAt] of newestRun) {
+    const capMs = maxRunAgeMs(product);
+    if (capMs === null) continue;
+    const runAgeMs = now.getTime() - runAt;
+    out.push({product, runAgeMs, capMs, stale: runAgeMs > capMs});
+  }
+
+  out.sort((a, b) => (b.runAgeMs - b.capMs) - (a.runAgeMs - a.capMs));
+  return out;
+}
+
 export function assessStoreHealth(
   lastSuccessfulWrite: Date | null,
   lastProbeSample: Date | null,
@@ -335,12 +401,23 @@ export function assessStoreHealth(
     );
   }
 
+  // How old the WATER is, which write recency above cannot see.
+  const runs = assessRunCurrency(samples, now);
+  for (const r of runs) {
+    if (!r.stale) continue;
+    problems.push(
+      `${r.product} is serving a run ` +
+      `${Math.round(r.runAgeMs / 3600_000)}h old ` +
+      `(cap ${Math.round(r.capMs / 3600_000)}h)`
+    );
+  }
+
   let status: HealthStatus = "healthy";
   if (problems.length === 1) status = "degraded";
   if (problems.length > 1) status = "down";
   if (lastWriteAgeMs === null && probeAgeMs === null) status = "down";
 
-  return {status, problems, lastWriteAgeMs, probeAgeMs, products};
+  return {status, problems, lastWriteAgeMs, probeAgeMs, products, runs};
 }
 
 /**
