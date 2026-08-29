@@ -22,87 +22,20 @@ if (!admin.apps.length) {
 }
 
 /**
- * Scheduled functions for checking river flood alerts at specific times
+ * Alert evaluation is RUN-DRIVEN, not clock-driven.
  *
- * Time slots based on user notification frequency preferences:
- * - Slot 1 (6am MT): All users (1x, 2x, 3x, 4x daily)
- * - Slot 2 (12pm MT): 3x and 4x daily users
- * - Slot 3 (6pm MT): 2x, 3x, and 4x daily users
- * - Slot 4 (12am MT): 4x daily users only
+ * Four scheduled functions used to live here — 6am, noon, 6pm and midnight
+ * Mountain — and `notificationFrequency` decided which of them a user appeared
+ * in. ADR 0011 Phase 6: evaluation now happens when the upstream run advances,
+ * which is what takes the time from publication to alert from up to six hours
+ * down to under one. The evaluation itself is triggered at the end of
+ * `storeRefreshHourly` and `storeGeoglowsDaily`, so it runs against data that
+ * was just written and only when there was something new to write.
+ *
+ * Guard 4 — "no new run, no evaluation, no sends" — is then free rather than
+ * enforced: the store refresh already knows, and does nothing when nothing
+ * advanced.
  */
-
-// Slot 1: 6:00 AM Mountain Time
-export const checkRiverAlerts6am = functions
-  .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("0 6 * * *")
-  .timeZone("America/Denver")
-  .onRun(async (context) => {
-    await runAlertCheckForSlot(1, context.timestamp);
-  });
-
-// Slot 2: 12:00 PM Mountain Time
-export const checkRiverAlerts12pm = functions
-  .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("0 12 * * *")
-  .timeZone("America/Denver")
-  .onRun(async (context) => {
-    await runAlertCheckForSlot(2, context.timestamp);
-  });
-
-// Slot 3: 6:00 PM Mountain Time
-export const checkRiverAlerts6pm = functions
-  .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("0 18 * * *")
-  .timeZone("America/Denver")
-  .onRun(async (context) => {
-    await runAlertCheckForSlot(3, context.timestamp);
-  });
-
-// Slot 4: 12:00 AM Mountain Time
-export const checkRiverAlerts12am = functions
-  .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("0 0 * * *")
-  .timeZone("America/Denver")
-  .onRun(async (context) => {
-    await runAlertCheckForSlot(4, context.timestamp);
-  });
-
-/**
- * Shared logic for running alert checks
- * @param {number} slot - The time slot number (1-4)
- * @param {string} scheduleTime - The scheduled execution time
- */
-async function runAlertCheckForSlot(
-  slot: number,
-  scheduleTime: string
-): Promise<void> {
-  const startTime = Date.now();
-  logger.info(`🔔 Starting river alert check for slot ${slot}`, {
-    slot,
-    scheduleTime,
-  });
-
-  try {
-    const {checkAlertsForTimeSlot} = await import("./notification-service.js");
-    const result = await checkAlertsForTimeSlot(slot);
-
-    const duration = Date.now() - startTime;
-    logger.info(`✅ Slot ${slot} alert check completed`, {
-      slot,
-      duration: `${duration}ms`,
-      usersChecked: result.usersChecked,
-      alertsSent: result.alertsSent,
-      errors: result.errors,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error(`❌ Slot ${slot} alert check failed`, {
-      slot,
-      error: error instanceof Error ? error.message : String(error),
-      duration: `${duration}ms`,
-    });
-  }
-}
 
 /**
  * Weekly Outlook digest — Fridays at 7:00 AM Mountain Time. One summary push per
@@ -200,30 +133,21 @@ export const triggerAlertCheck = functions
         return;
       }
 
-      logger.info("🧪 Manual alert check triggered");
+      logger.info("🧪 Manual alert evaluation triggered");
 
       try {
-        const slot = request.body?.slot || 1;
-
-        if (slot < 1 || slot > 4) {
-          response.status(400).json({
-            success: false,
-            error: "Slot must be between 1 and 4",
-          });
-          return;
-        }
-
-        const {checkAlertsForTimeSlot} = await import(
+        // No slot any more — evaluation is driven by the upstream run, so a
+        // manual trigger simply evaluates the store as it stands now.
+        const {runAlertEvaluation} = await import(
           "./notification-service.js"
         );
-        const result = await checkAlertsForTimeSlot(slot);
+        const result = await runAlertEvaluation("manual");
 
-        logger.info(`✅ Manual check for slot ${slot} completed`, result);
+        logger.info("✅ Manual alert evaluation completed", result);
 
         response.json({
           success: true,
-          slot,
-          message: `Alert check for slot ${slot} completed successfully`,
+          message: "Alert evaluation completed successfully",
           ...result,
         });
       } catch (error) {
@@ -370,7 +294,48 @@ export const storeRefreshHourly = functions
       lagging: outcome.report?.skippedLagging ?? 0,
       usage: outcome.usage,
     });
+
+    await evaluateAlertsAfterStoreRun("nwm run advanced", outcome);
   });
+
+/**
+ * Evaluate alerts, but only when the store actually advanced.
+ *
+ * ADR 0011 Phase 6 guard 4 — "no new run, no evaluation, no sends" — is free
+ * here rather than enforced: the store refresh already decided whether anything
+ * advanced, so gating on its outcome means an idle upstream costs nothing. It
+ * also guarantees ordering, since the documents alerts read were written
+ * moments earlier by the same invocation.
+ *
+ * Failures are logged and swallowed. An alert evaluation must never be able to
+ * fail a store run: the store is what the app reads, and a broken notification
+ * is a smaller problem than a stale river.
+ *
+ * @param {string} reason - What triggered it, for the logs.
+ * @param {object} outcome - The store run's outcome.
+ * @return {Promise<void>} Nothing; outcomes are logged.
+ */
+async function evaluateAlertsAfterStoreRun(
+  reason: string,
+  outcome: {ran: boolean; report: {written: number} | null}
+): Promise<void> {
+  const written = outcome.report?.written ?? 0;
+  if (!outcome.ran || written === 0) {
+    logger.info("🔕 no new data; alerts not evaluated", {reason, written});
+    return;
+  }
+
+  try {
+    const {runAlertEvaluation} = await import("./notification-service.js");
+    const result = await runAlertEvaluation(reason);
+    logger.info("🔔 alerts evaluated after store run", {reason, ...result});
+  } catch (error) {
+    logger.error("❌ alert evaluation failed after a store run", {
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Write-through on favourite (guard 9).
@@ -454,6 +419,11 @@ export const storeGeoglowsDaily = functions
       written: outcome.report?.written ?? 0,
       failed: outcome.report?.failed ?? 0,
     });
+
+    // GEOGLOWS advances on its own daily cycle, not the NWM probe's, so its
+    // reaches would otherwise only be evaluated when an unrelated NWM run
+    // happened to advance.
+    await evaluateAlertsAfterStoreRun("geoglows run advanced", outcome);
   });
 
 /**

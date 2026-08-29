@@ -38,7 +38,9 @@ interface UserSettings {
 import {FloodCategory, categoryFor} from "./flow-classification.js";
 import {readAlertDataFromStore} from "./store-alert-source.js";
 import {
+  AlertFrequency,
   AlertTrigger,
+  DEFAULT_FREQUENCY,
   decideTrigger,
   frequencyFrom,
 } from "./alert-triggers.js";
@@ -134,12 +136,10 @@ export interface ReachData {
  * @param {number} timeSlot - Time slot number (1-4)
  * @return {Promise<AlertCheckResult>} Summary of alert check results
  */
-export async function checkAlertsForTimeSlot(
-  timeSlot: number
+export async function runAlertEvaluation(
+  reason: string
 ): Promise<AlertCheckResult> {
-  logger.info(`🔍 Starting alert check for time slot ${timeSlot}`, {
-    timeSlot,
-  });
+  logger.info("🔍 Starting alert evaluation", {reason});
 
   const result: AlertCheckResult = {
     usersChecked: 0,
@@ -148,14 +148,13 @@ export async function checkAlertsForTimeSlot(
   };
 
   try {
-    // Step 1: Get eligible users for this time slot
-    const users = await getNotificationUsers(timeSlot);
-    logger.info(
-      `📱 Found ${users.length} eligible users for slot ${timeSlot}`
-    );
+    // Step 1: every user eligible for notifications. No slot: WHEN to
+    // evaluate is decided by the upstream run now, not by a user preference.
+    const users = await getNotificationUsers();
+    logger.info(`📱 Found ${users.length} eligible users`);
 
     if (users.length === 0) {
-      logger.info(`🎯 Slot ${timeSlot}: no eligible users, done.`);
+      logger.info("🎯 No eligible users, done.");
       return result;
     }
 
@@ -210,7 +209,8 @@ export async function checkAlertsForTimeSlot(
     const reachesWithThresholds = Array.from(reachDataMap.values())
       .filter((r) => r.returnPeriods.length > 0).length;
 
-    logger.info(`🎯 Slot ${timeSlot} check complete`, {
+    logger.info("🎯 Alert evaluation complete", {
+      reason,
       ...result,
       uniqueReaches: uniqueReaches.size,
       reachesWithForecast: reachesWithData,
@@ -219,7 +219,8 @@ export async function checkAlertsForTimeSlot(
 
     return result;
   } catch (error) {
-    logger.error(`💥 Fatal error in slot ${timeSlot} check`, {
+    logger.error("💥 Fatal error in alert evaluation", {
+      reason,
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
@@ -305,31 +306,29 @@ export async function batchFetchReachData(
 }
 
 /**
- * Get users who should be checked for this time slot
- * Time slot mapping:
- * - Slot 1 (6am): All users (1x, 2x, 3x, 4x daily)
- * - Slot 2 (12pm): 3x and 4x daily users
- * - Slot 3 (6pm): 2x, 3x, and 4x daily users
- * - Slot 4 (12am): 4x daily users only
- * @param {number} timeSlot - Time slot number (1-4)
- * @return {Promise<UserSettings[]>} Array of users for this slot
+ * Every user eligible for notifications.
+ *
+ * Used to filter by time slot: evaluation ran on four fixed Mountain-Time
+ * slots and `notificationFrequency` decided which of them a user appeared in.
+ * ADR 0011 Phase 6 replaced the clock with the upstream run, so WHEN to
+ * evaluate is no longer a user preference — how often to be *reminded* is, per
+ * stream, via `alertFrequencies` (decision 19).
+ *
+ * @return {Promise<UserSettings[]>} Eligible users.
  */
-async function getNotificationUsers(
-  timeSlot: number
-): Promise<UserSettings[]> {
+async function getNotificationUsers(): Promise<UserSettings[]> {
   try {
-    // Determine minimum frequency for this slot
-    const minFrequency = getMinFrequencyForSlot(timeSlot);
-
+    // A single equality filter — no composite index needed. The declared
+    // users(enableNotifications, notificationFrequency) index is now unused by
+    // this query; left in place rather than dropped, because removing an index
+    // is not something to undo in a hurry.
     const usersSnapshot = await db.collection("users")
       .where("enableNotifications", "==", true)
-      .where("notificationFrequency", ">=", minFrequency)
       .get();
 
     logger.info(
-      `📊 User query: ${usersSnapshot.size} docs matched` +
-      ` (slot ${timeSlot}, minFrequency ${minFrequency})` +
-      ", filtering for valid FCM + favorites..."
+      `📊 User query: ${usersSnapshot.size} docs matched, ` +
+      "filtering for valid FCM + favorites..."
     );
 
     const users: UserSettings[] = [];
@@ -391,23 +390,21 @@ async function getNotificationUsers(
 }
 
 /**
- * Get minimum frequency required for a time slot
- * @param {number} timeSlot - Time slot number (1-4)
- * @return {number} Minimum notification frequency
+ * The reminder interval for a reach the user has not set explicitly.
+ *
+ * Their old global `notificationFrequency` (1-4 checks a day) is read as a
+ * signal about how much they want to hear rather than discarded: someone who
+ * chose once a day gets daily reminders, everyone else the standard 6-hourly.
+ *
+ * That setting no longer decides WHEN evaluation happens — the upstream run
+ * does — so this is the only meaning it retains, and only until the user picks
+ * a per-stream value.
+ *
+ * @param {number} legacyFrequency - The old 1-4 setting.
+ * @return {AlertFrequency} The default reminder interval.
  */
-function getMinFrequencyForSlot(timeSlot: number): number {
-  switch (timeSlot) {
-  case 1: // 6am - all users
-    return 1;
-  case 2: // 12pm - 3x and 4x
-    return 3;
-  case 3: // 6pm - 2x, 3x, 4x
-    return 2;
-  case 4: // 12am - 4x only
-    return 4;
-  default:
-    return 1;
-  }
+export function defaultFrequencyFor(legacyFrequency: number): AlertFrequency {
+  return legacyFrequency === 1 ? "daily" : DEFAULT_FREQUENCY;
 }
 
 /**
@@ -446,7 +443,9 @@ async function checkUserRivers(
         category,
         previous: prior?.category ?? null,
         lastSentAt: prior?.sentAt ?? null,
-        frequency: frequencyFrom(user.alertFrequencies[reachId]),
+        frequency: reachId in user.alertFrequencies ?
+          frequencyFrom(user.alertFrequencies[reachId]) :
+          defaultFrequencyFor(user.notificationFrequency),
         now: new Date(),
       });
 
