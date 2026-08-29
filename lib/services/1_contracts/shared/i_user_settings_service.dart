@@ -48,6 +48,17 @@ abstract class IUserSettingsService {
     String reachId,
     String wireValue,
   );
+
+  /// Set the same reminder frequency on every given river.
+  ///
+  /// One write rather than N: a per-river loop over twenty favourites is
+  /// twenty round trips, and a partial failure would leave the list in a state
+  /// the user never chose.
+  Future<UserSettings?> updateAllRiverAlertFrequencies(
+    String userId,
+    List<String> reachIds,
+    String wireValue,
+  );
   void clearCache();
   Future<bool> userHasSettings(String userId);
   Future<void> syncFlowUnitPreference(String userId);

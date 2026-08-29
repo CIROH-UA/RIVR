@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:rivr/ui/2_presentation/features/forecast/widgets/reach_alert_frequency_row.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/load_view_state.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
@@ -740,6 +741,15 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         // Outlook trend + detail: NWM range widgets, or the GEOGLOWS 15-day list.
         if (!_isGeoglows) ..._nwmBodySlivers(nwm),
         if (_isGeoglows) ..._geoglowsBodySlivers(),
+        // How often this river notifies, at the end of the notification's own
+        // journey — a flood alert deep-links to this page, and this was the
+        // only place a woken user could not reach the fix from.
+        SliverToBoxAdapter(
+          child: ReachAlertFrequencyRow(
+            reachId: widget.reachId,
+            riverName: _river,
+          ),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );

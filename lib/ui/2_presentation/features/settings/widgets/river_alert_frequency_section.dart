@@ -40,6 +40,7 @@ class RiverAlertFrequencySection extends StatelessWidget {
     required this.frequencies,
     required this.defaultFrequency,
     required this.onChanged,
+    required this.onChangedAll,
     this.isEnabled = true,
   });
 
@@ -57,6 +58,13 @@ class RiverAlertFrequencySection extends StatelessWidget {
 
   /// Called with the reach id and the newly chosen frequency.
   final void Function(String reachId, AlertFrequency frequency) onChanged;
+
+  /// Apply one frequency to every favourite at once.
+  ///
+  /// Review's point: someone with twenty favourites who wants "only when it
+  /// changes" everywhere would otherwise open twenty pages. The per-river list
+  /// is the precise tool; this is the blunt one, and both are needed.
+  final void Function(AlertFrequency frequency) onChangedAll;
 
   final bool isEnabled;
 
@@ -91,6 +99,31 @@ class RiverAlertFrequencySection extends StatelessWidget {
         'often you are reminded while it stays flooded.',
       ),
       children: [
+        // Offered only where it earns its place. With three favourites the
+        // list itself is faster than a bulk action; with twenty it is not.
+        if (favorites.length >= 5)
+          CupertinoListTile(
+            leading: Icon(
+              CupertinoIcons.slider_horizontal_3,
+              size: 20,
+              color: CupertinoColors.systemBlue.resolveFrom(context),
+            ),
+            title: const Text('Set all rivers'),
+            trailing: const CupertinoListTileChevron(),
+            onTap: isEnabled
+                ? () => Navigator.of(context).push(
+                      CupertinoPageRoute<void>(
+                        builder: (_) => RiverAlertFrequencyPage(
+                          riverName: 'All ${favorites.length} rivers',
+                          selected: defaultFrequency,
+                          isDefault: false,
+                          applyToAll: true,
+                          onChanged: onChangedAll,
+                        ),
+                      ),
+                    )
+                : null,
+          ),
         for (final favorite in favorites)
           _RiverRow(
             favorite: favorite,
@@ -154,7 +187,7 @@ class _RiverRow extends StatelessWidget {
       onTap: isEnabled
           ? () => Navigator.of(context).push(
                 CupertinoPageRoute<void>(
-                  builder: (_) => _RiverAlertFrequencyPage(
+                  builder: (_) => RiverAlertFrequencyPage(
                     riverName: _name,
                     selected: selected,
                     isDefault: isDefault,
@@ -167,31 +200,45 @@ class _RiverRow extends StatelessWidget {
   }
 }
 
-/// The picker itself, as a pushed page.
+/// The reminder-frequency picker for one river, as a pushed page.
 ///
 /// A page rather than an action sheet so the chevron on the row tells the
 /// truth, so five options with descriptions cannot overflow a small phone, and
 /// so the "Off still escalates" note can sit on the same screen as the Off row
 /// rather than in a footer the user scrolled past.
-class _RiverAlertFrequencyPage extends StatefulWidget {
-  const _RiverAlertFrequencyPage({
+///
+/// Public because the settings list is not the only door. Someone woken by a
+/// notification lands on that river's forecast page, and the fix has to be
+/// reachable from there — review found the settings list was the ONLY route,
+/// three taps behind a custom overflow menu, so the person actually annoyed at
+/// 3am had nowhere to go.
+class RiverAlertFrequencyPage extends StatefulWidget {
+  const RiverAlertFrequencyPage({
+    super.key,
     required this.riverName,
     required this.selected,
     required this.isDefault,
     required this.onChanged,
+    this.previousPageTitle = 'Notifications',
+    this.applyToAll = false,
   });
 
+  /// Whether this choice will be written to EVERY favourite. Changes the
+  /// wording so a bulk action cannot be mistaken for a single one.
+  final bool applyToAll;
+
+  final String previousPageTitle;
   final String riverName;
   final AlertFrequency selected;
   final bool isDefault;
   final ValueChanged<AlertFrequency> onChanged;
 
   @override
-  State<_RiverAlertFrequencyPage> createState() =>
+  State<RiverAlertFrequencyPage> createState() =>
       _RiverAlertFrequencyPageState();
 }
 
-class _RiverAlertFrequencyPageState extends State<_RiverAlertFrequencyPage> {
+class _RiverAlertFrequencyPageState extends State<RiverAlertFrequencyPage> {
   late AlertFrequency _selected = widget.selected;
 
   /// Quietest first.
@@ -215,7 +262,7 @@ class _RiverAlertFrequencyPageState extends State<_RiverAlertFrequencyPage> {
       backgroundColor: CupertinoColors.systemGroupedBackground,
       navigationBar: CupertinoNavigationBar(
         middle: Text(widget.riverName, overflow: TextOverflow.ellipsis),
-        previousPageTitle: 'Notifications',
+        previousPageTitle: widget.previousPageTitle,
       ),
       child: SafeArea(
         child: ListView(
@@ -224,13 +271,19 @@ class _RiverAlertFrequencyPageState extends State<_RiverAlertFrequencyPage> {
             CupertinoListSection.insetGrouped(
               header: const Text('REMIND ME'),
               footer: Text(
-                widget.isDefault
-                    ? 'This river is using your default. Choosing here sets it '
-                        'for this river only.\n\nYou are told the moment it '
-                        'starts flooding, and always when it gets worse — even '
-                        'if you choose Off.'
-                    : 'You are told the moment it starts flooding, and always '
-                        'when it gets worse — even if you choose Off.',
+                widget.applyToAll
+                    ? 'This replaces the setting on every river, including any '
+                        'you have already set individually.\n\nYou are told '
+                        'the moment a river starts flooding, and always when '
+                        'it gets worse — even a river set to Off.'
+                    : widget.isDefault
+                        ? 'This river is using your default. Choosing here '
+                            'sets it for this river only.\n\nYou are told the '
+                            'moment it starts flooding, and always when it '
+                            'gets worse — even if you choose Off.'
+                        : 'You are told the moment it starts flooding, and '
+                            'always when it gets worse — even if you choose '
+                            'Off.',
               ),
               children: [
                 for (final option in _order)

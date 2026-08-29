@@ -22,6 +22,9 @@ class FavoriteRiverCard extends StatefulWidget {
   final FavoriteRiver favorite;
   final VoidCallback? onTap;
   final VoidCallback? onRename;
+
+  /// Whether this river's alerts are set to "Off". Shown as a marker only.
+  final bool isMuted;
   final VoidCallback? onChangeImage;
   final bool isReorderable;
   final int cardIndex;
@@ -31,6 +34,7 @@ class FavoriteRiverCard extends StatefulWidget {
     required this.favorite,
     this.onTap,
     this.onRename,
+    this.isMuted = false,
     this.onChangeImage,
     this.isReorderable = true,
     this.cardIndex = 0,
@@ -519,6 +523,27 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
               children: [
                 // Flood risk badge
                 _buildFloodRiskBadge(),
+                const SizedBox(width: 6),
+                // Muted marker. Without it a river set to Off is invisible
+                // here, so a user who silenced one months ago has no way to
+                // notice — and an escalation from it later reads as a bug.
+                // Deliberately just a marker: changing the setting lives on
+                // this river's own page and in Notification settings, and a
+                // third control on a card that already slides three ways
+                // would be one too many.
+                if (widget.isMuted)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.black.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      CupertinoIcons.bell_slash_fill,
+                      size: 12,
+                      color: CupertinoColors.white,
+                    ),
+                  ),
                 const Spacer(),
                 if (isRefreshing)
                   const CupertinoActivityIndicator(

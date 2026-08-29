@@ -810,6 +810,13 @@ class MockUserSettingsService implements IUserSettingsService {
     String reachId,
     String wireValue,
   ) async => null;
+  @override
+  Future<UserSettings?> updateAllRiverAlertFrequencies(
+    String userId,
+    List<String> reachIds,
+    String wireValue,
+  ) async => null;
+
 
   @override
   void clearCache() {}

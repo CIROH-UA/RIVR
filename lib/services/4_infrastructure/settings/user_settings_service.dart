@@ -469,6 +469,46 @@ class UserSettingsService implements IUserSettingsService {
     }
   }
 
+  /// Set the same reminder frequency on every given river.
+  ///
+  /// Still dotted field paths, one per river, in a SINGLE update. That keeps
+  /// the merge property the per-river write has — a setting changed on another
+  /// device for a river not in this list survives — while making the whole
+  /// bulk change atomic.
+  @override
+  Future<UserSettings?> updateAllRiverAlertFrequencies(
+    String userId,
+    List<String> reachIds,
+    String wireValue,
+  ) async {
+    try {
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+      if (reachIds.isEmpty) return settings;
+
+      await updateUserSettings(userId, {
+        for (final reachId in reachIds)
+          'alertFrequencies.$reachId': wireValue,
+      });
+
+      return settings.copyWith(
+        alertFrequencies: {
+          ...settings.alertFrequencies,
+          for (final reachId in reachIds) reachId: wireValue,
+        },
+      );
+    } catch (e) {
+      AppLogger.error(
+        'UserSettingsService',
+        'Error updating all river alert frequencies: $e',
+        e,
+      );
+      throw Exception(
+        'Failed to update river alert frequencies: ${e.toString()}',
+      );
+    }
+  }
+
   /// Clear cached settings (call on sign out)
   @override
   void clearCache() {

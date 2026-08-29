@@ -218,6 +218,45 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
     }
   }
 
+  /// Apply one frequency to every favourite.
+  ///
+  /// Same optimistic pattern as the single-river write, and the same revert.
+  Future<void> _updateAllRiverFrequencies(
+    List<String> reachIds,
+    AlertFrequency frequency,
+  ) async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null || reachIds.isEmpty) return;
+
+    final previous = Map<String, String>.from(_alertFrequencies);
+    setState(() {
+      _alertFrequencies = {
+        ..._alertFrequencies,
+        for (final id in reachIds) id: frequency.wireValue,
+      };
+    });
+
+    try {
+      final saved = await GetIt.I<IUserSettingsService>()
+          .updateAllRiverAlertFrequencies(
+        userId,
+        reachIds,
+        frequency.wireValue,
+      );
+      if (saved == null) throw Exception('settings unavailable');
+    } catch (e) {
+      AppLogger.error(
+        'NotificationsSettingsPage',
+        'Error updating all river alert frequencies: $e',
+        e,
+      );
+      if (mounted) {
+        setState(() => _alertFrequencies = previous);
+        _showError('Could not save those settings. Please try again.');
+      }
+    }
+  }
+
   /// Persist one river's reminder frequency.
   ///
   /// Optimistic: the row updates immediately and reverts if the write fails.
@@ -385,6 +424,12 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
                         defaultFrequency:
                             AlertFrequency.defaultFor(_notificationFrequency),
                         onChanged: _updateRiverFrequency,
+                        onChangedAll: (f) => _updateAllRiverFrequencies(
+                          favorites.favorites
+                              .map((r) => r.reachId)
+                              .toList(),
+                          f,
+                        ),
                         isEnabled: !_isUpdating,
                       ),
                     ),

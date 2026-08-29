@@ -25,6 +25,7 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
+import 'package:rivr/models/1_domain/shared/alert_frequency.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 
 /// Main favorites page - serves as app home screen
@@ -70,6 +71,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeFavorites();
       _loadUserFlowUnitPreference();
+      _loadMutedReaches();
       _loadBannerDismissalState();
       _loadOsPermission();
       _checkAndShowCoachMarks();
@@ -716,6 +718,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             lon: favorite.longitude,
           ),
           onRename: () => _showRenameDialog(favorite),
+          isMuted: _mutedReachIds.contains(favorite.reachId),
           onChangeImage: () => _navigateToImageSelection(favorite),
           isReorderable: _searchQuery.isEmpty,
         );
@@ -1176,6 +1179,32 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   void _navigateToImageSelection(FavoriteRiver favorite) {
     AppRouter.pushImageSelection(context, reachId: favorite.reachId);
+  }
+
+  /// Reach ids whose alerts the user has set to "Off".
+  ///
+  /// Read once when the page builds its list. A stale value here shows or
+  /// hides a small marker for one refresh, which is a far smaller cost than
+  /// listening to the settings document from a scrolling list.
+  Set<String> _mutedReachIds = const {};
+
+  Future<void> _loadMutedReaches() async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+    try {
+      final settings =
+          await GetIt.I<IUserSettingsService>().getUserSettings(userId);
+      if (!mounted || settings == null) return;
+      setState(() {
+        _mutedReachIds = {
+          for (final entry in settings.alertFrequencies.entries)
+            if (entry.value == AlertFrequency.off.wireValue) entry.key,
+        };
+      });
+    } catch (e) {
+      // A marker is not worth an error state; the list is the point.
+      AppLogger.error('FavoritesPage', 'Error loading muted reaches: $e', e);
+    }
   }
 
   void _showRenameDialog(FavoriteRiver favorite) {
