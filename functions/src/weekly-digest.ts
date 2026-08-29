@@ -17,6 +17,7 @@
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import {
+  labelFor,
   ReachData,
   reachKey,
   ReachSource,
@@ -207,7 +208,11 @@ function buildRows(
     rows.push({
       // Prefer the app-populated label (real name / geocoded place); the
       // server's riverName ("Stream <id>" for GEOGLOWS) is the fallback.
-      name: user.favoriteLabels[reachId] ?? reach.riverName,
+      // Shared reader: prefers the source-carrying key, falls back to the
+      // bare-reachId entries written before 2026-08-30. Keyed by reach alone,
+      // an NWM comid and a GEOGLOWS linkno that are numerically equal shared
+      // one label slot.
+      name: labelFor(user.favoriteLabels, source, reachId, reach.riverName),
       peakCfs: peak.value,
       dayLabel: dayLabel(peak.validTime, now),
       trend: trendOf(series),

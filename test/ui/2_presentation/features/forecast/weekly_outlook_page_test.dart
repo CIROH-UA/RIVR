@@ -29,6 +29,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/models/1_domain/shared/favorite_label_key.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/features/auth/auth_user.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
@@ -587,10 +589,23 @@ void main() {
       expect(find.text('Provo, UT'), findsOneWidget);
 
       // …and so must the write the digest banner reads.
-      expect(_settings.stored['9962444'], 'Provo, UT',
+      expect(_settings.stored['nwm:9962444'], 'Provo, UT',
           reason: 'persisting the pre-geocode list writes the placeholder '
               'over a correct stored label — the screen is right and the '
               'write is wrong, so nothing visible ever catches it');
+
+      // The key carries the SOURCE as of 2026-08-30. Keyed by reach alone, an
+      // NWM comid and a GEOGLOWS linkno that are numerically equal shared one
+      // slot and one river's label silently overwrote the other's — an
+      // accepted limit while this was digest-only, and not acceptable now that
+      // a flood notification puts it in the title.
+      expect(_settings.stored.containsKey('9962444'), isFalse,
+          reason: 'the bare reach id is the old key; writing it again would '
+              'reintroduce the collision between the two networks');
+      expect(
+          favoriteLabelKey(ForecastSource.nwm, '9962444'), 'nwm:9962444',
+          reason: 'the key format is a cross-language contract with '
+              'functions/src/notification-service.ts');
     });
 
     testWidgets('a placeholder is never written over a stored label',
@@ -630,7 +645,7 @@ void main() {
           _wrap(const WeeklyOutlookPage(), named: false, signedIn: true));
       await _settle(t);
 
-      expect(_settings.stored['9962444'], 'Provo, UT',
+      expect(_settings.stored['nwm:9962444'], 'Provo, UT',
           reason: 'this week\'s label is written');
       expect(_settings.stored['8888888'], 'Elsewhere, OR',
           reason: 'a river that did not load this week keeps its stored label '
@@ -682,13 +697,13 @@ void main() {
     testWidgets('a failed geocode leaves the stored label alone', (t) async {
       _register(geocodeFails: true);
       _forecast.unnamedReach = true;
-      _settings.stored = {'9962444': 'Provo, UT'};
+      _settings.stored = {'nwm:9962444': 'Provo, UT'};
 
       await t.pumpWidget(
           _wrap(const WeeklyOutlookPage(), named: false, signedIn: true));
       await _settle(t);
 
-      expect(_settings.stored['9962444'], 'Provo, UT',
+      expect(_settings.stored['nwm:9962444'], 'Provo, UT',
           reason: 'a placeholder title means "nothing resolved this time" — '
               'writing it over a real label makes Friday\'s banner worse than '
               'last week\'s');

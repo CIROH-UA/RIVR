@@ -26,6 +26,7 @@ import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
 import 'package:rivr/models/1_domain/shared/alert_frequency.dart';
+import 'package:rivr/models/1_domain/shared/favorite_label_key.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 
 /// Main favorites page - serves as app home screen
@@ -1189,6 +1190,36 @@ class _FavoritesPageState extends State<FavoritesPage>
     AppRouter.pushImageSelection(context, reachId: favorite.reachId);
   }
 
+  /// Publish one favourite's display label to the user document.
+  ///
+  /// `favoriteLabels` already existed for the weekly digest; this makes it
+  /// carry the user's own name and keeps it current. The read-modify-write is
+  /// deliberate — a label for a river not touched here must survive — and the
+  /// key carries the SOURCE, because an NWM comid and a GEOGLOWS linkno can be
+  /// numerically identical and would otherwise share one slot.
+  ///
+  /// Failure is logged and swallowed. The rename itself already succeeded
+  /// locally, and a name that reaches the server one visit later is a far
+  /// smaller problem than a rename that appears to fail.
+  Future<void> _syncFavoriteLabel(FavoriteRiver favorite, String label) async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null || label.trim().isEmpty) return;
+    try {
+      final svc = GetIt.I<IUserSettingsService>();
+      final settings = await svc.getUserSettings(userId);
+      if (settings == null) return;
+
+      final key = favoriteLabelKey(favorite.source, favorite.reachId);
+      if (settings.favoriteLabels[key] == label) return;
+
+      await svc.updateUserSettings(userId, {
+        'favoriteLabels': {...settings.favoriteLabels, key: label},
+      });
+    } catch (e) {
+      AppLogger.error('FavoritesPage', 'Label sync failed: $e', e);
+    }
+  }
+
   /// Reach ids whose alerts the user has set to "Off".
   ///
   /// Read once when the page builds its list. A stale value here shows or
@@ -1285,6 +1316,14 @@ class _FavoritesPageState extends State<FavoritesPage>
                   favorite.reachId,
                   customName: newName,
                 );
+                // Push the name to the server too, so a flood alert can use
+                // it. Custom names live only in device SharedPreferences, so
+                // until now a notification said NOAA's official name — and
+                // that name is the first thing a user reads on a lock screen.
+                // Written HERE, on rename, rather than only when the Weekly
+                // Outlook page is next opened: renaming a river and never
+                // visiting that page meant the server never heard about it.
+                await _syncFavoriteLabel(favorite, newName);
               }
             },
             child: const Text('Save'),

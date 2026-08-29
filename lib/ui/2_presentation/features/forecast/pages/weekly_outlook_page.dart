@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/models/1_domain/shared/favorite_label_key.dart';
 import 'package:rivr/models/1_domain/features/forecast/weekly_outlook_row.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
@@ -291,11 +292,12 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
   /// labels for rows that did not load this week survive (guarded: round 16
   /// proved the merge was deletable with the suite green).
   ///
-  /// Known limits, accepted: the map is keyed by reachId alone because
-  /// functions/src/weekly-digest.ts reads it that way — an NWM COMID and a
-  /// GEOGLOWS LINKNO that collide numerically would share a label slot. And a
-  /// reach that stored a river name in an earlier week but is unnamed now gets
-  /// its geocoded place written over the name.
+  /// The key carries the SOURCE as of 2026-08-30 — see favorite_label_key.dart
+  /// for why, and for how entries written under the old bare-reachId key are
+  /// still read.
+  ///
+  /// Known limit, accepted: a reach that stored a river name in an earlier week
+  /// but is unnamed now gets its geocoded place written over the name.
   Future<void> _persistDigestLabels(List<OutlookRow> rows) async {
     if (!mounted || rows.isEmpty) return;
     final userId = context.read<AuthProvider>().currentUser?.uid;
@@ -307,8 +309,14 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
       var changed = false;
       for (final r in rows) {
         if (r.title.contains(r.reachId)) continue; // placeholder — never write
-        if (merged[r.reachId] == r.title) continue;
-        merged[r.reachId] = r.title;
+        // Keyed by SOURCE and reach. Keyed by reach alone, an NWM comid and a
+        // GEOGLOWS linkno that are numerically equal shared one slot and one
+        // river's label silently overwrote the other's — recorded as an
+        // accepted limit when this was digest-only, and no longer acceptable
+        // now that a flood notification puts this in its title.
+        final key = favoriteLabelKey(r.source, r.reachId);
+        if (merged[key] == r.title) continue;
+        merged[key] = r.title;
         changed = true;
       }
       if (!changed) return;

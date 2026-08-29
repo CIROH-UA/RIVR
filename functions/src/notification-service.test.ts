@@ -32,8 +32,10 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
-import {evaluateAlert, ReachData, timeToPeak}
+import {evaluateAlert, labelFor, ReachData, reachKey, timeToPeak}
   from "./notification-service.js";
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
 import {categoryFor} from "./flow-classification.js";
 
 /** The conversion evaluateAlert applies to forecast values (CFS → CMS). */
@@ -390,5 +392,78 @@ describe("evaluateAlert — the peak's time survives to the alert", () => {
       riverName: "Test River",
     };
     assert.equal(evaluateAlert("123", data, "cfs")?.peakAt, null);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The name a notification calls a river.
+//
+// Custom names live only in device SharedPreferences, so until 2026-08-30 an
+// alert used NOAA's official name even for a river the user had renamed — and
+// that name is the first thing read on a lock screen. `favoriteLabels` already
+// existed for the weekly digest; alerts now read it too.
+//
+// The key carries the SOURCE. Keyed by reach alone — as it was — an NWM comid
+// and a GEOGLOWS linkno that are numerically equal share one slot and one
+// river's label silently overwrites the other's. Both id spaces are plain
+// integers with no coordination, so that is a matter of time.
+
+describe("labelFor — the user's own name for a river", () => {
+  test("a label under the source-carrying key wins", () => {
+    const labels = {"nwm:18471070": "The fishing spot"};
+    assert.equal(labelFor(labels, "nwm", "18471070", "White River"),
+      "The fishing spot");
+  });
+
+  test("two networks sharing a reach id keep separate labels", () => {
+    // The collision the old key could not express.
+    const labels = {
+      "nwm:12345": "Provo, upstream",
+      "geoglows:12345": "Rio Napo",
+    };
+    assert.equal(labelFor(labels, "nwm", "12345", "x"), "Provo, upstream");
+    assert.equal(labelFor(labels, "geoglows", "12345", "y"), "Rio Napo");
+  });
+
+  test("labels written before the source key are still read", () => {
+    // Not migrated: the next rename or Weekly Outlook visit writes the new
+    // key. Dropping them would blank a user's names on upgrade.
+    assert.equal(labelFor({"18471070": "Old label"}, "nwm", "18471070", "x"),
+      "Old label");
+  });
+
+  test("the new key wins over a stale legacy entry", () => {
+    const labels = {"18471070": "Stale", "nwm:18471070": "Current"};
+    assert.equal(labelFor(labels, "nwm", "18471070", "x"), "Current");
+  });
+
+  test("no label, an empty one, or no map at all falls back", () => {
+    assert.equal(labelFor({}, "nwm", "1", "White River"), "White River");
+    assert.equal(labelFor(undefined, "nwm", "1", "White River"), "White River");
+    assert.equal(labelFor({"nwm:1": "   "}, "nwm", "1", "White River"),
+      "White River");
+  });
+});
+
+describe("the label key is a cross-language contract", () => {
+  test("the Dart key format matches reachKey here", () => {
+    // The app WRITES these keys and this file READS them. A format change on
+    // either side does not throw — every label simply stops being found and
+    // every notification silently reverts to the official name.
+    const dart = readFileSync(
+      resolve(__dirname, "..", "..",
+        "lib/models/1_domain/shared/favorite_label_key.dart"), "utf8");
+    assert.match(dart, /'\$\{source\.id\}:\$reachId'/,
+      "favoriteLabelKey no longer produces `<source>:<reachId>`");
+    assert.equal(reachKey("nwm", "18471070"), "nwm:18471070");
+  });
+
+  test("the Dart side also reads the legacy key", () => {
+    const dart = readFileSync(
+      resolve(__dirname, "..", "..",
+        "lib/models/1_domain/shared/favorite_label_key.dart"), "utf8");
+    assert.match(dart, /\?\? labels\[reachId\]/,
+      "the app stopped reading pre-2026-08-30 labels, so a user's names " +
+      "would disappear on upgrade");
   });
 });

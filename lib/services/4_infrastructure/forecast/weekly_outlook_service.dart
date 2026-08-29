@@ -140,9 +140,18 @@ class WeeklyOutlookService {
       points: points,
       thresholds: thresholds,
       unitLabel: _unitService.getDisplayUnit(),
-      displayName: (meta?.riverName?.isNotEmpty ?? false)
-          ? meta!.riverName!
-          : favorite.displayName,
+      // The user's own name wins.
+      //
+      // This used to prefer `meta.riverName` outright, so a river the user had
+      // renamed showed NOAA's official name here — and, because this title is
+      // what gets published to `favoriteLabels`, the rename never reached the
+      // server at all. The metadata name is still the right fallback for a
+      // reach the user has not renamed and whose favourite carries no name.
+      displayName: (favorite.customName?.isNotEmpty ?? false)
+          ? favorite.customName!
+          : (meta?.riverName?.isNotEmpty ?? false)
+              ? meta!.riverName!
+              : favorite.displayName,
       // Prefer the favorite's stored coords; fall back to the reach's.
       lat: favorite.latitude ?? meta?.latitude,
       lon: favorite.longitude ?? meta?.longitude,

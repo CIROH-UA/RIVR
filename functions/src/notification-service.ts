@@ -30,6 +30,11 @@ interface UserSettings {
    * on `river_data`, which every signed-in user can read.
    */
   alertFrequencies: Record<string, string>;
+  /**
+   * App-published display label per favourite, keyed `<source>:<reachId>`.
+   * Carries the user's OWN name for a river when they have set one.
+   */
+  favoriteLabels: Record<string, string>;
   fcmTokens: string[];
   firstName: string;
   lastName: string;
@@ -80,6 +85,41 @@ function sourceOf(user: UserSettings, reachId: string): ReachSource {
  */
 export function reachKey(source: ReachSource, reachId: string): string {
   return `${source}:${reachId}`;
+}
+
+/**
+ * The name to call a river, preferring what the USER called it.
+ *
+ * `favoriteLabels` is written by the app and carries the user's own name for a
+ * favourite — the one they see on the card. Until 2026-08-30 only the weekly
+ * digest read it, so a flood alert put NOAA's official name in its title even
+ * for a river the user had renamed. That name is the first thing read on a
+ * lock screen.
+ *
+ * Falls back to the bare-`reachId` key for labels written before the key
+ * carried a source. Those are not migrated: the next rename or Weekly Outlook
+ * visit writes the new key, and until then the old value is still the right
+ * label for a reach id that exists on only one network. See
+ * lib/models/1_domain/shared/favorite_label_key.dart — the format is a
+ * cross-language contract, pinned by test.
+ *
+ * @param {Record<string, string>} labels - The user's favoriteLabels map.
+ * @param {ReachSource} source - Which network.
+ * @param {string} reachId - The reach.
+ * @param {string} fallback - The server's own name for the river.
+ * @return {string} The name to display.
+ */
+export function labelFor(
+  labels: Record<string, string> | undefined,
+  source: ReachSource,
+  reachId: string,
+  fallback: string
+): string {
+  const byKey = labels?.[reachKey(source, reachId)];
+  if (typeof byKey === "string" && byKey.trim() !== "") return byKey;
+  const legacy = labels?.[reachId];
+  if (typeof legacy === "string" && legacy.trim() !== "") return legacy;
+  return fallback;
 }
 
 export interface ForecastData {
@@ -302,6 +342,9 @@ async function getNotificationUsers(): Promise<UserSettings[]> {
           alertFrequencies: (data.alertFrequencies &&
             typeof data.alertFrequencies === "object") ?
             data.alertFrequencies as Record<string, string> : {},
+          favoriteLabels: (data.favoriteLabels &&
+            typeof data.favoriteLabels === "object") ?
+            data.favoriteLabels as Record<string, string> : {},
           fcmTokens: tokens,
           firstName: data.firstName || "User",
           lastName: data.lastName || "",
@@ -400,7 +443,9 @@ async function checkUserRivers(
       const notification: AlertNotification = {
         trigger,
         category,
-        riverName: reachData.riverName,
+        // The user's own name for this river, when they have set one.
+        riverName: labelFor(
+          user.favoriteLabels, source, reachId, reachData.riverName),
         alert,
       };
       const success = await sendAlert(user, reachId, source, notification);
