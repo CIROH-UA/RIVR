@@ -697,39 +697,72 @@ void main() {
 /// test can observe it. This reads the source instead — the same technique the
 /// Cloud Functions tests use for cross-language contracts.
 ///
-/// It exists because the bug was a comment. `fcm_service.dart` said "Clear iOS
+/// Two bugs live behind these assertions, and the second is the instructive
+/// one.
+///
+/// First: nothing cleared the badge at all. The server stamps `badge: 1` on
+/// every alert and no code ever reset it, so a red 1 sat on the home screen
+/// indefinitely. It hid behind a comment in fcm_service.dart reading "Clear iOS
 /// badge on launch" above a call that only sets foreground presentation
-/// options, so the badge looked handled and was not: the server stamps
-/// `badge: 1` on every alert and nothing ever reset it, leaving a red 1 on the
-/// home screen indefinitely. Reported from a device 2026-08-29.
+/// options.
+///
+/// Second: the FIRST fix was an `applicationDidBecomeActive` override. Info.plist
+/// declares a UIApplicationSceneManifest, and a scene-based app never calls
+/// that method on the app delegate — UIKit calls `sceneDidBecomeActive` on the
+/// scene delegate instead. The override compiled, read correctly, and never
+/// executed. **These tests passed on that version.** They asserted the presence
+/// of code, which is not the same as the code running, and only the device said
+/// otherwise.
+///
+/// So they now also assert the shape that can actually fire, and assert against
+/// the trap specifically.
 void badgeClearedNativelyTests() {
   group('the app icon badge is actually cleared', () {
     late String appDelegate;
+    late String infoPlist;
 
     setUpAll(() {
       appDelegate = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+      infoPlist = File('ios/Runner/Info.plist').readAsStringSync();
     });
 
-    test('AppDelegate resets the badge when the app becomes active', () {
-      expect(appDelegate, contains('applicationDidBecomeActive'),
-          reason: 'nothing clears the badge on foreground');
+    test('the badge count is reset to zero somewhere', () {
       expect(appDelegate, contains('setBadgeCount(0)'),
-          reason: 'the badge count is never reset to zero');
+          reason: 'nothing resets the badge count');
     });
 
-    test('the reset is on becoming active, not only on launch', () {
-      // didFinishLaunching alone would leave the badge set on every resume,
-      // which is most of how the app is actually opened.
-      final idx = appDelegate.indexOf('applicationDidBecomeActive');
-      final body = appDelegate.substring(
-          idx, (idx + 600).clamp(0, appDelegate.length));
-      expect(body, contains('setBadgeCount(0)'),
-          reason: 'the badge reset is not inside applicationDidBecomeActive');
+    test('the reset is driven by a lifecycle notification, not an app-delegate '
+        'callback', () {
+      // The trap: in a scene-based app `applicationDidBecomeActive` on the app
+      // delegate is never called, so a fix written there silently does nothing.
+      expect(appDelegate, contains('UIScene.didActivateNotification'),
+          reason: 'the badge clear is not hooked to a scene activation, so in '
+              'a scene-based app it will never fire');
+      expect(appDelegate.contains('override func applicationDidBecomeActive'),
+          isFalse,
+          reason: 'applicationDidBecomeActive is dead code in a scene-based '
+              'app — this is exactly how the first fix failed on device');
+    });
+
+    test('the observer is registered, not merely defined', () {
+      expect(appDelegate, contains('observeForegroundForBadgeClear()'),
+          reason: 'the observer function exists but is never called');
+      expect(appDelegate, contains('addObserver'));
+    });
+
+    test('the scene manifest is still what makes this necessary', () {
+      // If the manifest is ever removed, the scene notification stops firing
+      // and the app-delegate path would be needed again. The code observes
+      // both, so this is a tripwire rather than a failure — it fails loudly
+      // here rather than silently on a home screen.
+      expect(infoPlist, contains('UIApplicationSceneManifest'),
+          reason: 'the scene manifest is gone; re-check which lifecycle '
+              'callback actually fires before trusting the badge clear');
+      expect(appDelegate, contains('UIApplication.didBecomeActiveNotification'),
+          reason: 'the non-scene fallback observer was removed');
     });
 
     test('no Dart code claims to clear the badge', () {
-      // The original bug. If a comment says it clears the badge, someone will
-      // believe it again.
       for (final path in [
         'lib/services/4_infrastructure/fcm/fcm_service.dart',
         'lib/services/1_contracts/shared/i_fcm_service.dart',

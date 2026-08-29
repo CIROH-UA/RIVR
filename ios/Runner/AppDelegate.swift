@@ -36,6 +36,10 @@ import UserNotifications
     // opts in, rather than racing a 6-second poll.
     application.registerForRemoteNotifications()
 
+    // See observeForegroundForBadgeClear: this must be an observer, because a
+    // scene-based app never calls applicationDidBecomeActive on the delegate.
+    observeForegroundForBadgeClear()
+
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -94,24 +98,42 @@ import UserNotifications
   /// once a single notification had arrived — whether or not the user had
   /// opened the app and read it. Reported from a device 2026-08-29.
   ///
-  /// `fcm_service.dart` carried a comment reading "Clear iOS badge on launch"
-  /// directly above a call to `setForegroundNotificationPresentationOptions`,
-  /// which only decides how a notification is PRESENTED while the app is
-  /// already open. It never touched the count. The comment described the fix
-  /// this code is.
+  /// **This is a NotificationCenter observer, not an
+  /// `applicationDidBecomeActive` override, and that distinction is the whole
+  /// bug.** Info.plist declares a `UIApplicationSceneManifest` (scene delegate
+  /// `FlutterSceneDelegate`, added by the UIScene work merged 2026-08-24). In a
+  /// scene-based app UIKit calls `sceneDidBecomeActive(_:)` on the SCENE
+  /// delegate and never calls `applicationDidBecomeActive(_:)` on the app
+  /// delegate at all. The first attempt at this fix was that override: it
+  /// compiled, it read correctly, its test passed, and it never once executed.
+  /// The badge did not move on device.
   ///
-  /// Native rather than Dart on purpose: this must happen on EVERY foreground,
-  /// including resumes where the Flutter engine is already running, and it must
-  /// not depend on the Dart side being initialised or on a plugin's lifecycle
-  /// callbacks firing in the right order.
-  ///
+  /// The scene delegate is Flutter's own class, so subclassing it would mean
+  /// changing the manifest and taking on the UIScene migration that was only
+  /// just stabilised. An observer needs neither, and fires under both
+  /// lifecycles — `UIScene.didActivateNotification` for the scene app we are,
+  /// and `UIApplication.didBecomeActiveNotification` if the manifest is ever
+  /// removed. Clearing twice is harmless; clearing never is the bug.
+  private func observeForegroundForBadgeClear() {
+    let center = NotificationCenter.default
+    center.addObserver(self,
+                       selector: #selector(clearBadge),
+                       name: UIScene.didActivateNotification,
+                       object: nil)
+    center.addObserver(self,
+                       selector: #selector(clearBadge),
+                       name: UIApplication.didBecomeActiveNotification,
+                       object: nil)
+  }
+
   /// `setBadgeCount` is iOS 16+; the deployment target is 16.6, so there is no
   /// availability branch to get wrong.
-  override func applicationDidBecomeActive(_ application: UIApplication) {
-    super.applicationDidBecomeActive(application)
+  @objc private func clearBadge() {
     UNUserNotificationCenter.current().setBadgeCount(0) { error in
       if let error = error {
         print("Failed to clear app icon badge: \(error)")
+      } else {
+        print("App icon badge cleared")
       }
     }
   }
