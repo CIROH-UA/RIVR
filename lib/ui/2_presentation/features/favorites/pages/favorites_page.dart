@@ -1059,7 +1059,10 @@ class _FavoritesPageState extends State<FavoritesPage>
                   _buildMenuDivider(),
                   _buildMenuOption('Notifications', CupertinoIcons.bell, () {
                     Navigator.pop(context);
-                    AppRouter.pushNotificationsSettings(context);
+                    // Awaited so the muted markers refresh on return: this
+                    // is where a river is most likely to be muted or unmuted.
+                    AppRouter.pushNotificationsSettings(context)
+                        .then((_) => _loadMutedReaches());
                   }),
                   _buildMenuDivider(),
                   _buildFlowUnitsToggleWithModalState(setModalState),
@@ -1159,22 +1162,27 @@ class _FavoritesPageState extends State<FavoritesPage>
     AppRouter.pushMap(context);
   }
 
-  void _navigateToForecast(
+  Future<void> _navigateToForecast(
     String reachId,
     ForecastSource source, {
     double? lat,
     double? lon,
-  }) {
+  }) async {
     // Pass the favorite's coordinates so the forecast page can show a location.
     // GEOGLOWS reaches have no name/location of their own — without these, the
     // page can't reverse-geocode a place (NWM reaches carry their own coords).
-    AppRouter.pushForecast(
+    await AppRouter.pushForecast(
       context,
       reachId: reachId,
       source: source,
       lat: lat,
       lon: lon,
     );
+    // The forecast page carries an alerts row, so a river can be muted or
+    // unmuted while we are away. Without this the card's marker is whatever it
+    // was when this page first loaded — reported on device: un-muting a river
+    // left the crossed bell on its card.
+    await _loadMutedReaches();
   }
 
   void _navigateToImageSelection(FavoriteRiver favorite) {
@@ -1189,9 +1197,13 @@ class _FavoritesPageState extends State<FavoritesPage>
   Set<String> _mutedReachIds = const {};
 
   Future<void> _loadMutedReaches() async {
+    if (!mounted) return;
     final userId = context.read<AuthProvider>().currentUser?.uid;
     if (userId == null) return;
     try {
+      // No force-refresh needed: UserSettingsService caches, but
+      // updateUserSettings CLEARS that cache on every write, so a read after
+      // the user changed a setting elsewhere already goes to Firestore.
       final settings =
           await GetIt.I<IUserSettingsService>().getUserSettings(userId);
       if (!mounted || settings == null) return;
