@@ -750,7 +750,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
             riverName: _river,
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 40)),
+        // The scaffold uses SafeArea(bottom: false), so this has to clear the
+        // home indicator itself — 40 alone left the alerts card flush against
+        // the bottom of the screen.
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 40 + MediaQuery.paddingOf(context).bottom,
+          ),
+        ),
       ],
     );
   }

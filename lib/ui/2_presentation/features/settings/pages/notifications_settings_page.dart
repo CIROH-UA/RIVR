@@ -553,11 +553,25 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
     if (hasToken && !isPending) {
       iconColor = CupertinoColors.systemGreen;
       icon = CupertinoIcons.shield_fill;
+      // NOT a device count, despite how "N devices registered" reads.
+      //
+      // These are push registrations, and a device mints a new one on a fresh
+      // install — so a phone reinstalled five times contributes five, of which
+      // four are dead. Jerson read "6 devices registered" beside "6 favorite
+      // rivers" and reasonably asked whether a device was a river; they were
+      // unrelated numbers that happened to match.
+      //
+      // Dead registrations are removed when a send fails against them (see
+      // staleTokens in notification-service.ts), so the number settles on its
+      // own rather than needing a button here.
       title = tokens.length == 1
-          ? 'Device registered'
-          : '${tokens.length} devices registered';
+          ? 'This device is registered'
+          : 'Registered · ${tokens.length} push registrations';
       final lastToken = tokens.last;
-      subtitle = '...${lastToken.substring(lastToken.length - 8)}';
+      subtitle = tokens.length == 1
+          ? '...${lastToken.substring(lastToken.length - 8)}'
+          : 'Includes older ones from previous installs — they are removed '
+              'automatically once they stop working.';
       footer = null;
     } else if (isPending) {
       iconColor = CupertinoColors.systemOrange;
