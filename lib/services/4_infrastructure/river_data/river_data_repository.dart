@@ -109,7 +109,25 @@ class RiverDataRepository implements IRiverDataRepository {
   }
 
   @override
-  Future<RiverDataEntry?> refresh(RiverDataKey key) => _fetchAndCache(key);
+  Future<RiverDataEntry?> refresh(RiverDataKey key) async {
+    try {
+      return await _fetchAndCache(key);
+    } catch (_) {
+      // A pull-to-refresh that fails is only a freshness problem if what
+      // stays on screen is actually past its window. Failing while the cached
+      // value is still in-window has cost the user nothing, and warning there
+      // is the noise that teaches people to ignore the strip.
+      //
+      // Review round 1 found this path raised nothing at all: a user could
+      // pull to refresh on data hours past its window, watch it fail, and get
+      // no indication — on the very gesture that asks "is this current?".
+      final cached = await _cache.get(key);
+      if (cached == null || !cached.isFreshAt(_now())) {
+        _markUnconfirmed(key);
+      }
+      rethrow;
+    }
+  }
 
   @override
   ValueListenable<RiverDataEntry?> watch(RiverDataKey key) {

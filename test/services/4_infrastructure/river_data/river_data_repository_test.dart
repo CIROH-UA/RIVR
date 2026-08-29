@@ -306,6 +306,30 @@ void main() {
       expect(repo.outOfSync.value, isFalse);
     });
 
+    // Review FYI 7. Pull-to-refresh is the gesture that literally asks "is
+    // this current?" — failing it silently on data past its window is the
+    // worst possible moment to say nothing.
+    test('a failed refresh on expired data raises it', () async {
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2)); // past the window
+      source.offline = true;
+
+      await expectLater(repo.refresh(key), throwsA(anything));
+      expect(repo.outOfSync.value, isTrue);
+    });
+
+    // ...but not when the value on screen is still in-window. The user has
+    // lost nothing, and a warning here is the noise that gets the strip
+    // ignored before the day it matters.
+    test('a failed refresh on FRESH data stays silent', () async {
+      await repo.read(key);
+      now = now.add(const Duration(minutes: 10)); // still inside the window
+      source.offline = true;
+
+      await expectLater(repo.refresh(key), throwsA(anything));
+      expect(repo.outOfSync.value, isFalse);
+    });
+
     test('it notifies listeners, so the banner can rebuild', () async {
       var notified = 0;
       repo.outOfSync.addListener(() => notified++);

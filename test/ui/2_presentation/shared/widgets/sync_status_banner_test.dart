@@ -285,6 +285,56 @@ void main() {
     });
   });
 
+  // ── No ConnectivityProvider in the tree at all ───────────────────────────
+  //
+  // Untested when it was written, and the gap is the dangerous kind: the
+  // widget guards a page it can take down. Mounting the banner on the reach
+  // forecast page, whose harness had no ConnectivityProvider, turned a bare
+  // `Consumer` into 35 red tests at once. In production main.dart provides it
+  // above CupertinoApp so this should never happen — but "should never happen"
+  // is exactly what the guard is for, and the failure mode is a value screen
+  // that will not render because of the widget whose job is to be invisible.
+  group('with no ConnectivityProvider', () {
+    Future<void> pumpBareTree(WidgetTester tester, Widget banner) {
+      return tester.pumpWidget(
+        CupertinoApp(
+          home: CupertinoPageScaffold(
+            child: Column(
+              children: [banner, const Expanded(child: SizedBox())],
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('renders nothing instead of throwing', (tester) async {
+      await pumpBareTree(tester, const SyncStatusBanner());
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull,
+          reason: 'a freshness indicator must never be the reason a value '
+              'screen fails to render');
+      expect(tester.getSize(find.byType(SyncStatusBanner)).height, 0);
+    });
+
+    testWidgets('the offlineOnly form does the same', (tester) async {
+      await pumpBareTree(tester, const SyncStatusBanner.offlineOnly());
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(find.byType(SyncStatusBanner)).height, 0);
+    });
+
+    // Silence, not a warning. Not knowing whether we are offline is not the
+    // same as knowing we are.
+    testWidgets('says nothing rather than guessing', (tester) async {
+      await pumpBareTree(tester, const SyncStatusBanner());
+      await tester.pumpAndSettle();
+      expect(find.text(_offlineText), findsNothing);
+      expect(find.textContaining(_stalePrefix), findsNothing);
+    });
+  });
+
   // ── Degrading safely ──────────────────────────────────────────────────────
   // "We do not know" must never render as "we know it is stale". With no
   // repository the banner still reports offline, but never invents a warning.
