@@ -15,6 +15,7 @@
 
 import {ForecastProductId} from "./store-keys.js";
 import {isRunNewer} from "./store-document.js";
+import {StoredWindowSample, maxHoldMs} from "./store-window.js";
 
 /** The probe's view of what upstream has published. */
 export interface ProbeRuns {
@@ -177,6 +178,8 @@ export interface StoreHealth {
   problems: string[];
   lastWriteAgeMs: number | null;
   probeAgeMs: number | null;
+  /** Per-product freshness, stalest first. Empty when not supplied. */
+  products: ProductFreshness[];
 }
 
 /**
@@ -188,15 +191,92 @@ export interface StoreHealth {
  * while writing nothing. No successful write for hours is indistinguishable
  * from a quiet upstream unless something checks.
  *
+ * The collection-wide write age stays as a coarse "is anything happening at
+ * all" check; `samples` adds the per-product dimension that catches ONE product
+ * stalling while the others keep the aggregate looking fresh. Optional so a
+ * caller wanting only the coarse answer keeps working.
+ *
  * @param {Date | null} lastSuccessfulWrite - Most recent store write.
  * @param {Date | null} lastProbeSample - Most recent probe sample.
  * @param {Date} now - Reference instant.
+ * @param {readonly StoredWindowSample[]} samples - Every stored document.
  * @return {StoreHealth} Status plus every problem found.
  */
+/** One product's freshness, as the health check sees it. */
+export interface ProductFreshness {
+  product: ForecastProductId;
+  /** Age of the NEWEST document for this product. */
+  ageMs: number;
+  /** The product's hold cap — past this, silence means broken. */
+  capMs: number;
+  stale: boolean;
+}
+
+/**
+ * Assess freshness PER PRODUCT.
+ *
+ * **Why this exists, and it is not hypothetical.** `lastSuccessfulWrite` takes
+ * the newest write across the WHOLE collection, so one fresh NWM hourly write
+ * makes the store look healthy while another product sits still for days. That
+ * is not a theoretical hole: GEOGLOWS held YESTERDAY'S run for 24 hours every
+ * single day and the store reported healthy throughout. It was found from a
+ * device log on 2026-08-29, not from monitoring.
+ *
+ * ADR 0011 Phase 7 removes the timestamps that would let a user notice, and
+ * says plainly that a silently-failing store is the most dangerous outcome in
+ * the document. A per-collection heartbeat cannot underwrite that promise; this
+ * can.
+ *
+ * **The threshold is `MAX_HOLD_MS`, deliberately reused rather than a second
+ * number.** It already answers exactly the right question — how long upstream
+ * can plausibly go quiet before silence stops meaning "nothing changed" — and
+ * a separate constant here would drift from the window logic it must agree
+ * with. Phase 7 guard 4 asks that the user-facing indicator be driven by the
+ * same signal that alarms operationally; this is that signal.
+ *
+ * A product with NO documents is skipped rather than reported down: nobody has
+ * favourited a river that needs it, so there is nothing to be stale. The
+ * newest document per product is the one judged — a single old document among
+ * fresh ones is a per-reach fetch failure, which the run already records and
+ * retries, not a stalled product.
+ *
+ * Pure, so a stalled product can be tested without freezing a real store.
+ *
+ * @param {readonly StoredWindowSample[]} samples - Every stored document.
+ * @param {Date} now - Reference instant.
+ * @return {ProductFreshness[]} One entry per product present, stalest first.
+ */
+export function assessProductFreshness(
+  samples: readonly StoredWindowSample[],
+  now: Date
+): ProductFreshness[] {
+  const newest = new Map<ForecastProductId, number>();
+
+  for (const s of samples) {
+    const fetchedAt = Date.parse(s.fetchedAt);
+    if (Number.isNaN(fetchedAt)) continue;
+    const seen = newest.get(s.product);
+    if (seen === undefined || fetchedAt > seen) {
+      newest.set(s.product, fetchedAt);
+    }
+  }
+
+  const out: ProductFreshness[] = [];
+  for (const [product, fetchedAt] of newest) {
+    const ageMs = now.getTime() - fetchedAt;
+    const capMs = maxHoldMs(product);
+    out.push({product, ageMs, capMs, stale: ageMs > capMs});
+  }
+
+  out.sort((a, b) => (b.ageMs - b.capMs) - (a.ageMs - a.capMs));
+  return out;
+}
+
 export function assessStoreHealth(
   lastSuccessfulWrite: Date | null,
   lastProbeSample: Date | null,
-  now: Date
+  now: Date,
+  samples: readonly StoredWindowSample[] = []
 ): StoreHealth {
   const problems: string[] = [];
 
@@ -227,12 +307,22 @@ export function assessStoreHealth(
     );
   }
 
+  const products = assessProductFreshness(samples, now);
+  for (const p of products) {
+    if (!p.stale) continue;
+    problems.push(
+      `${p.product} has not advanced for ` +
+      `${Math.round(p.ageMs / 3600_000)}h ` +
+      `(cap ${Math.round(p.capMs / 3600_000)}h)`
+    );
+  }
+
   let status: HealthStatus = "healthy";
   if (problems.length === 1) status = "degraded";
   if (problems.length > 1) status = "down";
   if (lastWriteAgeMs === null && probeAgeMs === null) status = "down";
 
-  return {status, problems, lastWriteAgeMs, probeAgeMs};
+  return {status, problems, lastWriteAgeMs, probeAgeMs, products};
 }
 
 /**

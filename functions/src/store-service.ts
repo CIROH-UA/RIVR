@@ -44,6 +44,7 @@ import {planWindowExtensions} from "./store-window.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
 import {StoreDocument, isRunNewer} from "./store-document.js";
 import {
+  FORECAST_PRODUCTS,
   ForecastProductId,
   ForecastSourceId,
   storageKey,
@@ -700,17 +701,24 @@ export async function checkStoreHealth(): Promise<{
   problems: string[];
 }> {
   const usage = newUsage();
-  const [lastWrite, probe] = await Promise.all([
+  // The per-product samples are what make this check able to see ONE product
+  // stalling. Without them a single fresh NWM write reports the whole store
+  // healthy — which is precisely how GEOGLOWS served yesterday's run for 24
+  // hours a day without the heartbeat ever objecting.
+  const [lastWrite, probe, samples] = await Promise.all([
     lastSuccessfulWrite(usage),
     readLatestProbe(usage),
+    sampleStoredWindows(FORECAST_PRODUCTS, usage),
   ]);
 
   const health = assessStoreHealth(
-    lastWrite, probe?.sampledAt ?? null, new Date());
+    lastWrite, probe?.sampledAt ?? null, new Date(), samples);
 
   if (health.status === "healthy") {
     logger.info("💚 store healthy", {
       lastWriteAgeMs: health.lastWriteAgeMs,
+      products: health.products.map(
+        (p) => `${p.product}:${Math.round(p.ageMs / 3600_000)}h`),
     });
   } else {
     // error level so it surfaces without anybody watching, which is the

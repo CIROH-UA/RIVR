@@ -20,6 +20,7 @@ import {
   PROBE_STALE_MS,
   ProbeRuns,
   assessStoreHealth,
+  assessProductFreshness,
   decideTriggers,
   probeRunFor,
   quotaUsage,
@@ -152,6 +153,110 @@ describe("the heartbeat can actually say the store is broken", () => {
       NOW);
     assert.equal(h.problems.length, 2);
     assert.equal(h.status, "down");
+  });
+});
+
+describe("per-product freshness — the hole the heartbeat had", () => {
+  /**
+   * Build a stored-document sample.
+   * @param {string} product - Product id.
+   * @param {number} ageHours - How long ago it was fetched.
+   * @param {string} id - Document id.
+   * @return {object} A StoredWindowSample.
+   */
+  function sample(product: string, ageHours: number, id = "d") {
+    return {
+      documentId: `${product}__${id}`,
+      source: "nwm",
+      product,
+      fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
+      validUntil: NOW.toISOString(),
+    };
+  }
+
+  // THE regression this whole change exists for. Measured in production:
+  // GEOGLOWS held yesterday's run for 24 hours every day while NWM's hourly
+  // writes kept the collection-wide heartbeat fresh, and the store reported
+  // healthy the entire time. It was found from a device log on 2026-08-29,
+  // not from monitoring. Phase 7 removes the timestamp that let a user notice,
+  // so this must be caught here or not at all.
+  test("a stalled GEOGLOWS is caught even though NWM keeps writing", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000), // a fresh write exists
+      new Date(NOW.getTime() - 600_000), // probe is live
+      NOW,
+      [
+        sample("shortRange", 0.5),
+        sample("geoglowsForecast", 50), // cap is 48h
+      ] as never);
+
+    assert.notEqual(h.status, "healthy",
+      "one product stalled while the aggregate looked fresh — this is the " +
+      "exact failure that ran undetected in production for days");
+    assert.match(h.problems.join(" "), /geoglowsForecast/);
+  });
+
+  test("the threshold is the product's own hold cap, not one number", () => {
+    // 20h is stale for shortRange (6h) and fine for geoglowsForecast (48h).
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [sample("shortRange", 20), sample("geoglowsForecast", 20)] as never);
+
+    const joined = h.problems.join(" ");
+    assert.match(joined, /shortRange/);
+    assert.ok(!joined.includes("geoglowsForecast"),
+      "geoglowsForecast is well inside its 48h cap and must not be reported");
+  });
+
+  test("the NEWEST document per product is judged, not the oldest", () => {
+    // One reach failing to fetch is a per-reach failure the run already
+    // records and retries. It is not a stalled product, and reporting it as
+    // one would make the alarm cry wolf until nobody reads it.
+    const fresh = assessProductFreshness(
+      [sample("shortRange", 30, "old"), sample("shortRange", 1, "new")] as never,
+      NOW);
+    assert.equal(fresh.length, 1);
+    assert.equal(fresh[0].stale, false);
+  });
+
+  test("a product with no documents is skipped, not reported down", () => {
+    // Nobody has favourited a river needing it, so there is nothing to be
+    // stale. Reporting absence as failure would alarm on an empty store.
+    const fresh = assessProductFreshness([sample("shortRange", 1)] as never, NOW);
+    assert.deepEqual(fresh.map((p) => p.product), ["shortRange"]);
+  });
+
+  test("an unparseable fetchedAt is ignored, it does not read as age zero", () => {
+    // Date.parse("") is NaN; treating that as fresh would hide a stall behind
+    // a malformed document.
+    const fresh = assessProductFreshness(
+      [{
+        documentId: "x", source: "nwm", product: "shortRange",
+        fetchedAt: "", validUntil: "",
+      }] as never,
+      NOW);
+    assert.deepEqual(fresh, []);
+  });
+
+  test("healthy products are still reported, so the log shows coverage", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [sample("shortRange", 1), sample("mediumRange", 2)] as never);
+    assert.equal(h.status, "healthy");
+    assert.equal(h.products.length, 2);
+  });
+
+  test("omitting samples keeps the old coarse behaviour", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW);
+    assert.equal(h.status, "healthy");
+    assert.deepEqual(h.products, []);
   });
 });
 
