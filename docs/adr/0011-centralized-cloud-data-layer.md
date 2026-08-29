@@ -959,27 +959,117 @@ the live ruleset back on 2026-08-29 — not by trusting "Deploy complete".
 
 ## Phase 6 — Alerts on the store
 
-**Free to change: no alert has ever been delivered** — the `notification_logs`
-collection does not exist. And the 6-hour cooldown decouples check frequency from
-notification frequency, so raising the former cannot spam.
+**Two premises this section rested on are false, and were corrected on
+2026-08-29 before any code depended on them.** Phase 0 guard 5 exists for
+exactly this.
+
+> ~~Free to change: no alert has ever been delivered — the `notification_logs`
+> collection does not exist. And the 6-hour cooldown decouples check frequency
+> from notification frequency, so raising the former cannot spam.~~
+
+**Alerts HAVE been delivered.** `notification_logs` exists and holds real sends.
+Reach 620569308 alerted Jerson every six hours, four times a day, for at least
+three consecutive days (verified by reading the collection). This phase is not
+free to change: it is changing something users are already receiving.
+
+**And there is no cooldown.** `checkRecentAlert` runs, and its answer is used
+ONLY to change the wording to "still". Nothing skips a send. So the claim that
+raising check frequency "cannot spam" is backwards — moving evaluation to
+hourly, as this phase does, would have taken four notifications a day to
+twenty-four, for a river whose category had not changed once.
+
+### Decision 14 — what deserves a notification (2026-08-29)
+
+The question Jerson put: *"we built an app to notify users of high events and
+now that we have it, will we just notify them once? A stream does not flood
+often if ever. So when they do we should notify it."* Both halves are right,
+and the resolution is that **the unit of news is a change, not a tick.** A
+river sitting at Major for three days is one event, not seventy-two.
+
+Four triggers, in priority order:
+
+1. **Entry** — the reach crosses from Normal into any alert category. Always
+   sent.
+2. **Escalation** — the category rises (Action → Major, Major → Extreme).
+   **Always sent, and NOT suppressible by any user setting.** Safety beats
+   preference: Action to Extreme at 3am must wake someone regardless of what
+   they chose. This is the one place the system deliberately overrides a stated
+   user preference, and it was confirmed explicitly by Jerson.
+3. **Persistence** — while the event continues without escalating, a reminder
+   at the user's chosen interval for THAT reach. Default 6-hourly.
+4. **All-clear** — the reach returns to Normal. Sent today by nothing at all,
+   and genuinely useful: "it is over" is news.
+
+**Per-stream frequency, not global.** Options: hourly, 6-hourly, daily,
+only-on-change, off. Stored on the user document as a reach → preference map,
+beside `favoriteSources`. It must NOT live on `river_data`, which is readable
+by every signed-in user and has to stay free of anything user-specific.
+
+The reasoning for a 6-hourly default rather than hourly: hourly notifications
+about an unchanged category say the same thing with a different number, and the
+number is the part a reader cannot use. That is how a safety app teaches people
+to ignore it — and the Peru reach above is that mechanism already running.
+Per-stream control exists so a river that misbehaves can be quietened without
+quietening the ones that matter.
+
+### Decision 15 — what an alert says (2026-08-29)
+
+Alerts carried a raw recurrence interval and a raw streamflow number:
+`Forecast: 147362 CFS (Exceeds 25-year flood threshold)`. Neither appears
+anywhere in the app, which calls that same water "Extreme".
+
+    White River — Major Event
+    Peaking in ~14 hours at 12,400 CFS.
+
+    White River — still Major Event
+    Now peaking in ~6 hours at 13,100 CFS.
+
+- **The category comes first**, and is the app's own, through a shared ladder
+  (`functions/src/flow-classification.ts`) pinned to
+  `flow_classification.dart` by a drift test. Guard 3.
+- **The river is named once.** There is room for about two lines.
+- **The body leads with WHEN.** "In ~14 hours" decides whether you move the
+  truck tonight; a streamflow figure decides nothing. The time was always in
+  the payload and was being discarded.
+- **Timing is RELATIVE, never absolute.** No user timezone is stored anywhere,
+  so "Saturday 4 PM" would be silently wrong for every user outside Mountain
+  Time. A peak already past yields no timing rather than "in ~-3 hours".
+- **The recurrence interval is not shown.** Still on the payload for the app;
+  it competed for space with how bad and how soon.
+- `SCALE_FACTOR` is deleted — a demo lever whose non-1 value would have
+  desynchronised the alert from the screen, which is what guard 3 forbids.
+
+**Known gap, deliberately deferred:** the title uses NOAA's official river
+name, because a user's custom name for a favourite lives only in device
+`SharedPreferences` and is never written to Firestore. Jerson wants custom
+names synced so alerts can use them; scheduled AFTER this phase.
 
 **Build.** `checkRiverAlerts` reads from the store rather than fetching, and
-evaluates when a new run lands rather than on a fixed clock.
+evaluates when a new run lands rather than on a fixed clock. The four fixed
+Mountain-Time slots (6am / noon / 6pm / midnight) and the global
+`notificationFrequency` are replaced by run-driven evaluation plus decision 14's
+per-stream triggers.
 
 **Guards.**
 1. Alerts issue **zero** upstream fetches.
-2. At most one alert per user per river per 6 hours with hourly evaluation.
-   **Verify the composite index is deployed, not merely declared** —
-   `checkRecentAlert` fails open, so a missing index silently disables dedupe.
+2. Persistence reminders honour the per-stream interval; **entry and escalation
+   are never suppressed.** Verify the composite index is deployed, not merely
+   declared — `checkRecentAlert` fails open, so a missing index silently
+   disables dedupe. (Index verified READY in production 2026-08-29.)
 3. **The category a user sees and the one the alert fired on come from the same
    code** (decision 13). Reading the same document is not sufficient — identical
    inputs through different implementations can still disagree.
 4. No new run → no evaluation, no sends.
 5. Time from publication to alert under one hour, versus up to six today.
-6. Independent agent review passes.
+6. **A sustained event does not re-notify beyond its per-stream interval**, and
+   a category rise during one notifies immediately. Both proved against a real
+   multi-day event, not a unit test alone — the Peru reach is a standing
+   fixture.
+7. Independent agent review passes.
 
 **You are done when** an alert fires from data the app is already displaying,
-within an hour of the run that triggered it.
+within an hour of the run that triggered it, and a three-day event produces the
+notifications a person would actually want rather than twelve identical ones.
 
 ---
 
