@@ -33,6 +33,7 @@
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
 import {evaluateAlert, ReachData} from "./notification-service.js";
+import {categoryFor} from "./flow-classification.js";
 
 /** The conversion evaluateAlert applies to forecast values (CFS → CMS). */
 const CFS_TO_CMS = 0.0283168;
@@ -195,4 +196,82 @@ describe("evaluateAlert — missing and incomplete data", () => {
       const alert = evaluateAlert("123", reach(5000, partial), "cfs");
       assert.equal(alert?.returnPeriod, "2-year");
     });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR 0011 Phase 6 guard 3, added 2026-08-29.
+//
+// Until now an alert carried a raw recurrence interval and a raw streamflow
+// number, and the push notification read "Forecast: 147362 CFS (Exceeds 25-year
+// flood threshold)". Neither of those words appears anywhere in the app: the
+// card for that same river says "Extreme". Two vocabularies for one river, and
+// the alert is the one the user reads on a lock screen without the app open.
+//
+// The fixture ladder is 2/5/10/25-year at 1000/2000/3000/4000 CFS, so the
+// category boundaries are exactly the thresholds the existing tests already
+// pin.
+
+describe("evaluateAlert — the category the user will also see", () => {
+  test("a peak in the 2-to-5-year band is Action", () => {
+    assert.equal(evaluateAlert("123", reach(1000), "cfs")?.category, "Action");
+    assert.equal(evaluateAlert("123", reach(1500), "cfs")?.category, "Action");
+  });
+
+  test("5-to-10 is Moderate, 10-to-25 is Major", () => {
+    assert.equal(evaluateAlert("123", reach(2000), "cfs")?.category,
+      "Moderate");
+    assert.equal(evaluateAlert("123", reach(2999), "cfs")?.category,
+      "Moderate");
+    assert.equal(evaluateAlert("123", reach(3000), "cfs")?.category, "Major");
+    assert.equal(evaluateAlert("123", reach(3999), "cfs")?.category, "Major");
+  });
+
+  test("at and above the 25-year level is Extreme", () => {
+    assert.equal(evaluateAlert("123", reach(4000), "cfs")?.category, "Extreme");
+    assert.equal(evaluateAlert("123", reach(500000), "cfs")?.category,
+      "Extreme");
+  });
+
+  test("a 50-year exceedance is still Extreme, not a new category", () => {
+    // The old behaviour reported returnPeriod "50-year", which the app has no
+    // word for. The recurrence interval is still carried for the reader who
+    // wants it; the CATEGORY is what the card would show.
+    const withFifty: unknown[] = [{
+      return_period_2: cms(1000),
+      return_period_5: cms(2000),
+      return_period_10: cms(3000),
+      return_period_25: cms(4000),
+      return_period_50: cms(5000),
+    }];
+    const alert = evaluateAlert("123", reach(5000, withFifty), "cfs");
+    assert.equal(alert?.returnPeriod, "50-year");
+    assert.equal(alert?.category, "Extreme",
+      "the app has no 50-year category; Extreme is the top of the ladder");
+  });
+
+  test("an incomplete ladder still alerts but cannot name a category", () => {
+    // The alert path only needs ONE exceeded threshold; the category ladder
+    // needs all four. Reporting "Unknown" is honest — inventing a category the
+    // card could not produce is what guard 3 forbids.
+    const partial: unknown[] = [{
+      return_period_2: cms(1000),
+      return_period_5: cms(2000),
+    }];
+    const alert = evaluateAlert("123", reach(2500, partial), "cfs");
+    assert.notEqual(alert, null);
+    assert.equal(alert?.category, "Unknown");
+  });
+
+  test("the category agrees with the app for every band", () => {
+    // Walks the same flows through the shared classifier the app is pinned to.
+    // If evaluateAlert ever computed its own ladder again, this diverges.
+    for (const cfs of [1000, 1500, 2000, 2500, 3000, 3500, 4000, 9000]) {
+      const alert = evaluateAlert("123", reach(cfs), "cfs");
+      const direct = categoryFor(cfs * CFS_TO_CMS, {
+        2: cms(1000), 5: cms(2000), 10: cms(3000), 25: cms(4000),
+      });
+      assert.equal(alert?.category, direct,
+        `alert and shared classifier disagree at ${cfs} CFS`);
+    }
+  });
 });

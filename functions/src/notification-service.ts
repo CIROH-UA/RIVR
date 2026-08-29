@@ -26,6 +26,8 @@ interface UserSettings {
   lastName: string;
 }
 
+import {FloodCategory, categoryFor} from "./flow-classification.js";
+
 export type ReachSource = "nwm" | "geoglows";
 
 /**
@@ -81,6 +83,18 @@ export interface AlertData {
   threshold: number;
   returnPeriod: string;
   riverName: string;
+  /**
+   * The flood category the APP would show for this flow — Action, Moderate,
+   * Major or Extreme.
+   *
+   * ADR 0011 Phase 6 guard 3. Until 2026-08-29 an alert carried only a raw
+   * recurrence interval and a raw streamflow number, neither of which appears
+   * anywhere in the app's vocabulary, so a notification said "Forecast: 147362
+   * CFS (exceeds 25-year flood threshold)" while the card the user then opened
+   * said "Extreme". Computed through flow-classification.ts, which is pinned
+   * to the Dart ladder by test.
+   */
+  category: FloodCategory;
 }
 
 /** Pre-fetched data for a single reach, shared across all users. */
@@ -93,9 +107,6 @@ export interface ReachData {
   riverName: string;
 }
 
-// Scale factor for testing (set to 1 for production, increase for demos)
-const SCALE_FACTOR = 1;
-
 /**
  * Check alerts for a specific time slot.
  * Batch-fetches reach data once per unique reach, then evaluates per user.
@@ -107,7 +118,6 @@ export async function checkAlertsForTimeSlot(
 ): Promise<AlertCheckResult> {
   logger.info(`🔍 Starting alert check for time slot ${timeSlot}`, {
     timeSlot,
-    scaleFactor: SCALE_FACTOR,
   });
 
   const result: AlertCheckResult = {
@@ -454,9 +464,22 @@ export function evaluateAlert(
         ([period, threshold]) => ({
           period,
           threshold_CMS: Math.round(threshold * 100) / 100,
-          exceeds: forecastCms >= (threshold / SCALE_FACTOR),
+          exceeds: forecastCms >= threshold,
         })),
     });
+
+  // The category the APP would show for this same flow.
+  //
+  // Guard 3: the alert and the card must not describe one river in two
+  // vocabularies. `thresholds` here is keyed "2-year"/"25-year"; the shared
+  // ladder wants plain years, and it wants CMS on both sides — which
+  // forecastCms already is, and the stored thresholds natively are.
+  const ladder: Record<number, number> = {};
+  for (const [label, value] of Object.entries(thresholds)) {
+    const years = parseInt(label, 10);
+    if (Number.isFinite(years)) ladder[years] = value;
+  }
+  const category = categoryFor(forecastCms, ladder);
 
   // Find HIGHEST exceeded threshold
   let highestExceededAlert: AlertData | null = null;
@@ -469,22 +492,21 @@ export function evaluateAlert(
     .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10));
 
   for (const [returnPeriod, thresholdCms] of byYearAscending) {
-    const scaledThreshold = thresholdCms / SCALE_FACTOR;
-
-    if (forecastCms >= scaledThreshold) {
+    if (forecastCms >= thresholdCms) {
       const displayForecast = userFlowUnit === "cfs" ?
         maxForecastFlow :
         forecastCms;
 
       const displayThreshold = userFlowUnit === "cfs" ?
-        scaledThreshold / 0.0283168 :
-        scaledThreshold;
+        thresholdCms / 0.0283168 :
+        thresholdCms;
 
       highestExceededAlert = {
         forecastFlow: Math.round(displayForecast),
         threshold: Math.round(displayThreshold),
         returnPeriod,
         riverName: reachData.riverName,
+        category,
       };
     }
   }
@@ -492,6 +514,7 @@ export function evaluateAlert(
   if (highestExceededAlert) {
     logger.info(`🚨 Alert condition met for reach ${reachId}`, {
       riverName: highestExceededAlert.riverName,
+      category: highestExceededAlert.category,
       returnPeriod: highestExceededAlert.returnPeriod,
       forecastFlow: highestExceededAlert.forecastFlow,
       unit: userFlowUnit.toUpperCase(),
@@ -516,8 +539,23 @@ async function sendAlert(
 ): Promise<boolean> {
   // Check if this is a repeat alert (sent within last 6 hours)
   const isRepeat = await checkRecentAlert(user.userId, reachId);
-  const stillPrefix = isRepeat ? "Still exceeds" : "Exceeds";
   const unitLabel = user.preferredFlowUnit.toUpperCase();
+
+  // Lead with the CATEGORY, not the number.
+  //
+  // The body used to read "Forecast: 147362 CFS (Exceeds 25-year flood
+  // threshold)". Jerson's judgement 2026-08-29, and it is plainly right: a raw
+  // streamflow figure on a lock screen is meaningless — nobody knows whether
+  // 147362 CFS is a lot for that river, which is the entire question. The
+  // category is the word the app already uses on the card, so the alert and
+  // the screen now say the same thing.
+  //
+  // The number stays, after the category, for the reader who does want it.
+  const stillPrefix = isRepeat ? "still at" : "now at";
+  const body = `${alertData.riverName} is ${stillPrefix} ` +
+    `${alertData.category} flood level — ` +
+    `${alertData.forecastFlow.toLocaleString("en-US")} ${unitLabel}, ` +
+    `above the ${alertData.returnPeriod} threshold`;
 
   const staleTokens: string[] = [];
   let anySent = false;
@@ -528,9 +566,8 @@ async function sendAlert(
       const message = {
         token,
         notification: {
-          title: `🌊 ${alertData.riverName} Flood Alert`,
-          body: `Forecast: ${alertData.forecastFlow} ${unitLabel} ` +
-            `(${stillPrefix} ${alertData.returnPeriod} flood threshold)`,
+          title: `🌊 ${alertData.category}: ${alertData.riverName}`,
+          body,
         },
         data: {
           type: "flood_alert",
@@ -734,7 +771,6 @@ async function logNotification(
       threshold: alertData.threshold,
       returnPeriod: alertData.returnPeriod,
       sentAt: new Date(),
-      scaleFactor: SCALE_FACTOR,
     });
   } catch (error) {
     logger.error("❌ Error logging notification", {error});
