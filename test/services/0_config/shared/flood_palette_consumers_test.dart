@@ -112,8 +112,9 @@ class _NoopReorder implements ReorderFavoritesUseCase {
 /// rather than faked because the card does `context.read<FavoritesProvider>()`
 /// on the concrete type.
 class _FakeFavoritesProvider extends FavoritesProvider {
-  _FakeFavoritesProvider(this._returnPeriods)
-      : super(
+  _FakeFavoritesProvider(this._returnPeriods, {String unit = 'CMS'})
+      : _unit = unit,
+        super(
           favoritesService: _NoopDeps(),
           reachCacheService: _NoopDeps(),
           unitService: _StubUnit(),
@@ -125,9 +126,20 @@ class _FakeFavoritesProvider extends FavoritesProvider {
         );
 
   final Map<int, double>? _returnPeriods;
+  final String _unit;
 
   @override
   Map<int, double>? getReturnPeriods(String reachId) => _returnPeriods;
+
+  // Paired with the thresholds above, and the reason this fake is honest.
+  // The provider records the unit the thresholds were CACHED in alongside the
+  // values themselves; the card converts FROM that unit. Returning null here
+  // (the pre-2026-08-30 shape of this fake) makes the card skip the conversion
+  // and read every flow as Extreme.
+  @override
+  String? getReturnPeriodUnit(String reachId) =>
+      _returnPeriods == null ? null : _unit;
+
   @override
   bool isRefreshing(String reachId) => false;
 }
@@ -266,21 +278,32 @@ void main() {
     });
     tearDown(() => GetIt.instance.reset());
 
-    /// Return periods as the provider holds them: natively CMS. ×35.3147 gives
-    /// the CFS bands {353, 706, 1059, 1412}, so the flows below land in a
-    /// known rung only if the card converts — an unconverted read classifies
-    /// every one of them as Extreme and fails.
+    /// Return periods as the provider holds them WHEN IT CACHED THEM IN CMS —
+    /// which is what `getReturnPeriodUnit` on the fake reports.
+    ///
+    /// This comment used to say "natively CMS", full stop, and that belief is
+    /// exactly the bug fixed on 2026-08-30: the card converted every threshold
+    /// from a hardcoded 'CMS' even though `ReturnPeriodPayload.decode` and
+    /// `GeoglowsForecastPayload.decode` have ALREADY converted to the user's
+    /// unit. For a CFS user that multiplied every threshold by ~35 and a river
+    /// at 834 CFS against a 684 CFS two-year threshold read NORMAL on the card
+    /// while the server alerted it as Action.
+    ///
+    /// ×35.3147 gives the CFS bands {353, 706, 1059, 1412}, so the flows below
+    /// land in a known rung only if the card converts from the RECORDED unit —
+    /// an unconverted read classifies every one of them as Extreme and fails.
     const rpCms = {2: 10.0, 5: 20.0, 10: 30.0, 25: 40.0};
 
     Future<Color?> pumpAndReadBadge(
       WidgetTester tester,
       double flowCfs, {
       Map<int, double>? returnPeriods = rpCms,
+      String unit = 'CMS',
       required String expectedCategory,
     }) async {
       await tester.pumpWidget(_app(
         ChangeNotifierProvider<FavoritesProvider>.value(
-          value: _FakeFavoritesProvider(returnPeriods),
+          value: _FakeFavoritesProvider(returnPeriods, unit: unit),
           child: Center(
             child: SizedBox(
               width: 320,
@@ -309,6 +332,36 @@ void main() {
       );
       return (container.decoration as BoxDecoration?)?.color;
     }
+
+    // ── The 2026-08-30 regression, as behaviour ────────────────────────────
+    //
+    // The card used to convert thresholds from a hardcoded 'CMS'. Both decoders
+    // have already converted to the user's unit by then, so for a CFS user
+    // every threshold was multiplied by ~35 and almost every river read NORMAL
+    // however high it was — badge, colour and card animation all wrong
+    // together, while the SERVER (which converts once) alerted correctly.
+    //
+    // This is the guard that catches it: thresholds recorded in CFS, a flow in
+    // CFS, and no conversion is the correct answer. Restore the hardcoded 'CMS'
+    // and 800 lands below the ×35 two-year band, so the badge reads NORMAL and
+    // this fails. A classifier-only test does NOT catch it — the ladder was
+    // never wrong, the units reaching it were.
+    testWidgets('thresholds recorded in CFS are NOT converted again',
+        (tester) async {
+      expect(
+        await pumpAndReadBadge(
+          tester,
+          800,
+          returnPeriods: const {2: 353.0, 5: 706.0, 10: 1059.0, 25: 1412.0},
+          unit: 'CFS',
+          expectedCategory: 'Moderate',
+        ),
+        AppConstants.getFlowCategoryColor('Moderate'),
+        reason: 'the card is converting thresholds that were already in the '
+            "user's unit — check for a re-introduced hardcoded 'CMS' in "
+            'favorite_river_card.dart',
+      );
+    });
 
     testWidgets('a classified flow uses getFlowCategoryColor', (tester) async {
       // 800 CFS sits between the 5-yr (706) and 10-yr (1059) bands.

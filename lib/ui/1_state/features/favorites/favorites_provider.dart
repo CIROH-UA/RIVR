@@ -45,6 +45,10 @@ class FavoritesProvider with ChangeNotifier {
   // Resolved lazily from GetIt when absent (see [_resolveGeoglowsApi]) so tests
   // that don't register it simply skip coordinate resolution.
   final IGeoglowsApiService? _geoglowsApi;
+  /// The unit each cached return-period set is expressed in. See the note
+  /// where they are stored — they are NOT raw CMS.
+  final Map<String, String> _sessionReturnPeriodUnits = {};
+
   final Map<String, Map<int, double>> _sessionReturnPeriods =
       {}; // reachId -> return periods
 
@@ -309,6 +313,7 @@ class FavoritesProvider with ChangeNotifier {
       // Clean up ALL session data in one call
       _sessionData.remove(reachId);
       _sessionReturnPeriods.remove(reachId);
+      _sessionReturnPeriodUnits.remove(reachId);
       _refreshingReachIds.remove(reachId);
       _refreshGenerations.remove(reachId);
 
@@ -716,9 +721,23 @@ class FavoritesProvider with ChangeNotifier {
             : existing.coordinates,
       );
 
-      // Cache raw return periods for the card's own flood-risk computation.
+      // Cache return periods for the card's own flood-risk computation.
+      //
+      // **They are NOT raw CMS.** Both decoders — ReturnPeriodPayload for NWM
+      // and GeoglowsForecastPayload for GEOGLOWS — already convert to the unit
+      // current at decode time. The card believed they were CMS and converted
+      // AGAIN, multiplying every threshold by ~35 for a CFS user, so almost
+      // every river read as Normal however high it was. Found on a device
+      // 2026-08-30: a GEOGLOWS reach at 834 CFS against a 684 CFS two-year
+      // threshold showed NORMAL, while the server — which converts once —
+      // alerted it as Action.
+      //
+      // The unit is recorded alongside, exactly as `storedFlowUnit` already
+      // does for the flow value, so the card converts from the right one and a
+      // later unit change is handled rather than silently wrong.
       if (returnPeriods != null && returnPeriods.isNotEmpty) {
         _sessionReturnPeriods[reachId] = returnPeriods;
+        _sessionReturnPeriodUnits[reachId] = _unitService.currentFlowUnit;
       }
 
       final session = _sessionData[reachId]!;
@@ -755,6 +774,13 @@ class FavoritesProvider with ChangeNotifier {
   Map<int, double>? getReturnPeriods(String reachId) {
     return _sessionReturnPeriods[reachId];
   }
+
+  /// The unit [getReturnPeriods] returned them in.
+  ///
+  /// Null when nothing is cached for this reach. Callers must convert FROM
+  /// this, not from an assumed CMS — see the note where these are stored.
+  String? getReturnPeriodUnit(String reachId) =>
+      _sessionReturnPeriodUnits[reachId];
 
   /// Filter favorites by search query
   List<FavoriteRiver> filterFavorites(String query) {
@@ -803,6 +829,7 @@ class FavoritesProvider with ChangeNotifier {
     _refreshingReachIds.clear();
     _sessionData.clear();
     _sessionReturnPeriods.clear();
+    _sessionReturnPeriodUnits.clear();
     // Through the single membership hook, so the cache un-pins too — review
     // found this path bypassing it, leaving pins for favourites that no longer
     // exist.

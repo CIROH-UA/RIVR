@@ -79,6 +79,15 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   /// The card headline: a GEOGLOWS reach shows its place (once geocoded);
   /// everything else uses the favorite's display name.
   String get _displayTitle {
+    // The user's own name wins over everything.
+    //
+    // A GEOGLOWS card showed its geocoded place unconditionally, so renaming
+    // one changed nothing on screen — the rename WAS saved, and reached the
+    // server, but the card kept showing "Pitumarca, Peru". Reported on device
+    // 2026-08-30.
+    final custom = widget.favorite.customName;
+    if (custom != null && custom.trim().isNotEmpty) return custom;
+
     if (widget.favorite.source.isGeoglows && _placeLabel != null) {
       return _placeLabel!;
     }
@@ -284,10 +293,24 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     final currentFlow =
         flowUnitService.convertFlow(rawFlow, storedUnit, currentUnit);
 
-    // Return periods are stored natively in CMS.
+    // Convert from the unit the PROVIDER stored them in, not from an assumed
+    // CMS.
+    //
+    // This said "return periods are stored natively in CMS" and converted from
+    // it. They are not: both payload decoders already convert to the unit
+    // current at decode time, so this multiplied every threshold by ~35 for a
+    // CFS user and almost every river read as Normal however high it was.
+    // Found on a device 2026-08-30 — a GEOGLOWS reach at 834 CFS against a
+    // 684 CFS two-year threshold showed NORMAL while the server alerted it as
+    // Action. The badge colour and the card's animation follow the category,
+    // so all three were wrong together.
+    final storedRpUnit =
+        favoritesProvider.getReturnPeriodUnit(widget.favorite.reachId) ??
+            currentUnit;
     final convertedReturnPeriods = <int, double>{
       for (final entry in returnPeriods.entries)
-        entry.key: flowUnitService.convertFlow(entry.value, 'CMS', currentUnit),
+        entry.key: flowUnitService.convertFlow(
+            entry.value, storedRpUnit, currentUnit),
     };
 
     // Single app-wide classifier — never reimplement the ladder.
