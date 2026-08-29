@@ -198,6 +198,13 @@ class StoreBackedDataSource implements IRiverDataSource {
         // document was fetched upstream when the server fetched it, and
         // re-stamping it here would let each device extend its life.
         validUntil: entry.window.validUntil,
+        // And the server's fetchedAt, for the same reason and a sharper one.
+        // Phase 7 asks how long a value has been HELD without anyone actually
+        // refetching it; the repository used to stamp `now` here, which reset
+        // that clock on every device read and made a store frozen for
+        // fourteen hours look freshly fetched. The guard could never fire on
+        // the one path it existed for.
+        fetchedAt: entry.window.fetchedAt,
       );
     } catch (e) {
       // A local miss throws rather than returning an empty snapshot, so this

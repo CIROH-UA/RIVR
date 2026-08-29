@@ -27,6 +27,8 @@ import {
   quotaUsage,
 } from "./store-trigger.js";
 import {ForecastProductId} from "./store-keys.js";
+import {maxHoldMs, maxRunAgeMs} from "./store-window.js";
+import {MANAGED_PRODUCTS, GEOGLOWS_PRODUCTS} from "./store-service.js";
 
 const MANAGED: ForecastProductId[] =
   ["analysisAssimilation", "shortRange", "mediumRange", "longRange"];
@@ -335,7 +337,9 @@ describe("run currency — the failure write recency cannot see", () => {
       new Date(NOW.getTime() - 600_000), // written minutes ago
       new Date(NOW.getTime() - 600_000),
       NOW,
-      [held("geoglowsForecast", 40, 0.25)] as never); // run 40h old, cap 36h
+      // 49.5h is what the old 01:30 schedule actually produced: it took
+      // yesterday's run and held it until the next 01:30. Cap is 42h.
+      [held("geoglowsForecast", 49.5, 0.25)] as never);
 
     assert.notEqual(h.status, "healthy",
       "written 15 minutes ago and still a day out of date — this is the " +
@@ -357,17 +361,33 @@ describe("run currency — the failure write recency cannot see", () => {
 
   // GEOGLOWS stamps its run at the day's 00Z and publishes 10:15-10:30 UTC, so
   // the oldest a legitimate run gets is ~34.5h just before the next lands.
-  test("a GEOGLOWS run just before the next publication is still healthy",
-    () => {
-      const h = assessStoreHealth(
-        new Date(NOW.getTime() - 600_000),
-        new Date(NOW.getTime() - 600_000),
-        NOW,
-        [held("geoglowsForecast", 34, 0.25)] as never);
-      assert.equal(h.status, "healthy",
-        "34h is a normal GEOGLOWS run age; alarming here would cry wolf " +
-        "every single morning");
-    });
+  // The margin that a 36h cap did not leave. What matters is not when
+  // GEOGLOWS publishes (10:15-10:30Z) but when WE fetch it:
+  // storeGeoglowsDaily runs at 11:30Z with no retry, so a stored run reaches
+  // 35.5h just before replacement. A 36h cap left ~25 minutes, and any
+  // publication later than 11:30 — the case the schedule is explicitly not
+  // trusted for — would have returned 503 for the next 23 hours.
+  test("a GEOGLOWS run just before OUR next fetch is still healthy", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("geoglowsForecast", 35.5, 0.25)] as never);
+    assert.equal(h.status, "healthy",
+      "35.5h is the normal maximum, not an anomaly; alarming here would " +
+      "cry wolf every single morning at 11:29");
+  });
+
+  test("a late GEOGLOWS publication does not immediately alarm", () => {
+    // The schedule is documented as not trusted. A run that lands a few
+    // hours late must not page anyone.
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [held("geoglowsForecast", 41, 0.25)] as never);
+    assert.equal(h.status, "healthy", h.problems.join("; "));
+  });
 
   test("the cap is per product, not one number", () => {
     // 30h: past shortRange's 8h, inside longRange's 36h.
@@ -410,6 +430,27 @@ describe("run currency — the failure write recency cannot see", () => {
     assert.deepEqual(runs, []);
   });
 
+  // referenceTimeOf joins several distinct reference times with "|", and a
+  // test pins that shape. A bare Date.parse returns NaN for it, and the first
+  // version of this skipped the product silently — an unparseable run and a
+  // current one produced identical output: healthy. That is the monitor going
+  // quiet for exactly the reason it exists.
+  test("a pipe-joined runId is read, not skipped", () => {
+    const at = (h: number) =>
+      new Date(NOW.getTime() - h * 3600_000).toISOString();
+    const runs = assessRunCurrency([
+      {
+        documentId: "x", source: "nwm", product: "shortRange",
+        fetchedAt: NOW.toISOString(), validUntil: NOW.toISOString(),
+        runId: `${at(40)}|${at(20)}`,
+      },
+    ] as never, NOW);
+
+    assert.equal(runs.length, 1, "the pipe-joined run was dropped entirely");
+    // The NEWEST segment is the run we actually hold.
+    assert.ok(Math.abs(runs[0].runAgeMs - 20 * 3600_000) < 60_000);
+  });
+
   test("an unparseable runId is ignored, not read as age zero", () => {
     const runs = assessRunCurrency([
       {
@@ -440,6 +481,111 @@ describe("run currency — the failure write recency cannot see", () => {
     assert.equal(h.products.length, 1);
     assert.equal(h.runs.length, 1);
   });
+});
+
+describe("every managed product is actually judged", () => {
+  // Nothing guarded this, and the omission is silent by construction:
+  // maxRunAgeMs returns null for an unknown product and assessRunCurrency
+  // skips it. A product added to the refresh cycle without a cap entry would
+  // be exempt from run currency forever, with no test failing and no log
+  // line saying so. Same mutation class as store-health-wiring.test.ts.
+  test("MANAGED_PRODUCTS and GEOGLOWS_PRODUCTS all have a run-age cap", () => {
+    for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
+      assert.notEqual(maxRunAgeMs(p), null,
+        `${p} is on the refresh cycle but has no MAX_RUN_AGE_MS entry, so it ` +
+        "is silently exempt from run-currency checking");
+    }
+  });
+
+  test("and a hold cap, so write recency judges them too", () => {
+    for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
+      assert.ok(maxHoldMs(p) > 0, `${p} has no hold cap`);
+    }
+  });
+});
+
+describe("the alarm must not call a documented-normal day an outage", () => {
+  /**
+   * A sample stalled by the same amount on both dimensions.
+   * @param {string} product - Product id.
+   * @param {number} hours - Age of both the write and the run.
+   * @return {object} A StoredWindowSample.
+   */
+  function stalled(product: string, hours: number) {
+    const at = new Date(NOW.getTime() - hours * 3600_000).toISOString();
+    return {
+      documentId: `${product}__d`,
+      source: "nwm",
+      product,
+      fetchedAt: at,
+      validUntil: NOW.toISOString(),
+      runId: at,
+    };
+  }
+
+  // THE false alarm this grouping exists to stop, found by review before
+  // deploying. `analysisAssimilation` and `shortRange` both come from NOAA's
+  // `short_range` series — same fetch, same section, same probe key, same
+  // write — so they always stall together. With write recency AND run
+  // currency both reporting per product, ONE pause produced four problem
+  // lines, and more than one line meant "down", which the endpoint serves as
+  // 503.
+  //
+  // This repo documents a five-hour NOAA stall as normal and cites it as
+  // proof that guard 1 works. Paging a human for it is exactly the
+  // cry-wolf failure that the returnPeriods 503 taught us to take seriously.
+  test("one stalled NOAA series is ONE cause, not four problems", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 7 * 3600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [stalled("analysisAssimilation", 7), stalled("shortRange", 7)] as never);
+
+    assert.notEqual(h.status, "down",
+      "one upstream series pausing must never read as a full outage: " +
+      h.problems.join("; "));
+  });
+
+  test("two genuinely independent products DO read as down", () => {
+    // The grouping must not swallow real breadth: NWM and GEOGLOWS failing
+    // together is two causes and should escalate.
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [stalled("shortRange", 30), stalled("geoglowsForecast", 60)] as never);
+
+    assert.equal(h.status, "down", h.problems.join("; "));
+  });
+
+  // Sized against 163 real samples from publish_cadence_log: an 8h cap would
+  // have fired on 29 of them (17.8%), with a maximum observed run age of
+  // 11.0h. The cap is 16h.
+  test("the worst run age seen in eight days of real probe data is healthy",
+    () => {
+      const h = assessStoreHealth(
+        new Date(NOW.getTime() - 600_000),
+        new Date(NOW.getTime() - 600_000),
+        NOW,
+        [
+          stalled("analysisAssimilation", 11),
+          stalled("shortRange", 11),
+        ] as never);
+
+      // Not "healthy": past the hold cap the store really has stopped
+      // covering this product, and saying so is the honest report. What it
+      // must NOT be is "down", which the endpoint serves as 503 — one NOAA
+      // series pausing is a bad afternoon upstream, not an outage here.
+      assert.notEqual(h.status, "down",
+        "11h is the worst run age measured across 163 hourly probes; a " +
+        "single stalled series must not page anyone: " +
+        h.problems.join("; "));
+
+      // And run currency specifically must stay quiet at 11h — that is the
+      // whole reason the cap moved from 8h to 16h.
+      assert.ok(!h.problems.some((p) => p.includes("serving a run")),
+        "run currency fired at 11h, which 163 real samples say is normal");
+    });
 });
 
 describe("guard 11 — usage against the documented free tier", () => {

@@ -240,11 +240,10 @@ export interface ProductFreshness {
  * a 48 h cap, and this check would have reported healthy exactly as the old
  * one did. The store served yesterday's water while writing punctually.
  *
- * Catching that needs RUN CURRENCY, not write recency: comparing each stored
- * document's `runId` against the run upstream currently advertises. The
- * ingredients are already here — `checkStoreHealth` reads the probe, and every
- * stored document carries a `runId` that `sampleStoredWindows` simply does not
- * project. Recorded as the next step rather than implied to be done.
+ * Catching that needs RUN CURRENCY, which `assessRunCurrency` below now does:
+ * it measures the age of the run itself against `MAX_RUN_AGE_MS`. (It compares
+ * against the clock, not against the probe — an earlier version of this
+ * paragraph proposed the probe and was superseded before it shipped.)
  *
  * **The threshold is `MAX_HOLD_MS`, deliberately reused rather than a second
  * number.** It already answers exactly the right question — how long upstream
@@ -252,11 +251,11 @@ export interface ProductFreshness {
  * a separate constant here would drift from the window logic it must agree
  * with.
  *
- * That reuse does NOT, by itself, satisfy Phase 7 guard 4. The client never
- * sees this constant: it decides staleness from a document's `validUntil`,
- * which `storeValidUntil` computes from publish alignment, not from this cap.
- * An earlier comment here claimed the two sides shared one number; they do
- * not.
+ * The client now shares this constant — `hold_policy.dart` carries its copy
+ * and `hold-policy-drift.test.ts` fails if they diverge — so guard 4 holds for
+ * write recency. It does NOT hold for run currency: `MAX_RUN_AGE_MS` has no
+ * client counterpart, and that is the dimension which catches the incident
+ * above.
  *
  * A product with NO documents is skipped rather than reported down: nobody has
  * favourited a river that needs it, so there is nothing to be stale. The
@@ -294,6 +293,34 @@ export function assessProductFreshness(
 
   out.sort((a, b) => (b.ageMs - b.capMs) - (a.ageMs - a.capMs));
   return out;
+}
+
+/**
+ * A run identity as an instant, or null when it cannot be read as one.
+ *
+ * **Handles the pipe-joined form.** `referenceTimeOf` documents that when a
+ * response carries several distinct reference times it joins them with `"|"`,
+ * and a test pins that shape. `isRunNewer` copes via its string fallback, so
+ * triggering keeps working — but a bare `Date.parse` returns NaN, and the
+ * first version of this function then SKIPPED the product silently. An
+ * unparseable run and a perfectly current one produced identical output: no
+ * entry, no problem, healthy.
+ *
+ * That is the monitor going quiet for the reason it exists to report. Latent
+ * rather than live today — NOAA currently returns one reference time per
+ * section — but silence is the wrong failure direction here.
+ *
+ * @param {string} runId - The stored run identity.
+ * @return {number | null} Epoch ms of the newest segment, or null.
+ */
+export function parseRunInstant(runId: string): number | null {
+  let newest: number | null = null;
+  for (const part of runId.split("|")) {
+    const t = Date.parse(part.trim());
+    if (Number.isNaN(t)) continue;
+    if (newest === null || t > newest) newest = t;
+  }
+  return newest;
 }
 
 /** One product's run currency, as the health check sees it. */
@@ -338,8 +365,8 @@ export function assessRunCurrency(
 
   for (const s of samples) {
     if (!s.runId) continue;
-    const runAt = Date.parse(s.runId);
-    if (Number.isNaN(runAt)) continue;
+    const runAt = parseRunInstant(s.runId);
+    if (runAt === null) continue;
     const seen = newestRun.get(s.product);
     if (seen === undefined || runAt > seen) newestRun.set(s.product, runAt);
   }
@@ -354,6 +381,33 @@ export function assessRunCurrency(
 
   out.sort((a, b) => (b.runAgeMs - b.capMs) - (a.runAgeMs - a.capMs));
   return out;
+}
+
+/**
+ * Products that fail together, and must therefore count once.
+ *
+ * Keyed by what actually breaks upstream rather than by product name. Both
+ * NWM hourly products come from the same `short_range` series, so a pause
+ * there is ONE cause however many documents it touches.
+ */
+const CAUSE_GROUP: Readonly<Record<string, string>> = {
+  analysisAssimilation: "nwm-short-series",
+  shortRange: "nwm-short-series",
+};
+
+/**
+ * The underlying cause a problem line belongs to.
+ *
+ * Both dimensions report per product, so the same stalled series can raise up
+ * to four lines; grouping collapses them to the one thing an operator would
+ * actually go and look at.
+ *
+ * @param {string} problem - A problem line.
+ * @return {string} A cause key.
+ */
+function causeOf(problem: string): string {
+  const product = problem.split(" ")[0];
+  return CAUSE_GROUP[product] ?? product;
 }
 
 export function assessStoreHealth(
@@ -412,9 +466,27 @@ export function assessStoreHealth(
     );
   }
 
+  // Status is counted by CAUSE, not by problem line, and the difference is
+  // not cosmetic.
+  //
+  // `analysisAssimilation` and `shortRange` are not independent: both are
+  // fetched from NOAA's `short_range` series, both read their run from the
+  // same section, both trigger off the same probe key, and both are written
+  // by the same run at the same instant. They stall together, always. With
+  // two dimensions now reporting (write recency and run currency), ONE
+  // ordinary NOAA pause produced four problem lines — and four lines meant
+  // "down", which the endpoint serves as 503.
+  //
+  // That is the five-hour stall this very repo documents as normal operation
+  // and cites as proof that guard 1 works. An alarm that calls a known-good
+  // day an outage is the same class of false alarm as the one that took
+  // storeHealth to 503 on the near-static products, and it is worse here
+  // because it is the state a human would page on.
+  const causes = new Set(problems.map(causeOf));
+
   let status: HealthStatus = "healthy";
-  if (problems.length === 1) status = "degraded";
-  if (problems.length > 1) status = "down";
+  if (causes.size === 1) status = "degraded";
+  if (causes.size > 1) status = "down";
   if (lastWriteAgeMs === null && probeAgeMs === null) status = "down";
 
   return {status, problems, lastWriteAgeMs, probeAgeMs, products, runs};

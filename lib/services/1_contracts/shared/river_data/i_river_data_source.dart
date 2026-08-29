@@ -31,11 +31,31 @@ class SourceFetchResult {
   /// Review round 3, non-blocking 5.
   final DateTime? validUntil;
 
+  /// When the value was ACTUALLY pulled from upstream, when the source knows
+  /// it better than the repository can.
+  ///
+  /// Exactly the same argument as [validUntil] above, applied to the other
+  /// half of the window — and it had to be made twice, because the first time
+  /// only `validUntil` was carried across. Phase 7's re-review found the
+  /// consequence: a value served from the cloud store was being stamped
+  /// `fetchedAt: now` by the repository, so the hold clock reset on every
+  /// device read and a document the SERVER had been holding for fourteen
+  /// hours looked freshly fetched.
+  ///
+  /// That defeated the whole guard it was added for. `fetchedAt` is what
+  /// answers "how long has nobody actually checked?" — the server never moves
+  /// it when it extends a window, precisely so it stays honest — and the
+  /// client must not move it either.
+  ///
+  /// Null for a genuine live fetch, which really did happen now.
+  final DateTime? fetchedAt;
+
   const SourceFetchResult({
     required this.payload,
     required this.unit,
     this.runId,
     this.validUntil,
+    this.fetchedAt,
   });
 }
 

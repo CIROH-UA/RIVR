@@ -61,6 +61,27 @@ class RiverDataRepository implements IRiverDataRepository {
     if (_unconfirmed.remove(key.storageKey)) _sync();
   }
 
+  /// Judge a value we are about to serve or store.
+  ///
+  /// Called wherever an entry is ADOPTED — a fresh cache hit, a completed
+  /// fetch, a pushed store document — because "is this held too long?" is a
+  /// property of the value, not of the door it came through. The re-review
+  /// found the first version asking the question only on a cache hit, so a
+  /// store document that arrived already fourteen hours old was adopted,
+  /// rendered and marked confirmed, and stayed unquestioned until some later
+  /// read happened to look.
+  void _judge(RiverDataKey key, RiverDataEntry entry) {
+    if (heldTooLong(
+      product: key.product,
+      fetchedAt: entry.window.fetchedAt,
+      now: _now(),
+    )) {
+      _markUnconfirmed(key);
+    } else {
+      _markConfirmed(key);
+    }
+  }
+
   void _sync() {
     final value = _unconfirmed.isNotEmpty;
     if (_outOfSync.value != value) _outOfSync.value = value;
@@ -79,15 +100,7 @@ class RiverDataRepository implements IRiverDataRepository {
       // cap the SERVER stops extending and lets the document expire. The
       // client stops vouching for it at the same instant, using the same
       // constant.
-      if (heldTooLong(
-        product: key.product,
-        fetchedAt: cached.window.fetchedAt,
-        now: _now(),
-      )) {
-        _markUnconfirmed(key);
-      } else {
-        _markConfirmed(key);
-      }
+      _judge(key, cached);
       return cached; // fresh — no network
     }
 
@@ -229,7 +242,7 @@ class RiverDataRepository implements IRiverDataRepository {
     // kept "These numbers may not be current" over the top of them: every
     // later read found the cache fresh and never fetched, so nothing cleared
     // it until the next expiry AND a live fetch.
-    _markConfirmed(entry.key);
+    _judge(entry.key, entry);
   }
 
   /// Whether [incoming] may replace [existing]. Same ordering the server uses.
@@ -272,7 +285,12 @@ class RiverDataRepository implements IRiverDataRepository {
     final entry = RiverDataEntry(
       key: key,
       window: FreshnessWindow(
-        fetchedAt: now,
+        // The SOURCE's own fetch time wins when it has one — only the cloud
+        // store supplies it, and only because the value really was pulled
+        // upstream earlier, by the server. Stamping `now` unconditionally
+        // reset the hold clock on every device read, which is what stopped
+        // Phase 7's guard 3 from ever firing on store-served data.
+        fetchedAt: result.fetchedAt ?? now,
         // The source's own window wins when it has one. Only the cloud store
         // supplies it, and only because its value was fetched earlier by the
         // server: recomputing from the read clock would extend the server's
@@ -285,7 +303,10 @@ class RiverDataRepository implements IRiverDataRepository {
       payload: result.payload,
     );
     await _cache.put(entry);
-    _markConfirmed(key);
+    // NOT an unconditional confirm: a store-served value can arrive already
+    // older than its product's hold cap, and adopting it is exactly when that
+    // must be noticed.
+    _judge(key, entry);
     return entry;
   }
 }

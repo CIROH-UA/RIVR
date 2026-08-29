@@ -107,24 +107,37 @@ export interface StoredWindowSample {
  *
  * The numbers are publish cadence plus the observed lag, not guesses:
  *
- * - **8 h** for the hourly NWM products. A five-hour NOAA stall is recorded in
- *   this repo as normal, so a tighter cap would cry wolf on a known-good day.
- * - **24 h / 36 h** for medium and long range. Nominally 6-hourly, but the 12Z
- *   run was observed landing at 21:20Z (2026-08-28), so a run stays current
- *   far longer than its cycle suggests. Long range gets more because its lag
- *   is worse.
- * - **36 h** for GEOGLOWS. One run per UTC day, stamped 00Z, published
- *   10:15-10:30 UTC (measured on two consecutive days). So the oldest a
- *   legitimate run gets is ~34.5 h, just before the next one lands. 36 h
- *   clears that and still catches yesterday's run from noon onward — which is
- *   the incident above.
+ * **The first version of these numbers was wrong in two places, and both were
+ * caught before deploying — by measurement, not by reasoning.**
+ *
+ * - **16 h** for the hourly NWM products. The first attempt used 8 h on the
+ *   argument that "a five-hour NOAA stall is recorded here as normal". That
+ *   forgot that run age = publish lag + stall: NOAA's `referenceTime` is
+ *   already ~3 h behind the wall clock on an ordinary day. Replaying 163
+ *   samples from `publish_cadence_log`, an 8 h cap would have fired on
+ *   **29 of them (17.8%)** for `analysisAssimilation` and 7 (4.3%) for
+ *   `shortRange`, with a maximum observed age of 11.0 h. 16 h clears the
+ *   worst observed sample, the documented five-hour stall on top of the
+ *   baseline lag, and one missed refresh interval.
+ * - **24 h / 36 h** for medium and long range. Unchanged: 0 of 153 and 0 of
+ *   155 samples would have fired, with maxima of 13.0 h and 21.0 h. The 12Z
+ *   run landing at 21:20Z (2026-08-28) is a ~15 h worst case, inside both.
+ * - **42 h** for GEOGLOWS, not 36 h. The run is stamped 00Z and published
+ *   10:15-10:30 UTC, but what matters is when WE fetch it, and
+ *   `storeGeoglowsDaily` runs at 11:30 UTC with no retry — so a stored run
+ *   legitimately reaches **35.5 h** just before replacement, leaving 36 h
+ *   about twenty-five minutes of margin. Any publication later than ~11:30
+ *   would have returned 503 continuously for the next 23 hours, and "the
+ *   schedule is not trusted" is exactly why the probe-and-fan-out design
+ *   exists. 42 h keeps the incident caught: the old 01:30 schedule let a run
+ *   reach 49.5 h before replacement.
  */
 export const MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
-  analysisAssimilation: 8 * 3600_000,
-  shortRange: 8 * 3600_000,
+  analysisAssimilation: 16 * 3600_000,
+  shortRange: 16 * 3600_000,
   mediumRange: 24 * 3600_000,
   longRange: 36 * 3600_000,
-  geoglowsForecast: 36 * 3600_000,
+  geoglowsForecast: 42 * 3600_000,
 };
 
 /**

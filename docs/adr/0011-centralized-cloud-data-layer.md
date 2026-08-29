@@ -1178,8 +1178,9 @@ that product's own cap.
   "something is broken" — and it is per product because the products differ by
   an order of magnitude (short range 6 h, long range 36 h, GEOGLOWS 48 h). A
   second constant here would drift from the window logic it has to agree with.
-  It does **not**, however, satisfy guard 4, though the first version of this
-  decision said it did. The client never sees this constant — see decision 22.
+  The client now shares this constant too (decision 22), so guard 4 holds for
+  write recency — but NOT for run currency below, which has no client
+  counterpart.
 - **A product with no documents is skipped, not reported down.** Nobody has
   favourited a river that needs it, so there is nothing to be stale.
 - **The NEWEST document per product is judged.** One old document among fresh
@@ -1243,10 +1244,11 @@ separate subject; two strips would be two competing answers to one question.
 
 | Situation | Banner |
 |---|---|
-| In window, online | nothing |
+| In window AND recently fetched, online | nothing |
 | Offline | "No internet connection" |
 | Serving data past its window, refresh failed | "These numbers may not be current" |
 | Online, a fetch failed, data still in window | nothing |
+| Held past its product's cap, even though in window | "may not be current" |
 
 The last row is the one worth defending. A failure that left in-window data on
 screen has cost the user nothing, and a warning there is the noise that teaches
@@ -1313,8 +1315,8 @@ overclaims are corrected in decisions 21 and 22 above rather than deleted.
 |---|---|
 | 1 — no value view renders a timestamp | **met**, tested and mutation-checked |
 | 2 — offline shows the indicator, healthy shows nothing | **met for the offline half** — favourites (full), reach forecast (offline only), map (its own notice); weekly outlook has none. The staleness half stays on favourites by decision, not omission |
-| 3 — a frozen store raises the indicator | **met** — a value held past its product's cap raises the indicator without forcing a refetch or showing an error; tested and mutation-checked |
-| 4 — the indicator is driven by the same signal that alarms operationally | **met** — client and server share `MAX_HOLD_MS`, pinned by a cross-language drift test that fails in both directions |
+| 3 — a frozen store raises the indicator | **met**, on the second attempt. The first passed its own test while failing in production: the repository stamped its own read clock over the server's `fetchedAt`, so the hold clock reset on every device read and the guard could never fire on store-served data. The test proving it wrote the crafted entry straight into the fake cache — asserting the premise instead of proving it. Now tested through a store-shaped source |
+| 4 — the indicator is driven by the same signal that alarms operationally | **met for write recency only.** Client and server share `MAX_HOLD_MS`, pinned by a drift test that fails in both directions. They do NOT share run currency: `MAX_RUN_AGE_MS` has no client counterpart, and decision 21 records that run currency is the dimension which catches the GEOGLOWS incident. So the shared signal is the weaker of the two |
 | 5 — independent agent review passes | **run 2026-08-29 and it did NOT pass.** This section is its result. Guards 3 and 4, and run currency, were all built in response to it; a re-review is still owed |
 
 What was genuinely delivered: the timestamps are gone from the values, the
@@ -1325,10 +1327,16 @@ that could stick on after data was restored, one that stayed silent on a failed
 cold-start fetch, and a global latch that let one river's success speak for
 another's failure).
 
-Everything the review raised has since been built: run currency (decision 21),
-and the shared hold cap that closes guards 3 and 4 (decision 22). **What
-remains is the re-review** — guard 5 is not satisfied by the review that
-failed, and none of this work has been through one.
+**A second review ran on 2026-08-29 and also did not pass.** It found the
+guard-3 fix passing its own test while failing in production, two run-age caps
+that would have false-alarmed (one on 17.8% of eight days of real probe
+samples), a status ladder that served one ordinary NOAA pause as a 503 outage,
+and a drift test that could be defeated by an ordinary trailing comment. All
+were fixed; the corrections are in decisions 21 and 22 above rather than
+deleted.
+
+What remains: guard 5 is still owed a review that passes, and guard 4 is met
+for only one of the server's two signals.
 
 ### How alerting actually works, end to end
 
@@ -1472,10 +1480,18 @@ once Phase 4's monitoring proves the guarantee, because afterwards **users canno
 tell a stale value from a current one — we have trained them not to look.**
 
 That precondition was checked rather than assumed, and it did not hold: the
-Phase 4 heartbeat measured the whole collection at once and had been reporting
-a healthy store through 24-hour GEOGLOWS stalls. Making health per-product
-(decision 21) was therefore part of this phase's work, not a prerequisite met
-elsewhere.
+Phase 4 heartbeat measured the whole collection at once, so a product that
+stopped being written was invisible behind any other product's writes. Making
+health per-product (decision 21) was therefore part of this phase's work, not a
+prerequisite met elsewhere.
+
+Two corrections to how that used to be worded here. It said the heartbeat "had
+been reporting a healthy store through 24-hour GEOGLOWS stalls" — but there
+were no stalls: decision 21 establishes the job wrote punctually every day
+carrying yesterday's run, which is a different failure and the reason write
+recency alone does not catch it. And "was reporting healthy" is deduced from
+reading the old code, not an observed response; no `storeHealth` output from
+that period is recorded anywhere.
 
 **Build.** No timestamps beside values. One unobtrusive indicator only when the
 app *knows* it is out of sync — offline, or the store has not advanced past an

@@ -150,6 +150,49 @@ void main() {
     // it passed all 1162 tests. Without it every device re-stamps the store's
     // 30-day static window from its own read clock, indefinitely extending the
     // exact worst case the kill switch has to reclaim.
+    // The OTHER half of the same window, and it had to be learned twice.
+    //
+    // `validUntil` was carried across in review round 3; `fetchedAt` was not,
+    // and Phase 7 then built its whole guard-3 story on `fetchedAt`. The
+    // repository stamped its own read clock, so a document the SERVER had
+    // been holding for fourteen hours arrived looking freshly fetched, the
+    // hold clock reset on every device read, and the indicator could never
+    // fire on the one path it existed for. Mutation-checked: deleting the
+    // forwarding line passed all 1255 tests before this existed.
+    test('the SERVER\'s fetchedAt is passed through, not re-stamped',
+        () async {
+      final now = DateTime.now().toUtc();
+      final serverFetchedAt = now.subtract(const Duration(hours: 14));
+      final db = FakeFirebaseFirestore();
+      final key = _key();
+      final json = RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: serverFetchedAt,
+          validUntil: now.add(const Duration(hours: 1)),
+        ),
+        unit: 'CMS',
+        runId: 'store-run',
+        payload: const {'from': 'store'},
+      ).toJson();
+      await db.collection(kStoreCollection).doc(key.storageKey).set(json);
+
+      final s = StoreBackedDataSource(
+          inner: upstream, readSwitch: _Switch(true), firestore: db);
+      final r = await s.fetch(key);
+
+      expect(r.fetchedAt, isNotNull,
+          reason: 'null here means the repository stamps its own read clock, '
+              'which resets the hold clock on every device read');
+      expect(
+        r.fetchedAt!.toIso8601String(),
+        serverFetchedAt.toIso8601String(),
+        reason: 'fetchedAt answers "how long has nobody actually checked?" — '
+            'the server never moves it when it extends a window, and neither '
+            'may the client',
+      );
+    });
+
     test('the SERVER\'s freshness window is passed through, not re-stamped',
         () async {
       final now = DateTime.now().toUtc();

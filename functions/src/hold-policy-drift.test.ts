@@ -45,9 +45,30 @@ function durationMs(literal: string): number {
   return ms;
 }
 
+/**
+ * Strip `//` comments before matching.
+ *
+ * Without this the test passed while the two sides disagreed, in the
+ * dangerous direction — found by mutation during the Phase 7 re-review. The
+ * entry regex is global and last-match-wins, so an ordinary edit like
+ *
+ *     ForecastProduct.shortRange: Duration(hours: 24),
+ *     // was ForecastProduct.shortRange: Duration(hours: 6), before 2026-08-30
+ *
+ * left the client on 24 h, the server on 6 h, and all four assertions green.
+ * Recording a superseded value in a trailing comment is a normal thing to do,
+ * which is what made it dangerous rather than contrived.
+ *
+ * @param {string} src - Dart source.
+ * @return {string} The same source with line comments removed.
+ */
+function stripComments(src: string): string {
+  return src.replace(/^\s*\/\/.*$/gm, "").replace(/\/\/.*$/gm, "");
+}
+
 /** The client's map, read out of the Dart source. */
 function dartHolds(): Record<string, number> {
-  const dart = readFileSync(DART, "utf8");
+  const dart = stripComments(readFileSync(DART, "utf8"));
   const block = /const Map<ForecastProduct, Duration> maxHold = \{([\s\S]*?)\};/
     .exec(dart);
   assert.notEqual(block, null,
@@ -65,6 +86,21 @@ function dartHolds(): Record<string, number> {
 }
 
 describe("guard 4 — the client and the server hold for the same time", () => {
+  // The test's own failure mode, pinned. A commented-out entry must not be
+  // able to speak for the live one, in either position.
+  test("a commented-out entry cannot override the real one", () => {
+    const withTrailingComment = stripComments(
+      "ForecastProduct.shortRange: Duration(hours: 6),\n" +
+      "// was ForecastProduct.shortRange: Duration(hours: 24), before today\n");
+    assert.ok(!withTrailingComment.includes("hours: 24"),
+      "a superseded value left in a comment used to win the last-match scan");
+
+    const withLeadingComment = stripComments(
+      "// ForecastProduct.shortRange: Duration(hours: 99),\n" +
+      "ForecastProduct.shortRange: Duration(hours: 6),\n");
+    assert.ok(!withLeadingComment.includes("hours: 99"));
+  });
+
   test("every server cap has an identical client cap", () => {
     const dart = dartHolds();
 
@@ -88,7 +124,7 @@ describe("guard 4 — the client and the server hold for the same time", () => {
   });
 
   test("the fallbacks agree too", () => {
-    const dart = readFileSync(DART, "utf8");
+    const dart = stripComments(readFileSync(DART, "utf8"));
     const fallback =
       /const Duration defaultMaxHold = (Duration\([^)]*\));/.exec(dart);
     assert.notEqual(fallback, null, "defaultMaxHold is gone from the client");

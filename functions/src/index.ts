@@ -483,5 +483,16 @@ export const storeHeartbeat = functions
 /** On-demand health read, for answering "is the store fresh right now?". */
 export const storeHealth = functions.https.onRequest(async (_req, res) => {
   const health = await checkStoreHealth();
-  res.status(health.status === "healthy" ? 200 : 503).json(health);
+  // Only "down" is a 503. "degraded" — exactly one cause, e.g. a single NOAA
+  // series pausing — returns 200 with the status in the body.
+  //
+  // The ladder distinguished the two from the start and the endpoint
+  // collapsed them, so one ordinary upstream pause served an outage page.
+  // This repo documents a five-hour NOAA stall as NORMAL and cites it as
+  // proof that guard 1 works; past the hold cap the store stops covering
+  // that product and says so, which is worth reporting and not worth waking
+  // anyone for. A monitor that wants to escalate on degraded can read
+  // `status` — a monitor that only reads the HTTP code should not be paged
+  // by a bad afternoon at NOAA.
+  res.status(health.status === "down" ? 503 : 200).json(health);
 });

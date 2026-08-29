@@ -24,12 +24,13 @@
 //
 // **What raises it:**
 //
-// | Situation                                    | Banner            |
-// |----------------------------------------------|-------------------|
-// | Everything inside its window, online          | nothing           |
-// | Offline                                       | "No internet"     |
-// | Serving data past its window, refresh failed  | "may not be current" |
-// | Online, a fetch failed, data still fresh      | nothing           |
+// | Situation                                     | Banner            |
+// |-----------------------------------------------|-------------------|
+// | Inside its window AND recently fetched, online | nothing           |
+// | Offline                                        | "No internet"     |
+// | Serving data past its window, refresh failed   | "may not be current" |
+// | HELD past its product's cap, even if in-window | "may not be current" |
+// | Online, a fetch failed, data still fresh       | nothing           |
 //
 // The last row is deliberate. A failure that still leaves in-window data on
 // screen has cost the user nothing, and a warning there is noise that teaches
@@ -38,30 +39,25 @@
 // Offline wins when both are true: it is the more actionable of the two, and
 // it explains the other.
 //
-// **Guard 4 is NOT met, and an earlier version of this comment claimed it
-// was.** The claim was that a document's window comes from the same
-// per-product `MAX_HOLD_MS` the server alarms on, so the indicator and the
-// operational alarm are one number. That is false, and it was written without
-// being checked: `MAX_HOLD_MS` exists only in TypeScript — the only occurrence
-// of the name anywhere in `lib/` was the comment asserting it was shared.
+// **Guard 4, and how it got there.** An early version of this comment claimed
+// the client and server shared `MAX_HOLD_MS`. They did not — the constant
+// existed only in TypeScript, and the only occurrence of the name anywhere in
+// `lib/` was the comment asserting it was shared. A review found that; a later
+// commit then made it true, and this comment went on asserting the opposite
+// until a second review found THAT. Both errors were the same error: a
+// statement about two files, checked against neither.
 //
-// What actually drives each side:
+// What is true now: `hold_policy.dart` holds the client's copy of the caps,
+// and `functions/src/hold-policy-drift.test.ts` reads it off disk and fails if
+// the two sides diverge in either direction. The client applies the cap to the
+// SERVER's `fetchedAt`, forwarded through `SourceFetchResult.fetchedAt`, not
+// to its own read clock.
 //
-//   this banner   `entry.window.validUntil` has passed AND the revalidation
-//                 that should have replaced the value failed. For a stored
-//                 document that window is `storeValidUntil` (publish
-//                 alignment, ~1 h for short range); for a live-path entry it
-//                 is the Dart data source's own schedule, which never touches
-//                 the server at all.
-//   the server    `window.fetchedAt` age against `MAX_HOLD_MS` (6 h for short
-//                 range) in `assessProductFreshness`.
-//
-// Different functions, different magnitudes, and no shared constant. They
-// correlate — both ultimately track publication — but "driven by the same
-// signal" is a stronger claim than the code supports, and Phase 7 is the last
-// place to overstate a guarantee. Closing this properly means the client
-// learning the server's health verdict rather than inferring one; that is
-// tracked as open, not quietly claimed.
+// What is still not true: the server also alarms on RUN AGE
+// (`MAX_RUN_AGE_MS`), and the client has no notion of that at all. So the
+// shared signal is write recency only — and decision 21 records that write
+// recency is the dimension which would NOT have caught the GEOGLOWS incident.
+// Guard 4 is met for one of the server's two signals, and not the sharper one.
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';

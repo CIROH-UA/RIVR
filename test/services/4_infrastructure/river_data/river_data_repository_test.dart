@@ -99,6 +99,10 @@ class _ControllableSource implements IRiverDataSource {
   /// A window the SOURCE already knows, as the cloud store supplies one.
   DateTime? nextValidUntil;
 
+  /// The instant the SERVER fetched this value, as StoreBackedDataSource
+  /// reports it. Null for a genuine live fetch, which really did happen now.
+  DateTime? nextFetchedAt;
+
   @override
   Set<ForecastProduct> get supportedProducts => ForecastProduct.values.toSet();
 
@@ -115,9 +119,11 @@ class _ControllableSource implements IRiverDataSource {
     if (offline) throw Exception('network unreachable');
     return SourceFetchResult(
       validUntil: nextValidUntil,
-        payload: nextPayload ?? {'value': nextValue},
-        unit: 'CMS',
-        runId: nextRunId);
+      fetchedAt: nextFetchedAt,
+      payload: nextPayload ?? {'value': nextValue},
+      unit: 'CMS',
+      runId: nextRunId,
+    );
   }
 }
 
@@ -338,6 +344,39 @@ void main() {
     // `fetchedAt` is never moved by an extension, and past the product's hold
     // cap the SERVER stops extending and lets the document expire. The client
     // now stops vouching at the same instant, using the same constant.
+    // The re-review's blocker, and the reason the two tests below it were not
+    // enough on their own: they wrote the crafted entry straight into the fake
+    // cache, which ASSERTS the premise (an old fetchedAt survives) rather than
+    // proving it. Production violated exactly that premise — `_doFetch`
+    // stamped `fetchedAt: now` on every value, including ones the SERVER had
+    // fetched hours earlier, so the hold clock reset on every device read and
+    // the guard could never fire on the one path it existed for.
+    //
+    // This test goes through a source shaped like StoreBackedDataSource: it
+    // returns the server's window, both halves of it.
+    test('a store-served value keeps the SERVER fetchedAt, not the read clock',
+        () async {
+      final serverFetchedAt = now.subtract(const Duration(hours: 14));
+      source.nextFetchedAt = serverFetchedAt;
+      source.nextValidUntil = now.add(const Duration(hours: 1));
+
+      final entry = await repo.refresh(key);
+
+      expect(entry!.window.fetchedAt, serverFetchedAt,
+          reason: 'stamping the read clock here resets the hold clock on '
+              'every device read, which is what stopped guard 3 firing');
+      expect(repo.outOfSync.value, isTrue,
+          reason: '14h-old water against a 6h cap: the indicator is the whole '
+              'point of carrying the server fetchedAt across');
+    });
+
+    test('a genuine live fetch still stamps now', () async {
+      // fetchedAt is null for a real live fetch, which really did happen now.
+      final entry = await repo.refresh(key);
+      expect(entry!.window.fetchedAt, now);
+      expect(repo.outOfSync.value, isFalse);
+    });
+
     test('an in-window value HELD past its cap raises it', () async {
       // shortRange holds for 6h. Fetch, then jump 7h with a window that a
       // frozen store would have kept extending.
