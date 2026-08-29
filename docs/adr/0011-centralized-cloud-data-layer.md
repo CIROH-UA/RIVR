@@ -1034,17 +1034,34 @@ river sitting at Major for three days is one event, not seventy-two.
 
 Four triggers, in priority order:
 
-1. **Entry** — the reach crosses from Normal into any alert category. Always
-   sent.
+1. **Entry** — the reach crosses from Normal into any alert category. Sent
+   under every frequency **except `off`**.
+
+   This first read "always sent", and taken literally it meant a stream a user
+   had muted still spoke twice — once when the event began, again if it
+   worsened. Corrected 2026-08-29 when that consequence was put to Jerson:
+   muting a river means "stop telling me about this one", and only the safety
+   override outranks it.
 2. **Escalation** — the category rises (Action → Major, Major → Extreme).
-   **Always sent, and NOT suppressible by any user setting.** Safety beats
+   **Always sent, and NOT suppressible by any user setting — including `off`.**
+   The only true override in the system. Safety beats
    preference: Action to Extreme at 3am must wake someone regardless of what
    they chose. This is the one place the system deliberately overrides a stated
    user preference, and it was confirmed explicitly by Jerson.
 3. **Persistence** — while the event continues without escalating, a reminder
    at the user's chosen interval for THAT reach. Default 6-hourly.
 4. **All-clear** — the reach returns to Normal. Sent today by nothing at all,
-   and genuinely useful: "it is over" is news.
+   and genuinely useful: "it is over" is news. Only to someone who was told the
+   event started — an all-clear for something a user never heard about is
+   noise — and silenced by `off`, but NOT by `change-only`, because the end of
+   an event is exactly the change that option asks for.
+
+**A drop that is still elevated** (Extreme → Major) is a persistence
+continuation, not an all-clear and not an escalation: the event has not ended
+and has not worsened. **`Unknown` triggers nothing** — it is not a category any
+user has been shown, and the half that matters is that losing the thresholds
+must not read as "back to Normal" and fire a false all-clear while the river is
+still high.
 
 **Per-stream frequency, not global.** Options: hourly, 6-hourly, daily,
 only-on-change, off. Stored on the user document as a reach → preference map,

@@ -16,8 +16,9 @@
 //
 // Four triggers, in priority order:
 //
-//   entry        Normal -> any alert category. Always sent.
-//   escalation   the category RISES. Always sent, and not suppressible.
+//   entry        Normal -> any alert category. Sent unless the stream is off.
+//   escalation   the category RISES. Always sent, and not suppressible by
+//                anything at all — the only true override in the system.
 //   persistence  still elevated, not risen — at the user's per-stream interval.
 //   all-clear    back to Normal. Sent by nothing today.
 //
@@ -140,9 +141,15 @@ export function decideTrigger(input: TriggerInput): AlertTrigger {
   // Elevated from here down.
 
   if (previous === null || !wasElevated) {
-    // Entry. Always sent, per decision 19 — including on a muted stream, which
-    // is a deliberate reading of "always" and is flagged in the ADR.
-    return "entry";
+    // Entry. Always sent EXCEPT on a muted stream.
+    //
+    // Decision 19 originally read "always sent", which taken literally meant a
+    // stream set to "off" still spoke twice — once when the event began and
+    // again if it worsened. Jerson's call 2026-08-29 when that was put to him:
+    // off should be truly silent except escalation. A user who mutes a river is
+    // saying "stop telling me about this one", and only the safety override
+    // outranks that.
+    return frequency === "off" ? "none" : "entry";
   }
 
   if (rank(category) > rank(previous)) {

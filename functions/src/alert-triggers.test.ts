@@ -65,13 +65,22 @@ describe("entry — the event begins", () => {
     assert.equal(decide({category: "Action", previous: null}), "entry");
   });
 
-  test("entry fires regardless of frequency, including off", () => {
-    // Decision 19 says entry is always sent. Recorded here because it is a
-    // deliberate reading of "always" and the surprising half of it.
-    for (const f of ["hourly", "6h", "daily", "change-only", "off"] as const) {
+  test("entry fires under every frequency except off", () => {
+    for (const f of ["hourly", "6h", "daily", "change-only"] as const) {
       assert.equal(decide({category: "Major", previous: "Normal", frequency: f}),
         "entry", `entry was suppressed by frequency "${f}"`);
     }
+  });
+
+  test("a muted stream stays silent when an event BEGINS", () => {
+    // Decision 19 first read "always sent", which meant a muted river still
+    // spoke twice. Jerson's call: off is truly silent except escalation.
+    assert.equal(
+      decide({category: "Major", previous: "Normal", frequency: "off"}),
+      "none");
+    assert.equal(
+      decide({category: "Extreme", previous: null, frequency: "off"}),
+      "none");
   });
 });
 
@@ -194,7 +203,7 @@ describe("all-clear — the event ends", () => {
     assert.equal(decide({category: "Normal", previous: "Normal"}), "none");
   });
 
-  test("a muted stream does not even say it is over", () => {
+  test("a muted stream says nothing at all except to escalate", () => {
     assert.equal(
       decide({category: "Normal", previous: "Major", frequency: "off"}),
       "none");
