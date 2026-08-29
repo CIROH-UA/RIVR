@@ -481,13 +481,32 @@ without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
 
 **Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
-published by the flood builder and does NOT exist yet — it must be created by
-hand in the Firebase console before the switch can be exercised at all. Absent,
-`getBool` returns false, which is the safe default: every device takes the live
-path. Set it to `true` to let devices read the store; flip to `false` and every open
-app detaches its listeners and evicts every cached entry for a favourite, so
-the live path takes over within seconds rather than after the stored window
-expires (up to 30 days for river names and flood thresholds).
+published by the flood builder. It **exists and is `true`** — created by hand
+in the Firebase console 2026-08-28. Absent, `getBool` returns false, which is
+the safe default: every device takes the live path. Set it to `true` to let
+devices read the store; flip to `false` and every open app detaches its
+listeners and evicts every cached entry for a favourite, so the live path takes
+over rather than waiting for the stored window to expire (up to 30 days for
+river names and flood thresholds).
+
+**Delivery is minutes, not seconds.** Measured twice on a device 2026-08-29:
+a publish reached the app in ~4 minutes both times, through Remote Config's
+real-time `onConfigUpdated` listener. Plan an incident around minutes.
+
+**Publishing it programmatically is a FORCE OVERWRITE.** The REST API returns
+no ETag for this project (verified 2026-08-29 — the response carries no `etag`
+header at all), so a write needs `If-Match: *`. That is survivable only by
+reading the whole template first and putting every parameter back unchanged;
+the flood builder publishes its three parameters at ~13:30 UTC, so never do
+this near that hour. Read back and check all four values afterwards.
+
+**Guard 9 failed here once, and quietly.** Verified on a device 2026-08-29
+after the fix: with the switch off, a cold start makes real upstream calls
+(51, both favourite reaches) and parses a full NOAA payload
+(`analysis_assimilation (120 points)`). Before the fix the same test made
+ZERO upstream calls and parsed the store's trimmed shape. See
+`store_subscription_service.dart` — an ingest that outlived a detach, and an
+`evict` that raced the write chain.
 
 That eviction is deliberately broader than "what the store wrote" — cache
 entries carry no provenance marker, and the switch means "the store may have

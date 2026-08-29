@@ -910,27 +910,50 @@ days — if the store serves something wrong, the fix cannot wait on Apple.
 river, show the same number at the same time — and each renders within 3 seconds
 of a cold start, or instantly with no network at all.
 
-**Open, and owned by name.** These cannot be settled from a development machine
-and are not review failures:
+**Settled on real devices, 2026-08-28/29.** These could not be closed from a
+development machine, and running them was worth it: the session found four
+live defects that the whole suite was green through, one of them guard 9
+itself.
 
-| Guard | Needs | Owner |
+| Guard | Result | Evidence |
 |---|---|---|
-| 2 — two devices, two accounts, identical values | Deployed server + two devices | Jerson |
-| 3 — renders under 3 s on a cold cache | A device, timed | Jerson |
-| 4 — renders offline | A device, airplane mode | Jerson |
-| 9 (device half) — the kill switch, flipped for real | `store_read_enabled` created in Remote Config, then a device | Jerson |
-| The construction in `main.dart` | Pumping the root widget needs a live Firebase app | Covered by the device run |
-| The `main.dart` lifecycle handler (release on `detached`, re-sync on `resumed`) | Same — and `detached`/`resumed` cannot be driven in a unit test | Covered by the device run |
+| 1 — zero upstream calls for a favourite | **PASS** | Clean install, empty cache: every favourite rendered from the store, 0 NOAA calls. The same test 20 min earlier made 78 — see the expiry-window defect below. |
+| 2 — two devices, two accounts, identical values | **PASS** | iPhone (main account) and simulator (second account, `jersonjara7.18@`), reaches 18471070 / 10376596: White River 16702.1, Provo 179.1 on both, 0 NOAA calls for either reach. |
+| 3 — renders under 3 s on a cold cache | **PASS** | Store subscribed 08:34:28, White River rendered 08:34:30. ~2 s. |
+| 4 — renders offline | **PASS** | Airplane mode, Wi-Fi off, force-quit, reopen: all favourites rendered. The values were the store's own (16702 / 179, its 04:00Z short-range points), and they had reached the device only 40 s before the network was cut — so this is Firestore's offline persistence, not an older local cache. |
+| 9 (device half) — the kill switch, flipped for real | **PASS, after a fix** | Failed first: with the switch off, a cold start made 0 upstream calls and parsed the store's trimmed payload. After the fix, the same test makes 51 calls across both favourite reaches and parses `analysis_assimilation (120 points)`. |
+| The construction in `main.dart` | **PASS** | Covered by every device run above. |
+| The `main.dart` lifecycle handler | **PASS** | Force-quit / relaunch cycles throughout. |
+
+**Guard 9's failure is the argument for this table existing.** Eight review
+rounds passed it. Two independent holes had to be open at once: an ingest
+dispatched `unawaited` outlived the `detach()` that was supposed to stop it,
+and `RiverDataCache.evict` deleted the file outside the serial chain that
+`put`'s write joins — so the evicted entry was written straight back, and the
+next cold start served store data with the switch off for as long as the entry
+stayed fresh. The switch is what we would reach for if the store ever served
+something wrong, so it failing silently is the worst available shape.
+
+**Remaining, and NOT closed by the above:** guard 11 (independent agent review)
+and the round 7 code items.
 
 **`storeStaticDaily` and the extended `CAN_FETCH` are deployed** (2026-08-25;
 Firestore holds 29 `reachMetadata` and 29 `returnPeriods` documents, counted
 back out through the REST API rather than believed from the run's own logs).
 
-One prerequisite remains: **`store_read_enabled` must be created by hand** in
-the Firebase console — nothing publishes it, the Remote Config API returns no
-ETag here so publishing it programmatically would mean force-overwriting the
-template the flood map depends on, and absent the parameter every device reads
-`false` and the phase is inert.
+**That prerequisite is met.** `store_read_enabled` was created by hand in the
+Firebase console on 2026-08-28 and is `true`. Nothing publishes it; the Remote
+Config API still returns no ETag for this project, so programmatic writes are
+force overwrites and must read the whole template first and put every other
+parameter back unchanged (done twice on 2026-08-29 to drive the guard 9 test,
+each time verified by reading all four parameters back).
+
+**A second prerequisite was found only by testing: the `river_data` Firestore
+RULE had never been deployed.** It went into the repo 2026-08-24 but only
+`firestore:indexes` was ever pushed, and that command exits 0. Every store read
+on a device returned PERMISSION_DENIED, silently, so the phase was inert for a
+different reason than this document predicted. Deployed and verified by reading
+the live ruleset back on 2026-08-29 — not by trusting "Deploy complete".
 
 ---
 
