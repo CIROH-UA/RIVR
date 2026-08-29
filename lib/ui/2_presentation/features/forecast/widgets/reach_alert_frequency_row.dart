@@ -165,6 +165,16 @@ class _ReachAlertFrequencyRowState extends State<ReachAlertFrequencyRow> {
 
     return CupertinoListSection.insetGrouped(
       margin: const EdgeInsets.fromLTRB(18, 20, 18, 0),
+      // TRANSPARENT, not the default.
+      //
+      // `insetGrouped` paints `systemGroupedBackground` — a light grey — as a
+      // full-width band behind and below its card. That is right on a settings
+      // page, which is grey all over. This page is not: its scaffold draws a
+      // gradient ending in pure white, so the band read as a strip of a
+      // slightly different shade across the bottom of the forecast. Reported
+      // on device, and mistaken for a safe-area artefact, which is what it
+      // looks like.
+      backgroundColor: const Color(0x00000000),
       children: [
         CupertinoListTile(
           leading: Icon(
