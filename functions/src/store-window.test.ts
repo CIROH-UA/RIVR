@@ -253,9 +253,19 @@ describe("re-verifying a document upstream has not replaced", () => {
       assert.ok(MAX_HOLD_MS[p] > 0, `${p} has no hold cap`);
       assert.equal(maxHoldMs(p), MAX_HOLD_MS[p]);
     }
-    // An unnamed product falls back to the short default rather than to
-    // "forever", which is the direction a mistake here must fail in.
-    assert.equal(maxHoldMs("returnPeriods"), DEFAULT_MAX_HOLD_MS);
+    // The near-static products are named now, and must be: they hold a 30-day
+    // window and are rewritten only when missing or nearly expired, so the
+    // 6-hour default called a healthy 17-hour-old document DOWN the minute the
+    // per-product health check reached production (2026-08-29).
+    for (const p of ["returnPeriods", "reachMetadata"] as const) {
+      assert.ok(maxHoldMs(p) > 30 * 24 * 3600_000,
+        `${p} holds a 30-day window; a shorter cap reports it stale`);
+    }
+
+    // A genuinely unnamed product still falls back to the short default rather
+    // than to "forever", which is the direction a mistake here must fail in.
+    // `returnPeriods` used to stand in for this case and no longer can.
+    assert.equal(maxHoldMs("mediumRangeBlend"), DEFAULT_MAX_HOLD_MS);
   });
 
   test("an unreadable window is named and left exactly as it is", () => {

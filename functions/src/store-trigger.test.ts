@@ -240,6 +240,37 @@ describe("per-product freshness — the hole the heartbeat had", () => {
     assert.deepEqual(fresh, []);
   });
 
+  // Caught in production on 2026-08-29, within a minute of the per-product
+  // check going live: storeHealth returned 503 "down" with
+  // "returnPeriods has not advanced for 17h (cap 6h)". Nothing was wrong. The
+  // near-static products are on no refresh cycle at all — they hold a 30-day
+  // window and storeStaticDaily rewrites one only when it is missing or within
+  // 7 days of expiring, so an untouched 23-day-old document is healthy.
+  //
+  // A false alarm is worse than no alarm: Phase 7 hands this signal to users,
+  // and one that cries wolf gets ignored before the day it is right.
+  test("the near-static products are not judged by the hourly default", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [sample("returnPeriods", 17), sample("reachMetadata", 17)] as never);
+
+    assert.equal(h.status, "healthy",
+      `17h is normal for a 30-day product: ${h.problems.join("; ")}`);
+  });
+
+  test("a static product IS reported once it stops being maintained", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 600_000),
+      new Date(NOW.getTime() - 600_000),
+      NOW,
+      [sample("returnPeriods", 33 * 24)] as never);
+
+    assert.notEqual(h.status, "healthy",
+      "past its 30-day window plus slack, nothing is refreshing it");
+  });
+
   test("healthy products are still reported, so the log shows coverage", () => {
     const h = assessStoreHealth(
       new Date(NOW.getTime() - 600_000),

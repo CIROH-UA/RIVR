@@ -51,6 +51,18 @@ export const MAX_HOLD_MS: Readonly<Record<string, number>> = {
   mediumRange: 18 * 3600_000,
   longRange: 36 * 3600_000,
   geoglowsForecast: 48 * 3600_000,
+
+  // The near-static products are NOT on any refresh cycle. They hold a 30-day
+  // window (STATIC_PRODUCT_MS) and `storeStaticDaily` rewrites one only when it
+  // is missing or within 7 days of expiring, so a perfectly healthy document
+  // sits untouched for about 23 days. Judging them by the 6-hour default said
+  // the store was DOWN 17 hours after a normal write — caught in production
+  // 2026-08-29, within a minute of the per-product health check going live.
+  //
+  // 32 days is the 30-day window plus room for the daily pass to come round.
+  // Past that a document really has stopped being maintained.
+  reachMetadata: 32 * 24 * 3600_000,
+  returnPeriods: 32 * 24 * 3600_000,
 };
 
 /** Default cap for a product not named above. Deliberately short. */
