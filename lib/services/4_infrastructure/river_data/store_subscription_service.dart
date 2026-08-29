@@ -477,6 +477,7 @@ class StoreSubscriptionService {
     // Bump FIRST: anything armed from here on — including an error delivered
     // during the await below — carries a stale generation and is refused.
     _generation++;
+    final had = _subs.isNotEmpty || _watched.isNotEmpty;
     _consecutiveErrors = 0;
     // Cleared so a heal that somehow survives has nothing to re-subscribe to.
     _lastRequested = const [];
@@ -490,7 +491,14 @@ class StoreSubscriptionService {
     // to arm a timer that the earlier cancel had already passed.
     _healTimer?.cancel();
     _healTimer = null;
-    AppLogger.info(_tag, 'detached; listeners released, service still usable');
+    // Only when there was something to release. `_syncLocked` calls detach
+    // UNCONDITIONALLY on every sync while the switch is off — which is correct,
+    // and round 3's B3 explains why — but favourites notify often, so logging
+    // regardless produced 136 identical lines in one session on a device and
+    // buried the lines that mattered.
+    if (had) {
+      AppLogger.info(_tag, 'detached; listeners released, service still usable');
+    }
   }
 
   /// Permanently stop. Nothing subscribes again after this. Idempotent.

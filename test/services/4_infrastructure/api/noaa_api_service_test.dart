@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -33,6 +35,7 @@ class _StubFlowUnitService implements IFlowUnitPreferenceService {
 }
 
 void main() {
+  apiKeyNeverLoggedTests();
   group('ApiException', () {
     test('stores message', () {
       const exception = ApiException('Something went wrong');
@@ -520,5 +523,52 @@ void main() {
       // 3 retries for unfiltered (1 + 2 retries) + 3 filtered calls
       expect(callCount, greaterThan(3));
     });
+  });
+}
+
+/// The NWM return-period URL carries `key=<nwmApiKey>` as a query parameter.
+/// Logging it whole put the credential in plaintext in every debug log — read
+/// over shoulders, pasted into issues, screen-shared. Found in a device log
+/// 2026-08-29. That key has already been rotated once (Mar 2026) after an
+/// accidental exposure, so this is a repeat of a mistake that has cost real
+/// work.
+///
+/// Source-level, deliberately: the leak is a log statement, and no behavioural
+/// test can see what a log line contains.
+void apiKeyNeverLoggedTests() {
+  group('the NWM API key is never written to a log', () {
+    late String src;
+
+    setUpAll(() {
+      src = File(
+        'lib/services/4_infrastructure/api/noaa_api_service.dart',
+      ).readAsStringSync();
+    });
+
+    test('no log statement interpolates the keyed URL', () {
+      // Only the return-period URL carries a credential; the NOAA URLs in this
+      // file carry nothing secret and are useful in a log. So the check is on
+      // the ONE variable that holds a key, which is named for the purpose.
+      expect(src.contains('final keyedUrl = AppConfig.getReturnPeriodUrl'),
+          isTrue,
+          reason: 'the keyed URL was renamed — this test no longer guards '
+              'anything, and the key can reach a log again unnoticed');
+
+      for (final line in src.split('\n')) {
+        if (!line.contains('AppLogger')) continue;
+        expect(line.contains(r'$keyedUrl'), isFalse,
+            reason: 'a log line interpolates the URL carrying the API key: '
+                '${line.trim()}');
+      }
+    });
+
+    test('the key itself is never named in a log statement', () {
+      for (final line in src.split('\n')) {
+        if (!line.contains('AppLogger')) continue;
+        expect(line.contains('nwmApiKey'), isFalse,
+            reason: 'a log line references the API key: ${line.trim()}');
+      }
+    });
+
   });
 }

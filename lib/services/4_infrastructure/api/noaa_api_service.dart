@@ -165,11 +165,20 @@ class NoaaApiService implements INoaaApiService {
     try {
       AppLogger.debug('NoaaApi', 'Fetching return periods for: $reachId');
 
-      final url = AppConfig.getReturnPeriodUrl(reachId);
-      AppLogger.debug('NoaaApi', 'Return period URL: $url');
+      // Named `keyedUrl`, not `url`: this one carries `key=<nwmApiKey>` as a
+      // query parameter while the other URLs in this file carry nothing
+      // secret. The name is what makes "never log this" checkable, and there
+      // is a test that no log statement interpolates it.
+      final keyedUrl = AppConfig.getReturnPeriodUrl(reachId);
+      // The URL carries `key=<nwmApiKey>` as a query parameter, so it is never
+      // logged whole. Debug logs are not a safe place for a credential: they
+      // are read over shoulders, pasted into issues and screen-shared, and this
+      // key has already been rotated once (Mar 2026) after an accidental
+      // exposure. The reach id is the only part with diagnostic value.
+      AppLogger.debug('NoaaApi', 'Return period request for: $reachId');
 
       final response = await _httpGetWithRetry(
-        url,
+        keyedUrl,
         timeout: _normalTimeout,
       );
 
