@@ -47,13 +47,18 @@ describe("refresh schedule arithmetic", () => {
       "2026-08-29T00:20:00.000Z");
   });
 
-  test("the next GEOGLOWS refresh is the next 01:30 UTC", () => {
+  test("the next GEOGLOWS refresh is the next :50, strictly after now", () => {
+    // Was a single 01:30 daily slot until 2026-08-29, when it turned out the
+    // 00Z run has never published by that hour.
     assert.equal(
       nextGeoglowsRefresh(new Date("2026-08-28T00:15:00Z")).toISOString(),
-      "2026-08-28T01:30:00.000Z");
+      "2026-08-28T00:50:00.000Z");
     assert.equal(
-      nextGeoglowsRefresh(new Date("2026-08-28T01:30:00Z")).toISOString(),
-      "2026-08-29T01:30:00.000Z");
+      nextGeoglowsRefresh(new Date("2026-08-28T00:50:00Z")).toISOString(),
+      "2026-08-28T01:50:00.000Z");
+    assert.equal(
+      nextGeoglowsRefresh(new Date("2026-08-28T23:55:00Z")).toISOString(),
+      "2026-08-29T00:50:00.000Z");
   });
 });
 
@@ -94,17 +99,20 @@ describe("the write-time floor closes the gap that was measured", () => {
     }
   });
 
-  test("GEOGLOWS is covered past its DAILY refresher, not the hourly one",
+  test("a GEOGLOWS window outlives its refresher at every hour of the day",
     () => {
-      // Written by storeGeoglowsDaily at 01:30; publication lag alone says
-      // 00:15 the next day, 75 minutes before the job runs again.
-      const written = new Date("2026-08-28T01:30:22.000Z");
-      assert.equal(
-        validUntil("geoglows", "geoglowsForecast", written).toISOString(),
-        "2026-08-29T00:15:00.000Z");
-      assert.equal(
-        storeValidUntil("geoglows", "geoglowsForecast", written).toISOString(),
-        "2026-08-29T01:40:00.000Z");
+      // Publication lag says 00:15 the next day, which is a long window and
+      // usually wins outright. The floor still has to hold at the one hour
+      // where it does not — just before midnight, when the publish boundary is
+      // minutes away and the next refresher run is on the far side of it.
+      for (let m = 0; m < 24 * 60; m += 5) {
+        const now = new Date(Date.UTC(2026, 7, 28, 0, m));
+        const stamped = storeValidUntil("geoglows", "geoglowsForecast", now);
+        const rescuer = nextGeoglowsRefresh(
+          new Date(now.getTime() + REFRESH_MARGIN_MS));
+        assert.ok(stamped.getTime() >= rescuer.getTime() + REFRESH_MARGIN_MS,
+          `at ${now.toISOString()} the window ends before a usable refresh`);
+      }
     });
 
   test("buildStoreDocument actually stamps the floored window", () => {

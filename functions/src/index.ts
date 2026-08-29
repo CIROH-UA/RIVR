@@ -419,17 +419,32 @@ export const storeWriteThroughOnFavourite = functions
   });
 
 /**
- * Daily GEOGLOWS refresh. GEOGLOWS publishes once per UTC day, so it runs on
- * its own schedule rather than on the NWM probe's hourly cycle. 01:30 UTC
- * leaves the 00Z run time to publish.
+ * GEOGLOWS refresh, hourly and gated on the run date.
+ *
+ * It was daily at 01:30 UTC on the assumption that the 00Z run had published
+ * by then. It had not, ever. Measured 2026-08-29: 01:30 on the 28th returned
+ * the 27th's run, 01:30 on the 29th returned the 28th's, and a direct query at
+ * 03:07 on the 29th still returned the 28th's. So the store never once held
+ * the current day's GEOGLOWS run — it took yesterday's and held it for 24
+ * hours, while any device on the live path picked the new one up as soon as it
+ * appeared. Two devices, one river, different numbers: Phase 5 guard 2 failing
+ * by construction, every single day.
+ *
+ * Rather than guess a later hour — GEOGLOWS's publication time is still
+ * unmeasured, known only to fall between 03:07 and 15:34 UTC — this runs every
+ * hour and probes ONE reach for its forecast_date. It fans out to the rest
+ * only when that date advances, so the common case costs a single fetch and
+ * the run lands whenever GEOGLOWS actually publishes.
+ *
+ * :50 keeps it clear of the NWM refresh at :20.
  */
-export const storeGeoglowsDaily = functions
+export const storeGeoglowsHourly = functions
   .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("30 1 * * *")
+  .pubsub.schedule("50 * * * *")
   .timeZone("UTC")
   .onRun(async () => {
     const outcome = await runGeoglowsRefresh({fetchProduct: fetchForStore});
-    logger.info("🌍 storeGeoglowsDaily", {
+    logger.info("🌍 storeGeoglowsHourly", {
       ran: outcome.ran,
       reason: outcome.reason,
       written: outcome.report?.written ?? 0,

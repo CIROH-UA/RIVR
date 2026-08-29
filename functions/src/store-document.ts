@@ -150,9 +150,21 @@ export function nextUtcMidnight(now: Date): Date {
 /** Minute past the hour that `storeRefreshHourly` is scheduled for. */
 export const REFRESH_MINUTE = 20;
 
-/** UTC hour and minute that `storeGeoglowsDaily` is scheduled for. */
-export const GEOGLOWS_REFRESH_HOUR = 1;
-export const GEOGLOWS_REFRESH_MINUTE = 30;
+/**
+ * Minute past the hour that `storeGeoglowsHourly` is scheduled for.
+ *
+ * GEOGLOWS used to be fetched once a day at 01:30 UTC on the belief that the
+ * 00Z run would have published by then. Measured 2026-08-29 and it has not:
+ * at 01:30 on the 28th upstream's newest was the 27th, at 01:30 on the 29th it
+ * was the 28th, and a direct query at 03:07 on the 29th still returned the
+ * 28th. So a daily fetch at that hour never once held the current day's run —
+ * it took yesterday's and sat on it for 24 hours, while any device on the live
+ * path picked up the new run the moment it appeared. That is Phase 5 guard 2
+ * failing by construction, every day.
+ *
+ * :50 keeps it clear of the NWM refresh at :20.
+ */
+export const GEOGLOWS_REFRESH_MINUTE = 50;
 
 /**
  * Room for a refresh run to actually finish after it starts.
@@ -177,16 +189,16 @@ export function nextHourlyRefresh(now: Date): Date {
 }
 
 /**
- * When the daily GEOGLOWS refresher next starts, strictly after [now].
+ * When the GEOGLOWS refresher next starts, strictly after [now].
  *
  * @param {Date} now - Reference instant.
- * @return {Date} The next 01:30 UTC.
+ * @return {Date} The next :GEOGLOWS_REFRESH_MINUTE past the hour.
  */
 export function nextGeoglowsRefresh(now: Date): Date {
   const at = Date.UTC(
     now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-    GEOGLOWS_REFRESH_HOUR, GEOGLOWS_REFRESH_MINUTE);
-  return at > now.getTime() ? new Date(at) : new Date(at + 24 * 3600_000);
+    now.getUTCHours(), GEOGLOWS_REFRESH_MINUTE);
+  return at > now.getTime() ? new Date(at) : new Date(at + 3600_000);
 }
 
 /**

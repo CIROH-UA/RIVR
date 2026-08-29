@@ -441,12 +441,28 @@ fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
 | Function | Cadence |
 |---|---|
 | `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
-| `storeGeoglowsDaily` | 01:30 UTC |
+| `storeGeoglowsHourly` | :50 past — probes ONE reach for `forecast_date`, fans out only when the day's run advances |
 | `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
 | `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
 | `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
 | `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
+
+**GEOGLOWS is hourly, not daily, and gated on the run date.** It was daily at
+01:30 UTC on the assumption the 00Z run had published by then. Measured
+2026-08-29: it never had. 01:30 on the 28th returned the 27th's run, 01:30 on
+the 29th returned the 28th's, and a direct query at 03:07 on the 29th still
+returned the 28th's. So the store never once held the current day's GEOGLOWS
+run — it took yesterday's and held it 24 hours, while any device on the live
+path picked the new one up as soon as it appeared. That is Phase 5 guard 2
+(two devices, one river, identical values) failing by construction every day,
+and it was found from a device log, not from review.
+
+GEOGLOWS's actual publication time is **still unmeasured** — known only to fall
+between 03:07 and 15:34 UTC, and the Phase 0 probe does not sample GEOGLOWS at
+all. So the schedule does not guess at an hour: `storeGeoglowsHourly` runs
+every hour, probes ONE reach for its `forecast_date`, and fans out to the rest
+only when that date advances. The common case is a single fetch.
 
 **The near-static products are not on the hourly cycle.** `reachMetadata` and
 `returnPeriods` carry no run identity for the probe to compare and hold a

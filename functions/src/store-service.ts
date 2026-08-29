@@ -42,7 +42,7 @@ import {
 } from "./store-firestore.js";
 import {planWindowExtensions} from "./store-window.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
-import {StoreDocument} from "./store-document.js";
+import {StoreDocument, isRunNewer} from "./store-document.js";
 import {
   ForecastProductId,
   ForecastSourceId,
@@ -163,14 +163,6 @@ async function buildWorkList(usage: FirestoreUsage): Promise<WorkList> {
 }
 
 /**
- * The hourly refresh.
- *
- * @param {UpstreamIo} io - Upstream fetchers.
- * @param {ForecastProductId[]} candidates - Products to consider.
- * @return {Promise<RefreshOutcome>} What happened.
- */
-
-/**
  * Re-stamp any stored window that would end before the refresher's next turn.
  *
  * Guard 1 says "no new run means zero FETCHES" — it does not say zero writes,
@@ -229,6 +221,13 @@ async function extendWindowCoverage(
   }
 }
 
+/**
+ * The hourly refresh.
+ *
+ * @param {UpstreamIo} io - Upstream fetchers.
+ * @param {ForecastProductId[]} candidates - Products to consider.
+ * @return {Promise<RefreshOutcome>} What happened.
+ */
 export async function runStoreRefresh(
   io: UpstreamIo,
   candidates: readonly ForecastProductId[] = MANAGED_PRODUCTS
@@ -409,8 +408,59 @@ export async function runGeoglowsRefresh(
       usage};
   }
 
+  // Probe one reach before fanning out.
+  //
+  // GEOGLOWS publishes nothing the NWM probe can sample, so "has the run
+  // advanced?" is unanswerable without asking upstream. Asking with ONE reach
+  // rather than all of them is the same bargain the NWM path makes: a run that
+  // finds nothing new costs one fetch instead of the whole set.
+  //
+  // This replaced a fixed 01:30 daily fetch, which never held the current
+  // day's run — see GEOGLOWS_REFRESH_MINUTE for the measurement. Running
+  // hourly and gated on the date means the run lands whenever GEOGLOWS
+  // actually publishes, without anyone having to know when that is.
+  const liveIds = liveDocumentIdsFor(workList, GEOGLOWS_PRODUCTS);
+  const stored = await sampleLiveStoredRuns(GEOGLOWS_PRODUCTS, liveIds, usage);
+  const held = stored.geoglowsForecast ?? null;
+
+  const probeReach = workList.entries[0];
+  let upstream: string | null = null;
+  try {
+    const probed = await io.fetchProduct(
+      probeReach.source, probeReach.reachId, "geoglowsForecast");
+    upstream = probed.referenceTime;
+  } catch (error) {
+    // Same rule as the NWM probe: a failed probe is not evidence that
+    // anything advanced, and fanning out on it would turn every upstream
+    // wobble into a full refetch.
+    logger.warn("🌍 GEOGLOWS probe failed; not fanning out", {
+      reachId: probeReach.reachId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    return {ran: false, reason: "probe failed", report: null, usage};
+  }
+
+  logger.info("🧭 GEOGLOWS refresh: run check", {
+    probeReach: probeReach.reachId, upstream, held,
+  });
+
+  if (upstream !== null && held !== null && !isRunNewer(upstream, held)) {
+    // The common case, most hours of the day. The stored run is still the
+    // newest that exists, so the windows get re-verified and nothing else is
+    // fetched.
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    return {
+      ran: false,
+      reason: `unchanged at ${held}`,
+      report: null,
+      usage,
+    };
+  }
+
   const report = await runStoreUpdate(
     workList, GEOGLOWS_PRODUCTS, firestoreDeps(io, usage));
+  await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 GEOGLOWS refresh: Firestore usage vs free tier", {
@@ -418,7 +468,7 @@ export async function runGeoglowsRefresh(
     written: report.written,
     failed: report.failed,
   });
-  return {ran: true, reason: "daily GEOGLOWS run", report, usage};
+  return {ran: true, reason: `advanced to ${upstream}`, report, usage};
 }
 
 export interface GcOutcome {
