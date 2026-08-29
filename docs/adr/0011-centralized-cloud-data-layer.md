@@ -1109,10 +1109,86 @@ anywhere in the app, which calls that same water "Extreme".
 - `SCALE_FACTOR` is deleted — a demo lever whose non-1 value would have
   desynchronised the alert from the screen, which is what guard 3 forbids.
 
-**Known gap, deliberately deferred:** the title uses NOAA's official river
-name, because a user's custom name for a favourite lives only in device
-`SharedPreferences` and is never written to Firestore. Jerson wants custom
-names synced so alerts can use them; scheduled AFTER this phase.
+**Closed 2026-08-29.** The title used NOAA's official river name, because a
+user's custom name lived only in device `SharedPreferences`. Renaming a
+favourite now writes `favoriteLabels` on the user document and the alert reads
+it, so a notification calls a river what its owner calls it. The key is
+`<source>:<reachId>`, not the bare reach id: NWM COMIDs and GEOGLOWS LINKNOs
+are both plain integers drawn from uncoordinated id spaces, so a shared slot
+would eventually let one river's name overwrite another's.
+
+### Decision 21 — health is per-product, not per-collection (2026-08-29)
+
+Phase 7 removes the timestamps that let a user notice stale data, and this
+document already says the quiet part: *a silently-failing store is the most
+dangerous outcome in this document*. So Phase 7 cannot ship on monitoring that
+cannot see a silent failure — and the monitoring shipped in Phase 4 could not.
+
+`lastSuccessfulWrite` takes the newest write across the WHOLE `river_data`
+collection. One fresh write reports the entire store healthy. **That is not a
+hypothetical: GEOGLOWS held yesterday's run for 24 hours a day, every day,
+while NWM's hourly writes kept the aggregate fresh, and `storeHealth` returned
+`{"status":"healthy"}` throughout.** It was found from a device log on
+2026-08-29 — the same investigation that moved the GEOGLOWS pass to 11:30 —
+not from the monitoring built to find exactly this.
+
+`assessProductFreshness` now judges the newest document PER PRODUCT against
+that product's own cap.
+
+- **The threshold is `MAX_HOLD_MS`, reused rather than redefined.** It already
+  answers precisely the right question — how long upstream can plausibly be
+  quiet before silence stops meaning "nothing changed" and starts meaning
+  "something is broken" — and it is per product because the products differ by
+  an order of magnitude (short range 6 h, long range 36 h, GEOGLOWS 48 h). A
+  second constant here would drift from the window logic it has to agree with.
+  It is also what makes guard 4 true rather than merely claimed: the device's
+  indicator and the server's alarm are the same number.
+- **A product with no documents is skipped, not reported down.** Nobody has
+  favourited a river that needs it, so there is nothing to be stale.
+- **The NEWEST document per product is judged.** One old document among fresh
+  ones is a per-reach fetch failure, which the run already records and retries
+  next cycle. Reporting that as a stalled product would make the alarm cry wolf
+  until nobody read it.
+
+Costs no new index: `sampleStoredWindows` already projects `product` and
+`window` through a single-field query.
+
+### Decision 22 — one indicator, and what it refuses to say (2026-08-29)
+
+With the timestamps gone, silence is a claim. The app makes exactly one
+statement about freshness, in one place, and only when it cannot vouch for what
+is on screen.
+
+`SyncStatusBanner` **subsumes `OfflineBanner`** rather than sitting above it.
+Offline is one of the two reasons the app cannot vouch for a number, not a
+separate subject; two strips would be two competing answers to one question.
+
+| Situation | Banner |
+|---|---|
+| In window, online | nothing |
+| Offline | "No internet connection" |
+| Serving data past its window, refresh failed | "These numbers may not be current" |
+| Online, a fetch failed, data still in window | nothing |
+
+The last row is the one worth defending. A failure that left in-window data on
+screen has cost the user nothing, and a warning there is the noise that teaches
+people to dismiss the strip before the day it matters.
+
+**What the ADR asked for and what was built differ in one place, on purpose.**
+Guard 3 says a store frozen past its cycle raises the indicator. On a device
+with working network it does not, and should not: when a stored document
+expires the client falls through to the live path and gets *current* data, so
+the user is not looking at anything stale and a warning would be a lie in the
+other direction. What the frozen store does raise is the SERVER alarm, through
+decision 21. The indicator appears when the store is frozen *and* the live path
+cannot cover for it — which is what the repository actually measures. Guard 3
+should be read as "the user is never left uninformed in front of stale data",
+and that is what is tested.
+
+**What was kept, and why it is not a timestamp.** The forecast chart's time
+axis stays: when the peak arrives is the subject the user came for, not a claim
+about our data's age. The map legend's date stays for the reason this document
+already gives — a once-daily product where the date is real information.
 
 ### How alerting actually works, end to end
 
@@ -1245,9 +1321,17 @@ notifications a person would actually want rather than twelve identical ones.
 
 ## Phase 7 — The trust model
 
+**Status: built 2026-08-29** (decisions 21 and 22).
+
 **Last, deliberately.** Removing the timestamp is a promise; it may only ship
 once Phase 4's monitoring proves the guarantee, because afterwards **users cannot
 tell a stale value from a current one — we have trained them not to look.**
+
+That precondition was checked rather than assumed, and it did not hold: the
+Phase 4 heartbeat measured the whole collection at once and had been reporting
+a healthy store through 24-hour GEOGLOWS stalls. Making health per-product
+(decision 21) was therefore part of this phase's work, not a prerequisite met
+elsewhere.
 
 **Build.** No timestamps beside values. One unobtrusive indicator only when the
 app *knows* it is out of sync — offline, or the store has not advanced past an
