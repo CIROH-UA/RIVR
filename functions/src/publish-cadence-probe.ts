@@ -107,6 +107,22 @@ export interface EndpointResult {
 export interface CadenceSample {
   schemaVersion: number;
   sampledAt: FirebaseFirestore.Timestamp;
+  /**
+   * When Firestore's TTL should delete this sample.
+   *
+   * A TTL policy deletes a document once the field it names is in the PAST, so
+   * it cannot be pointed at `sampledAt` — that is already past the moment it is
+   * written, and the whole dataset would evaporate. Hence a separate field
+   * holding sampledAt + {@link PROBE_RETENTION_MS}.
+   *
+   * The probe log is the only collection in this project that grows without
+   * bound: one document an hour, ~2 KB each, never overwritten and never
+   * garbage-collected, where `river_data` is overwritten in place and swept by
+   * storeGcDaily. 90 days caps it at ~2,200 documents — far more than the seven
+   * consecutive days Phase 0 guard 1 needs, and enough history to see NOAA's
+   * timing drift across a season.
+   */
+  expiresAt: FirebaseFirestore.Timestamp;
   /** endpoint name -> its result. */
   endpoints: Record<string, EndpointResult>;
   /** Authoritative per-series referenceTime, taken from the filtered calls. */
@@ -257,6 +273,15 @@ export async function probeEndpoint(
 }
 
 /**
+ * How long a probe sample is kept, enforced by a Firestore TTL policy on
+ * `expiresAt` rather than by any code here.
+ *
+ * Nothing in this project deleted probe samples before 2026-08-29; the
+ * collection was the one unbounded thing in the database.
+ */
+export const PROBE_RETENTION_MS = 90 * 24 * 3600_000;
+
+/**
  * Assemble one hour's sample from the five results.
  * @param {Record<string, EndpointResult>} endpoints Per-endpoint results.
  * @return {CadenceSample} The sample.
@@ -289,9 +314,12 @@ export function buildSample(
     });
   }
 
+  const now = admin.firestore.Timestamp.now();
   return {
     schemaVersion: PROBE_SCHEMA_VERSION,
-    sampledAt: admin.firestore.Timestamp.now(),
+    sampledAt: now,
+    expiresAt: admin.firestore.Timestamp.fromMillis(
+      now.toMillis() + PROBE_RETENTION_MS),
     endpoints,
     referenceTimes,
     okCount: Object.values(endpoints).filter((r) => r.ok).length,

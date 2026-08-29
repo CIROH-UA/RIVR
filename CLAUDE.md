@@ -441,28 +441,35 @@ fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
 | Function | Cadence |
 |---|---|
 | `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
-| `storeGeoglowsHourly` | :50 past — probes ONE reach for `forecast_date`, fans out only when the day's run advances |
+| `storeGeoglowsDaily` | 11:30 UTC — probes ONE reach for `forecast_date`, fans out only when the day's run advances |
 | `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
 | `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
 | `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
 | `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
 
-**GEOGLOWS is hourly, not daily, and gated on the run date.** It was daily at
-01:30 UTC on the assumption the 00Z run had published by then. Measured
+**GEOGLOWS runs at 11:30 UTC, not 01:30, and the schedule is not trusted.**
+It was 01:30, on the assumption the 00Z run had published by then. Measured
 2026-08-29: it never had. 01:30 on the 28th returned the 27th's run, 01:30 on
 the 29th returned the 28th's, and a direct query at 03:07 on the 29th still
 returned the 28th's. So the store never once held the current day's GEOGLOWS
 run — it took yesterday's and held it 24 hours, while any device on the live
 path picked the new one up as soon as it appeared. That is Phase 5 guard 2
 (two devices, one river, identical values) failing by construction every day,
-and it was found from a device log, not from review.
+found from a device log rather than from review.
 
-GEOGLOWS's actual publication time is **still unmeasured** — known only to fall
-between 03:07 and 15:34 UTC, and the Phase 0 probe does not sample GEOGLOWS at
-all. So the schedule does not guess at an hour: `storeGeoglowsHourly` runs
-every hour, probes ONE reach for its `forecast_date`, and fans out to the rest
-only when that date advances. The common case is a single fetch.
+**11:30 comes from a measurement this repo already held**:
+`functions_geoglows/main.py` records the daily run publishing at **10:15-10:30
+UTC**, from S3 Last-Modified on two consecutive days, and the flood builder is
+scheduled at 11:00 because of it. Do not re-derive it; do not call it unknown.
+
+The hour is still not trusted on its own. `runGeoglowsRefresh` probes ONE reach
+for its `forecast_date` and fans out only when that date advances, so a late
+publication is a cheap no-op rather than another silent day of yesterday's
+water. **An hourly version of this was written and reverted the same night**:
+it turned 4 fetches a day into 24 to rediscover a number already on disk, and a
+cold proxy call costs 10-14s against a zarr on S3 (2.5s only when an instance
+still has that river cached) — the exact waste the store exists to remove.
 
 **The near-static products are not on the hourly cycle.** `reachMetadata` and
 `returnPeriods` carry no run identity for the probe to compare and hold a
@@ -512,6 +519,13 @@ matching `RiverDataKey.storageKey`), and the envelope is exactly
 `RiverDataEntry.toJson()`. Both are cross-language contracts pinned by tests
 that read the Dart source off disk — a rename on either side fails the build
 rather than silently storing documents the app never reads.
+
+**`publish_cadence_log` is the only collection that grows without bound**, and
+since 2026-08-29 it no longer does: a Firestore TTL on `expiresAt` deletes
+samples after 90 days. The field is separate from `sampledAt` on purpose — a
+TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
+delete every sample the moment it was written. `river_data` never needed this;
+it is overwritten in place and swept by `storeGcDaily`.
 
 **Requires the composite index `river_data(product ASC, runId ASC)`.** Without
 it every hourly run aborts on FAILED_PRECONDITION. Declared in

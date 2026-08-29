@@ -419,32 +419,36 @@ export const storeWriteThroughOnFavourite = functions
   });
 
 /**
- * GEOGLOWS refresh, hourly and gated on the run date.
+ * Daily GEOGLOWS refresh at 11:30 UTC, gated on the run date.
  *
- * It was daily at 01:30 UTC on the assumption that the 00Z run had published
- * by then. It had not, ever. Measured 2026-08-29: 01:30 on the 28th returned
- * the 27th's run, 01:30 on the 29th returned the 28th's, and a direct query at
- * 03:07 on the 29th still returned the 28th's. So the store never once held
- * the current day's GEOGLOWS run — it took yesterday's and held it for 24
- * hours, while any device on the live path picked the new one up as soon as it
- * appeared. Two devices, one river, different numbers: Phase 5 guard 2 failing
- * by construction, every single day.
+ * It ran at 01:30 on the assumption the 00Z run had published by then. It never
+ * had. Measured 2026-08-29: 01:30 on the 28th returned the 27th's run, 01:30 on
+ * the 29th returned the 28th's, and a direct query at 03:07 on the 29th still
+ * returned the 28th's. So the store never once held the current day's run — it
+ * took yesterday's and held it 24 hours, while any device on the live path
+ * picked up the new one as soon as it appeared. Two devices, one river,
+ * different numbers: Phase 5 guard 2 failing by construction, every day.
  *
- * Rather than guess a later hour — GEOGLOWS's publication time is still
- * unmeasured, known only to fall between 03:07 and 15:34 UTC — this runs every
- * hour and probes ONE reach for its forecast_date. It fans out to the rest
- * only when that date advances, so the common case costs a single fetch and
- * the run lands whenever GEOGLOWS actually publishes.
+ * 11:30 comes from a measurement this repo already held and an earlier pass of
+ * mine did not look up: functions_geoglows/main.py records the daily run
+ * publishing at 10:15-10:30 UTC, from S3 Last-Modified on two consecutive days,
+ * and the flood builder is scheduled at 11:00 because of it.
  *
- * :50 keeps it clear of the NWM refresh at :20.
+ * **The schedule is not trusted on its own.** runGeoglowsRefresh probes ONE
+ * reach for its forecast_date and fans out only if it advanced, so a late
+ * publication is a cheap no-op that retries rather than another silent day of
+ * yesterday's water. An hourly version of this was written first and reverted:
+ * it turned 4 fetches a day into 24 to rediscover a number already on disk, and
+ * each cold call costs 10-14s against a zarr on S3 — the exact waste the store
+ * exists to remove.
  */
-export const storeGeoglowsHourly = functions
+export const storeGeoglowsDaily = functions
   .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("50 * * * *")
+  .pubsub.schedule("30 11 * * *")
   .timeZone("UTC")
   .onRun(async () => {
     const outcome = await runGeoglowsRefresh({fetchProduct: fetchForStore});
-    logger.info("🌍 storeGeoglowsHourly", {
+    logger.info("🌍 storeGeoglowsDaily", {
       ran: outcome.ran,
       reason: outcome.reason,
       written: outcome.report?.written ?? 0,

@@ -151,20 +151,28 @@ export function nextUtcMidnight(now: Date): Date {
 export const REFRESH_MINUTE = 20;
 
 /**
- * Minute past the hour that `storeGeoglowsHourly` is scheduled for.
+ * When `storeGeoglowsDaily` is scheduled, UTC.
  *
- * GEOGLOWS used to be fetched once a day at 01:30 UTC on the belief that the
- * 00Z run would have published by then. Measured 2026-08-29 and it has not:
- * at 01:30 on the 28th upstream's newest was the 27th, at 01:30 on the 29th it
- * was the 28th, and a direct query at 03:07 on the 29th still returned the
- * 28th. So a daily fetch at that hour never once held the current day's run —
- * it took yesterday's and sat on it for 24 hours, while any device on the live
- * path picked up the new run the moment it appeared. That is Phase 5 guard 2
- * failing by construction, every day.
+ * GEOGLOWS was fetched at 01:30 on the assumption the 00Z run had published by
+ * then. Measured 2026-08-29 and it never had: 01:30 on the 28th returned the
+ * 27th's run, 01:30 on the 29th returned the 28th's, and a direct query at
+ * 03:07 on the 29th still returned the 28th's. The store therefore never once
+ * held the current day's run — it took yesterday's and held it 24 hours, while
+ * a device on the live path picked the new one up as soon as it appeared.
  *
- * :50 keeps it clear of the NWM refresh at :20.
+ * 11:30 is chosen against a measurement this repo already had and an earlier
+ * pass of mine failed to look up: `functions_geoglows/main.py` records the
+ * daily run publishing at **10:15-10:30 UTC**, from S3 Last-Modified on two
+ * consecutive days, and the flood builder is scheduled at 11:00 on the strength
+ * of it. An hour past that window is margin without being another guess.
+ *
+ * The schedule is still not TRUSTED — `runGeoglowsRefresh` checks the returned
+ * forecast_date against what is stored and retries later in the day if the run
+ * has not landed, so a late publication costs a retry rather than another
+ * silent day of stale data.
  */
-export const GEOGLOWS_REFRESH_MINUTE = 50;
+export const GEOGLOWS_REFRESH_HOUR = 11;
+export const GEOGLOWS_REFRESH_MINUTE = 30;
 
 /**
  * Room for a refresh run to actually finish after it starts.
@@ -192,13 +200,13 @@ export function nextHourlyRefresh(now: Date): Date {
  * When the GEOGLOWS refresher next starts, strictly after [now].
  *
  * @param {Date} now - Reference instant.
- * @return {Date} The next :GEOGLOWS_REFRESH_MINUTE past the hour.
+ * @return {Date} The next 11:30 UTC.
  */
 export function nextGeoglowsRefresh(now: Date): Date {
   const at = Date.UTC(
     now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-    now.getUTCHours(), GEOGLOWS_REFRESH_MINUTE);
-  return at > now.getTime() ? new Date(at) : new Date(at + 3600_000);
+    GEOGLOWS_REFRESH_HOUR, GEOGLOWS_REFRESH_MINUTE);
+  return at > now.getTime() ? new Date(at) : new Date(at + 24 * 3600_000);
 }
 
 /**

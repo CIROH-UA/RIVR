@@ -18,6 +18,7 @@
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
 import {
+  PROBE_RETENTION_MS,
   buildEndpointResult,
   buildSample,
   referenceTimeOf,
@@ -191,5 +192,32 @@ describe("buildSample — the unfiltered cross-check", () => {
       unfiltered: ok(null, unfilteredBody()),
     };
     assert.equal(buildSample(endpoints).unfilteredAgrees, false);
+  });
+});
+
+// The probe log was the only collection in this project that grew without
+// bound — one document an hour, never overwritten, never swept — until a TTL
+// was put on it 2026-08-29. A TTL policy deletes when its field is in the past,
+// so pointing one at `sampledAt` would have deleted every sample the moment it
+// was written. That mistake is silent and total, hence these.
+
+describe("probe samples carry their own expiry", () => {
+  test("expiresAt is in the FUTURE, unlike sampledAt", () => {
+    const sample = buildSample({});
+    assert.ok(sample.expiresAt.toMillis() > Date.now(),
+      "expiresAt must be ahead of now or the TTL deletes on write");
+    assert.ok(sample.sampledAt.toMillis() <= Date.now());
+  });
+
+  test("expiry is exactly the retention window past the sample", () => {
+    const sample = buildSample({});
+    assert.equal(
+      sample.expiresAt.toMillis() - sample.sampledAt.toMillis(),
+      PROBE_RETENTION_MS);
+  });
+
+  test("retention comfortably clears the seven days guard 1 needs", () => {
+    assert.ok(PROBE_RETENTION_MS > 7 * 24 * 3600_000);
+    assert.equal(PROBE_RETENTION_MS, 90 * 24 * 3600_000);
   });
 });

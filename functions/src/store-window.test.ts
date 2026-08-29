@@ -47,18 +47,19 @@ describe("refresh schedule arithmetic", () => {
       "2026-08-29T00:20:00.000Z");
   });
 
-  test("the next GEOGLOWS refresh is the next :50, strictly after now", () => {
-    // Was a single 01:30 daily slot until 2026-08-29, when it turned out the
-    // 00Z run has never published by that hour.
+  test("the next GEOGLOWS refresh is the next 11:30 UTC", () => {
+    // Was 01:30 until 2026-08-29, when it turned out the day's run has never
+    // published by that hour; 11:30 sits an hour past the measured 10:15-10:30
+    // publication window.
     assert.equal(
       nextGeoglowsRefresh(new Date("2026-08-28T00:15:00Z")).toISOString(),
-      "2026-08-28T00:50:00.000Z");
+      "2026-08-28T11:30:00.000Z");
     assert.equal(
-      nextGeoglowsRefresh(new Date("2026-08-28T00:50:00Z")).toISOString(),
-      "2026-08-28T01:50:00.000Z");
+      nextGeoglowsRefresh(new Date("2026-08-28T11:30:00Z")).toISOString(),
+      "2026-08-29T11:30:00.000Z");
     assert.equal(
       nextGeoglowsRefresh(new Date("2026-08-28T23:55:00Z")).toISOString(),
-      "2026-08-29T00:50:00.000Z");
+      "2026-08-29T11:30:00.000Z");
   });
 });
 

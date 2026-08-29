@@ -706,7 +706,7 @@ and no widget can fetch on its own even if someone tries.
 **Review gate passed under the 3-round cap; deployed and verified in
 production 2026-08-25.** Seven functions are deployed in `ciroh-rivr-app`; the
 seventh, `storeStaticDaily`, was added and deployed by Phase 5:
-`storeRefreshHourly` (:20 past), `storeGeoglowsHourly` (:50 past),
+`storeRefreshHourly` (:20 past), `storeGeoglowsDaily` (11:30 UTC),
 `storeGcDaily` (03:40 UTC), `storeHeartbeat` (2-hourly), `storeHealth`
 (HTTPS), `storeWriteThroughOnFavourite` (Firestore trigger). Composite index
 `river_data(product ASC, runId ASC)` created and READY — without it every
