@@ -38,6 +38,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/widgets.dart';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
@@ -224,6 +226,7 @@ class _FakeNotificationSettings extends Fake implements NotificationSettings {
 // ---------------------------------------------------------------------------
 
 void main() {
+  badgeClearedNativelyTests();
   // Preserve original enum / interface tests
   group('NotificationPermissionResult', () {
     test('has all six expected values', () {
@@ -686,6 +689,55 @@ void main() {
       final enabled = await service.isEnabledForUser(userId);
 
       expect(enabled, isFalse);
+    });
+  });
+}
+
+/// The app icon badge is cleared natively, in AppDelegate.swift, so no Dart
+/// test can observe it. This reads the source instead — the same technique the
+/// Cloud Functions tests use for cross-language contracts.
+///
+/// It exists because the bug was a comment. `fcm_service.dart` said "Clear iOS
+/// badge on launch" above a call that only sets foreground presentation
+/// options, so the badge looked handled and was not: the server stamps
+/// `badge: 1` on every alert and nothing ever reset it, leaving a red 1 on the
+/// home screen indefinitely. Reported from a device 2026-08-29.
+void badgeClearedNativelyTests() {
+  group('the app icon badge is actually cleared', () {
+    late String appDelegate;
+
+    setUpAll(() {
+      appDelegate = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    });
+
+    test('AppDelegate resets the badge when the app becomes active', () {
+      expect(appDelegate, contains('applicationDidBecomeActive'),
+          reason: 'nothing clears the badge on foreground');
+      expect(appDelegate, contains('setBadgeCount(0)'),
+          reason: 'the badge count is never reset to zero');
+    });
+
+    test('the reset is on becoming active, not only on launch', () {
+      // didFinishLaunching alone would leave the badge set on every resume,
+      // which is most of how the app is actually opened.
+      final idx = appDelegate.indexOf('applicationDidBecomeActive');
+      final body = appDelegate.substring(
+          idx, (idx + 600).clamp(0, appDelegate.length));
+      expect(body, contains('setBadgeCount(0)'),
+          reason: 'the badge reset is not inside applicationDidBecomeActive');
+    });
+
+    test('no Dart code claims to clear the badge', () {
+      // The original bug. If a comment says it clears the badge, someone will
+      // believe it again.
+      for (final path in [
+        'lib/services/4_infrastructure/fcm/fcm_service.dart',
+        'lib/services/1_contracts/shared/i_fcm_service.dart',
+      ]) {
+        final src = File(path).readAsStringSync().toLowerCase();
+        expect(src.contains('clear the ios badge'), isFalse,
+            reason: '$path claims to clear the badge; nothing in Dart does');
+      }
     });
   });
 }

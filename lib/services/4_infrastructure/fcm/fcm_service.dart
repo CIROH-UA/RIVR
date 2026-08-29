@@ -75,7 +75,7 @@ class FCMService implements IFCMService {
 
   bool _listenersRegistered = false;
 
-  /// Set up notification tap listeners and clear the iOS badge.
+  /// Set up notification tap listeners and foreground presentation options.
   /// Safe to call multiple times — listeners are only registered once.
   @override
   void setupNotificationListeners() {
@@ -101,7 +101,14 @@ class FCMService implements IFCMService {
       }
     });
 
-    // Clear iOS badge on launch
+    // Presentation options ONLY — this does NOT clear the badge.
+    //
+    // The comment here used to say "Clear iOS badge on launch", which is what
+    // the call below looks like it might do and does not: it decides how a
+    // notification is shown while the app is already in the foreground. The
+    // badge count was never reset by anything, so the red 1 the server sets on
+    // every alert stayed on the home screen indefinitely. The actual clear is
+    // `applicationDidBecomeActive` in ios/Runner/AppDelegate.swift.
     if (Platform.isIOS) {
       _messaging.setForegroundNotificationPresentationOptions(
         alert: true,

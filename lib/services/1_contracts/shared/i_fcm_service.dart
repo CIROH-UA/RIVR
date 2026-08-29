@@ -65,7 +65,11 @@ abstract class IFCMService {
     required bool wantsAny,
   });
 
-  /// Set up notification tap listeners and clear the iOS badge.
+  /// Set up notification tap listeners and foreground presentation options.
+  ///
+  /// Does NOT clear the app icon badge — that is
+  /// applicationDidBecomeActive in ios/Runner/AppDelegate.swift. This comment
+  /// claimed otherwise, and the badge went unfixed behind it.
   /// Call on every app launch for users with notifications enabled.
   void setupNotificationListeners();
   /// Enable/disable Flood Alerts (threshold pushes).

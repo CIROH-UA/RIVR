@@ -85,6 +85,37 @@ import UserNotifications
     completionHandler([[.alert, .sound, .badge]])
   }
 
+  // MARK: - Badge
+
+  /// Clear the app icon badge every time the app comes to the foreground.
+  ///
+  /// The server stamps `badge: 1` on every alert (notification-service.ts) and
+  /// NOTHING ever set it back, so the red 1 stayed on the home screen forever
+  /// once a single notification had arrived — whether or not the user had
+  /// opened the app and read it. Reported from a device 2026-08-29.
+  ///
+  /// `fcm_service.dart` carried a comment reading "Clear iOS badge on launch"
+  /// directly above a call to `setForegroundNotificationPresentationOptions`,
+  /// which only decides how a notification is PRESENTED while the app is
+  /// already open. It never touched the count. The comment described the fix
+  /// this code is.
+  ///
+  /// Native rather than Dart on purpose: this must happen on EVERY foreground,
+  /// including resumes where the Flutter engine is already running, and it must
+  /// not depend on the Dart side being initialised or on a plugin's lifecycle
+  /// callbacks firing in the right order.
+  ///
+  /// `setBadgeCount` is iOS 16+; the deployment target is 16.6, so there is no
+  /// availability branch to get wrong.
+  override func applicationDidBecomeActive(_ application: UIApplication) {
+    super.applicationDidBecomeActive(application)
+    UNUserNotificationCenter.current().setBadgeCount(0) { error in
+      if let error = error {
+        print("Failed to clear app icon badge: \(error)")
+      }
+    }
+  }
+
   // Handle notification tap.
   //
   // MUST forward to super. Info.plist sets FirebaseAppDelegateProxyEnabled=false,
