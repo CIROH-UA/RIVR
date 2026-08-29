@@ -26,6 +26,7 @@ import {resolve} from "node:path";
 import {
   STATIC_PRODUCTS,
   STATIC_REFRESH_LEAD_MS,
+  assertStaticAccounting,
   staticRefreshDue,
 } from "./store-service.js";
 import {assertStoreRunConsistent} from "./store-run.js";
@@ -347,71 +348,111 @@ describe("the producers write the exact keys the client decodes", () => {
 // The per-run assertion already existed; what was missing was that
 // runStoreStaticRefresh runs the products in SEPARATE runs and merged their
 // reports without re-checking the totals, and logged `failed` at INFO.
-describe("a run that loses work cannot report success", () => {
+describe("assertStoreRunConsistent refuses a run whose outcomes do not add up",
+  () => {
   /**
    * @param {number} written - Written records.
    * @param {number} failed - Failed records.
    * @return {object[]} Result records.
    */
-  function results(written: number, failed: number): object[] {
-    const out: object[] = [];
-    for (let i = 0; i < written; i++) {
-      out.push({
-        documentId: `nwm__w${i}__reachMetadata`,
-        reachId: `w${i}`,
-        source: "nwm",
-        product: "reachMetadata",
-        outcome: "written",
-        storedRun: null,
-        laggingBehindProbe: false,
-      });
+    function results(written: number, failed: number): object[] {
+      const out: object[] = [];
+      for (let i = 0; i < written; i++) {
+        out.push({
+          documentId: `nwm__w${i}__reachMetadata`,
+          reachId: `w${i}`,
+          source: "nwm",
+          product: "reachMetadata",
+          outcome: "written",
+          storedRun: null,
+          laggingBehindProbe: false,
+        });
+      }
+      for (let i = 0; i < failed; i++) {
+        out.push({
+          documentId: `nwm__f${i}__reachMetadata`,
+          reachId: `f${i}`,
+          source: "nwm",
+          product: "reachMetadata",
+          outcome: "failed",
+          error: "reach info carried no name",
+          storedRun: null,
+          laggingBehindProbe: false,
+        });
+      }
+      return out;
     }
-    for (let i = 0; i < failed; i++) {
-      out.push({
-        documentId: `nwm__f${i}__reachMetadata`,
-        reachId: `f${i}`,
-        source: "nwm",
-        product: "reachMetadata",
-        outcome: "failed",
-        error: "reach info carried no name",
-        storedRun: null,
-        laggingBehindProbe: false,
-      });
-    }
-    return out;
-  }
 
-  test("outcomes that do not add up to the plan are refused", () => {
-    assert.throws(
-      () => assertStoreRunConsistent({
+    test("outcomes that do not add up to the plan are refused", () => {
+      assert.throws(
+        () => assertStoreRunConsistent({
+          productsTriggered: ["reachMetadata"],
+          planned: 29,
+          written: 26,
+          skippedSameRun: 0,
+          skippedLagging: 0,
+          failed: 0, // three reaches vanished without being counted
+          reachesToRetry: [],
+          results: results(26, 3),
+          fetches: 29,
+        } as never),
+        /unknown state/,
+        "a run whose totals do not add up must refuse to look clean"
+      );
+    });
+
+    test("a fully accounted run passes", () => {
+    // Exactly the shape of the first deployed run: 26 written, 3 failed on
+    // reaches NOAA has no name for, all three queued for another attempt.
+      assert.doesNotThrow(() => assertStoreRunConsistent({
         productsTriggered: ["reachMetadata"],
         planned: 29,
         written: 26,
         skippedSameRun: 0,
         skippedLagging: 0,
-        failed: 0, // three reaches vanished without being counted
-        reachesToRetry: [],
+        failed: 3,
+        reachesToRetry: ["f0", "f1", "f2"],
         results: results(26, 3),
         fetches: 29,
-      } as never),
-      /unknown state/,
-      "a run whose totals do not add up must refuse to look clean"
-    );
+      } as never));
+    });
   });
 
-  test("a fully accounted run passes", () => {
-    // Exactly the shape of the first deployed run: 26 written, 3 failed on
-    // reaches NOAA has no name for, all three queued for another attempt.
-    assert.doesNotThrow(() => assertStoreRunConsistent({
-      productsTriggered: ["reachMetadata"],
-      planned: 29,
-      written: 26,
-      skippedSameRun: 0,
-      skippedLagging: 0,
-      failed: 3,
-      reachesToRetry: ["f0", "f1", "f2"],
-      results: results(26, 3),
-      fetches: 29,
-    } as never));
+// Review round 7: the block above is named for a property the STATIC refresh
+// relies on, but it exercises `assertStoreRunConsistent` — which
+// `runStoreStaticRefresh` does not call. Its own accounting check could be
+// deleted with the whole suite green, which is the same as not having it.
+// `assertStaticAccounting` is that check, extracted so it can fail.
+
+describe("the static refresh's own accounting can actually fail", () => {
+  test("a plan fully accounted for passes", () => {
+    assert.doesNotThrow(() => assertStaticAccounting(29, 26, 3));
+    assert.doesNotThrow(() => assertStaticAccounting(0, 0, 0));
+  });
+
+  test("writes that vanished without being counted are refused", () => {
+    // The shape of the first deployed run: reported ok, 3 of 29 reaches
+    // failed, nothing in any log said so.
+    assert.throws(
+      () => assertStaticAccounting(29, 26, 0),
+      /lost\s+work it never reported/,
+      "a run that silently drops three reaches must not look clean");
+  });
+
+  test("over-counting is refused too, not just under-counting", () => {
+    // Double-counting a write would hide a failure just as effectively.
+    assert.throws(() => assertStaticAccounting(29, 29, 3), /planned 29/);
+  });
+
+  test("the error names the numbers, so a log line is diagnostic", () => {
+    try {
+      assertStaticAccounting(29, 26, 0);
+      assert.fail("should have thrown");
+    } catch (e) {
+      const m = (e as Error).message;
+      assert.match(m, /29/);
+      assert.match(m, /26/);
+      assert.equal((e as Error).name, "StoreRunAssertionError");
+    }
   });
 });

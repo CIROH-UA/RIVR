@@ -16,6 +16,25 @@ import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
 
 /// In-memory [IRiverDataCache] so repository tests are isolated from disk /
 /// path_provider (the real RiverDataCache is covered by its own test).
+/// A cache whose reads take a turn of the event loop.
+///
+/// Review round 7: every existing ingest test awaits one ingest before
+/// starting the next, so the serialisation chain in `ingest` could be deleted
+/// with the suite green. The chain only matters when two ingests for the SAME
+/// key overlap — then, without it, both read the old value before either
+/// writes, and the OLDER run can land last, walking the value backwards past
+/// the supersession check that exists to stop exactly that.
+///
+/// A synchronous fake cannot express that: the interleave needs `get` to
+/// yield.
+class _SlowReadCache extends _MemoryCache {
+  @override
+  Future<RiverDataEntry?> get(RiverDataKey key) async {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    return super.get(key);
+  }
+}
+
 class _MemoryCache implements IRiverDataCache {
   final Map<String, RiverDataEntry> _mem = {};
   final Map<String, ValueNotifier<RiverDataEntry?>> _notifiers = {};
@@ -124,6 +143,7 @@ class _StubUnit implements IFlowUnitPreferenceService {
 }
 
 void main() {
+  ingestSerialisationTests();
   const key = RiverDataKey(
     source: ForecastSource.nwm,
     reachId: '23021904',
@@ -521,6 +541,117 @@ void main() {
 
       expect(entry!.window.validUntil, now.add(const Duration(hours: 1)),
           reason: 'the live path must keep its publish-aligned window');
+    });
+  });
+}
+
+/// Review round 7 flagged the ingest serialisation as revertible with a green
+/// suite: every other ingest test awaits one call before starting the next, so
+/// the per-key chain never had to do anything. These overlap two ingests for
+/// the same key, which is the only situation it exists for.
+///
+/// Reachable in production, and not rarely: the subscription service dispatches
+/// every document in a snapshot with `unawaited(...)`, so a snapshot carrying
+/// two runs of one reach — or a re-subscribe delivering the initial snapshot
+/// while a previous batch is still ingesting — puts two ingests for the same
+/// key in flight at once.
+void ingestSerialisationTests() {
+  const key = RiverDataKey(
+    source: ForecastSource.nwm,
+    reachId: '23021904',
+    product: ForecastProduct.shortRange,
+  );
+  final now = DateTime.utc(2026, 7, 10, 12, 0);
+
+  RiverDataEntry entryWith({required String runId, required String tag}) =>
+      RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: now,
+          validUntil: now.add(const Duration(hours: 1)),
+        ),
+        unit: 'CMS',
+        runId: runId,
+        payload: {'from': tag},
+      );
+
+  group('round 7 — concurrent ingests for one key are serialised', () {
+    late _SlowReadCache cache;
+    late RiverDataRepository repo;
+
+    setUp(() {
+      cache = _SlowReadCache();
+      repo = RiverDataRepository(
+        cache: cache,
+        registry: SourceRegistry(const []),
+        clock: () => now,
+      );
+    });
+
+    test('an older run dispatched alongside a newer one cannot win', () async {
+      // Both start before either finishes reading. Unserialised, both see an
+      // empty cache, both pass the supersession check, and whichever writes
+      // last wins — which is the older run half the time.
+      await Future.wait([
+        repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'newer')),
+        repo.ingest(entryWith(runId: '2026-07-10T11:00:00Z', tag: 'older')),
+      ]);
+
+      final got = await cache.get(key);
+      expect(got!.payload['from'], 'newer',
+          reason: 'the 11:00 run overwrote the 12:00 one — the supersession '
+              'check cannot see a value the concurrent ingest has not '
+              'written yet');
+      expect(got.runId, '2026-07-10T12:00:00Z');
+    });
+
+    test('order of dispatch does not change the outcome', () async {
+      await Future.wait([
+        repo.ingest(entryWith(runId: '2026-07-10T11:00:00Z', tag: 'older')),
+        repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'newer')),
+      ]);
+
+      final got = await cache.get(key);
+      expect(got!.runId, '2026-07-10T12:00:00Z');
+    });
+
+    test('three overlapping runs settle on the newest', () async {
+      await Future.wait([
+        repo.ingest(entryWith(runId: '2026-07-10T11:00:00Z', tag: 'a')),
+        repo.ingest(entryWith(runId: '2026-07-10T13:00:00Z', tag: 'c')),
+        repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'b')),
+      ]);
+
+      final got = await cache.get(key);
+      expect(got!.payload['from'], 'c');
+    });
+
+    test('different keys are NOT serialised against each other', () async {
+      // The chain is per key on purpose: serialising everything would make one
+      // slow reach hold up every other reach in a snapshot.
+      const other = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '99999999',
+        product: ForecastProduct.shortRange,
+      );
+      final started = DateTime.now();
+      await Future.wait([
+        repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'one')),
+        repo.ingest(RiverDataEntry(
+          key: other,
+          window: FreshnessWindow(
+            fetchedAt: now,
+            validUntil: now.add(const Duration(hours: 1)),
+          ),
+          unit: 'CMS',
+          runId: '2026-07-10T12:00:00Z',
+          payload: const {'from': 'two'},
+        )),
+      ]);
+      final elapsed = DateTime.now().difference(started);
+      expect(elapsed.inMilliseconds, lessThan(40),
+          reason: 'two different keys ran back-to-back instead of in '
+              'parallel — the chain is meant to be per key');
     });
   });
 }

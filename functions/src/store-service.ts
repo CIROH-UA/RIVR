@@ -133,6 +133,40 @@ export function staticRefreshDue(
   return expiresAt <= now.getTime() + STATIC_REFRESH_LEAD_MS;
 }
 
+/**
+ * Every planned static write ended as either written or failed.
+ *
+ * Extracted so it can be TESTED. Review round 7's objection was not that the
+ * assertion was wrong — it was that reverting it left the suite green, and the
+ * block that looked like its coverage ("a run that loses work cannot report
+ * success") exercises `assertStoreRunConsistent`, a different function this
+ * path does not call. An assertion nothing can fail is decoration.
+ *
+ * It exists because the first deployed run of `storeStaticDaily` reported "ok"
+ * while failing 3 of 29 reaches, caught only because a human counted the
+ * documents back out of Firestore. CLAUDE.md's non-negotiable for these
+ * pipelines: they fail silently, and exit status has never caught one.
+ *
+ * @param {number} planned - Writes the run set out to make.
+ * @param {number} written - Writes that landed.
+ * @param {number} failed - Reaches that failed.
+ * @throws {StoreRunAssertionError} When the outcomes do not account for the
+ *   plan.
+ */
+export function assertStaticAccounting(
+  planned: number,
+  written: number,
+  failed: number
+): void {
+  if (written + failed !== planned) {
+    throw new StoreRunAssertionError(
+      `static refresh planned ${planned} writes but accounted for ` +
+      `${written} written + ${failed} failed — the run lost ` +
+      "work it never reported"
+    );
+  }
+}
+
 /** Upstream fetchers, injected so nothing here reaches NOAA during tests. */
 export interface UpstreamIo {
   fetchProduct(
@@ -582,13 +616,7 @@ export async function runStoreStaticRefresh(
   // reaches, caught only because a human read the document counts back out of
   // Firestore. Review round 6 pointed out the fetcher was fixed and the
   // REPORTING hole that let it pass was not.
-  if (merged.written + merged.failed !== merged.planned) {
-    throw new StoreRunAssertionError(
-      `static refresh planned ${merged.planned} writes but accounted for ` +
-      `${merged.written} written + ${merged.failed} failed — the run lost ` +
-      "work it never reported"
-    );
-  }
+  assertStaticAccounting(merged.planned, merged.written, merged.failed);
 
   // A failure is never an INFO-level detail here: every one is a reach whose
   // river name or flood thresholds are now up to 30 days stale on device.
