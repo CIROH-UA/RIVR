@@ -330,6 +330,64 @@ void main() {
       expect(repo.outOfSync.value, isFalse);
     });
 
+    // ── Guard 3: a store frozen past its cycle ───────────────────────────
+    //
+    // The scenario the Phase 7 review found unguarded, and it needs no schema
+    // change to catch. A stored document's `validUntil` is extended every hour
+    // that upstream has not published, so it reads "fresh" indefinitely; but
+    // `fetchedAt` is never moved by an extension, and past the product's hold
+    // cap the SERVER stops extending and lets the document expire. The client
+    // now stops vouching at the same instant, using the same constant.
+    test('an in-window value HELD past its cap raises it', () async {
+      // shortRange holds for 6h. Fetch, then jump 7h with a window that a
+      // frozen store would have kept extending.
+      await repo.read(key);
+      final held = (await cache.get(key))!;
+      now = now.add(const Duration(hours: 7));
+      await cache.put(RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: held.window.fetchedAt, // NEVER moved by an extension
+          validUntil: now.add(const Duration(hours: 1)), // extended forward
+        ),
+        unit: held.unit,
+        runId: held.runId,
+        payload: held.payload,
+      ));
+
+      final served = await repo.read(key);
+      expect(served, isNotNull,
+          reason: 'the value is still shown — this is a warning, not a blank '
+              'screen');
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'the window says fresh, but nobody has refetched this water '
+              'for longer than the server itself would stand behind');
+      expect(source.fetchCount, 1,
+          reason: 'and it must not turn into a network call: the window is '
+              'still valid, so this is a claim about confidence, not a refetch');
+    });
+
+    test('an in-window value INSIDE its cap stays silent', () async {
+      await repo.read(key);
+      final held = (await cache.get(key))!;
+      now = now.add(const Duration(hours: 3)); // inside shortRange's 6h
+      await cache.put(RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: held.window.fetchedAt,
+          validUntil: now.add(const Duration(hours: 1)),
+        ),
+        unit: held.unit,
+        runId: held.runId,
+        payload: held.payload,
+      ));
+
+      await repo.read(key);
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'a held value inside its cap really is the newest that '
+              'exists; warning here is the noise that gets the strip ignored');
+    });
+
     test('it notifies listeners, so the banner can rebuild', () async {
       var notified = 0;
       repo.outOfSync.addListener(() => notified++);

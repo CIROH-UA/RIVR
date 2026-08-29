@@ -1273,11 +1273,30 @@ store *and* the live path both fail.
 
 Extending a window is the store saying "upstream has not moved, so this value
 is still the newest that exists". That is true and useful, and the extension
-mechanism is not the bug. What is missing is that a document held on
+mechanism is not the bug. What was missing is that a document held on
 re-verification alone is a *weaker* claim than a freshly fetched one, and
-nothing carries that distinction to the device. Closing guard 3 honestly means
-marking held documents as held — which is a schema change to the stored
-envelope, and therefore not a quiet fix.
+nothing carried that distinction to the device.
+
+**Closed the same day, and it needed no schema change** — the first attempt at
+this paragraph said it did. The envelope already carries what is required:
+`fetchedAt` is deliberately never moved by an extension (moving it would let a
+document be held forever, one extension at a time), so it is the honest record
+of when this water was last pulled from upstream. `validUntil` answers "may I
+serve this?"; `fetchedAt` answers "how long has nobody actually checked?".
+
+The client now applies the SAME per-product cap the server does
+(`hold_policy.dart` mirroring `MAX_HOLD_MS`) to `fetchedAt`. Past it the server
+stops extending and lets the document expire; the client stops vouching for it
+at the same instant. Deliberately it does NOT force a refetch: the window is
+still valid, so this is a statement about confidence, not a reason to spend a
+network call.
+
+That shared constant is also what finally makes **guard 4** true rather than
+asserted, and it is pinned: `hold-policy-drift.test.ts` reads the Dart file off
+disk and fails if the two sides ever disagree, in either direction — the same
+mechanism that keeps the flood-category ladder honest across the two
+languages. A client holding LONGER than the server would keep showing water the
+server had already given up on, silently, which is this scenario again.
 
 **What was kept, and why it is not a timestamp.** The forecast chart's time
 axis stays: when the peak arrives is the subject the user came for, not a claim
@@ -1294,9 +1313,9 @@ overclaims are corrected in decisions 21 and 22 above rather than deleted.
 |---|---|
 | 1 — no value view renders a timestamp | **met**, tested and mutation-checked |
 | 2 — offline shows the indicator, healthy shows nothing | **met for the offline half** — favourites (full), reach forecast (offline only), map (its own notice); weekly outlook has none. The staleness half stays on favourites by decision, not omission |
-| 3 — a frozen store raises the indicator | **not met** — a held document is served as in-window for up to its hold cap (48 h for GEOGLOWS) with no indicator and no live-path fallback |
-| 4 — the indicator is driven by the same signal that alarms operationally | **not met** — the client decides from `validUntil`, the server from `fetchedAt` vs `MAX_HOLD_MS`; no shared constant |
-| 5 — independent agent review passes | **run 2026-08-29**; it did not pass, and this section is its result |
+| 3 — a frozen store raises the indicator | **met** — a value held past its product's cap raises the indicator without forcing a refetch or showing an error; tested and mutation-checked |
+| 4 — the indicator is driven by the same signal that alarms operationally | **met** — client and server share `MAX_HOLD_MS`, pinned by a cross-language drift test that fails in both directions |
+| 5 — independent agent review passes | **run 2026-08-29 and it did NOT pass.** This section is its result. Guards 3 and 4, and run currency, were all built in response to it; a re-review is still owed |
 
 What was genuinely delivered: the timestamps are gone from the values, the
 indicator exists and is correct for the cases it covers, per-product write
@@ -1306,9 +1325,10 @@ that could stick on after data was restored, one that stayed silent on a failed
 cold-start fetch, and a global latch that let one river's success speak for
 another's failure).
 
-Run-currency monitoring has since been built (decision 21). What remains:
-marking held documents as held so guard 3 can be closed (decision 22), and a
-re-review.
+Everything the review raised has since been built: run currency (decision 21),
+and the shared hold cap that closes guards 3 and 4 (decision 22). **What
+remains is the re-review** — guard 5 is not satisfied by the review that
+failed, and none of this work has been through one.
 
 ### How alerting actually works, end to end
 
@@ -1441,9 +1461,11 @@ notifications a person would actually want rather than twelve identical ones.
 
 ## Phase 7 — The trust model
 
-**Status: PARTIALLY built 2026-08-29** (decisions 21 and 22). Guards 1 and 2
-are met or nearly so; guards 3 and 4 are not. See "Phase 7 — where it actually
-stands" below the decisions. Do not treat this phase as closed.
+**Status: built 2026-08-29, re-review outstanding** (decisions 21 and 22). The
+first pass reported itself complete with three guards unmet; an independent
+review found that, and the gaps were closed in response. See "Phase 7 — where
+it actually stands" below the decisions. Do not treat this phase as closed
+until guard 5 is genuinely satisfied.
 
 **Last, deliberately.** Removing the timestamp is a promise; it may only ship
 once Phase 4's monitoring proves the guarantee, because afterwards **users cannot

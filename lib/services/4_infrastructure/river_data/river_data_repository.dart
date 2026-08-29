@@ -9,6 +9,7 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/services/4_infrastructure/river_data/hold_policy.dart';
 import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
 
 /// Source-of-truth implementation over [IRiverDataCache] + [SourceRegistry].
@@ -70,6 +71,23 @@ class RiverDataRepository implements IRiverDataRepository {
     final cached = await _cache.get(key);
 
     if (cached != null && cached.isFreshAt(_now())) {
+      // In-window — but that is not the whole question, and Phase 7's review
+      // found the gap. A stored document's `validUntil` is extended every hour
+      // that upstream has not published, so it can read "fresh" indefinitely
+      // about water nobody has refetched. `fetchedAt` is never moved by an
+      // extension, so it is the honest record — and past the product's hold
+      // cap the SERVER stops extending and lets the document expire. The
+      // client stops vouching for it at the same instant, using the same
+      // constant.
+      if (heldTooLong(
+        product: key.product,
+        fetchedAt: cached.window.fetchedAt,
+        now: _now(),
+      )) {
+        _markUnconfirmed(key);
+      } else {
+        _markConfirmed(key);
+      }
       return cached; // fresh — no network
     }
 
