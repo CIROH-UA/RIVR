@@ -21,6 +21,15 @@ interface UserSettings {
   // Per-reach data source. Missing/unknown reach ⇒ "nwm" (all pre-GEOGLOWS
   // favorites are NWM). Only non-NWM entries are stored on the user doc.
   favoriteSources: Record<string, string>;
+  /**
+   * Per-reach notification preference (ADR 0011 decision 19). Only reaches the
+   * user has changed appear; anything absent takes DEFAULT_FREQUENCY.
+   *
+   * Per stream rather than global so a river that misbehaves can be quietened
+   * without quietening the ones that matter. Lives on the USER document, never
+   * on `river_data`, which every signed-in user can read.
+   */
+  alertFrequencies: Record<string, string>;
   fcmTokens: string[];
   firstName: string;
   lastName: string;
@@ -28,6 +37,11 @@ interface UserSettings {
 
 import {FloodCategory, categoryFor} from "./flow-classification.js";
 import {readAlertDataFromStore} from "./store-alert-source.js";
+import {
+  AlertTrigger,
+  decideTrigger,
+  frequencyFrom,
+} from "./alert-triggers.js";
 
 export type ReachSource = "nwm" | "geoglows";
 
@@ -352,6 +366,9 @@ async function getNotificationUsers(
           favoriteSources: (data.favoriteSources &&
             typeof data.favoriteSources === "object") ?
             data.favoriteSources as Record<string, string> : {},
+          alertFrequencies: (data.alertFrequencies &&
+            typeof data.alertFrequencies === "object") ?
+            data.alertFrequencies as Record<string, string> : {},
           fcmTokens: tokens,
           firstName: data.firstName || "User",
           lastName: data.lastName || "",
@@ -414,17 +431,35 @@ async function checkUserRivers(
         continue;
       }
 
-      const alertData = evaluateAlert(
+      // Decision 19. `assessReach` rather than `evaluateAlert` because the
+      // trigger model needs to see a river that has returned to Normal — that
+      // is what ends an event and sends the all-clear, and evaluateAlert
+      // returns null for it, indistinguishable from having no data.
+      const {category, alert} = assessReach(
         reachId,
         reachData,
         user.preferredFlowUnit
       );
 
-      if (alertData) {
-        const success = await sendAlert(user, reachId, alertData, source);
-        if (success) {
-          alertsSent++;
-        }
+      const prior = await lastNotified(user.userId, reachId);
+      const trigger = decideTrigger({
+        category,
+        previous: prior?.category ?? null,
+        lastSentAt: prior?.sentAt ?? null,
+        frequency: frequencyFrom(user.alertFrequencies[reachId]),
+        now: new Date(),
+      });
+
+      if (trigger === "none") continue;
+
+      const success = await sendAlert(user, reachId, source, {
+        trigger,
+        category,
+        riverName: reachData.riverName,
+        alert,
+      });
+      if (success) {
+        alertsSent++;
       }
     } catch (error) {
       logger.error(
@@ -448,15 +483,44 @@ export function evaluateAlert(
   reachData: ReachData,
   userFlowUnit: "cfs" | "cms"
 ): AlertData | null {
+  return assessReach(reachId, reachData, userFlowUnit).alert;
+}
+
+/** A reach's category, and the alert to send if it is elevated. */
+export interface ReachAssessment {
+  /** Always present — including "Normal", which is what ends an event. */
+  category: FloodCategory;
+  /** The alert payload, or null when the reach is Normal or unrankable. */
+  alert: AlertData | null;
+}
+
+/**
+ * Assess a reach: its category, and the alert if one is warranted.
+ *
+ * Split out from `evaluateAlert` for decision 19. `evaluateAlert` returns null
+ * for a quiet river, which meant the alert loop could not tell "no flood" from
+ * "no data" — and could therefore never notice a river returning to Normal, so
+ * an all-clear was impossible to send. The category comes back either way.
+ *
+ * @param {string} reachId - The reach.
+ * @param {ReachData} reachData - Pre-read data; no I/O happens here.
+ * @param {"cfs" | "cms"} userFlowUnit - The unit to render numbers in.
+ * @return {ReachAssessment} Category, and the alert when elevated.
+ */
+export function assessReach(
+  reachId: string,
+  reachData: ReachData,
+  userFlowUnit: "cfs" | "cms"
+): ReachAssessment {
   if (!reachData.forecast) {
     logger.warn(`⚠️ No forecast data for reach ${reachId}`);
-    return null;
+    return {category: "Unknown", alert: null};
   }
 
   const peak = getMaxForecastFlow(reachData.forecast);
   if (peak === null) {
     logger.warn(`⚠️ No valid forecast values for reach ${reachId}`);
-    return null;
+    return {category: "Unknown", alert: null};
   }
   const maxForecastFlow = peak.value;
 
@@ -471,7 +535,7 @@ export function evaluateAlert(
         riverName: reachData.riverName,
         maxForecastFlow_CFS: maxForecastFlow,
       });
-    return null;
+    return {category: "Unknown", alert: null};
   }
 
   // Log the comparison
@@ -542,7 +606,7 @@ export function evaluateAlert(
     });
   }
 
-  return highestExceededAlert;
+  return {category, alert: highestExceededAlert};
 }
 
 /**
@@ -552,49 +616,77 @@ export function evaluateAlert(
  * @param {AlertData} alertData - Alert details and thresholds
  * @return {Promise<boolean>} True if alert sent successfully
  */
+/** Everything a send needs, decided before we get here. */
+export interface AlertNotification {
+  trigger: AlertTrigger;
+  category: FloodCategory;
+  riverName: string;
+  /** Null only for an all-clear, where there is no exceeded threshold. */
+  alert: AlertData | null;
+}
+
+/**
+ * Compose and send one notification.
+ *
+ * @param {UserSettings} user - Recipient.
+ * @param {string} reachId - The reach.
+ * @param {ReachSource} source - Which network, for tap routing.
+ * @param {AlertNotification} notification - What to say and why.
+ * @return {Promise<boolean>} True when at least one token accepted it.
+ */
 async function sendAlert(
   user: UserSettings,
   reachId: string,
-  alertData: AlertData,
-  source: ReachSource
+  source: ReachSource,
+  notification: AlertNotification
 ): Promise<boolean> {
-  // Check if this is a repeat alert (sent within last 6 hours)
-  const isRepeat = await checkRecentAlert(user.userId, reachId);
-  const unitLabel = user.preferredFlowUnit.toUpperCase();
-
   // Category in the TITLE, timing in the body, and the river named once.
   //
   // The body used to read "Forecast: 147362 CFS (Exceeds 25-year flood
   // threshold)". A raw streamflow number on a lock screen is meaningless —
   // nobody knows whether 147362 CFS is a lot for that river, which is the
-  // entire question — and the earlier fix then said the river's name twice in
-  // a message with room for about two lines.
+  // entire question — and there is room for about two lines.
   //
   // Shape settled with Jerson 2026-08-29:
   //
-  //     White River — Major Event
+  //     White River — Major Event          (entry)
   //     Peaking in ~14 hours at 12,400 CFS.
   //
-  //     White River — still Major Event
+  //     White River — still Major Event    (persistence)
   //     Now peaking in ~6 hours at 13,100 CFS.
+  //
+  // Escalation and all-clear are new with decision 19 and follow the same
+  // shape. "now" rather than "still" is the whole signal that it got worse, so
+  // it must not be softened into a synonym.
   //
   // The recurrence interval ("25-year") is deliberately NOT shown. It is still
   // carried in the data payload for the app, but it competed for space with
   // the two things a reader can use: how bad, and how soon.
-  const title = isRepeat ?
-    `${alertData.riverName} — still ${alertData.category} Event` :
-    `${alertData.riverName} — ${alertData.category} Event`;
+  const {trigger, category, riverName, alert} = notification;
 
-  const flow = `${alertData.forecastFlow.toLocaleString("en-US")} ${unitLabel}`;
-  const when = timeToPeak(alertData.peakAt);
+  const unitLabel = user.preferredFlowUnit.toUpperCase();
+  let title: string;
+  let body: string;
 
-  // No usable peak time — a stale forecast, or one whose peak has already
-  // passed. Say less rather than saying something wrong.
-  const body = when === null ?
-    `Peaking at ${flow}.` :
-    isRepeat ?
-      `Now peaking ${when} at ${flow}.` :
-      `Peaking ${when} at ${flow}.`;
+  if (trigger === "all-clear") {
+    title = `${riverName} — back to Normal`;
+    body = "Flow has dropped below the Action level.";
+  } else {
+    const qualifier = trigger === "persistence" ? "still " :
+      trigger === "escalation" ? "now " : "";
+    title = `${riverName} — ${qualifier}${category} Event`;
+
+    // An elevated trigger always carries an alert; this guard exists so a
+    // future caller cannot produce a notification with a blank body.
+    const flow = alert === null ? null :
+      `${alert.forecastFlow.toLocaleString("en-US")} ${unitLabel}`;
+    const when = alert === null ? null : timeToPeak(alert.peakAt);
+    const lead = trigger === "persistence" ? "Now peaking" : "Peaking";
+
+    body = flow === null ? `${category} flood level forecast.` :
+      when === null ? `Peaking at ${flow}.` :
+        `${lead} ${when} at ${flow}.`;
+  }
 
   const staleTokens: string[] = [];
   let anySent = false;
@@ -613,10 +705,15 @@ async function sendAlert(
           reachId: reachId,
           // So the notification tap opens the correct forecast source.
           source: source,
-          riverName: alertData.riverName,
-          forecastFlow: String(alertData.forecastFlow),
-          threshold: String(alertData.threshold),
-          returnPeriod: alertData.returnPeriod,
+          riverName,
+          // The app reads these; an all-clear legitimately has no exceeded
+          // threshold, so they are empty rather than absent or faked.
+          category,
+          trigger,
+          forecastFlow: alert === null ? "" : String(alert.forecastFlow),
+          threshold: alert === null ? "" : String(alert.threshold),
+          returnPeriod: alert === null ? "" : alert.returnPeriod,
+          peakAt: alert?.peakAt ?? "",
           flowUnit: user.preferredFlowUnit,
         },
         android: {
@@ -688,15 +785,16 @@ async function sendAlert(
 
   // Log and return
   if (anySent) {
-    await logNotification(user.userId, reachId, alertData);
+    await logNotification(user.userId, reachId, notification);
     logger.info(
-      `📲 Alert sent to user ${user.userId} for ${alertData.riverName}`,
+      `📲 ${trigger} sent to user ${user.userId} for ${riverName}`,
       {
         userId: user.userId,
         reachId,
-        forecastFlow: alertData.forecastFlow,
+        trigger,
+        category,
+        forecastFlow: alert?.forecastFlow ?? null,
         unit: unitLabel,
-        isRepeat,
         deviceCount: user.fcmTokens.length - staleTokens.length,
       }
     );
@@ -711,25 +809,59 @@ async function sendAlert(
  * @param {string} reachId - River reach identifier
  * @return {Promise<boolean>} True if recent alert exists
  */
-async function checkRecentAlert(
+/** The last notification actually sent for one user and reach. */
+export interface LastNotification {
+  category: FloodCategory | null;
+  sentAt: Date;
+}
+
+/**
+ * Read back the most recent notification for this user and reach.
+ *
+ * This replaced `checkRecentAlert`, which asked only "was anything sent in the
+ * last six hours" and — despite reading like a cooldown — used the answer only
+ * to change the wording to "still". Nothing ever skipped a send. decideTrigger
+ * needs the CATEGORY as well, because that is what separates an escalation
+ * from a repeat.
+ *
+ * Uses the composite index `notification_logs(userId, reachId, sentAt)`, which
+ * is declared in firestore.indexes.json and verified READY in production.
+ * A failure here returns null, which reads as "no prior notification" and
+ * therefore as an entry — erring towards sending rather than towards silence,
+ * because a missed flood alert is the worse failure.
+ *
+ * Entries written before 2026-08-29 carry no category. They return null and
+ * the next evaluation reads as an entry: one extra notification per active
+ * reach at rollout, and correct from then on.
+ *
+ * @param {string} userId - The user.
+ * @param {string} reachId - The reach.
+ * @return {Promise<LastNotification | null>} The last send, or null.
+ */
+async function lastNotified(
   userId: string,
   reachId: string
-): Promise<boolean> {
+): Promise<LastNotification | null> {
   try {
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-
-    const recentAlerts = await db.collection("notification_logs")
+    const snap = await db.collection("notification_logs")
       .where("userId", "==", userId)
       .where("reachId", "==", reachId)
-      .where("sentAt", ">", sixHoursAgo)
+      .orderBy("sentAt", "desc")
       .limit(1)
       .get();
 
-    return !recentAlerts.empty;
+    if (snap.empty) return null;
+    const data = snap.docs[0].data();
+    const sentAt = data.sentAt?.toDate?.();
+    if (!(sentAt instanceof Date)) return null;
+
+    const category = typeof data.category === "string" ?
+      data.category as FloodCategory :
+      null;
+    return {category, sentAt};
   } catch (error) {
-    logger.error("❌ Error checking recent alerts", {error});
-    // Assume not repeat on error (better to send than miss)
-    return false;
+    logger.error("❌ Error reading the last notification", {error});
+    return null;
   }
 }
 
@@ -849,16 +981,22 @@ function extractReturnPeriodThresholds(
 async function logNotification(
   userId: string,
   reachId: string,
-  alertData: AlertData
+  notification: AlertNotification
 ): Promise<void> {
   try {
+    const {alert} = notification;
     await db.collection("notification_logs").add({
       userId,
       reachId,
-      riverName: alertData.riverName,
-      forecastFlow: alertData.forecastFlow,
-      threshold: alertData.threshold,
-      returnPeriod: alertData.returnPeriod,
+      riverName: notification.riverName,
+      // The CATEGORY and the time are what decideTrigger reads back. Without
+      // the category there is no way to tell an escalation from a repeat, and
+      // the trigger model degrades to "notify every time".
+      category: notification.category,
+      trigger: notification.trigger,
+      forecastFlow: alert?.forecastFlow ?? null,
+      threshold: alert?.threshold ?? null,
+      returnPeriod: alert?.returnPeriod ?? null,
       sentAt: new Date(),
     });
   } catch (error) {
