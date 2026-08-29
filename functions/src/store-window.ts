@@ -126,7 +126,10 @@ export interface StoredWindowSample {
  *   10:15-10:30 UTC, but what matters is when WE fetch it, and
  *   `storeGeoglowsDaily` runs at 11:30 UTC with no retry — so a stored run
  *   legitimately reaches **35.5 h** just before replacement, leaving 36 h
- *   about twenty-five minutes of margin. Any publication later than ~11:30
+ *   about twenty-five minutes of margin. MEASURED, not derived: the run check
+ *   at 2026-08-29T11:30:34Z logged `held: 2026-08-28T00:00:00Z` against
+ *   `upstream: 2026-08-29T00:00:00Z` — a 35.5 h old run still in the store,
+ *   replaced seconds later. Any publication later than ~11:30
  *   would have returned 503 continuously for the next 23 hours, and "the
  *   schedule is not trusted" is exactly why the probe-and-fan-out design
  *   exists. 42 h keeps the incident caught: the old 01:30 schedule let a run

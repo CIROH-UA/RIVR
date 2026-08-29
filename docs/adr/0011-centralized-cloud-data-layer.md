@@ -1158,7 +1158,7 @@ The caps come from measurements already in this repo:
 | `analysisAssimilation`, `shortRange` | 8 h | a five-hour NOAA stall is recorded here as normal; tighter would cry wolf on a good day |
 | `mediumRange` | 24 h | nominally 6-hourly, but the 12Z run was observed landing at 21:20Z |
 | `longRange` | 36 h | same, with a worse observed lag |
-| `geoglowsForecast` | 36 h | one run per UTC day stamped 00Z, published 10:15-10:30 UTC, so a legitimate run reaches ~34.5 h just before the next lands |
+| `geoglowsForecast` | 42 h | **Measured.** What matters is when WE fetch, not when GEOGLOWS publishes: `storeGeoglowsDaily` runs at 11:30 UTC with no retry, so a stored run legitimately reaches 35.5 h. Confirmed in production — the run check at 2026-08-29T11:30:34Z logged `held: 2026-08-28T00:00:00Z` against `upstream: 2026-08-29T00:00:00Z`, replacing it seconds later. A 36 h cap left ~25 minutes |
 
 Products with no entry are **skipped, never defaulted** — the near-static
 products carry no run identity at all, and inheriting another product's cadence
