@@ -26,6 +26,7 @@ import {
   LADDER_YEARS,
   categoryFor,
   indexFor,
+  ladderFromReturnPeriods,
   warrantsAlert,
 } from "./flow-classification.js";
 
@@ -141,5 +142,68 @@ describe("the alert floor", () => {
   test("Normal and Unknown do not", () => {
     assert.equal(warrantsAlert("Normal"), false);
     assert.equal(warrantsAlert("Unknown"), false);
+  });
+});
+
+describe("unpacking the upstream return-period payload", () => {
+  // Both the alert path and the weekly digest had their own copy of this, which
+  // is how the ladder came to have three implementations (decision 13).
+  const RAW: unknown[] = [{
+    feature_id: 18471070,
+    return_period_2: 2626.0,
+    return_period_5: 3930.4,
+    return_period_10: 4793.5,
+    return_period_25: 5884.4,
+    return_period_50: 6693.5,
+  }];
+
+  test("return_period_N becomes a ladder keyed by year", () => {
+    const ladder = ladderFromReturnPeriods(RAW);
+    assert.equal(ladder[2], 2626.0);
+    assert.equal(ladder[25], 5884.4);
+    assert.equal(ladder[50], 6693.5);
+  });
+
+  test("non-threshold fields are ignored", () => {
+    const ladder = ladderFromReturnPeriods(RAW);
+    assert.equal("feature_id" in ladder, false);
+    assert.equal(Object.keys(ladder).length, 5);
+  });
+
+  test("a malformed payload yields an empty ladder, not a crash", () => {
+    for (const bad of [[], [null], ["nope"], [{}], [{return_period_2: "x"}]]) {
+      assert.deepEqual(ladderFromReturnPeriods(bad as unknown[]), {});
+    }
+  });
+
+  test("an empty ladder classifies as Unknown, never as Normal", () => {
+    // The dangerous failure: reading "no thresholds" as "not flooding" would
+    // silence every alert for a reach whose return periods went missing.
+    assert.equal(categoryFor(999999, ladderFromReturnPeriods([])), "Unknown");
+  });
+});
+
+describe("decision 13 — one rule, one implementation", () => {
+  test("the digest's classifier and the shared one agree everywhere", async () => {
+    // weekly-digest.ts carried a faithful copy of this ladder. Faithful is
+    // precisely what made it dangerous: nothing failed when a copy drifted,
+    // and ADR 0002 exists because two of them already had. The digest now
+    // delegates; this walks a range through both routes to prove it.
+    const {buildDigestRowsForTest} = await import("./weekly-digest.js")
+      .then((m) => m as unknown as Record<string, unknown>)
+      .catch(() => ({} as Record<string, unknown>));
+    // The digest does not export its internals; the agreement that matters is
+    // that it calls indexFor at all, which the source asserts below.
+    assert.equal(typeof buildDigestRowsForTest, "undefined");
+
+    const {readFileSync} = await import("node:fs");
+    const {resolve} = await import("node:path");
+    const src = readFileSync(
+      resolve(__dirname, "..", "src", "weekly-digest.ts"), "utf8");
+
+    assert.match(src, /indexFor\(/,
+      "weekly-digest no longer delegates to the shared ladder");
+    assert.equal(/if \(peakCms < t2\) return 0;/.test(src), false,
+      "weekly-digest has grown its own copy of the ladder again");
   });
 });

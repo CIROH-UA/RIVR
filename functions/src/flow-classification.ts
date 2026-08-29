@@ -118,6 +118,36 @@ export function categoryFor(
 }
 
 /**
+ * Build a ladder from the upstream return-period payload.
+ *
+ * Upstream hands over an array of one object with `return_period_2`,
+ * `return_period_5` … in CMS. Both the alert path and the weekly digest had
+ * their own copy of this unpacking, which is how the ladder came to have three
+ * implementations (decision 13).
+ *
+ * @param {unknown[]} returnPeriods - The stored/upstream payload.
+ * @return {Record<number, number>} Thresholds keyed by recurrence year, CMS.
+ */
+export function ladderFromReturnPeriods(
+  returnPeriods: unknown[]
+): Record<number, number> {
+  const out: Record<number, number> = {};
+  if (!Array.isArray(returnPeriods) || returnPeriods.length === 0) return out;
+  const row = returnPeriods[0];
+  if (row === null || typeof row !== "object") return out;
+
+  for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
+    if (!key.startsWith("return_period_")) continue;
+    const years = Number(key.slice("return_period_".length));
+    if (Number.isFinite(years) && typeof value === "number" &&
+        Number.isFinite(value)) {
+      out[years] = value;
+    }
+  }
+  return out;
+}
+
+/**
  * Whether a category is high enough to notify on.
  *
  * The floor is **Action**, confirmed by Jerson 2026-08-29. Alerts already fired

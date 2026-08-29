@@ -2,19 +2,30 @@
 //
 // Weekly Outlook digest — a once-a-week (Fri 7am MT) push summarizing how each
 // user's favorite rivers are forecast to behave over the coming week. A single
-// notification per user, led by the most "newsworthy" river. Reuses the flood
-// alert fetch pipeline (batchFetchReachData) and mirrors the client-side
-// WeeklyOutlookService logic (peak-anchored trend, flood category, newsworthiness
-// ranking) so the push and the in-app Weekly Outlook page tell the same story.
+// notification per user, led by the most "newsworthy" river.
+//
+// Reads the SAME store the alert path and the app read (ADR 0011 Phase 6), and
+// classifies through the SAME shared ladder, so the digest, the alert and the
+// card cannot describe one river three different ways. It used to fetch NOAA
+// and GEOGLOWS itself via batchFetchReachData and carry its own copy of the
+// 2/5/10/25-year ladder — the third implementation of one rule, named in
+// decision 13.
+//
+// Still mirrors the client-side WeeklyOutlookService for the parts that are
+// genuinely presentational: peak-anchored trend and newsworthiness ranking.
 
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import {
-  batchFetchReachData,
-  reachKey,
   ReachData,
+  reachKey,
   ReachSource,
 } from "./notification-service.js";
+import {readAlertDataFromStore} from "./store-alert-source.js";
+import {
+  indexFor,
+  ladderFromReturnPeriods,
+} from "./flow-classification.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -79,7 +90,8 @@ export async function sendWeeklyDigests(): Promise<DigestResult> {
       unique.set(reachKey(source, reachId), {source, reachId});
     }
   }
-  const reachDataMap = await batchFetchReachData(Array.from(unique.values()));
+  const reachDataMap = await readAlertDataFromStore(
+    Array.from(unique.values()));
 
   for (const user of dueUsers) {
     try {
@@ -237,23 +249,22 @@ function trendOf(
   return "steady";
 }
 
-/** Flood category index for a peak flow (CFS) vs return periods (CMS). Mirrors
- * the client's FlowClassification.indexFor (2/5/10/25-yr ladder). */
+/**
+ * Flood category index for a peak flow (CFS) against return periods (CMS).
+ *
+ * Delegates to the SHARED ladder. This file used to carry its own copy — the
+ * third implementation of one rule, named in ADR 0011 decision 13 alongside
+ * the client's and evaluateAlert's. The copy was faithful, which is exactly why
+ * it was dangerous: nothing would have failed when one of the three drifted,
+ * and ADR 0002 exists because two of them already had.
+ *
+ * @param {number} peakCfs - Peak forecast flow, CFS.
+ * @param {unknown[]} returnPeriods - Upstream return-period payload, CMS.
+ * @return {number} Index 0..4, or -1 when undeterminable.
+ */
 function categoryIndexFor(peakCfs: number, returnPeriods: unknown[]): number {
-  const peakCms = peakCfs * CFS_TO_CMS;
-  const rp = Array.isArray(returnPeriods) && returnPeriods.length > 0 ?
-    returnPeriods[0] as Record<string, unknown> : null;
-  if (!rp) return -1;
-  const t = (y: number): number | null =>
-    typeof rp[`return_period_${y}`] === "number" ?
-      rp[`return_period_${y}`] as number : null;
-  const t2 = t(2); const t5 = t(5); const t10 = t(10); const t25 = t(25);
-  if (t2 === null || t5 === null || t10 === null || t25 === null) return -1;
-  if (peakCms < t2) return 0;
-  if (peakCms < t5) return 1;
-  if (peakCms < t10) return 2;
-  if (peakCms < t25) return 3;
-  return 4;
+  return indexFor(peakCfs * CFS_TO_CMS,
+    ladderFromReturnPeriods(returnPeriods));
 }
 
 /** Higher = more newsworthy (shown/led first). Mirrors OutlookRow.newsworthiness. */

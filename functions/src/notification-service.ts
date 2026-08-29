@@ -227,83 +227,17 @@ export async function runAlertEvaluation(
   }
 }
 
-/**
- * Batch-fetch forecast, return period, and river name data for a list of
- * reach IDs. Each reach is fetched exactly once using Promise.allSettled
- * so one failure doesn't block others.
+/*
+ * batchFetchReachData lived here: it called NOAA and GEOGLOWS directly, once
+ * per reach per alert slot. ADR 0011 Phase 6 moved both the alert path and the
+ * weekly digest onto the store (`readAlertDataFromStore`), leaving it with no
+ * callers.
+ *
+ * Deleted rather than kept as a fallback. Guard 1 is "alerts issue ZERO
+ * upstream fetches", and a dead function that still reads as a live fetch path
+ * is how a fallback gets quietly reintroduced. It is in the history if the
+ * shape is ever needed again.
  */
-export async function batchFetchReachData(
-  reaches: Array<{source: ReachSource; reachId: string}>
-): Promise<Map<string, ReachData>> {
-  const {getForecast, getReturnPeriods, getRiverName} =
-    await import("./noaa-client.js");
-  const {getGeoglowsReachData} = await import("./geoglows-client.js");
-
-  const reachDataMap = new Map<string, ReachData>();
-
-  // Process reaches in parallel batches of 10 to avoid overwhelming APIs
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < reaches.length; i += BATCH_SIZE) {
-    const batch = reaches.slice(i, i + BATCH_SIZE);
-
-    const batchResults = await Promise.allSettled(
-      batch.map(async ({source, reachId}) => {
-        const key = reachKey(source, reachId);
-
-        // GEOGLOWS: one proxy call returns forecast + return periods + name.
-        if (source === "geoglows") {
-          const data = await getGeoglowsReachData(reachId);
-          return {key, ...data};
-        }
-
-        // NWM: fetch the three sources in parallel so a river-name failure
-        // doesn't discard forecast data.
-        const [forecastResult, returnPeriodsResult, riverNameResult] =
-          await Promise.allSettled([
-            getForecast(reachId),
-            getReturnPeriods(reachId),
-            getRiverName(reachId),
-          ]);
-
-        const forecast = forecastResult.status === "fulfilled"
-          ? forecastResult.value
-          : null;
-        const returnPeriods = returnPeriodsResult.status === "fulfilled"
-          ? returnPeriodsResult.value
-          : [];
-        const riverName = riverNameResult.status === "fulfilled"
-          ? riverNameResult.value
-          : `Reach ${reachId}`;
-
-        if (forecastResult.status === "rejected") {
-          logger.warn(`⚠️ Forecast fetch failed for reach ${reachId}`, {
-            error: forecastResult.reason instanceof Error
-              ? forecastResult.reason.message
-              : String(forecastResult.reason),
-          });
-        }
-
-        return {key, forecast, returnPeriods, riverName};
-      })
-    );
-
-    // Store results in the map
-    for (const result of batchResults) {
-      if (result.status === "fulfilled") {
-        const {key, forecast, returnPeriods, riverName} = result.value;
-        reachDataMap.set(key, {forecast, returnPeriods, riverName});
-      } else {
-        logger.error("❌ Unexpected batch fetch error", {
-          error: result.reason instanceof Error
-            ? result.reason.message
-            : String(result.reason),
-        });
-      }
-    }
-  }
-
-  return reachDataMap;
-}
 
 /**
  * Every user eligible for notifications.
