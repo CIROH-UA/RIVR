@@ -18,7 +18,7 @@ import 'package:rivr/services/4_infrastructure/favorites/coach_mark_targets.dart
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/favorites_search_bar.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/skeleton_river_card.dart';
-import 'package:rivr/ui/2_presentation/shared/widgets/offline_banner.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/sync_status_banner.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/notification_prompt_banner.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
@@ -245,7 +245,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               bottom: false,
               child: Column(
                 children: [
-                  const OfflineBanner(),
+                  const SyncStatusBanner(),
                   Expanded(
                     child: Consumer<FavoritesProvider>(
                       builder: (context, favoritesProvider, child) {

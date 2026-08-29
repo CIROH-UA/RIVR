@@ -32,6 +32,22 @@ class RiverDataRepository implements IRiverDataRepository {
   /// One in-flight fetch per key, so concurrent readers share a single request.
   final Map<String, Future<RiverDataEntry>> _inFlight = {};
 
+  final ValueNotifier<bool> _outOfSync = ValueNotifier<bool>(false);
+
+  @override
+  ValueListenable<bool> get outOfSync => _outOfSync;
+
+  /// Raised when a value is served past its window and the revalidation that
+  /// should have replaced it failed. Cleared by ANY successful fetch, because
+  /// one proves the app can reach current data again.
+  ///
+  /// Phase 7 makes this the whole of the app's honesty about freshness: with
+  /// the timestamps gone, silence is a claim that the numbers are current, and
+  /// this is the only thing entitled to withdraw that claim.
+  void _setOutOfSync(bool value) {
+    if (_outOfSync.value != value) _outOfSync.value = value;
+  }
+
   @override
   Future<RiverDataEntry?> read(RiverDataKey key) async {
     final cached = await _cache.get(key);
@@ -45,8 +61,13 @@ class RiverDataRepository implements IRiverDataRepository {
       unawaited(
         _fetchAndCache(key).then(
           (_) {},
-          onError: (Object e, StackTrace s) =>
-              AppLogger.error(_tag, 'Background revalidate failed for $key', e),
+          onError: (Object e, StackTrace s) {
+            AppLogger.error(_tag, 'Background revalidate failed for $key', e);
+            // The user is now looking at a value past its window that we
+            // could not replace. Phase 7 took away the timestamp that would
+            // have let them see that for themselves.
+            _setOutOfSync(true);
+          },
         ),
       );
       return cached;
@@ -189,6 +210,7 @@ class RiverDataRepository implements IRiverDataRepository {
       payload: result.payload,
     );
     await _cache.put(entry);
+    _setOutOfSync(false);
     return entry;
   }
 }

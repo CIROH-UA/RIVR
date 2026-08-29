@@ -346,6 +346,40 @@ void main() {
     // and 800 lands below the ×35 two-year band, so the badge reads NORMAL and
     // this fails. A classifier-only test does NOT catch it — the ladder was
     // never wrong, the units reaching it were.
+    // ── ADR 0011 Phase 7 guard 1: no value view renders a timestamp ────────
+    //
+    // This card used to carry two freshness claims: a green tick / yellow
+    // warning beside the flow, and a "3h ago" line under it. Both are gone.
+    //
+    // The green tick is the more important removal and the easier one to
+    // reintroduce by accident. A per-card claim of "current" trains the eye to
+    // look for it, and the first time it is wrong it has taught the user to
+    // trust exactly the wrong thing. Phase 7's promise is that SILENCE means
+    // current, and one widget quietly re-adding a badge breaks it everywhere.
+    //
+    // The single indicator that survives lives in SyncStatusBanner, once for
+    // the whole app, and has its own tests.
+    testWidgets('renders no relative timestamp and no freshness badge',
+        (tester) async {
+      await pumpAndReadBadge(tester, 800, expectedCategory: 'Moderate');
+
+      final relativeTime = RegExp(r'\b\d+\s*[mhd]\s+ago\b');
+      final offenders = tester
+          .widgetList<Text>(find.byType(Text))
+          .map((t) => t.data ?? '')
+          .where(relativeTime.hasMatch)
+          .toList();
+      expect(offenders, isEmpty,
+          reason: 'Phase 7 removed freshness timestamps from value views; '
+              'found $offenders on the favourites card');
+
+      expect(find.byIcon(CupertinoIcons.checkmark_circle), findsNothing,
+          reason: 'the green "this is current" tick is the claim Phase 7 '
+              'deliberately stopped making per card');
+      expect(find.byIcon(CupertinoIcons.exclamationmark_circle), findsNothing,
+          reason: 'staleness is reported once by SyncStatusBanner, not per card');
+    });
+
     testWidgets('thresholds recorded in CFS are NOT converted again',
         (tester) async {
       expect(

@@ -659,34 +659,21 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
               ),
             ),
 
-            // Data freshness indicator
-            if (widget.favorite.lastUpdated != null) ...[
-              const SizedBox(width: 8),
-              Icon(
-                widget.favorite.isFlowDataStale
-                    ? CupertinoIcons.exclamationmark_circle
-                    : CupertinoIcons.checkmark_circle,
-                color: widget.favorite.isFlowDataStale
-                    ? CupertinoColors.systemYellow
-                    : CupertinoColors.systemGreen.withValues(alpha: 0.8),
-                size: 12,
-              ),
-            ],
+            // ADR 0011 Phase 7: NO freshness badge and NO "3h ago" here.
+            //
+            // Both used to live on this row: a green tick when fresh, a yellow
+            // warning plus a relative timestamp when stale. They are gone on
+            // purpose, and the green tick is the more important removal — a
+            // per-card claim of "current" trains the eye to look for it, and
+            // the moment it is ever wrong it has taught the user to trust the
+            // wrong thing. Silence is the claim now.
+            //
+            // The one case where the app is NOT entitled to that silence —
+            // data served past its window that could not be revalidated — is
+            // shown ONCE for the whole app by SyncStatusBanner, not per card,
+            // driven by IRiverDataRepository.outOfSync.
           ],
         ),
-
-        // Last updated info (if stale)
-        if (widget.favorite.isFlowDataStale &&
-            widget.favorite.lastUpdated != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            _getLastUpdatedText(),
-            style: TextStyle(
-              color: CupertinoColors.white.withValues(alpha: 0.7),
-              fontSize: 12,
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -705,21 +692,6 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         onRename: widget.onRename,
       ),
     );
-  }
-
-  String _getLastUpdatedText() {
-    if (widget.favorite.lastUpdated == null) return '';
-
-    final now = DateTime.now();
-    final difference = now.difference(widget.favorite.lastUpdated!);
-
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else {
-      return '${difference.inDays}d ago';
-    }
   }
 
   // Gesture handling for slide actions

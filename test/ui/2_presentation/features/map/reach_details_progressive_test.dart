@@ -91,6 +91,12 @@ FreshnessWindow _window() => FreshnessWindow(
 /// Records every product requested, and lets each one be delayed independently
 /// so "renders as it lands" is observable rather than asserted by faith.
 class _RecordingRepo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   _RecordingRepo({
     this.delays = const {},
     this.failures = const {},

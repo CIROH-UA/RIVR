@@ -169,6 +169,86 @@ void main() {
     );
   });
 
+  // ── ADR 0011 Phase 7: the signal behind the one indicator ────────────────
+  //
+  // Phase 7 takes the timestamps off the values, so the app can no longer let
+  // a user judge freshness for themselves. `outOfSync` is the whole of what it
+  // offers instead, and SyncStatusBanner does nothing but render it — so these
+  // tests, not the widget's, are what decide whether the promise holds.
+  //
+  // The bar is deliberately narrow: NOT "offline", NOT "a fetch failed", but
+  // "we served a value past its window and could not replace it".
+  group('outOfSync — Phase 7 guards 2 and 3', () {
+    test('starts false: nothing has been served, nothing is suspect', () {
+      expect(repo.outOfSync.value, isFalse);
+    });
+
+    test('a fresh cache hit never raises it', () async {
+      await repo.read(key);
+      now = now.add(const Duration(minutes: 30)); // still inside the 1h window
+      await repo.read(key);
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'in-window data is current; a warning here is noise');
+    });
+
+    // Guard 3, at the level that matters. A store frozen past its cycle looks
+    // exactly like this on device: the window has ended, the value is still
+    // served so the screen is not empty, and the refresh that should have
+    // replaced it cannot.
+    test('serving past the window with a failed refresh raises it', () async {
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2)); // window has ended
+      source.offline = true;
+
+      final served = await repo.read(key);
+      expect(served, isNotNull, reason: 'stale data is still shown, not hidden');
+
+      // The revalidation is deliberately unawaited inside read().
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isTrue);
+    });
+
+    test('a later successful fetch clears it', () async {
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2));
+      source.offline = true;
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isTrue);
+
+      source.offline = false;
+      await repo.refresh(key);
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'one success proves the app can reach current data again');
+    });
+
+    // The distinction the banner's copy depends on. Offline alone is not a
+    // staleness claim: a phone in airplane mode looking at a forecast fetched
+    // twenty minutes ago is looking at the current forecast.
+    test('offline with everything in-window stays silent', () async {
+      await repo.read(key);
+      source.offline = true;
+      now = now.add(const Duration(minutes: 30));
+
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isFalse);
+    });
+
+    test('it notifies listeners, so the banner can rebuild', () async {
+      var notified = 0;
+      repo.outOfSync.addListener(() => notified++);
+
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2));
+      source.offline = true;
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(notified, greaterThan(0));
+    });
+  });
+
   test('read miss fetches, caches, and returns the value', () async {
     final entry = await repo.read(key);
     expect(entry, isNotNull);

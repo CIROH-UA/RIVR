@@ -82,6 +82,12 @@ class _StubForecastService implements IForecastService {
 }
 
 class _FakeRepo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   _FakeRepo(this.entry,
       {this.byProduct = const {},
       this.delay,

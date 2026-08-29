@@ -62,6 +62,12 @@ class _Unit implements IFlowUnitPreferenceService {
 /// payloads (the shape the real cache holds), and exposes its watch notifiers
 /// so a test can push a "background revalidation" into the provider.
 class _Repo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   _Repo({this.failProducts = const {}, this.delay});
 
   final Set<ForecastProduct> failProducts;

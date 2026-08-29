@@ -33,4 +33,19 @@ abstract class IRiverDataRepository {
   /// Insert a value produced outside the normal fetch path (e.g. an FCM push
   /// payload) so the UI reflects it without a network call (step 6).
   Future<void> ingest(RiverDataEntry entry);
+
+  /// Whether the app is knowingly showing data it could not confirm is
+  /// current.
+  ///
+  /// **ADR 0011 Phase 7.** Once the timestamps come off the values, silence
+  /// has to mean "this is current" — so the app owes the user a signal for the
+  /// one case where it is not. This is that signal, and it is deliberately
+  /// narrow: true only when a value was served PAST ITS WINDOW and the
+  /// revalidation that should have replaced it failed.
+  ///
+  /// It is not "offline". A device offline with everything inside its window
+  /// is showing current data and must stay silent. It is not "a fetch failed"
+  /// either: a failure that still leaves fresh data on screen has cost the
+  /// user nothing.
+  ValueListenable<bool> get outOfSync;
 }

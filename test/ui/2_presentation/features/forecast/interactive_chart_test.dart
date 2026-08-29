@@ -52,6 +52,12 @@ class _Unit implements IFlowUnitPreferenceService {
 /// Medium range is gated behind [releaseMedium] — the window the defect lives
 /// in: overview lands, the chart mounts, medium range is still in flight.
 class _GatedRepo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   bool mediumReleased = false;
   final List<void Function()> _pendingMedium = [];
 

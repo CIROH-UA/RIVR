@@ -27,6 +27,12 @@ import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart
 import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 
 class _NoopRepo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   final List<RiverDataEntry> ingested = [];
   @override
   Future<void> ingest(RiverDataEntry e) async => ingested.add(e);

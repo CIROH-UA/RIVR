@@ -27,6 +27,12 @@ import 'package:rivr/services/4_infrastructure/river_data/store_subscription_ser
 
 /// Captures what the service ingests, so delivery can be asserted directly.
 class _CapturingRepo implements IRiverDataRepository {
+
+  // Phase 7: the fakes never go out of sync — a test that needs the indicator
+  // drives it explicitly rather than inheriting a default that could hide a
+  // real regression.
+  @override
+  final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
   final List<RiverDataEntry> ingested = [];
   int readCalls = 0;
 
