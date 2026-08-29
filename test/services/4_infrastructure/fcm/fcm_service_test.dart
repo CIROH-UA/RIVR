@@ -60,6 +60,13 @@ import 'fcm_service_test.mocks.dart';
 /// - how many writes occurred (atomic vs. multiple)
 /// - the exact user ID targeted
 class SpyUserSettingsService implements IUserSettingsService {
+  @override
+  Future<UserSettings?> updateRiverAlertFrequency(
+    String userId,
+    String reachId,
+    String wireValue,
+  ) async => null;
+
   // --- updateUserSettings spy data ---
   int updateCallCount = 0;
   String? lastUpdateUserId;

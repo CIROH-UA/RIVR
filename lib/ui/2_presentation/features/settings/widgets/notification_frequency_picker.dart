@@ -2,7 +2,19 @@
 
 import 'package:flutter/cupertino.dart';
 
-/// Widget for selecting notification frequency (1x, 2x, 3x, or 4x per day)
+/// Default reminder frequency for rivers the user has not set individually.
+///
+/// **This used to be "CHECK FREQUENCY", and it advertised times that no longer
+/// exist.** The rows read "6:00 AM, 12:00 PM, 6:00 PM MT" and named four
+/// scheduled functions that ADR 0011 Phase 6 deleted — alerts are now evaluated
+/// whenever the upstream model publishes, not on a clock. Shipping a settings
+/// screen that promises a 6:00 AM check is worse than shipping no setting at
+/// all, so the whole section is re-framed around the only thing a user still
+/// chooses: how often to be reminded while a river stays high.
+///
+/// The stored value is unchanged (1-4) so no migration is needed; the server
+/// reads it as this user's DEFAULT reminder interval until they set a
+/// per-river preference. See `defaultFrequencyFor` in notification-service.ts.
 class NotificationFrequencyPicker extends StatelessWidget {
   final int selectedFrequency;
   final ValueChanged<int> onChanged;
@@ -19,43 +31,33 @@ class NotificationFrequencyPicker extends StatelessWidget {
   Widget build(BuildContext context) {
     return CupertinoListSection.insetGrouped(
       header: Text(
-        'CHECK FREQUENCY',
+        'DEFAULT REMINDERS',
         style: TextStyle(
           fontSize: 13,
           color: CupertinoColors.secondaryLabel.resolveFrom(context),
         ),
       ),
-      // footer: Text(
-      //   'Choose how often we check your favorite rivers for flood alerts',
-      //   style: TextStyle(
-      //     fontSize: 13,
-      //     color: CupertinoColors.secondaryLabel.resolveFrom(context),
-      //   ),
-      // ),
+      footer: Text(
+        'Used for rivers you have not set individually below. You are always '
+        'told the moment a river floods or gets worse — this only changes how '
+        'often you are reminded while it stays high.',
+        style: TextStyle(
+          fontSize: 13,
+          color: CupertinoColors.secondaryLabel.resolveFrom(context),
+        ),
+      ),
       children: [
         _buildFrequencyTile(
           context,
           frequency: 1,
-          title: 'Once daily',
-          subtitle: '6:00 AM MT',
-        ),
-        _buildFrequencyTile(
-          context,
-          frequency: 2,
-          title: 'Twice daily',
-          subtitle: '6:00 AM, 6:00 PM MT',
-        ),
-        _buildFrequencyTile(
-          context,
-          frequency: 3,
-          title: 'Three times daily',
-          subtitle: '6:00 AM, 12:00 PM, 6:00 PM MT',
+          title: 'Once a day',
+          subtitle: 'One reminder a day while a river stays high',
         ),
         _buildFrequencyTile(
           context,
           frequency: 4,
-          title: 'Four times daily',
-          subtitle: '12:00 AM, 6:00 AM, 12:00 PM, 6:00 PM MT',
+          title: 'Every 6 hours',
+          subtitle: 'The standard reminder rhythm',
         ),
       ],
     );

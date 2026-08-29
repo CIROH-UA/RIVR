@@ -10,6 +10,9 @@ import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/ui/2_presentation/features/settings/widgets/notification_frequency_picker.dart';
+import 'package:rivr/ui/2_presentation/features/settings/widgets/river_alert_frequency_section.dart';
+import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
+import 'package:rivr/models/1_domain/shared/alert_frequency.dart';
 
 class NotificationsSettingsPage extends StatefulWidget {
   const NotificationsSettingsPage({super.key});
@@ -26,6 +29,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
 
   bool _notificationsEnabled = false;
   int _notificationFrequency = 1;
+  Map<String, String> _alertFrequencies = const {};
   bool _weeklyOutlookEnabled = false;
   bool _isLoading = true;
   bool _isUpdating = false;
@@ -78,6 +82,7 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
           _userSettings = settings;
           _notificationsEnabled = settings.enableNotifications;
           _notificationFrequency = settings.notificationFrequency;
+          _alertFrequencies = settings.alertFrequencies;
           _weeklyOutlookEnabled = settings.weeklyOutlookEnabled;
           _isLoading = false;
         });
@@ -213,6 +218,45 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
     }
   }
 
+  /// Persist one river's reminder frequency.
+  ///
+  /// Optimistic: the row updates immediately and reverts if the write fails.
+  /// A settings toggle that waits on a round trip before moving feels broken,
+  /// and this one is safe to revert because nothing else depends on it.
+  Future<void> _updateRiverFrequency(
+    String reachId,
+    AlertFrequency frequency,
+  ) async {
+    final userId = context.read<AuthProvider>().currentUser?.uid;
+    if (userId == null) return;
+
+    final previous = Map<String, String>.from(_alertFrequencies);
+    setState(() {
+      _alertFrequencies = {
+        ..._alertFrequencies,
+        reachId: frequency.wireValue,
+      };
+    });
+
+    try {
+      await GetIt.I<IUserSettingsService>().updateRiverAlertFrequency(
+        userId,
+        reachId,
+        frequency.wireValue,
+      );
+    } catch (e) {
+      AppLogger.error(
+        'NotificationsSettingsPage',
+        'Error updating river alert frequency: $e',
+        e,
+      );
+      if (mounted) {
+        setState(() => _alertFrequencies = previous);
+        _showError('Could not save that setting. Please try again.');
+      }
+    }
+  }
+
   Future<void> _updateFrequency(int frequency) async {
     if (_isUpdating) return;
 
@@ -316,12 +360,25 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
 
                   // ALERTS — flood threshold pushes
                   _buildToggleSection(),
-                  if (_notificationsEnabled)
+                  if (_notificationsEnabled) ...[
                     NotificationFrequencyPicker(
                       selectedFrequency: _notificationFrequency,
                       onChanged: _updateFrequency,
                       isEnabled: !_isUpdating,
                     ),
+                    // Per-river overrides. Placed directly under the default
+                    // so the relationship reads top-down: this is the default,
+                    // these are the exceptions.
+                    Consumer<FavoritesProvider>(
+                      builder: (context, favorites, _) =>
+                          RiverAlertFrequencySection(
+                        favorites: favorites.favorites,
+                        frequencies: _alertFrequencies,
+                        onChanged: _updateRiverFrequency,
+                        isEnabled: !_isUpdating,
+                      ),
+                    ),
+                  ],
 
                   // DIGEST — weekly outlook (independent toggle)
                   _buildDigestSection(),

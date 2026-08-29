@@ -35,6 +35,12 @@ class UserSettings {
   // 'geoglows'). Only non-NWM favorites are stored; a missing key means NWM.
   // The notification Cloud Function reads this to pick the right forecast API.
   final Map<String, String> favoriteSources;
+  // Per-river reminder frequency, keyed by reachId (value = an
+  // AlertFrequency.wireValue, e.g. '6h'). Only rivers the user has changed are
+  // stored; a missing key means the default. ADR 0011 decision 19 — read by
+  // functions/src/alert-triggers.ts, so the VALUES are a cross-language
+  // contract.
+  final Map<String, String> alertFrequencies;
   // App-populated display label per favorite (reachId -> "White River" or
   // "Castilla, Peru"). The weekly-digest Cloud Function reads these for the push
   // banner because it can't geocode; the app writes them once it has the name or
@@ -60,6 +66,7 @@ class UserSettings {
     this.weeklyDigestsSinceOpen = 0,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
+    this.alertFrequencies = const {},
     this.favoriteLabels = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [], // Default to empty list
@@ -80,6 +87,7 @@ class UserSettings {
     int? weeklyDigestsSinceOpen,
     List<String>? favoriteReachIds,
     Map<String, String>? favoriteSources,
+    Map<String, String>? alertFrequencies,
     Map<String, String>? favoriteLabels,
     List<String>? fcmTokens,
     List<String>? customBackgroundImagePaths,
@@ -101,6 +109,7 @@ class UserSettings {
           weeklyDigestsSinceOpen ?? this.weeklyDigestsSinceOpen,
       favoriteReachIds: favoriteReachIds ?? this.favoriteReachIds,
       favoriteSources: favoriteSources ?? this.favoriteSources,
+      alertFrequencies: alertFrequencies ?? this.alertFrequencies,
       favoriteLabels: favoriteLabels ?? this.favoriteLabels,
       fcmTokens: fcmTokens ?? this.fcmTokens,
       customBackgroundImagePaths:

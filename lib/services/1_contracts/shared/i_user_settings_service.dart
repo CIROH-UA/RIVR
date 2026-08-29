@@ -36,6 +36,18 @@ abstract class IUserSettingsService {
     String userId,
     int frequency,
   );
+
+  /// Set the per-river reminder frequency (ADR 0011 decision 19).
+  ///
+  /// Writes one entry into the `alertFrequencies` map on the user document.
+  /// [wireValue] must be an [AlertFrequency.wireValue] — the server reads these
+  /// strings directly, so an unrecognised one silently reverts that river to
+  /// the default.
+  Future<UserSettings?> updateRiverAlertFrequency(
+    String userId,
+    String reachId,
+    String wireValue,
+  );
   void clearCache();
   Future<bool> userHasSettings(String userId);
   Future<void> syncFlowUnitPreference(String userId);

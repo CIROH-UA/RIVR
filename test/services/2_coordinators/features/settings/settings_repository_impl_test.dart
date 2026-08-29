@@ -43,6 +43,13 @@ class _StubSettingsService implements IUserSettingsService {
   }
 
   @override
+  Future<UserSettings?> updateRiverAlertFrequency(
+    String userId,
+    String reachId,
+    String wireValue,
+  ) async => null;
+
+  @override
   Future<UserSettings?> syncAfterLogin(String userId) async {
     if (exceptionToThrow != null) throw exceptionToThrow!;
     return settingsToReturn;

@@ -19,6 +19,8 @@ class UserSettingsDto {
   final int weeklyDigestsSinceOpen;
   final List<String> favoriteReachIds;
   final Map<String, String> favoriteSources;
+  /// Per-river reminder frequency; see UserSettings.alertFrequencies.
+  final Map<String, String> alertFrequencies;
   final Map<String, String> favoriteLabels;
   final List<String> fcmTokens;
   final List<String> customBackgroundImagePaths;
@@ -39,6 +41,7 @@ class UserSettingsDto {
     this.weeklyDigestsSinceOpen = 0,
     required this.favoriteReachIds,
     this.favoriteSources = const {},
+    this.alertFrequencies = const {},
     this.favoriteLabels = const {},
     this.fcmTokens = const [],
     this.customBackgroundImagePaths = const [],
@@ -64,6 +67,10 @@ class UserSettingsDto {
         json['favoriteReachIds'] as List? ?? [],
       ),
       favoriteSources: (json['favoriteSources'] as Map?)?.map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          ) ??
+          const {},
+      alertFrequencies: (json['alertFrequencies'] as Map?)?.map(
             (k, v) => MapEntry(k.toString(), v.toString()),
           ) ??
           const {},
@@ -95,6 +102,7 @@ class UserSettingsDto {
       'weeklyDigestsSinceOpen': weeklyDigestsSinceOpen,
       'favoriteReachIds': favoriteReachIds,
       'favoriteSources': favoriteSources,
+      'alertFrequencies': alertFrequencies,
       'favoriteLabels': favoriteLabels,
       'fcmTokens': fcmTokens,
       'customBackgroundImagePaths': customBackgroundImagePaths,
@@ -121,6 +129,7 @@ class UserSettingsDto {
       weeklyDigestsSinceOpen: weeklyDigestsSinceOpen,
       favoriteReachIds: favoriteReachIds,
       favoriteSources: favoriteSources,
+      alertFrequencies: alertFrequencies,
       favoriteLabels: favoriteLabels,
       fcmTokens: fcmTokens,
       customBackgroundImagePaths: customBackgroundImagePaths,
@@ -159,6 +168,7 @@ class UserSettingsDto {
       weeklyDigestsSinceOpen: entity.weeklyDigestsSinceOpen,
       favoriteReachIds: entity.favoriteReachIds,
       favoriteSources: entity.favoriteSources,
+      alertFrequencies: entity.alertFrequencies,
       favoriteLabels: entity.favoriteLabels,
       fcmTokens: entity.fcmTokens,
       customBackgroundImagePaths: entity.customBackgroundImagePaths,

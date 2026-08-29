@@ -431,6 +431,44 @@ class UserSettingsService implements IUserSettingsService {
     }
   }
 
+  /// Set the per-river reminder frequency (ADR 0011 decision 19).
+  ///
+  /// A dotted field path so ONE river is written, not the whole map. A
+  /// read-modify-write of `alertFrequencies` would drop a change made on
+  /// another device between the read and the write, and the same merge
+  /// reasoning already applies to `fcmTokens` here.
+  @override
+  Future<UserSettings?> updateRiverAlertFrequency(
+    String userId,
+    String reachId,
+    String wireValue,
+  ) async {
+    try {
+      final settings = await getUserSettings(userId);
+      if (settings == null) return null;
+
+      await updateUserSettings(userId, {
+        'alertFrequencies.$reachId': wireValue,
+      });
+
+      return settings.copyWith(
+        alertFrequencies: {
+          ...settings.alertFrequencies,
+          reachId: wireValue,
+        },
+      );
+    } catch (e) {
+      AppLogger.error(
+        'UserSettingsService',
+        'Error updating river alert frequency: $e',
+        e,
+      );
+      throw Exception(
+        'Failed to update river alert frequency: ${e.toString()}',
+      );
+    }
+  }
+
   /// Clear cached settings (call on sign out)
   @override
   void clearCache() {

@@ -143,6 +143,13 @@ class _StubAuthService implements IAuthService {
 }
 
 class _StubSettingsService implements IUserSettingsService {
+  @override
+  Future<UserSettings?> updateRiverAlertFrequency(
+    String userId,
+    String reachId,
+    String wireValue,
+  ) async => null;
+
   UserSettings? settingsToReturn;
   Exception? exceptionToThrow;
   Exception? deleteExceptionToThrow;

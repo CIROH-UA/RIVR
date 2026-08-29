@@ -26,6 +26,8 @@ import {
   frequencyFrom,
 } from "./alert-triggers.js";
 import {FloodCategory} from "./flow-classification.js";
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
 
 const NOW = new Date("2026-08-29T12:00:00Z");
 
@@ -295,5 +297,45 @@ describe("the three-day event that started all this", () => {
       now: NOW,
     });
     assert.equal(trigger, "escalation");
+  });
+});
+
+describe("the frequency values are a cross-language contract", () => {
+  // The app WRITES these strings into `alertFrequencies` on the user document
+  // and this file READS them back. A rename on either side that is not matched
+  // on the other does not throw — `frequencyFrom` falls back — so every user
+  // who had chosen a setting would silently revert to the default and nobody
+  // would see an error anywhere.
+  const DART = resolve(__dirname, "..", "..",
+    "lib/models/1_domain/shared/alert_frequency.dart");
+
+  test("every wire value in the Dart enum exists here", () => {
+    const dart = readFileSync(DART, "utf8");
+    const wire = [...dart.matchAll(/^\s*\w+\('([^']+)'\)[,;]?$/gm)]
+      .map((m) => m[1]);
+
+    assert.ok(wire.length >= 5,
+      `expected the five frequencies in the Dart enum, found ${wire.length}`);
+    for (const value of wire) {
+      assert.ok(value in FREQUENCY_INTERVAL_MS,
+        `the app can write "${value}" but the server does not know it, so ` +
+        "that river would silently revert to the default");
+    }
+  });
+
+  test("and every value here exists in the Dart enum", () => {
+    const dart = readFileSync(DART, "utf8");
+    for (const value of Object.keys(FREQUENCY_INTERVAL_MS)) {
+      assert.ok(dart.includes(`'${value}'`),
+        `the server honours "${value}" but no app build can write it`);
+    }
+  });
+
+  test("the two sides agree on which value is the default", () => {
+    const dart = readFileSync(DART, "utf8");
+    assert.match(dart,
+      /defaultFrequency = AlertFrequency\.sixHourly/,
+      "the Dart default changed; DEFAULT_FREQUENCY here must match");
+    assert.equal(DEFAULT_FREQUENCY, "6h");
   });
 });
