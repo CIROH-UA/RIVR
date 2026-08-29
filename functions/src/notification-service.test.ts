@@ -458,12 +458,21 @@ describe("the label key is a cross-language contract", () => {
     assert.equal(reachKey("nwm", "18471070"), "nwm:18471070");
   });
 
-  test("the Dart side also reads the legacy key", () => {
+  test("the app PRESERVES legacy entries when it writes", () => {
+    // The app never reads these labels — it renders from the favourite's own
+    // customName — so the legacy fallback lives here on the server. What the
+    // app must do is not DROP the old entries when it writes a new one, or
+    // this fallback would have nothing to fall back to.
+    //
+    // The behaviour itself is tested in Dart
+    // (test/models/1_domain/shared/favorite_label_key_test.dart, "entries
+    // under the OLD bare-reachId key are preserved"). This pins the merge that
+    // makes it possible, from the side that depends on it.
     const dart = readFileSync(
       resolve(__dirname, "..", "..",
         "lib/models/1_domain/shared/favorite_label_key.dart"), "utf8");
-    assert.match(dart, /\?\? labels\[reachId\]/,
-      "the app stopped reading pre-2026-08-30 labels, so a user's names " +
-      "would disappear on upgrade");
+    assert.match(dart, /\{\.\.\.existing, key: trimmed\}/,
+      "labelsAfterRename stopped merging, so writing one label would drop " +
+      "every pre-2026-08-30 entry and the fallback above would never fire");
   });
 });

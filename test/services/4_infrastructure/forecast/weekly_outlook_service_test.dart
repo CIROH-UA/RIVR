@@ -256,6 +256,7 @@ WeeklyOutlookService _service({
     );
 
 void main() {
+  customNameTests();
   // REGRESSION (ADR 0010's headline defect): `location:` used to be
   // `await _locationLabel(lat, lon)`. Because buildOutlook waits on every row,
   // one Mapbox hop per favourite gated the whole page — and the only bound on
@@ -468,5 +469,50 @@ void main() {
 
     expect(result.rows.single.latitude, 40.2);
     expect(result.rows.single.longitude, -111.6);
+  });
+}
+
+/// The user's own name for a river must survive into the outlook — and
+/// therefore into `favoriteLabels`, which is what the Friday digest and, since
+/// 2026-08-30, a flood alert read.
+///
+/// This preferred `meta.riverName` outright, so a renamed river showed NOAA's
+/// official name here. Because the outlook's title is what gets published to
+/// the server, the consequence was larger than one screen: the rename never
+/// left the device at all, so a flood notification could never use it.
+void customNameTests() {
+  group('a renamed river keeps its name', () {
+    test('a custom name beats the metadata name', () async {
+      final svc = _service(geocoder: _Geocoder());
+      final result = await svc.buildOutlook([
+        _fav('9962444').copyWith(customName: 'The fishing spot'),
+      ]);
+
+      expect(result.rows.single.title, 'The fishing spot',
+          reason: "NOAA's name overwrote the user's — and because this title "
+              'is what gets published to favoriteLabels, the rename would '
+              'never reach the server at all');
+    });
+
+    test('without a custom name the metadata name is still used', () async {
+      final svc = _service(geocoder: _Geocoder());
+      final result = await svc.buildOutlook([_fav('9962444')]);
+
+      expect(result.rows.single.title, 'Test River 9962444',
+          reason: 'the metadata name is still the right fallback for a river '
+              'the user has not renamed');
+    });
+
+    test('a GEOGLOWS river keeps its custom name too', () async {
+      // GEOGLOWS reaches are unnamed upstream, so the custom name is the only
+      // meaningful title they can have.
+      final svc = _service(
+          geocoder: _Geocoder(), repo: _Repo(forecast: _geoglowsForecast()));
+      final result = await svc.buildOutlook([
+        _geoFav('760021642').copyWith(customName: 'Rio Urubamba'),
+      ]);
+
+      expect(result.rows.single.title, 'Rio Urubamba');
+    });
   });
 }

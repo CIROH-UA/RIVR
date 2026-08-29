@@ -25,19 +25,40 @@ import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 String favoriteLabelKey(ForecastSource source, String reachId) =>
     '${source.id}:$reachId';
 
-/// Read a label, tolerating entries written before the key carried a source.
+// A Dart reader was written here and deleted: the app never READS these
+// labels. It renders from the favourite's own `customName`, which is the
+// source of truth on device; `favoriteLabels` exists solely so the SERVER can
+// name a river the way the app does. The reader was dead code whose doc
+// comment described a fallback the app does not perform — and would have read
+// as live to the next person. The server's own `labelFor` in
+// notification-service.ts does that job, and is tested there.
+
+/// The `favoriteLabels` map to write for a rename, or null when there is
+/// nothing to write.
 ///
-/// Labels written before 2026-08-30 are keyed by the bare reach id. They are
-/// not migrated: a user's next rename or Weekly Outlook visit writes the new
-/// key, and until then the old value is still the right label for the common
-/// case of a reach id that exists on only one network. Reading both means
-/// nobody's label disappears on upgrade.
+/// Pure, so the decision is testable without a widget, a signed-in user or
+/// Firestore. The rename sync had no test at all when it shipped — the headline
+/// behaviour of the whole change — which is what pulling it out of the page
+/// fixes.
 ///
-/// The server does the same, for the same reason.
-String? labelFor(
-  Map<String, String> labels,
-  ForecastSource source,
-  String reachId,
-) {
-  return labels[favoriteLabelKey(source, reachId)] ?? labels[reachId];
+/// Returns null rather than an unchanged map for the two cases that must NOT
+/// produce a write: a blank label, and a label already stored. A no-op write
+/// here would cost a Firestore round trip on every rename dialog dismissal.
+///
+/// The merge is deliberate: labels for rivers not being renamed must survive,
+/// including entries under the pre-2026-08-30 bare-reachId key, which the
+/// server still reads.
+Map<String, String>? labelsAfterRename({
+  required Map<String, String> existing,
+  required ForecastSource source,
+  required String reachId,
+  required String label,
+}) {
+  final trimmed = label.trim();
+  if (trimmed.isEmpty) return null;
+
+  final key = favoriteLabelKey(source, reachId);
+  if (existing[key] == trimmed) return null;
+
+  return {...existing, key: trimmed};
 }

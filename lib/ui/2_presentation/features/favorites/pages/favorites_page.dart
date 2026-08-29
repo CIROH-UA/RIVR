@@ -1209,12 +1209,15 @@ class _FavoritesPageState extends State<FavoritesPage>
       final settings = await svc.getUserSettings(userId);
       if (settings == null) return;
 
-      final key = favoriteLabelKey(favorite.source, favorite.reachId);
-      if (settings.favoriteLabels[key] == label) return;
+      final merged = labelsAfterRename(
+        existing: settings.favoriteLabels,
+        source: favorite.source,
+        reachId: favorite.reachId,
+        label: label,
+      );
+      if (merged == null) return;
 
-      await svc.updateUserSettings(userId, {
-        'favoriteLabels': {...settings.favoriteLabels, key: label},
-      });
+      await svc.updateUserSettings(userId, {'favoriteLabels': merged});
     } catch (e) {
       AppLogger.error('FavoritesPage', 'Label sync failed: $e', e);
     }
