@@ -438,14 +438,27 @@ class RiverDataCache implements IRiverDataCache {
       _lastAccess.remove(group);
     }
 
-    await _ensureInitialized();
-    if (_dir == null) return;
-    try {
-      final file = _fileFor(key);
-      if (await file.exists()) await file.delete();
-    } catch (e) {
-      AppLogger.error(_tag, 'Error evicting ${key.storageKey}', e);
-    }
+    // The disk delete joins the serial chain, for the same reason put's write
+    // does. Outside it, a `put` already queued ran AFTER this delete and wrote
+    // the entry straight back — memory clean, disk dirty, and the next cold
+    // start served the resurrected value.
+    //
+    // That is not hypothetical: it is how Phase 5 guard 9 failed on a device
+    // on 2026-08-29. The kill switch detached and evicted, an in-flight store
+    // ingest landed behind the delete, and the following cold start rendered
+    // store data with the switch off and made zero upstream calls. The
+    // subscription service now drains its ingests before detach returns; this
+    // makes the ordering safe even if one slips through.
+    await _serialised(() async {
+      await _ensureInitialized();
+      if (_dir == null) return;
+      try {
+        final file = _fileFor(key);
+        if (await file.exists()) await file.delete();
+      } catch (e) {
+        AppLogger.error(_tag, 'Error evicting ${key.storageKey}', e);
+      }
+    });
   }
 
   @override

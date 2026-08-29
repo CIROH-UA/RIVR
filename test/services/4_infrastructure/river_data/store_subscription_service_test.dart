@@ -83,6 +83,7 @@ Map<String, dynamic> _doc({
     };
 
 void main() {
+  _guard9Tests();
   group('decoding a stored document', () {
     test('a well-formed document becomes an entry', () {
       final e = StoreSubscriptionService.decodeDocument(
@@ -722,6 +723,15 @@ class _ErroringFirestore implements FirebaseFirestore {
   /// Deliver a SERVER snapshot on a stream that does not fail.
   bool serverSnapshotOnSuccess = false;
 
+  /// Which stream delivers a DOCUMENT-BEARING snapshot on a delay, timed to
+  /// land while another batch is still cancelling inside `_cancelAll()`.
+  ///
+  /// This is the only window in which a snapshot can reach `_onSnapshot`
+  /// after a detach has begun, and therefore the only thing that exercises
+  /// the generation guard. Without it, removing that guard left every test
+  /// green — the same shape of hole round 5's B4 found for errors.
+  int docSnapshotDuringCancelIndex = -1;
+
   /// Emit a (cached, empty) SNAPSHOT before erroring — what real Firestore
   /// does with local persistence on a query whose documents it already holds,
   /// which is exactly the sign-out case. Round 6, B4: the fake emitted either
@@ -818,6 +828,10 @@ class _ErroringQuery implements Query<Map<String, dynamic>> {
           controller.add(_EmptySnapshot(fromCache: false));
         }
       });
+    } else if (db.docSnapshotDuringCancelIndex == index) {
+      Future<void>.delayed(db.errorDelay, () {
+        if (!controller.isClosed) controller.add(_DocSnapshot());
+      });
     } else if (db.errorDuringCancelIndex == index) {
       // Fires later, timed to land while the slow batch above is cancelling.
       Future<void>.delayed(db.errorDelay, () {
@@ -830,6 +844,44 @@ class _ErroringQuery implements Query<Map<String, dynamic>> {
     return controller.stream;
   }
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// A snapshot carrying one added document, so delivery actually reaches
+/// `_repository.ingest`. `_EmptySnapshot` cannot: its docChanges are empty, so
+/// it proves nothing about ingestion.
+// ignore: subtype_of_sealed_class
+class _DocSnapshot implements QuerySnapshot<Map<String, dynamic>> {
+  @override
+  List<DocumentChange<Map<String, dynamic>>> get docChanges =>
+      [_AddedChange()];
+  @override
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> get docs => const [];
+  @override
+  int get size => 1;
+  @override
+  SnapshotMetadata get metadata => _Meta(false);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _AddedChange implements DocumentChange<Map<String, dynamic>> {
+  @override
+  DocumentChangeType get type => DocumentChangeType.added;
+  @override
+  QueryDocumentSnapshot<Map<String, dynamic>> get doc => _QueryDoc();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ignore: subtype_of_sealed_class
+class _QueryDoc implements QueryDocumentSnapshot<Map<String, dynamic>> {
+  @override
+  String get id => 'nwm__123__shortRange';
+  @override
+  Map<String, dynamic> data() => _doc();
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
@@ -862,4 +914,140 @@ class _Meta implements SnapshotMetadata {
   bool get hasPendingWrites => false;
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5 guard 9, found on a device 2026-08-29 and not by any of eight review
+// rounds.
+//
+// The kill switch detaches listeners and then evicts every cached entry for a
+// favourite, so the live path takes over. But a snapshot already delivered
+// started a fire-and-forget ingest, and that write could land AFTER the
+// eviction — putting the store's value straight back on disk. The observed
+// consequence: with the switch off, a COLD START rendered store-shaped data
+// (18 short-range points, no analysis section, no ensembles) and made zero
+// upstream calls. The switch's own comment promises every open app returns to
+// the live path "within seconds"; it did not, for as long as the entry stayed
+// fresh — up to 30 days for river names and flood thresholds.
+//
+// Both halves are pinned here: nothing ingests after a detach, and detach does
+// not return while an ingest it started is still running.
+
+class _SlowRepo extends _CapturingRepo {
+  final Completer<void> gate = Completer<void>();
+  int started = 0;
+
+  @override
+  Future<void> ingest(RiverDataEntry entry) async {
+    started++;
+    await gate.future;
+    await super.ingest(entry);
+  }
+}
+
+void _guard9Tests() {
+  group('guard 9: nothing the store wrote survives the kill switch', () {
+    late FakeFirebaseFirestore db;
+    late _CapturingRepo repo;
+    late StoreSubscriptionService svc;
+
+    setUp(() {
+      db = FakeFirebaseFirestore();
+      repo = _CapturingRepo();
+      svc = StoreSubscriptionService(repository: repo, firestore: db);
+    });
+
+    test('a document written AFTER detach is not ingested', () async {
+      await svc.syncFavourites([_key('123')]);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      await svc.detach();
+
+      await db
+          .collection(kStoreCollection)
+          .doc('nwm__123__shortRange')
+          .set(_doc());
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(repo.ingested, isEmpty,
+          reason: 'a detached service must not write the store into the cache');
+    });
+
+    test('detach WAITS for an ingest it already started', () async {
+      final slow = _SlowRepo();
+      final s = StoreSubscriptionService(repository: slow, firestore: db);
+
+      await db
+          .collection(kStoreCollection)
+          .doc('nwm__123__shortRange')
+          .set(_doc());
+      await s.syncFavourites([_key('123')]);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(slow.started, 1, reason: 'the ingest must be in flight');
+
+      var detached = false;
+      final pending = s.detach().then((_) => detached = true);
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(detached, isFalse,
+          reason: 'detach returned while a store write was still running — '
+              'the coordinator would evict and this write would undo it');
+
+      slow.gate.complete();
+      await pending;
+      expect(detached, isTrue);
+      expect(slow.ingested, hasLength(1),
+          reason: 'the write still completes; it just cannot outlive detach');
+
+      await s.dispose();
+    });
+
+    test('a snapshot arriving DURING the cancel is not ingested', () async {
+      // The only window where a snapshot can reach the handler after a detach
+      // has begun: `_generation` is bumped first, then `_cancelAll()` cancels
+      // batches SEQUENTIALLY, so a slow-cancelling batch holds the detach open
+      // while another batch's stream is still live and delivering.
+      //
+      // Without this test the generation guard could be deleted with the suite
+      // still green — mutation-checked 2026-08-29, which is exactly how the
+      // bug it defends against reached a device in the first place.
+      final db = _ErroringFirestore(failFirstOnly: false);
+      db.failNext = false;
+      db.slowCancelIndex = 0; // holds _cancelAll open...
+      db.docSnapshotDuringCancelIndex = 1; // ...while batch 1 delivers a doc
+      db.errorDelay = const Duration(milliseconds: 80);
+      final repo = _CapturingRepo();
+      final svc = StoreSubscriptionService(repository: repo, firestore: db);
+
+      // 20 reaches x 6 products = 120 ids -> 4 batches of 30.
+      await svc.syncFavourites(List.generate(20, (i) => _key('r$i')));
+      expect(svc.isSubscribed, isTrue);
+
+      await svc.detach();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(repo.ingested, isEmpty,
+          reason: 'a snapshot delivered while the detach was cancelling was '
+              'ingested — the kill switch evicts, then this write puts the '
+              "store's value straight back, and the next cold start serves it");
+      await svc.dispose();
+    });
+
+    test('a detach during delivery leaves nothing in flight', () async {
+      for (final id in ['123', '456', '789']) {
+        await db
+            .collection(kStoreCollection)
+            .doc('nwm__${id}__shortRange')
+            .set(_doc(reachId: id));
+      }
+      await svc.syncFavourites(
+          [_key('123'), _key('456'), _key('789')]);
+      await svc.detach();
+
+      final settled = repo.ingested.length;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(repo.ingested, hasLength(settled),
+          reason: 'no ingest may complete after detach returned');
+    });
+  });
 }

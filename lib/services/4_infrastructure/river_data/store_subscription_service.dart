@@ -107,6 +107,13 @@ class StoreSubscriptionService {
   /// document read).
   Set<String> _watched = <String>{};
 
+  /// Ingests dispatched from a snapshot and not yet finished.
+  ///
+  /// Tracked so [detach] can drain them. See the note in [_onSnapshot]: an
+  /// ingest that outlives a detach re-writes exactly what the kill switch
+  /// evicted.
+  final Set<Future<void>> _inFlightIngests = <Future<void>>{};
+
   bool _disposed = false;
 
   /// Serialises [syncFavourites]. Round 1, B1: two calls entering across the
@@ -231,6 +238,9 @@ class StoreSubscriptionService {
     }
 
     final ids = wanted.toList();
+    // The generation these listeners belong to. A snapshot delivered after a
+    // detach carries a stale one and must not ingest — see [_onSnapshot].
+    final gen = _generation;
     for (var i = 0; i < ids.length; i += kWhereInBatchSize) {
       final batch = ids.sublist(
         i,
@@ -243,7 +253,7 @@ class StoreSubscriptionService {
           .where(FieldPath.documentId, whereIn: batch)
           .snapshots()
           .listen(
-            _onSnapshot,
+            (snap) => _onSnapshot(snap, gen),
             // A permission error or a missing index must degrade to the live
             // path, not surface to the user (guard 8). The repository still
             // fetches upstream on a cache miss.
@@ -325,7 +335,17 @@ class StoreSubscriptionService {
     });
   }
 
-  void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
+  void _onSnapshot(QuerySnapshot<Map<String, dynamic>> snap, int gen) {
+    // Refuse anything from a superseded subscription.
+    //
+    // Round 8 / Phase 5 guard 9, found on a device and not in review: the kill
+    // switch detaches and then evicts, but a snapshot already delivered starts
+    // a FIRE-AND-FORGET ingest that could complete AFTER the eviction and
+    // write the store's value straight back to disk. The next cold start then
+    // served store data with the switch off, made zero upstream calls, and the
+    // switch's promise that "every open app returns to the live path within
+    // seconds" was false — for as long as the entry stayed fresh.
+    if (gen != _generation) return;
     // Success is a snapshot FROM THE SERVER — not a subscribe call returning,
     // and not a snapshot from the local cache.
     //
@@ -356,11 +376,16 @@ class StoreSubscriptionService {
       ingested++;
       // Fire and forget: ingest only writes the shared cache, and awaiting it
       // inside a snapshot callback would serialise delivery behind disk I/O.
-      unawaited(
-        _repository.ingest(entry).catchError(
-          (Object e) => AppLogger.error(_tag, 'ingest failed for ${change.doc.id}', e),
-        ),
-      );
+      // Still fire-and-forget for delivery — awaiting inside a snapshot
+      // callback would serialise delivery behind disk I/O — but TRACKED, so
+      // detach can wait for it. Untracked, the write outlives the eviction
+      // meant to undo it.
+      late final Future<void> ingest;
+      ingest = _repository.ingest(entry).catchError(
+        (Object e) => AppLogger.error(_tag, 'ingest failed for ${change.doc.id}', e),
+      ).whenComplete(() => _inFlightIngests.remove(ingest));
+      _inFlightIngests.add(ingest);
+      unawaited(ingest);
     }
   }
 
@@ -425,6 +450,16 @@ class StoreSubscriptionService {
   /// ON. Using the terminal [dispose] for that made the switch one-way: once
   /// off, the store never came back without an app restart, which is not a
   /// switch. Idempotent.
+  /// Wait for every dispatched ingest to finish.
+  ///
+  /// Bounded: each ingest is one cache write. Failures are already swallowed
+  /// by the catchError attached at dispatch, so this cannot throw.
+  Future<void> _drainIngests() async {
+    while (_inFlightIngests.isNotEmpty) {
+      await Future.wait(_inFlightIngests.toList());
+    }
+  }
+
   Future<void> detach() {
     // Through the SAME lock as syncFavourites. Round 3, B3: detach ran outside
     // it, and `_syncLocked` awaits `_cancelAll()` before installing the new
@@ -447,6 +482,10 @@ class StoreSubscriptionService {
     _lastRequested = const [];
     await _cancelAll();
     _watched = <String>{};
+    // Drain before returning. The coordinator evicts as soon as this
+    // completes, so an ingest still running here would land after the
+    // eviction and undo it.
+    await _drainIngests();
     // Cancelled AFTER the await, not before: an error arriving mid-cancel used
     // to arm a timer that the earlier cancel had already passed.
     _healTimer?.cancel();
