@@ -82,16 +82,32 @@ enum SyncWarning {
 /// The freshness indicator. Renders nothing at all when the app can vouch for
 /// its data — which is almost always, and is the point.
 ///
-/// **Mounted on the favourites page only** (`favorites_page.dart`), which is
-/// where the widget it replaced was mounted. It is NOT app-wide, and the
-/// header above used to say it was. The forecast page, the map's reach detail
-/// sheet and the weekly outlook all render flow values through the same
-/// repository and show no indicator, so a user arriving from a notification
-/// deep link can read an unconfirmed number with nothing to say so. Phase 7's
-/// promise is app-wide; its coverage is not, and that gap is recorded rather
-/// than papered over.
+/// **Where it is mounted, and why not everywhere.** Full form on the
+/// favourites page; [SyncStatusBanner.offlineOnly] on the reach forecast page.
+/// The map has its own `MapOfflineNotice`. The weekly outlook page has
+/// nothing.
+///
+/// That is a decision, not an oversight. The store exists so that a device
+/// with internet shows the newest value that exists anywhere, so in practice
+/// the reason a user sees an old number is that they are offline — and the
+/// offline half is the half worth repeating. The forecast page got it because
+/// that is where a flood notification lands: tapping an alert with no signal
+/// used to show numbers with nothing anywhere saying the phone was offline.
+///
+/// The STALE half is deliberately NOT repeated there. `outOfSync` is a
+/// property of the whole repository, not of the river on screen, so on a
+/// single-river page it could warn about a different river entirely. It stays
+/// on the favourites page, where every affected river is visible at once.
 class SyncStatusBanner extends StatelessWidget {
-  const SyncStatusBanner({super.key, this.repository});
+  const SyncStatusBanner({super.key, this.repository}) : _offlineOnly = false;
+
+  /// Reports only the offline case. See the class doc for why a single-river
+  /// page must not carry a repository-wide staleness claim.
+  const SyncStatusBanner.offlineOnly({super.key})
+    : repository = null,
+      _offlineOnly = true;
+
+  final bool _offlineOnly;
 
   /// Injectable so a widget test can drive the state directly. Falls back to
   /// the DI container, which is where every other consumer of the repository
@@ -100,6 +116,19 @@ class SyncStatusBanner extends StatelessWidget {
   /// than to a warning, because "we do not know" must never render as "we know
   /// it is stale".
   final IRiverDataRepository? repository;
+
+  /// Whether a [ConnectivityProvider] is reachable from [context].
+  ///
+  /// `listen: false` deliberately — this is only a presence check; the
+  /// [Consumer] below does the subscribing.
+  static bool _hasConnectivity(BuildContext context) {
+    try {
+      Provider.of<ConnectivityProvider>(context, listen: false);
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
 
   static IRiverDataRepository? _fromDi() =>
       GetIt.I.isRegistered<IRiverDataRepository>()
@@ -111,7 +140,18 @@ class SyncStatusBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final repo = repository ?? _fromDi();
+    final repo = _offlineOnly ? null : (repository ?? _fromDi());
+
+    // Degrade to silence when connectivity is not in the tree at all.
+    //
+    // `main.dart` provides it above `CupertinoApp`, so in production it is
+    // always there. But a bare `Consumer` THROWS when it is not, and mounting
+    // this on the reach forecast page turned that into 35 red tests at once —
+    // a whole page taken down by the one widget on it whose entire job is to
+    // be unobtrusive. A freshness indicator must never be the reason a value
+    // screen fails to render, and silence is the honest reading anyway: not
+    // knowing whether we are offline is not the same as knowing we are.
+    if (!_hasConnectivity(context)) return const SizedBox.shrink();
 
     return Consumer<ConnectivityProvider>(
       builder: (context, conn, _) {

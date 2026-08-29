@@ -10,6 +10,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
@@ -217,6 +218,70 @@ void main() {
         reason: 'the stale case is silent to VoiceOver without its own label',
       );
       handle.dispose();
+    });
+  });
+
+  // ── The offline-only form, used on the reach forecast page ────────────────
+  //
+  // The forecast page is where a flood notification lands, and before this it
+  // had no connectivity indicator of any kind — so tapping an alert with no
+  // signal showed flow numbers with nothing anywhere saying so, and Phase 7
+  // had just removed the "3h ago" label that was the last hint.
+  //
+  // It reports OFFLINE ONLY on purpose. `outOfSync` is a property of the whole
+  // repository, not of the river on screen, so on a single-river page it could
+  // warn about a completely different river.
+  group('offlineOnly', () {
+    Future<void> pumpOfflineOnly(
+      WidgetTester tester, {
+      required bool offline,
+      required bool stale,
+    }) {
+      return tester.pumpWidget(
+        ChangeNotifierProvider<ConnectivityProvider>.value(
+          value: FakeConnectivity(offline),
+          child: const CupertinoApp(
+            home: CupertinoPageScaffold(
+              child: Column(
+                children: [
+                  SyncStatusBanner.offlineOnly(),
+                  Expanded(child: SizedBox()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('reports offline', (tester) async {
+      await pumpOfflineOnly(tester, offline: true, stale: false);
+      await tester.pumpAndSettle();
+      expect(find.text(_offlineText), findsOneWidget);
+    });
+
+    testWidgets('stays silent when online', (tester) async {
+      await pumpOfflineOnly(tester, offline: false, stale: false);
+      await tester.pumpAndSettle();
+      expect(find.text(_offlineText), findsNothing);
+      expect(tester.getSize(find.byType(SyncStatusBanner)).height, 0);
+    });
+
+    // The distinguishing behaviour. A repository-wide staleness flag must not
+    // become a claim about the one river this page is showing.
+    testWidgets('never reports staleness, even with the flag raised',
+        (tester) async {
+      GetIt.instance.registerSingleton<IRiverDataRepository>(
+        FakeRepo()..stale = true,
+      );
+      addTearDown(GetIt.instance.reset);
+
+      await pumpOfflineOnly(tester, offline: false, stale: true);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining(_stalePrefix), findsNothing,
+          reason: 'outOfSync belongs to the repository, not to this river');
+      expect(tester.getSize(find.byType(SyncStatusBanner)).height, 0);
     });
   });
 

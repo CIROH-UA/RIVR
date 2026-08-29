@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/sync_status_banner.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/widgets/reach_alert_frequency_row.dart';
 import 'package:rivr/ui/2_presentation/features/forecast/load_view_state.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
@@ -609,6 +610,14 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // This is where a flood notification lands. Tapping an alert
+              // with no signal used to show flow numbers with nothing
+              // anywhere saying the phone was offline — and since Phase 7
+              // took the "3h ago" labels off the values, nothing else can.
+              // Offline only: see SyncStatusBanner's class doc for why a
+              // single-river page must not carry a repository-wide staleness
+              // claim.
+              const SyncStatusBanner.offlineOnly(),
               _Header(
                 river: _river,
                 location: _location,

@@ -1195,15 +1195,30 @@ favourited reaches.
 With the timestamps gone, silence is a claim. The app makes one statement about
 freshness, and only when it cannot vouch for what is on screen.
 
-**Coverage is one page, not the app, and the first version of this decision
-implied otherwise.** `SyncStatusBanner` is mounted on the favourites page —
-the single place the widget it replaced was mounted. The reach forecast page,
-the map's reach detail sheet and the weekly outlook page all render flow values
-through the same repository and show no indicator at all. A user who opens a
-river from a push notification and never visits favourites can read an
-unconfirmed number with nothing anywhere to say so. This is not a regression —
-the old offline banner had the same single mount point — but Phase 7's promise
-is app-wide and its coverage is not.
+**Coverage is deliberate, and narrower than the first version of this decision
+implied.** Full banner on the favourites page; **offline only** on the reach
+forecast page; the map has its own `MapOfflineNotice`; the weekly outlook page
+has nothing.
+
+The reasoning, which is Jerson's: the store exists so that a device with
+internet shows the newest value that exists anywhere, so in practice the reason
+a user sees an old number is that they are offline — and the offline half is
+the half worth repeating. The forecast page earned it because that is where a
+flood notification lands, and it previously had **no connectivity indicator of
+any kind**: tapping an alert with no signal showed flow numbers with nothing
+anywhere saying the phone was offline, and Phase 7 had just removed the "3h
+ago" label that was the last hint.
+
+The STALE half is deliberately not repeated there. `outOfSync` is a property of
+the whole repository, not of the river on screen, so on a single-river page it
+could warn about a different river entirely. It stays on the favourites page,
+where every affected river is visible at once.
+
+The premise has one known exception, and it is the one that actually happened:
+during the GEOGLOWS incident devices were online and still showed yesterday's
+water. Neither the banner nor `outOfSync` would have caught it — the app
+considered that data in-window. That case is answered by run currency
+(decision 21) and by marking held documents as held, not by more banners.
 
 `SyncStatusBanner` **subsumes `OfflineBanner`** rather than sitting above it.
 Offline is one of the two reasons the app cannot vouch for a number, not a
@@ -1261,7 +1276,7 @@ overclaims are corrected in decisions 21 and 22 above rather than deleted.
 | Guard | Status |
 |---|---|
 | 1 — no value view renders a timestamp | **met**, tested and mutation-checked |
-| 2 — offline shows the indicator, healthy shows nothing | **partly met** — the logic is right and tested; it is mounted on the favourites page only |
+| 2 — offline shows the indicator, healthy shows nothing | **met for the offline half** — favourites (full), reach forecast (offline only), map (its own notice); weekly outlook has none. The staleness half stays on favourites by decision, not omission |
 | 3 — a frozen store raises the indicator | **not met** — a held document is served as in-window for up to its hold cap (48 h for GEOGLOWS) with no indicator and no live-path fallback |
 | 4 — the indicator is driven by the same signal that alarms operationally | **not met** — the client decides from `validUntil`, the server from `fetchedAt` vs `MAX_HOLD_MS`; no shared constant |
 | 5 — independent agent review passes | **run 2026-08-29**; it did not pass, and this section is its result |
@@ -1276,8 +1291,7 @@ another's failure).
 
 What remains before this phase can be called done: run-currency monitoring
 (decision 21), marking held documents as held so guard 3 can be closed
-(decision 22), mounting the indicator on the remaining value surfaces, and a
-re-review.
+(decision 22), and a re-review.
 
 ### How alerting actually works, end to end
 

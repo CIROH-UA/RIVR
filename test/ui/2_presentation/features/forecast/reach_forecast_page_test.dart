@@ -10,6 +10,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/ui/1_state/shared/connectivity_provider.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/sync_status_banner.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:rivr/models/1_domain/features/forecast/geoglows_forecast.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
@@ -243,11 +245,29 @@ _FakeRepo _registerRepo(
 }
 
 Widget _wrap(Widget page, {ReachDataProvider? provider}) => CupertinoApp(
-      home: ChangeNotifierProvider<ReachDataProvider>.value(
-        value: provider ?? _FakeReachDataProvider(),
+      home: MultiProvider(
+        providers: [
+          ChangeNotifierProvider<ReachDataProvider>.value(
+            value: provider ?? _FakeReachDataProvider(),
+          ),
+          // Mirrors main.dart, which provides this above CupertinoApp so every
+          // route has it. The page carries SyncStatusBanner.offlineOnly()
+          // because this is where a flood notification lands.
+          ChangeNotifierProvider<ConnectivityProvider>.value(
+            value: _FakeConnectivity(),
+          ),
+        ],
         child: page,
       ),
     );
+
+class _FakeConnectivity extends ChangeNotifier implements ConnectivityProvider {
+  @override
+  bool get isOffline => false;
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 /// Pump past the async repository read without waiting on the looping shimmer.
 Future<void> _pumpLoaded(WidgetTester tester) async {
@@ -1663,4 +1683,56 @@ void _r2_7Tests() {
           reason: 'error is done; the widget mounts and reports for itself');
     });
   });
+  // ── ADR 0011 Phase 7: the offline strip is MOUNTED here ──────────────────
+  //
+  // Mutation-checked and it mattered: deleting the widget from the page passed
+  // every other test in this file. The banner's own tests prove the widget
+  // behaves; only this proves the page actually carries it.
+  //
+  // This is where a flood notification lands. Before Phase 7 the favourites
+  // card at least said "3h ago"; now nothing on this path tells a user their
+  // phone is offline unless this widget is here.
+  RiverDataEntry nwmEntry() => RiverDataEntry(
+        key: const RiverDataKey(
+          source: ForecastSource.nwm,
+          reachId: '23021904',
+          product: ForecastProduct.shortRange,
+        ),
+        window: FreshnessWindow(
+          fetchedAt: DateTime.utc(2026, 7, 12, 12),
+          validUntil: DateTime.utc(2026, 7, 12, 13),
+        ),
+        unit: 'CFS',
+        payload: const {},
+      );
+
+  group('Phase 7 — the forecast page carries the offline indicator', () {
+    testWidgets('SyncStatusBanner is mounted on the page', (tester) async {
+      _registerRepo(nwmEntry(), byProduct: _narrowPayloads());
+      await tester.pumpWidget(_wrap(const ReachForecastPage(
+        reachId: '23021904',
+        source: ForecastSource.nwm,
+      )));
+      await _pumpLoaded(tester);
+
+      expect(find.byType(SyncStatusBanner), findsOneWidget,
+          reason: 'a flood alert opens this page; with no connectivity '
+              'indicator here an offline user reads numbers with nothing '
+              'anywhere saying so');
+    });
+
+    // Silence is the whole promise. Online, it must claim no height at all.
+    testWidgets('it renders nothing while online', (tester) async {
+      _registerRepo(nwmEntry(), byProduct: _narrowPayloads());
+      await tester.pumpWidget(_wrap(const ReachForecastPage(
+        reachId: '23021904',
+        source: ForecastSource.nwm,
+      )));
+      await _pumpLoaded(tester);
+
+      expect(tester.getSize(find.byType(SyncStatusBanner)).height, 0);
+      expect(find.text('No internet connection'), findsNothing);
+    });
+  });
+
 }
