@@ -160,7 +160,33 @@ the sweep; changing the behaviour would regress freshness.
    per-reach failure then costs a retry, not stale data under a fresh label.
 7. **The work list is derived** from the union of all favourites each run.
    Nothing is reference-counted; orphans are garbage-collected.
-8. **GEOGLOWS syncs once daily**, keyed on `forecast_date`.
+8. **GEOGLOWS syncs once daily at 11:30 UTC**, keyed on `forecast_date`, and
+    **gated on the date rather than trusted to the hour**.
+
+    The hour is not a guess and must not be re-guessed: `functions_geoglows/
+    main.py` records the daily run publishing at **10:15-10:30 UTC**, measured
+    from S3 Last-Modified on two consecutive days, which is also why the flood
+    builder runs at 11:00.
+
+    It ran at 01:30 until 2026-08-29 on the assumption the 00Z run was out by
+    then. It never was — 01:30 on the 28th returned the 27th's run, 01:30 on the
+    29th returned the 28th's, and a direct query at 03:07 on the 29th still
+    returned the 28th's. So the store **never once held the current day's run**:
+    it took yesterday's and held it 24 hours while any device on the live path
+    picked up the new one as soon as it appeared. That is Phase 5 guard 2 —
+    two devices, one river, identical values — failing by construction, every
+    day, found from a device log rather than review.
+
+    The gate is what makes the hour safe rather than lucky: the run probes ONE
+    reach for its `forecast_date` and fans out only when that date advances, so
+    a late publication is a cheap no-op that retries instead of another silent
+    day of yesterday's water.
+
+    **An hourly version was written and reverted the same night.** It turned 4
+    fetches a day into 24 to rediscover a number already on disk, and a cold
+    proxy call costs 10-14s against a zarr on S3 (2.5s only when an instance
+    still has that river cached) — the exact waste the store exists to
+    remove.
 
 ### On the device
 
@@ -195,12 +221,32 @@ the sweep; changing the behaviour would regress freshness.
     produced no alert at all. Phase 6 guard 3 is where these collapse into one.
 14. **Cached payloads carry a schema version.** Entries without a recognised
     version are discarded, not parsed.
-15. **Alerts read from the store and evaluate when a new run lands.** The
-    existing 6-hour cooldown remains the notification governor.
+15. **Alerts read from the store and evaluate when a new run lands.**
+    ~~The existing 6-hour cooldown remains the notification governor.~~
+    **Corrected 2026-08-29: there is no cooldown.** `checkRecentAlert` runs and
+    its answer only changes the wording to "still"; nothing skips a send. The
+    governor is decision 19's trigger model — entry, escalation, a per-stream
+    persistence interval, and an all-clear.
 16. **No timestamps beside values.** Users should trust that what they see is the
     latest available; making that true is our job. A signal appears only when we
     *know* we are out of sync.
 17. **The map's coloured streams and legend are finished and out of scope.**
+18. **The alert floor is Action** — the lowest flood category, crossing the
+    2-year return period. Confirmed by Jerson 2026-08-29 when the alternative
+    (starting at Moderate) was put to him.
+
+    This NAMES existing behaviour rather than changing it: `evaluateAlert`
+    already fired on any exceeded threshold, and the lowest threshold is the
+    2-year one. It was undocumented and implicit in a loop, so raising or
+    lowering it would have been a one-character change nobody would have
+    recognised as a policy change. It now lives in `warrantsAlert`
+    (`flow-classification.ts`) with a test, so moving it has to be deliberate.
+
+    The reasoning for keeping it low: a river reaching Action is rare, and this
+    app exists to say so. The noise problem a low floor creates is not solved by
+    raising the floor — it is solved by decision 19's per-stream frequency,
+    which quietens a river that misbehaves without quietening the ones that
+    matter.
 
 ---
 
@@ -978,7 +1024,7 @@ raising check frequency "cannot spam" is backwards — moving evaluation to
 hourly, as this phase does, would have taken four notifications a day to
 twenty-four, for a river whose category had not changed once.
 
-### Decision 14 — what deserves a notification (2026-08-29)
+### Decision 19 — what deserves a notification (2026-08-29)
 
 The question Jerson put: *"we built an app to notify users of high events and
 now that we have it, will we just notify them once? A stream does not flood
@@ -1012,7 +1058,7 @@ to ignore it — and the Peru reach above is that mechanism already running.
 Per-stream control exists so a river that misbehaves can be quietened without
 quietening the ones that matter.
 
-### Decision 15 — what an alert says (2026-08-29)
+### Decision 20 — what an alert says (2026-08-29)
 
 Alerts carried a raw recurrence interval and a raw streamflow number:
 `Forecast: 147362 CFS (Exceeds 25-year flood threshold)`. Neither appears
@@ -1047,7 +1093,7 @@ names synced so alerts can use them; scheduled AFTER this phase.
 **Build.** `checkRiverAlerts` reads from the store rather than fetching, and
 evaluates when a new run lands rather than on a fixed clock. The four fixed
 Mountain-Time slots (6am / noon / 6pm / midnight) and the global
-`notificationFrequency` are replaced by run-driven evaluation plus decision 14's
+`notificationFrequency` are replaced by run-driven evaluation plus decision 19's
 per-stream triggers.
 
 **Guards.**
