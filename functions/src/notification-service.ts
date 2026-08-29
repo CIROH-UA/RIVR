@@ -27,6 +27,7 @@ interface UserSettings {
 }
 
 import {FloodCategory, categoryFor} from "./flow-classification.js";
+import {readAlertDataFromStore} from "./store-alert-source.js";
 
 export type ReachSource = "nwm" | "geoglows";
 
@@ -158,8 +159,20 @@ export async function checkAlertsForTimeSlot(
       `across ${users.length} users`
     );
 
-    // Step 3: Batch-fetch data for all unique reaches (branches NWM/GEOGLOWS)
-    const reachDataMap = await batchFetchReachData(
+    // Step 3: read every reach from the STORE. ADR 0011 Phase 6 guard 1 —
+    // "alerts issue zero upstream fetches".
+    //
+    // This used to be batchFetchReachData, which called NOAA and GEOGLOWS once
+    // per reach per slot, four times a day, for data the store already holds
+    // for the app. Reading the same documents the app renders is also what
+    // makes an alert and the screen agree by construction rather than by
+    // coincidence.
+    //
+    // No live fallback: a missing document means the store has a hole for a
+    // reach someone is following, and falling back would hide the failure the
+    // store exists to remove. readAlertDataFromStore logs it at ERROR and the
+    // reach is skipped.
+    const reachDataMap = await readAlertDataFromStore(
       Array.from(uniqueReaches.values())
     );
 
