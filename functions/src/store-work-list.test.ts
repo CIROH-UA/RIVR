@@ -17,6 +17,7 @@ import {test, describe} from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  liveDocumentIdsFor,
   FavouritingUser,
   WorkList,
   WorkListAssertionError,
@@ -231,5 +232,36 @@ describe("production shape", () => {
       .reduce((n, e) => n + e.followerCount, 0);
     assert.equal(totalFollows, 36);
     assert.equal(totalFollows - list.entries.length, 7);
+  });
+});
+
+describe("document IDs a refresh run could actually update", () => {
+  const list = deriveWorkList([
+    {userId: "u1", favoriteReachIds: ["100", "900"],
+      favoriteSources: {"900": "geoglows"}},
+  ]);
+
+  test("one document ID per reach per product it can serve", () => {
+    const ids = liveDocumentIdsFor(list, ["shortRange", "geoglowsForecast"]);
+    assert.ok(ids.has("nwm__100__shortRange"));
+    assert.ok(ids.has("geoglows__900__geoglowsForecast"));
+  });
+
+  test("a product a source cannot serve produces no ID", () => {
+    // GEOGLOWS has no shortRange, NWM has no geoglowsForecast. Minting IDs for
+    // them would put documents in the live set that can never exist, and an
+    // absent document must not read as an orphan.
+    const ids = liveDocumentIdsFor(list, ["shortRange", "geoglowsForecast"]);
+    assert.ok(!ids.has("geoglows__900__shortRange"));
+    assert.ok(!ids.has("nwm__100__geoglowsForecast"));
+  });
+
+  test("an unfavourited reach is absent, which is the whole point", () => {
+    const ids = liveDocumentIdsFor(list, ["shortRange"]);
+    assert.ok(!ids.has("nwm__9962444__shortRange"));
+  });
+
+  test("an empty work list covers nothing", () => {
+    assert.equal(liveDocumentIdsFor(deriveWorkList([]), ["shortRange"]).size, 0);
   });
 });

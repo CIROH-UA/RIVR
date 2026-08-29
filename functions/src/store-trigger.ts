@@ -63,6 +63,48 @@ export interface TriggerDecision {
   reasons: Record<string, string>;
 }
 
+/** One document's run identity, as sampled for the trigger decision. */
+export interface RunSample {
+  documentId: string;
+  runId: string | null;
+}
+
+/**
+ * The oldest run among documents a refresh run could actually update.
+ *
+ * Ascending — the OLDEST live run wins — for the reason the original sample
+ * did: one reach writing the current run must not make the next hour report
+ * "unchanged" while another followed reach is still behind.
+ *
+ * The restriction to live documents is the 2026-08-29 fix. Orphaned documents
+ * from unfavourited reaches sit in the collection for the GC's seven-day grace
+ * and are never rewritten, so their run identity is frozen. Including them
+ * pinned the sample in the past and made every product read as "upstream
+ * advanced" every single hour.
+ *
+ * @param {readonly RunSample[]} samples - Every document of one product.
+ * @param {ReadonlySet<string>} liveDocumentIds - IDs the work list covers.
+ * @return {string | null} The oldest live run, or null when the store holds
+ *   nothing live for this product.
+ */
+export function oldestLiveRun(
+  samples: readonly RunSample[],
+  liveDocumentIds: ReadonlySet<string>
+): string | null {
+  let oldest: string | null = null;
+  let sawLive = false;
+  for (const s of samples) {
+    if (!liveDocumentIds.has(s.documentId)) continue;
+    sawLive = true;
+    // A live document with no run identity cannot be ordered. It is not a
+    // candidate for "oldest", but it must not read as "nothing stored"
+    // either — that would trigger a full fan-out.
+    if (s.runId === null) continue;
+    if (oldest === null || isRunNewer(oldest, s.runId)) oldest = s.runId;
+  }
+  return sawLive ? oldest : null;
+}
+
 /**
  * Products whose upstream run has moved past what the store holds.
  *

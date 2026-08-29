@@ -13,6 +13,8 @@ import {test, describe} from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  oldestLiveRun,
+  RunSample,
   FREE_TIER_WRITES_PER_DAY,
   HEARTBEAT_STALE_MS,
   PROBE_STALE_MS,
@@ -214,5 +216,84 @@ describe("the probe key is not always the product name", () => {
       assert.equal(probeRunFor(probe({[p]: "2026-08-24T12:00:00Z"}), p),
         "2026-08-24T12:00:00Z");
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orphaned documents. Found in production 2026-08-29, not in review: four
+// documents belonging to reach 9962444 — unfavourited, still inside the GC's
+// seven-day grace — held runs from 2026-08-24. Because the sample took the
+// oldest run across EVERY document of a product, every product read as
+// "upstream advanced" every hour. One run planned 116 fetches and wrote 0.
+// That is Phase 4 guard 1 ("no new run means zero fetches") failing silently,
+// for however long it had been since that reach was unfavourited.
+
+describe("the oldest stored run ignores documents no run can update", () => {
+  const live = new Set([
+    "nwm__100__shortRange",
+    "nwm__200__shortRange",
+  ]);
+
+  function s(documentId: string, runId: string | null): RunSample {
+    return {documentId, runId};
+  }
+
+  test("a followed reach that is behind still holds the sample back", () => {
+    // The reason the sample is ascending in the first place. Must survive.
+    assert.equal(
+      oldestLiveRun([
+        s("nwm__100__shortRange", "2026-08-29T02:00:00Z"),
+        s("nwm__200__shortRange", "2026-08-29T00:00:00Z"),
+      ], live),
+      "2026-08-29T00:00:00Z");
+  });
+
+  test("an orphan's frozen run does not hold the sample back", () => {
+    assert.equal(
+      oldestLiveRun([
+        s("nwm__100__shortRange", "2026-08-29T02:00:00Z"),
+        s("nwm__200__shortRange", "2026-08-29T02:00:00Z"),
+        // The 9962444 case: old, and not in the work list.
+        s("nwm__9962444__shortRange", "2026-08-24T23:00:00Z"),
+      ], live),
+      "2026-08-29T02:00:00Z");
+  });
+
+  test("the orphan case would have triggered before, and does not now", () => {
+    const samples = [
+      s("nwm__100__shortRange", "2026-08-29T02:00:00Z"),
+      s("nwm__9962444__shortRange", "2026-08-24T23:00:00Z"),
+    ];
+    const upstream = "2026-08-29T02:00:00Z";
+    const held = oldestLiveRun(samples, live);
+    const decision = decideTriggers(
+      {referenceTimes: {shortRange: upstream}, sampledAt: new Date()},
+      {shortRange: held},
+      ["shortRange"]);
+    assert.deepEqual(decision.triggered, []);
+    assert.match(decision.reasons.shortRange!, /unchanged/);
+  });
+
+  test("no live documents at all still reads as an empty store", () => {
+    // Must trigger: this is a genuinely uncovered product, not an orphan.
+    assert.equal(
+      oldestLiveRun([s("nwm__9962444__shortRange", "2026-08-24T23:00:00Z")],
+        live),
+      null);
+  });
+
+  test("live documents without a run do not read as an empty store", () => {
+    // Null would trigger a full fan-out. They are simply not orderable.
+    assert.equal(oldestLiveRun([s("nwm__100__shortRange", null)], live), null);
+    assert.equal(
+      oldestLiveRun([
+        s("nwm__100__shortRange", null),
+        s("nwm__200__shortRange", "2026-08-29T02:00:00Z"),
+      ], live),
+      "2026-08-29T02:00:00Z");
+  });
+
+  test("an empty collection reads as an empty store", () => {
+    assert.equal(oldestLiveRun([], live), null);
   });
 });

@@ -25,7 +25,9 @@
 // upstream with no error anywhere.
 
 import {sourceOfFavourite} from "./notification-service.js";
-import {ForecastSourceId} from "./store-keys.js";
+import {ForecastProductId, ForecastSourceId, storageKey}
+  from "./store-keys.js";
+import {canFetch} from "./store-upstream.js";
 
 /**
  * The fields of a user document this derivation reads. Deliberately narrow:
@@ -214,4 +216,29 @@ export function assertWorkListConsistent(
       "empty — refusing to treat this as 'nothing to do'"
     );
   }
+}
+
+/**
+ * Document IDs the work list covers, for the products under consideration.
+ *
+ * Anything in the collection outside this set is an orphan: a reach nobody
+ * favourites any more, still inside the GC's grace, which no run will rewrite.
+ *
+ * @param {WorkList} workList - Reaches the store keeps fresh.
+ * @param {readonly ForecastProductId[]} products - Products under refresh.
+ * @return {Set<string>} Document IDs a run could actually update.
+ */
+export function liveDocumentIdsFor(
+  workList: WorkList,
+  products: readonly ForecastProductId[]
+): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of workList.entries) {
+    for (const product of products) {
+      // A product this source cannot serve has no document to sample.
+      if (!canFetch(entry.source, product)) continue;
+      ids.add(storageKey(entry.source, entry.reachId, product));
+    }
+  }
+  return ids;
 }

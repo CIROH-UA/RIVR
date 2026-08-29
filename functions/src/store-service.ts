@@ -36,7 +36,7 @@ import {
   newUsage,
   readAllUsers,
   readLatestProbe,
-  sampleStoredRun,
+  sampleLiveStoredRuns,
   sampleStoredWindows,
   applyWindowExtensions,
 } from "./store-firestore.js";
@@ -53,6 +53,7 @@ import {
   WorkList,
   assertWorkListConsistent,
   deriveWorkList,
+  liveDocumentIdsFor,
 } from "./store-work-list.js";
 
 /** Products the store keeps fresh on the hourly cycle. */
@@ -168,6 +169,7 @@ async function buildWorkList(usage: FirestoreUsage): Promise<WorkList> {
  * @param {ForecastProductId[]} candidates - Products to consider.
  * @return {Promise<RefreshOutcome>} What happened.
  */
+
 /**
  * Re-stamp any stored window that would end before the refresher's next turn.
  *
@@ -245,8 +247,16 @@ export async function runStoreRefresh(
     };
   }
 
-  const stored: Partial<Record<ForecastProductId, string | null>> = {};
-  for (const p of candidates) stored[p] = await sampleStoredRun(p, usage);
+  // The work list is built BEFORE the trigger decision, not after, because the
+  // decision is only meaningful about documents this run could update. See
+  // sampleLiveStoredRuns: orphaned documents from unfavourited reaches froze
+  // the oldest sampled run in the past and made every hour look like a new
+  // publication.
+  const workList = await buildWorkList(usage);
+  const liveDocumentIds = liveDocumentIdsFor(workList, candidates);
+
+  const stored = await sampleLiveStoredRuns(
+    candidates, liveDocumentIds, usage);
 
   const decision = decideTriggers(probe, stored, candidates);
   logger.info("🧭 store refresh: trigger decision", {
@@ -266,7 +276,6 @@ export async function runStoreRefresh(
     };
   }
 
-  const workList = await buildWorkList(usage);
   // The probe's runs go in so guard 3 can tell a lagging reach from a settled
   // one — see lagsProbe.
   // Remapped, for the same reason decideTriggers remaps: handing the raw

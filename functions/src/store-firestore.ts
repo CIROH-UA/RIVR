@@ -22,7 +22,7 @@ import {ForecastProductId, ForecastSourceId, STORE_COLLECTION}
   from "./store-keys.js";
 import {FavouritingUser} from "./store-work-list.js";
 import {assertPayloadFits, trimPayload} from "./store-payload.js";
-import {ProbeRuns} from "./store-trigger.js";
+import {ProbeRuns, oldestLiveRun} from "./store-trigger.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -89,34 +89,59 @@ export async function readLatestProbe(
   };
 }
 
+
 /**
- * The run currently stored for a product, sampled from ONE document.
+ * The oldest stored run for a product, counting ONLY documents this run could
+ * actually update.
  *
- * Reaches can legitimately sit on different runs (guard 3), so there is no
- * single "the store's run". This samples the first document found for the
- * product and is used only to decide whether upstream has moved — a reach
- * still behind is caught per-reach by the supersession check.
+ * The obvious implementation takes the oldest run across EVERY document of a
+ * product,
+ * which is right for a lagging favourite and wrong for an orphan. A reach that
+ * nobody favourites any more leaves its documents behind for the GC's seven-day
+ * grace; they are not in the work list, so no run will ever rewrite them, and
+ * their run identity is frozen. Sampling them means the oldest stored run is
+ * permanently in the past, every product reads as "upstream advanced" every
+ * hour, and the store performs a full fan-out that writes nothing.
  *
- * @param {ForecastProductId} product - Product to sample.
+ * Measured 2026-08-29: four documents from reach 9962444, last written
+ * 2026-08-24, made every hourly run plan 116 fetches and write 0 — the exact
+ * behaviour Phase 4 guard 1 ("no new run means zero fetches") exists to
+ * prevent, running unnoticed since whenever that reach was unfavourited.
+ *
+ * Restricting to the work list keeps the ascending sample doing its real job:
+ * a followed reach that is behind still holds the sample back and is
+ * revisited. Costs one read per document rather than one per product, which is
+ * the price of the decision being about documents that can actually move.
+ *
+ * @param {readonly ForecastProductId[]} products - Products to sample.
+ * @param {ReadonlySet<string>} liveDocumentIds - Document IDs the work list
+ *   covers; anything else is an orphan awaiting GC.
  * @param {FirestoreUsage} usage - Counters to increment.
- * @return {Promise<string | null>} A stored run, or null.
+ * @return {Promise<object>} Oldest live run per product, or null.
  */
-export async function sampleStoredRun(
-  product: ForecastProductId,
+export async function sampleLiveStoredRuns(
+  products: readonly ForecastProductId[],
+  liveDocumentIds: ReadonlySet<string>,
   usage: FirestoreUsage
-): Promise<string | null> {
-  // ASCENDING: the OLDEST run wins. Sampling the newest meant one reach
-  // writing the current run made the next hour report "unchanged", so a reach
-  // still behind was never revisited — for medium/long range, up to six hours
-  // stale with no failure and no log. Round 2, F1 follow-on.
-  const snap = await db.collection(STORE_COLLECTION)
-    .where("product", "==", product)
-    .orderBy("runId", "asc")
-    .limit(1)
-    .get();
-  usage.reads += snap.size;
-  if (snap.empty) return null;
-  return (snap.docs[0].data().runId as string | undefined) ?? null;
+): Promise<Partial<Record<ForecastProductId, string | null>>> {
+  const out: Partial<Record<ForecastProductId, string | null>> = {};
+  for (const product of products) {
+    const snap = await db.collection(STORE_COLLECTION)
+      .where("product", "==", product)
+      .select("runId")
+      .get();
+    usage.reads += snap.size;
+
+    // The selection itself is pure and tested in store-trigger.test.ts; this
+    // function only supplies the documents.
+    out[product] = oldestLiveRun(
+      snap.docs.map((d) => ({
+        documentId: d.id,
+        runId: (d.data().runId as string | undefined) ?? null,
+      })),
+      liveDocumentIds);
+  }
+  return out;
 }
 
 /**
