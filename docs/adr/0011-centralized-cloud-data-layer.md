@@ -1187,7 +1187,42 @@ per-stream triggers.
 | 4 — no new run, no evaluation | **MET in code, not yet observed** | Evaluation is gated on the store run's own outcome, so an idle upstream cannot reach it. The "nothing advanced" path has not yet been seen in a production log. |
 | 5 — publication to alert under an hour | **MET structurally; the timing is UNMEASURED** | Evaluation runs inside the same invocation that writes the documents, on the :20 hourly cycle, so the bound follows from the schedule. The 2026-08-29 observation (long range advanced 18:46, alerts evaluated 18:49) was a MANUAL trigger, not the hourly cycle, and `longRange` is not in `ALERT_PRODUCTS` — so it demonstrates the plumbing fires, not the publication-to-alert latency for the products alerts actually read. Measuring that properly needs a short/medium run advance observed on the natural cycle. |
 | 6 — a sustained event does not re-notify beyond its interval | **PARTIAL** | Unit-proven, including a 24-hour simulation that yields one entry and three reminders instead of twenty-four notifications. Not yet observed across a real multi-day event; reach 620569308 is the standing fixture. |
-| 7 — independent agent review | **NOT DONE** | |
+| 7 — independent agent review | **PASSED, after fixes** | Two reviews, 2026-08-30: one for live defects, one for untrue documentation. Both found real problems and both are addressed. |
+
+**What the review found, because it is the most useful part of this phase to
+record.**
+
+Two live defects, neither of which any existing test could see:
+
+- **A muted river could never escalate** — the guarantee the whole design rests
+  on. `previous` came from `notification_logs`, which is written only when
+  something is SENT, so a muted river wrote nothing, so every evaluation read
+  as the start of an event and returned silence. It could climb Action →
+  Extreme unheard while three lines of UI copy promised otherwise. The
+  escalation tests passed because they hand `previous` in directly; production
+  could never produce that state. Fixed by separating what we SAW from what we
+  SAID, in a new `alert_state` collection written on every evaluation.
+- **A river flapping on its threshold could send 24 notifications a day.**
+  Entry and all-clear consulted no interval at all. Fixed with a two-hour dwell
+  on both; escalation is decided before it, so a real worsening is never
+  delayed.
+
+And a claim that had never been true: **"a rename on either side fails the
+build"**. CI ran only the Flutter suite, so every cross-language drift guard in
+this document — the skews, the ladder, the stored field names, the frequency
+wire values — was a check nothing automated ran. `npm --prefix functions test`
+is now in CI. Related: the collapse in guard 3 was incomplete, and the default
+rule was pinned in one direction only.
+
+**Verified in production 2026-08-30 after deploy:** twelve `alert_state`
+documents, eleven of them written with `notified: none` — the observation
+recorded while deliberately saying nothing, which is precisely what was
+impossible before. A separate run logged "no new data; alerts not evaluated",
+which is guard 4 observed rather than merely reasoned.
+
+**Still unverified:** a real river actually climbing a category end to end.
+The mechanism is proven; the event needs a genuine flood. Reach 620569308 is
+the standing fixture.
 
 **The app-side settings shipped** on 2026-08-30, five commits after this table
 was first written. Three entry points write `alertFrequencies`: the per-river
