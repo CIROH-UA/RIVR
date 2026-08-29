@@ -288,7 +288,7 @@ and wrong rather than visibly broken.
 | narrow NWM products | `reachMetadata`, `analysisAssimilation`, `returnPeriods` — added in Phase 1, already used by the map sheet and forecast page |
 | `return_period_cache` | Firestore, keyed by reach ID, server-written — the pattern already in production |
 | `checkRiverAlerts` | already fans out over every distinct favourite 4×/day, then discards the data |
-| 6-hour alert cooldown | `checkRecentAlert`, composite index declared |
+| ~~6-hour alert cooldown~~ | **There was never one.** `checkRecentAlert` existed and read like a cooldown, but its answer only changed the wording to "still" — nothing skipped a send. Corrected 2026-08-29; see decision 19. |
 | `probePublishCadence` | Phase 0, deployed, sampling five endpoints hourly |
 
 Current scale: **18 users, 14 with favourites, 36 favourite rows, 29 distinct
@@ -1043,8 +1043,15 @@ Four triggers, in priority order:
    muting a river means "stop telling me about this one", and only the safety
    override outranks it.
 2. **Escalation** — the category rises (Action → Major, Major → Extreme).
-   **Always sent, and NOT suppressible by any user setting — including `off`.**
-   The only true override in the system. Safety beats
+   **Always sent, and NOT suppressible by any PER-RIVER setting — including
+   `off`.** The only true override of a per-river preference.
+
+   Precisely: the account-wide "River Flood Alerts" switch still applies, since
+   `getNotificationUsers` filters on `enableNotifications`. A user who turns
+   notifications off entirely receives nothing, escalations included — and the
+   stale-token cleanup flips that switch automatically when every one of a
+   user's tokens has died. Stated exactly because the earlier wording said "any
+   user setting", which an independent audit correctly called false. Safety beats
    preference: Action to Extreme at 3am must wake someone regardless of what
    they chose. This is the one place the system deliberately overrides a stated
    user preference, and it was confirmed explicitly by Jerson.
@@ -1137,9 +1144,15 @@ the code, and the part most worth explaining to someone who has not seen it.
    are the only two things a reader can act on.
 
 The cost story: alerts perform **zero** upstream fetches. Everything above is
-Firestore reads against documents the app is already using, so a user's alert
-and the number on their screen are the same value by construction rather than
-by coincidence.
+Firestore reads against documents the app is already using, so an alert and the
+app are computed **from the same documents, through the same ladder** rather
+than from two independently fetched copies.
+
+Not the same NUMBER, and the distinction matters: an alert reports the forecast
+PEAK, while the favourites card and the gauge show CURRENT flow. They agree
+about the flood category because they share the ladder; they legitimately show
+different figures, which is why the app already carries a strip explaining that
+the map colours by forecast peak.
 
 **Build.** `checkRiverAlerts` reads from the store rather than fetching, and
 evaluates when a new run lands rather than on a fixed clock. The four fixed
@@ -1169,18 +1182,19 @@ per-stream triggers.
 | Guard | State | Evidence |
 |---|---|---|
 | 1 — zero upstream fetches | **MET** | Alerts and the weekly digest both read the store; `batchFetchReachData` is deleted, so no live-fetch path remains in the alert code at all. |
-| 2 — per-stream interval, entry/escalation never suppressed | **MET in code** | Pure `decideTrigger`, mutation-checked in both directions. The composite index is verified READY in production. **The app cannot yet WRITE a per-stream setting** — see below. |
-| 3 — one category, one implementation | **MET** | All three ladders collapsed to one per language, with a test that reads `flow_classification.dart` off disk and fails on drift in the names, the intervals, the boundary direction or the completeness check. |
+| 2 — per-stream interval, entry/escalation never suppressed | **MET** | Pure `decideTrigger`, mutation-checked in both directions. The app writes the setting from three places (see below). **Escalation was BROKEN until 2026-08-30** — see the review findings below; it is fixed and pinned by a regression test that drives the state machine as the caller does. |
+| 3 — one category, one implementation | **MET** | The threshold comparison is single-source per language, pinned by a test that reads `flow_classification.dart` off disk and fails on drift in the names, the intervals, the boundary direction or the completeness check. An audit on 2026-08-30 found the collapse was incomplete — `weekly-digest.ts` still declared its own copy of the category NAMES, which the drift test could not see because it only asserted `indexFor(` was called. Fixed, and a second test now fails if any module outside `flow-classification.ts` declares that list again. |
 | 4 — no new run, no evaluation | **MET in code, not yet observed** | Evaluation is gated on the store run's own outcome, so an idle upstream cannot reach it. The "nothing advanced" path has not yet been seen in a production log. |
-| 5 — publication to alert under an hour | **MET** | Evaluation runs inside the same invocation that writes the documents, on the :20 hourly cycle. Observed 2026-08-29: long range advanced at 18:46, alerts evaluated at 18:49, one notification sent. |
+| 5 — publication to alert under an hour | **MET structurally; the timing is UNMEASURED** | Evaluation runs inside the same invocation that writes the documents, on the :20 hourly cycle, so the bound follows from the schedule. The 2026-08-29 observation (long range advanced 18:46, alerts evaluated 18:49) was a MANUAL trigger, not the hourly cycle, and `longRange` is not in `ALERT_PRODUCTS` — so it demonstrates the plumbing fires, not the publication-to-alert latency for the products alerts actually read. Measuring that properly needs a short/medium run advance observed on the natural cycle. |
 | 6 — a sustained event does not re-notify beyond its interval | **PARTIAL** | Unit-proven, including a 24-hour simulation that yields one entry and three reminders instead of twenty-four notifications. Not yet observed across a real multi-day event; reach 620569308 is the standing fixture. |
 | 7 — independent agent review | **NOT DONE** | |
 
-**Open, and app-side:** nothing writes `alertFrequencies` yet. Until the
-settings UI exists, every reach uses the default derived from the user's old
-global `notificationFrequency` — daily for someone who chose once a day,
-6-hourly for everyone else. The read path, the storage shape and the defaults
-are all in place; only the picker is missing.
+**The app-side settings shipped** on 2026-08-30, five commits after this table
+was first written. Three entry points write `alertFrequencies`: the per-river
+list in Notification settings, a bulk "Set all rivers" once a user has five or
+more favourites, and an "Alerts" row on each river's own forecast page — that
+last one because a flood alert deep-links there, so the fix is reachable from
+where the annoyance happens. All three open one shared picker.
 
 **Rollout effect, expected and observed:** notification logs written before
 this carry no category, so the first evaluation reads as an entry for every

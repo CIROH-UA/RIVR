@@ -197,11 +197,16 @@ export const healthCheck = functions.https.onRequest(
       status: "healthy",
       timestamp: new Date().toISOString(),
       message: "RIVR notification system is running (1st gen)",
+      // Was a four-slot Mountain-Time schedule. Those functions were deleted
+      // in ADR 0011 Phase 6 and this endpoint kept announcing them — the same
+      // failure as the settings screen that advertised deleted check times,
+      // and worse, because this is what someone queries to find out what the
+      // system does.
       schedule: {
-        slot1: "6:00 AM MT (all users)",
-        slot2: "12:00 PM MT (3x, 4x users)",
-        slot3: "6:00 PM MT (2x, 3x, 4x users)",
-        slot4: "12:00 AM MT (4x users)",
+        alerts: "run-driven — evaluated whenever an upstream model publishes, " +
+          "at the end of storeRefreshHourly (:20) and storeGeoglowsDaily " +
+          "(11:30 UTC). No new run means no evaluation and no sends.",
+        weeklyOutlook: "Fridays, 7:00 AM Mountain",
       },
     });
   }

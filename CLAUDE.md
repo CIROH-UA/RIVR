@@ -536,7 +536,9 @@ window.
 **Document IDs ARE the client's cache key** (`nwm__<reachId>__<product>`,
 matching `RiverDataKey.storageKey`), and the envelope is exactly
 `RiverDataEntry.toJson()`. Both are cross-language contracts pinned by tests
-that read the Dart source off disk — a rename on either side fails the build
+that read the Dart source off disk — a rename on either side fails CI
+(`npm --prefix functions test`, which was NOT run by CI until 2026-08-30; an
+audit found this sentence had been false the whole time)
 rather than silently storing documents the app never reads.
 
 **`publish_cadence_log` is the only collection that grows without bound**, and

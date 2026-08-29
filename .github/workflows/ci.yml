@@ -37,3 +37,24 @@ jobs:
 
       - name: Test (unit & widget only)
         run: flutter test test/models test/services test/ui test/utils test/helpers
+
+      # The Cloud Functions suite was never run by CI, which made a claim in
+      # several files false: comments in flow-classification.ts, CLAUDE.md and
+      # ADR 0011 all said a cross-language rename "fails the build". Nothing
+      # ran them, so nothing failed. Those drift guards read the Dart source off
+      # disk and are the only thing stopping the app and the server disagreeing
+      # about flood categories, freshness skews and stored field names — they
+      # are worth a minute of CI.
+      - name: Set up Node for the Cloud Functions suite
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Cloud Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Lint Cloud Functions
+        run: npm --prefix functions run lint
+
+      - name: Test Cloud Functions (includes the cross-language drift guards)
+        run: npm --prefix functions test

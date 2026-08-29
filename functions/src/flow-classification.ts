@@ -18,7 +18,7 @@
 //
 // Two implementations in two languages cannot literally be the same code, so
 // the next best thing is enforced here: the ladder is defined once per
-// language, and a test reads the Dart source off disk and fails the build if
+// language, and a test reads the Dart source off disk and fails CI if
 // the names, the recurrence intervals, or the comparison boundaries drift
 // apart. That is the same technique store-document.ts uses to pin the
 // freshness skews.

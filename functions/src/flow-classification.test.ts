@@ -18,7 +18,7 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readFileSync, readdirSync} from "node:fs";
 import {resolve} from "node:path";
 
 import {
@@ -205,5 +205,25 @@ describe("decision 13 — one rule, one implementation", () => {
       "weekly-digest no longer delegates to the shared ladder");
     assert.equal(/if \(peakCms < t2\) return 0;/.test(src), false,
       "weekly-digest has grown its own copy of the ladder again");
+  });
+
+  test("no other module keeps its own list of the category NAMES", () => {
+    // The comparison was single-source; the NAMES were not. weekly-digest.ts
+    // carried `const CATEGORIES = ["Normal", ...]` and used it for the
+    // user-facing digest body, so the digest could have named a category
+    // differently from the alert and the card while every drift test passed.
+    // Found by an independent docs audit 2026-08-30 — the previous test
+    // asserted only that `indexFor(` appeared in the source, which a duplicated
+    // name list does not disturb.
+    const dir = resolve(__dirname, "..", "src");
+
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+      if (file === "flow-classification.ts") continue;
+      const src = readFileSync(resolve(dir, file), "utf8");
+      assert.equal(/["']Normal["']\s*,\s*["']Action["']/.test(src), false,
+        `${file} declares its own flood-category list; import ` +
+        "FLOOD_CATEGORIES instead");
+    }
   });
 });

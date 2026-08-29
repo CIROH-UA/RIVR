@@ -351,6 +351,16 @@ describe("the frequency values are a cross-language contract", () => {
       /legacyFrequency == 1 \? AlertFrequency\.daily : AlertFrequency\.sixHourly/,
       "the app's defaultFor rule no longer matches defaultFrequencyFor in " +
       "notification-service.ts");
+
+    // BOTH directions. The audit found this pinned only the Dart side, so
+    // changing the TypeScript rule left every test green — which is exactly
+    // the divergence the test exists to prevent, just pointing the other way.
+    const ts = readFileSync(
+      resolve(__dirname, "..", "src", "notification-service.ts"), "utf8");
+    assert.match(ts,
+      /legacyFrequency === 1 \? "daily" : DEFAULT_FREQUENCY/,
+      "defaultFrequencyFor no longer matches AlertFrequency.defaultFor in " +
+      "alert_frequency.dart");
   });
 
   test("the two sides agree on which value is the default", () => {

@@ -23,6 +23,7 @@ import {
 } from "./notification-service.js";
 import {readAlertDataFromStore} from "./store-alert-source.js";
 import {
+  FLOOD_CATEGORIES,
   indexFor,
   ladderFromReturnPeriods,
 } from "./flow-classification.js";
@@ -35,7 +36,6 @@ const db = admin.firestore();
 const messaging = admin.messaging();
 
 const CFS_TO_CMS = 0.0283168;
-const CATEGORIES = ["Normal", "Action", "Moderate", "Major", "Extreme"];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 interface DigestUser {
@@ -302,7 +302,7 @@ function compose(
 
   let body: string;
   if (top.categoryIndex >= 1) {
-    body = `${top.name} reaches ${CATEGORIES[top.categoryIndex]} ` +
+    body = `${top.name} reaches ${FLOOD_CATEGORIES[top.categoryIndex]} ` +
       `${top.dayLabel}. ${n} river${n === 1 ? "" : "s"}, ${rising} rising.`;
   } else if (rising > 0) {
     body = `${top.name} peaks ${fmt(top.peakCfs)} ${unitLabel} ` +
