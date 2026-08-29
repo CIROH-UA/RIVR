@@ -1164,6 +1164,30 @@ per-stream triggers.
    fixture.
 7. Independent agent review passes.
 
+**Guard status, 2026-08-29 (deployed to production).**
+
+| Guard | State | Evidence |
+|---|---|---|
+| 1 — zero upstream fetches | **MET** | Alerts and the weekly digest both read the store; `batchFetchReachData` is deleted, so no live-fetch path remains in the alert code at all. |
+| 2 — per-stream interval, entry/escalation never suppressed | **MET in code** | Pure `decideTrigger`, mutation-checked in both directions. The composite index is verified READY in production. **The app cannot yet WRITE a per-stream setting** — see below. |
+| 3 — one category, one implementation | **MET** | All three ladders collapsed to one per language, with a test that reads `flow_classification.dart` off disk and fails on drift in the names, the intervals, the boundary direction or the completeness check. |
+| 4 — no new run, no evaluation | **MET in code, not yet observed** | Evaluation is gated on the store run's own outcome, so an idle upstream cannot reach it. The "nothing advanced" path has not yet been seen in a production log. |
+| 5 — publication to alert under an hour | **MET** | Evaluation runs inside the same invocation that writes the documents, on the :20 hourly cycle. Observed 2026-08-29: long range advanced at 18:46, alerts evaluated at 18:49, one notification sent. |
+| 6 — a sustained event does not re-notify beyond its interval | **PARTIAL** | Unit-proven, including a 24-hour simulation that yields one entry and three reminders instead of twenty-four notifications. Not yet observed across a real multi-day event; reach 620569308 is the standing fixture. |
+| 7 — independent agent review | **NOT DONE** | |
+
+**Open, and app-side:** nothing writes `alertFrequencies` yet. Until the
+settings UI exists, every reach uses the default derived from the user's old
+global `notificationFrequency` — daily for someone who chose once a day,
+6-hourly for everyone else. The read path, the storage shape and the defaults
+are all in place; only the picker is missing.
+
+**Rollout effect, expected and observed:** notification logs written before
+this carry no category, so the first evaluation reads as an entry for every
+reach currently elevated. Seen once on 2026-08-29 — reach 620569308 logged
+`category: Action, trigger: entry` — and correct from then on. That same reach
+had been sending four identical notifications a day for at least three days.
+
 **You are done when** an alert fires from data the app is already displaying,
 within an hour of the run that triggered it, and a three-day event produces the
 notifications a person would actually want rather than twelve identical ones.
