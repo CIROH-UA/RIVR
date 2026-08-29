@@ -37,14 +37,31 @@ class RiverDataRepository implements IRiverDataRepository {
   @override
   ValueListenable<bool> get outOfSync => _outOfSync;
 
-  /// Raised when a value is served past its window and the revalidation that
-  /// should have replaced it failed. Cleared by ANY successful fetch, because
-  /// one proves the app can reach current data again.
+  /// The keys we currently cannot supply a confirmed-current value for.
   ///
+  /// **Per key, not one global latch.** Review round 1 found the latch version
+  /// wrong in both directions at once: it was raised by whichever key failed
+  /// and cleared by ANY key succeeding, so with several favourites refreshing
+  /// concurrently one permanently-failing reach made the banner flap in and
+  /// out on a 260 ms animation, while a successful `returnPeriods` fetch for a
+  /// different river silently cancelled a genuine stall on the flow the user
+  /// was reading. Keeping the set makes both impossible: the warning stands
+  /// while, and only while, something is actually unresolved.
+  final Set<String> _unconfirmed = {};
+
   /// Phase 7 makes this the whole of the app's honesty about freshness: with
   /// the timestamps gone, silence is a claim that the numbers are current, and
   /// this is the only thing entitled to withdraw that claim.
-  void _setOutOfSync(bool value) {
+  void _markUnconfirmed(RiverDataKey key) {
+    if (_unconfirmed.add(key.storageKey)) _sync();
+  }
+
+  void _markConfirmed(RiverDataKey key) {
+    if (_unconfirmed.remove(key.storageKey)) _sync();
+  }
+
+  void _sync() {
+    final value = _unconfirmed.isNotEmpty;
     if (_outOfSync.value != value) _outOfSync.value = value;
   }
 
@@ -66,7 +83,7 @@ class RiverDataRepository implements IRiverDataRepository {
             // The user is now looking at a value past its window that we
             // could not replace. Phase 7 took away the timestamp that would
             // have let them see that for themselves.
-            _setOutOfSync(true);
+            _markUnconfirmed(key);
           },
         ),
       );
@@ -74,7 +91,21 @@ class RiverDataRepository implements IRiverDataRepository {
     }
 
     // Miss — must fetch (errors propagate to the caller).
-    return _fetchAndCache(key);
+    //
+    // This branch counts too, and review round 1 found it did not. The
+    // repository having nothing does NOT mean the screen is empty: the
+    // favourites card renders `lastKnownFlow`, restored from SharedPreferences
+    // on a cold start with no age check at all. So after any cache wipe —
+    // signing out and back in, or the Phase 5 kill switch flipping ON to OFF,
+    // which is exactly the thing you do BECAUSE upstream is misbehaving — a
+    // failing fetch leaves yesterday's number on screen. Before Phase 7 that
+    // card said "1d ago" next to it; now nothing does unless this fires.
+    try {
+      return await _fetchAndCache(key);
+    } catch (_) {
+      _markUnconfirmed(key);
+      rethrow;
+    }
   }
 
   @override
@@ -155,6 +186,14 @@ class RiverDataRepository implements IRiverDataRepository {
       return;
     }
     await _cache.put(entry);
+    // A store document is current data arriving by a different door. Round 1:
+    // only `_doFetch` cleared the flag, and store documents never go through
+    // it — they come from the Firestore listener. So a phone that came back
+    // from a tunnel got correct numbers pushed to it, repainted them, and then
+    // kept "These numbers may not be current" over the top of them: every
+    // later read found the cache fresh and never fetched, so nothing cleared
+    // it until the next expiry AND a live fetch.
+    _markConfirmed(entry.key);
   }
 
   /// Whether [incoming] may replace [existing]. Same ordering the server uses.
@@ -210,7 +249,7 @@ class RiverDataRepository implements IRiverDataRepository {
       payload: result.payload,
     );
     await _cache.put(entry);
-    _setOutOfSync(false);
+    _markConfirmed(key);
     return entry;
   }
 }

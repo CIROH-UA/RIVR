@@ -16,9 +16,11 @@
 // **It replaces OfflineBanner** rather than stacking above it. Offline is one
 // of the two reasons the app cannot vouch for a number, not a separate
 // subject, and the old banner's hard-won parts are kept: the near-black ink on
-// systemOrange (white measured 2.2:1 against WCAG AA's 4.5:1; this measures
-// 9.55:1), the Semantics wrapper, and an AnimatedSwitcher that shows on the
-// way down and simply disappears on the way back up.
+// systemOrange (white measures 2.2:1 against WCAG AA's 4.5:1; #1A1300 on
+// #FF9500 measures 8.40:1 — the 9.55:1 previously quoted here is the figure
+// for pure black, not for the ink actually shipped), the Semantics wrapper,
+// and an AnimatedSwitcher that shows on the way down and simply disappears on
+// the way back up.
 //
 // **What raises it:**
 //
@@ -36,15 +38,30 @@
 // Offline wins when both are true: it is the more actionable of the two, and
 // it explains the other.
 //
-// **The second cause shares the server's threshold, which is guard 4.**
-// `IRiverDataRepository.outOfSync` rises only when a value was served past its
-// window and revalidation failed. A document's window comes from the same
-// per-product `MAX_HOLD_MS` that `assessProductFreshness`
-// (functions/src/store-trigger.ts) alarms on — the store's answer to "how long
-// can upstream be quiet before silence means broken". Guard 4 asks that the
-// user-facing indicator be driven by the same signal that alarms
-// operationally; sharing the threshold instead of picking a second number is
-// what makes that true and keeps it true as the number changes.
+// **Guard 4 is NOT met, and an earlier version of this comment claimed it
+// was.** The claim was that a document's window comes from the same
+// per-product `MAX_HOLD_MS` the server alarms on, so the indicator and the
+// operational alarm are one number. That is false, and it was written without
+// being checked: `MAX_HOLD_MS` exists only in TypeScript — the only occurrence
+// of the name anywhere in `lib/` was the comment asserting it was shared.
+//
+// What actually drives each side:
+//
+//   this banner   `entry.window.validUntil` has passed AND the revalidation
+//                 that should have replaced the value failed. For a stored
+//                 document that window is `storeValidUntil` (publish
+//                 alignment, ~1 h for short range); for a live-path entry it
+//                 is the Dart data source's own schedule, which never touches
+//                 the server at all.
+//   the server    `window.fetchedAt` age against `MAX_HOLD_MS` (6 h for short
+//                 range) in `assessProductFreshness`.
+//
+// Different functions, different magnitudes, and no shared constant. They
+// correlate — both ultimately track publication — but "driven by the same
+// signal" is a stronger claim than the code supports, and Phase 7 is the last
+// place to overstate a guarantee. Closing this properly means the client
+// learning the server's health verdict rather than inferring one; that is
+// tracked as open, not quietly claimed.
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';
@@ -62,8 +79,17 @@ enum SyncWarning {
   stale,
 }
 
-/// The app's single freshness indicator. Renders nothing at all when the app
-/// can vouch for its data — which is almost always, and is the point.
+/// The freshness indicator. Renders nothing at all when the app can vouch for
+/// its data — which is almost always, and is the point.
+///
+/// **Mounted on the favourites page only** (`favorites_page.dart`), which is
+/// where the widget it replaced was mounted. It is NOT app-wide, and the
+/// header above used to say it was. The forecast page, the map's reach detail
+/// sheet and the weekly outlook all render flow values through the same
+/// repository and show no indicator, so a user arriving from a notification
+/// deep link can read an unconfirmed number with nothing to say so. Phase 7's
+/// promise is app-wide; its coverage is not, and that gap is recorded rather
+/// than papered over.
 class SyncStatusBanner extends StatelessWidget {
   const SyncStatusBanner({super.key, this.repository});
 

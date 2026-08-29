@@ -174,12 +174,18 @@ describe("per-product freshness — the hole the heartbeat had", () => {
     };
   }
 
-  // THE regression this whole change exists for. Measured in production:
-  // GEOGLOWS held yesterday's run for 24 hours every day while NWM's hourly
-  // writes kept the collection-wide heartbeat fresh, and the store reported
-  // healthy the entire time. It was found from a device log on 2026-08-29,
-  // not from monitoring. Phase 7 removes the timestamp that let a user notice,
-  // so this must be caught here or not at all.
+  // The failure a per-collection heartbeat structurally cannot see: one
+  // product stops being WRITTEN while another product's writes keep the
+  // aggregate fresh.
+  //
+  // Note what this is NOT. An earlier version of this comment called it "the
+  // regression this whole change exists for, measured in production", meaning
+  // the 2026-08-29 GEOGLOWS incident. That was wrong: in that incident the
+  // 01:30 job wrote punctually every day carrying a run one day old, so
+  // `fetchedAt` never aged past ~24 h and this check would have said healthy
+  // too. Catching that one needs run currency, not write recency. This test
+  // models a genuinely stalled writer — 50 h against a 48 h cap — which is a
+  // real failure and a real gap in the old check, just not that one.
   test("a stalled GEOGLOWS is caught even though NWM keeps writing", () => {
     const h = assessStoreHealth(
       new Date(NOW.getTime() - 600_000), // a fresh write exists

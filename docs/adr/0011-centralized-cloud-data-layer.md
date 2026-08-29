@@ -1125,12 +1125,32 @@ dangerous outcome in this document*. So Phase 7 cannot ship on monitoring that
 cannot see a silent failure — and the monitoring shipped in Phase 4 could not.
 
 `lastSuccessfulWrite` takes the newest write across the WHOLE `river_data`
-collection. One fresh write reports the entire store healthy. **That is not a
-hypothetical: GEOGLOWS held yesterday's run for 24 hours a day, every day,
-while NWM's hourly writes kept the aggregate fresh, and `storeHealth` returned
-`{"status":"healthy"}` throughout.** It was found from a device log on
-2026-08-29 — the same investigation that moved the GEOGLOWS pass to 11:30 —
-not from the monitoring built to find exactly this.
+collection. One fresh write reports the entire store healthy, so a product that
+stops being written is invisible for as long as any other product keeps
+writing.
+
+**A correction, because the first version of this decision claimed more than is
+true.** It said this check would have caught the 2026-08-29 GEOGLOWS incident.
+It would not have, and the review caught the overclaim. In that incident the
+01:30 job ran *punctually every day*: it fetched, received a `forecast_date`
+one day newer than the stored one, and wrote. `fetchedAt` was therefore never
+more than ~24 hours old against a 48-hour cap, and a per-product **write
+recency** check reports that as healthy — exactly as the old one did. The store
+was serving yesterday's water while writing on time.
+
+So there are two distinct failures, and this decision addresses one of them:
+
+| Failure | Detected by |
+|---|---|
+| The refresher stops writing | **write recency** — this decision |
+| The refresher writes stale content on time | **run currency** — NOT yet built |
+
+Run currency means comparing each stored document's `runId` against the run
+upstream currently advertises. The ingredients are already in place —
+`checkStoreHealth` reads the probe, and every document carries a `runId` that
+`sampleStoredWindows` does not project — so this is a small addition, and it is
+the one that would have caught the incident that prompted the phase. It is
+recorded here as open.
 
 `assessProductFreshness` now judges the newest document PER PRODUCT against
 that product's own cap.
@@ -1141,8 +1161,8 @@ that product's own cap.
   "something is broken" — and it is per product because the products differ by
   an order of magnitude (short range 6 h, long range 36 h, GEOGLOWS 48 h). A
   second constant here would drift from the window logic it has to agree with.
-  It is also what makes guard 4 true rather than merely claimed: the device's
-  indicator and the server's alarm are the same number.
+  It does **not**, however, satisfy guard 4, though the first version of this
+  decision said it did. The client never sees this constant — see decision 22.
 - **A product with no documents is skipped, not reported down.** Nobody has
   favourited a river that needs it, so there is nothing to be stale.
 - **The NEWEST document per product is judged.** One old document among fresh
@@ -1150,14 +1170,40 @@ that product's own cap.
   next cycle. Reporting that as a stalled product would make the alarm cry wolf
   until nobody read it.
 
-Costs no new index: `sampleStoredWindows` already projects `product` and
-`window` through a single-field query.
+**It false-alarmed in production within a minute of going live, and that is
+worth recording.** `reachMetadata` and `returnPeriods` had no `MAX_HOLD_MS`
+entry, so they inherited the 6-hour default meant for hourly forecasts — while
+in fact they hold a 30-day window and are rewritten only when missing or nearly
+expired. `storeHealth` returned 503 with *"returnPeriods has not advanced for
+17h (cap 6h)"* on a completely healthy store. Both now have 32-day caps
+(30-day window plus room for the daily pass), pinned at both ends by tests so
+the fix cannot drift into "never alarm". A false alarm matters more here than
+almost anywhere else in this document: Phase 7 hands this signal to users, and
+a warning that cries wolf is ignored before the day it is right.
+
+Costs no new index — `sampleStoredWindows` already projects `product` and
+`window` through a single-field query — but it is **not free**: it now reads
+every stored document on every health check (~135-180 reads), against 2 before.
+At the 2-hourly heartbeat that is roughly 1,600-2,100 reads/day, about 3-4% of
+the 50,000/day free tier. That is safe at current scale and becomes the store's
+largest single reader; `storeHealth` is also a public unauthenticated endpoint,
+so each anonymous request now costs the same. Worth revisiting at roughly 700
+favourited reaches.
 
 ### Decision 22 — one indicator, and what it refuses to say (2026-08-29)
 
-With the timestamps gone, silence is a claim. The app makes exactly one
-statement about freshness, in one place, and only when it cannot vouch for what
-is on screen.
+With the timestamps gone, silence is a claim. The app makes one statement about
+freshness, and only when it cannot vouch for what is on screen.
+
+**Coverage is one page, not the app, and the first version of this decision
+implied otherwise.** `SyncStatusBanner` is mounted on the favourites page —
+the single place the widget it replaced was mounted. The reach forecast page,
+the map's reach detail sheet and the weekly outlook page all render flow values
+through the same repository and show no indicator at all. A user who opens a
+river from a push notification and never visits favourites can read an
+unconfirmed number with nothing anywhere to say so. This is not a regression —
+the old offline banner had the same single mount point — but Phase 7's promise
+is app-wide and its coverage is not.
 
 `SyncStatusBanner` **subsumes `OfflineBanner`** rather than sitting above it.
 Offline is one of the two reasons the app cannot vouch for a number, not a
@@ -1174,21 +1220,64 @@ The last row is the one worth defending. A failure that left in-window data on
 screen has cost the user nothing, and a warning there is the noise that teaches
 people to dismiss the strip before the day it matters.
 
-**What the ADR asked for and what was built differ in one place, on purpose.**
-Guard 3 says a store frozen past its cycle raises the indicator. On a device
-with working network it does not, and should not: when a stored document
-expires the client falls through to the live path and gets *current* data, so
-the user is not looking at anything stale and a warning would be a lie in the
-other direction. What the frozen store does raise is the SERVER alarm, through
-decision 21. The indicator appears when the store is frozen *and* the live path
-cannot cover for it — which is what the repository actually measures. Guard 3
-should be read as "the user is never left uninformed in front of stale data",
-and that is what is tested.
+**Guard 3 is NOT met, and the first version of this decision claimed it was
+met under a redefinition.** That claim does not survive reading the code, and
+the review said so.
+
+The argument made was: when a stored document expires the client falls through
+to the live path and gets current data, so no warning is warranted. That
+describes only what happens *after* a product's hold cap. Before it —
+`extendWindowCoverage` re-stamps every document's `validUntil` forward every
+hour for up to `MAX_HOLD_MS`, which is 6 hours for short range and **48 hours
+for GEOGLOWS**. Throughout that window `StoreBackedDataSource` serves the held
+document as in-window, the client never reaches the live path, and `outOfSync`
+never rises. A store frozen past its cycle therefore produces, for up to two
+days, exactly what this phase exists to prevent: held data, no indicator, no
+fallback. That is the guard-3 scenario, and it is unguarded.
+
+Nor was the redefinition tested. No test in the tree freezes a store; the
+substitute drives a total fetch failure, which is the different case where the
+store *and* the live path both fail.
+
+Extending a window is the store saying "upstream has not moved, so this value
+is still the newest that exists". That is true and useful, and the extension
+mechanism is not the bug. What is missing is that a document held on
+re-verification alone is a *weaker* claim than a freshly fetched one, and
+nothing carries that distinction to the device. Closing guard 3 honestly means
+marking held documents as held — which is a schema change to the stored
+envelope, and therefore not a quiet fix.
 
 **What was kept, and why it is not a timestamp.** The forecast chart's time
 axis stays: when the peak arrives is the subject the user came for, not a claim
 about our data's age. The map legend's date stays for the reason this document
 already gives — a once-daily product where the date is real information.
+
+### Phase 7 — where it actually stands (2026-08-29)
+
+Written down because the first pass at this phase reported itself complete and
+three of the five guards were not met. An independent review found it; the
+overclaims are corrected in decisions 21 and 22 above rather than deleted.
+
+| Guard | Status |
+|---|---|
+| 1 — no value view renders a timestamp | **met**, tested and mutation-checked |
+| 2 — offline shows the indicator, healthy shows nothing | **partly met** — the logic is right and tested; it is mounted on the favourites page only |
+| 3 — a frozen store raises the indicator | **not met** — a held document is served as in-window for up to its hold cap (48 h for GEOGLOWS) with no indicator and no live-path fallback |
+| 4 — the indicator is driven by the same signal that alarms operationally | **not met** — the client decides from `validUntil`, the server from `fetchedAt` vs `MAX_HOLD_MS`; no shared constant |
+| 5 — independent agent review passes | **run 2026-08-29**; it did not pass, and this section is its result |
+
+What was genuinely delivered: the timestamps are gone from the values, the
+indicator exists and is correct for the cases it covers, per-product write
+recency now catches a stalled writer that the old heartbeat could not, and
+three live defects in the indicator's own signal were found and fixed (a flag
+that could stick on after data was restored, one that stayed silent on a failed
+cold-start fetch, and a global latch that let one river's success speak for
+another's failure).
+
+What remains before this phase can be called done: run-currency monitoring
+(decision 21), marking held documents as held so guard 3 can be closed
+(decision 22), mounting the indicator on the remaining value surfaces, and a
+re-review.
 
 ### How alerting actually works, end to end
 
@@ -1321,7 +1410,9 @@ notifications a person would actually want rather than twelve identical ones.
 
 ## Phase 7 — The trust model
 
-**Status: built 2026-08-29** (decisions 21 and 22).
+**Status: PARTIALLY built 2026-08-29** (decisions 21 and 22). Guards 1 and 2
+are met or nearly so; guards 3 and 4 are not. See "Phase 7 — where it actually
+stands" below the decisions. Do not treat this phase as closed.
 
 **Last, deliberately.** Removing the timestamp is a promise; it may only ship
 once Phase 4's monitoring proves the guarantee, because afterwards **users cannot

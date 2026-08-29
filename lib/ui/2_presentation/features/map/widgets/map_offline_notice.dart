@@ -6,7 +6,7 @@ import 'package:rivr/ui/1_state/shared/connectivity_provider.dart';
 
 /// A quiet pill telling the user why the map has stopped filling in.
 ///
-/// Deliberately not the shared [OfflineBanner], which is a full-width solid
+/// Deliberately not the shared [SyncStatusBanner], which is a full-width solid
 /// orange bar. Two reasons it cannot be reused here:
 ///
 ///  * **Orange is already taken.** On this screen orange is the Moderate rung

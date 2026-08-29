@@ -235,6 +235,77 @@ void main() {
       expect(repo.outOfSync.value, isFalse);
     });
 
+    // ── Found by the Phase 7 review, all three were live defects ───────────
+
+    // BLOCKER 1. Store documents arrive through `ingest` from the Firestore
+    // listener, never through `_doFetch`. With the flag cleared only on fetch,
+    // a phone coming back from a tunnel got current data pushed to it,
+    // repainted it, and kept the warning over the top — every later read found
+    // the cache fresh and never fetched, so nothing cleared it.
+    test('a pushed store document clears it', () async {
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2));
+      source.offline = true;
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isTrue);
+
+      await repo.ingest(RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: now,
+          validUntil: now.add(const Duration(hours: 1)),
+        ),
+        unit: 'CMS',
+        runId: 'run-2',
+        payload: const {'value': 9.0},
+      ));
+
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'the store just supplied current data for this very key');
+    });
+
+    // BLOCKER 2. A miss that fails does NOT mean an empty screen: the
+    // favourites card renders `lastKnownFlow` out of SharedPreferences with no
+    // age check. After a cache wipe — sign-out, or the kill switch flipping
+    // ON to OFF — a failing fetch leaves yesterday's number on screen with
+    // nothing to say so, now that the "1d ago" label is gone.
+    test('a failed fetch on a cache MISS raises it', () async {
+      source.offline = true;
+      await expectLater(repo.read(key), throwsA(anything));
+      expect(repo.outOfSync.value, isTrue);
+    });
+
+    // SHOULD-FIX 4. The flag used to be one global latch: raised by whichever
+    // key failed, cleared by ANY key succeeding. With favourites refreshing
+    // concurrently that made it both flap and lie.
+    test('one key succeeding does not clear another key\'s failure', () async {
+      const other = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '99999999',
+        product: ForecastProduct.returnPeriods,
+      );
+
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2));
+      source.offline = true;
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isTrue);
+
+      // A different river's product fetches fine.
+      source.offline = false;
+      await repo.read(other);
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'the ORIGINAL key is still unresolved; a success elsewhere '
+              'must not speak for it');
+
+      // Resolving the original one does clear it.
+      await repo.refresh(key);
+      expect(repo.outOfSync.value, isFalse);
+    });
+
     test('it notifies listeners, so the banner can rebuild', () async {
       var notified = 0;
       repo.outOfSync.addListener(() => notified++);

@@ -215,24 +215,42 @@ export interface ProductFreshness {
 /**
  * Assess freshness PER PRODUCT.
  *
- * **Why this exists, and it is not hypothetical.** `lastSuccessfulWrite` takes
- * the newest write across the WHOLE collection, so one fresh NWM hourly write
- * makes the store look healthy while another product sits still for days. That
- * is not a theoretical hole: GEOGLOWS held YESTERDAY'S run for 24 hours every
- * single day and the store reported healthy throughout. It was found from a
- * device log on 2026-08-29, not from monitoring.
+ * **Why this exists.** `lastSuccessfulWrite` takes the newest write across the
+ * WHOLE collection, so one fresh NWM hourly write makes the store look healthy
+ * while another product sits still for days. ADR 0011 Phase 7 removes the
+ * timestamps that would let a user notice, and says plainly that a
+ * silently-failing store is the most dangerous outcome in the document.
  *
- * ADR 0011 Phase 7 removes the timestamps that would let a user notice, and
- * says plainly that a silently-failing store is the most dangerous outcome in
- * the document. A per-collection heartbeat cannot underwrite that promise; this
- * can.
+ * **What this catches, and what it does NOT.** It measures WRITE RECENCY —
+ * how long since a document for this product was last written. It therefore
+ * catches a refresher that has stopped writing, which is the failure a
+ * per-collection heartbeat hides behind other products' writes.
+ *
+ * It does NOT catch a refresher that keeps writing STALE CONTENT on time, and
+ * an earlier version of this comment wrongly claimed it would have caught the
+ * 2026-08-29 GEOGLOWS incident. It would not have. In that incident the 01:30
+ * job ran daily, fetched, received a `forecast_date` one day newer than the
+ * stored one, and wrote — so `fetchedAt` was never more than ~24 h old against
+ * a 48 h cap, and this check would have reported healthy exactly as the old
+ * one did. The store served yesterday's water while writing punctually.
+ *
+ * Catching that needs RUN CURRENCY, not write recency: comparing each stored
+ * document's `runId` against the run upstream currently advertises. The
+ * ingredients are already here — `checkStoreHealth` reads the probe, and every
+ * stored document carries a `runId` that `sampleStoredWindows` simply does not
+ * project. Recorded as the next step rather than implied to be done.
  *
  * **The threshold is `MAX_HOLD_MS`, deliberately reused rather than a second
  * number.** It already answers exactly the right question — how long upstream
  * can plausibly go quiet before silence stops meaning "nothing changed" — and
  * a separate constant here would drift from the window logic it must agree
- * with. Phase 7 guard 4 asks that the user-facing indicator be driven by the
- * same signal that alarms operationally; this is that signal.
+ * with.
+ *
+ * That reuse does NOT, by itself, satisfy Phase 7 guard 4. The client never
+ * sees this constant: it decides staleness from a document's `validUntil`,
+ * which `storeValidUntil` computes from publish alignment, not from this cap.
+ * An earlier comment here claimed the two sides shared one number; they do
+ * not.
  *
  * A product with NO documents is skipped rather than reported down: nobody has
  * favourited a river that needs it, so there is nothing to be stale. The
