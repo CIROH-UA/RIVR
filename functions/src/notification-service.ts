@@ -353,6 +353,10 @@ async function checkUserRivers(
 ): Promise<number> {
   let alertsSent = 0;
 
+  // One batched read for every favourite, before the loop. Previously this
+  // issued one query per favourite inside it.
+  const states = await readAlertStates(user.userId, user.favoriteReachIds);
+
   for (const reachId of user.favoriteReachIds) {
     try {
       const source = sourceOf(user, reachId);
@@ -372,28 +376,40 @@ async function checkUserRivers(
         user.preferredFlowUnit
       );
 
-      const prior = await lastNotified(user.userId, reachId);
+      const prior = states.get(reachId);
       const trigger = decideTrigger({
         category,
-        previous: prior?.category ?? null,
-        lastSentAt: prior?.sentAt ?? null,
+        observed: prior?.observed ?? null,
+        previous: prior?.notified ?? null,
+        lastSentAt: prior?.lastSentAt ?? null,
         frequency: reachId in user.alertFrequencies ?
           frequencyFrom(user.alertFrequencies[reachId]) :
           defaultFrequencyFor(user.notificationFrequency),
         now: new Date(),
       });
 
-      if (trigger === "none") continue;
+      if (trigger === "none") {
+        // Record the sighting even though we said nothing. This is what makes
+        // a later escalation visible on a muted river — the defect independent
+        // review found, where a muted river could climb Action -> Extreme in
+        // silence because nothing was ever written.
+        await recordAlertState(user.userId, reachId, category, null);
+        continue;
+      }
 
-      const success = await sendAlert(user, reachId, source, {
+      const notification: AlertNotification = {
         trigger,
         category,
         riverName: reachData.riverName,
         alert,
-      });
+      };
+      const success = await sendAlert(user, reachId, source, notification);
       if (success) {
         alertsSent++;
+        await recordAlertState(user.userId, reachId, category, notification);
       }
+      // A FAILED send writes nothing, deliberately: the observation stays
+      // behind so the next run sees the same rise and retries.
     } catch (error) {
       logger.error(
         `❌ Error checking river ${reachId} for user ${user.userId}`,
@@ -742,59 +758,107 @@ async function sendAlert(
  * @param {string} reachId - River reach identifier
  * @return {Promise<boolean>} True if recent alert exists
  */
-/** The last notification actually sent for one user and reach. */
-export interface LastNotification {
-  category: FloodCategory | null;
-  sentAt: Date;
+/** What we last saw, and what we last told the user, for one user and reach. */
+export interface AlertState {
+  /** The category we last OBSERVED, whether or not we notified. */
+  observed: FloodCategory | null;
+  /** The category of the last notification actually SENT. */
+  notified: FloodCategory | null;
+  /** When that notification was sent. */
+  lastSentAt: Date | null;
+}
+
+/** Document id for one user's state on one reach. */
+export function alertStateId(userId: string, reachId: string): string {
+  return `${userId}__${reachId}`;
 }
 
 /**
- * Read back the most recent notification for this user and reach.
+ * Read the alert state for every one of a user's reaches, in one round trip.
  *
- * This replaced `checkRecentAlert`, which asked only "was anything sent in the
- * last six hours" and — despite reading like a cooldown — used the answer only
- * to change the wording to "still". Nothing ever skipped a send. decideTrigger
- * needs the CATEGORY as well, because that is what separates an escalation
- * from a repeat.
+ * **Why a separate collection rather than reading `notification_logs`.**
+ * Independent review 2026-08-30: `notification_logs` records what was SENT, so
+ * a muted river writes nothing, so escalation — the one guarantee no user
+ * setting may suppress — was unreachable for it. The observed category has to
+ * be recorded even when we deliberately say nothing.
  *
- * Uses the composite index `notification_logs(userId, reachId, sentAt)`, which
- * is declared in firestore.indexes.json and verified READY in production.
- * A failure here returns null, which reads as "no prior notification" and
- * therefore as an entry — erring towards sending rather than towards silence,
- * because a missed flood alert is the worse failure.
+ * Batched with `getAll` rather than one query per favourite. The previous
+ * implementation issued `users × favourites` queries per run, unconditionally,
+ * before the category was even considered; at ~100 users with 20 favourites
+ * that alone would have exceeded the daily free tier on one line item.
  *
- * Entries written before 2026-08-29 carry no category. They return null and
- * the next evaluation reads as an entry: one extra notification per active
- * reach at rollout, and correct from then on.
+ * A read failure returns empty state, which reads as a first sighting and
+ * therefore as an entry — erring towards notifying, because a missed flood
+ * alert is the worse failure.
+ *
+ * @param {string} userId - The user.
+ * @param {string[]} reachIds - Their favourites.
+ * @return {Promise<Map<string, AlertState>>} Keyed by reach id.
+ */
+async function readAlertStates(
+  userId: string,
+  reachIds: string[]
+): Promise<Map<string, AlertState>> {
+  const out = new Map<string, AlertState>();
+  if (reachIds.length === 0) return out;
+
+  try {
+    const refs = reachIds.map(
+      (reachId) => db.collection("alert_state").doc(alertStateId(userId, reachId)));
+    const snaps = await db.getAll(...refs);
+
+    snaps.forEach((snap, i) => {
+      if (!snap.exists) return;
+      const data = snap.data() ?? {};
+      const sentAt = data.lastSentAt?.toDate?.();
+      out.set(reachIds[i], {
+        observed: typeof data.observed === "string" ?
+          data.observed as FloodCategory : null,
+        notified: typeof data.notified === "string" ?
+          data.notified as FloodCategory : null,
+        lastSentAt: sentAt instanceof Date ? sentAt : null,
+      });
+    });
+  } catch (error) {
+    logger.error("❌ Error reading alert state", {error});
+  }
+  return out;
+}
+
+/**
+ * Record what we saw, and what we said about it.
+ *
+ * Called after EVERY evaluation of a favourite, including ones that
+ * deliberately said nothing — that is the whole point.
+ *
+ * **Not called when a send was attempted and FAILED.** Leaving the observation
+ * behind means the next run sees the same rise again and retries, which is the
+ * property that makes a transient FCM failure cost a delay rather than a
+ * missed flood.
  *
  * @param {string} userId - The user.
  * @param {string} reachId - The reach.
- * @return {Promise<LastNotification | null>} The last send, or null.
+ * @param {FloodCategory} observed - What this evaluation saw.
+ * @param {AlertNotification | null} sent - The notification sent, or null.
+ * @return {Promise<void>} Nothing; failures are logged.
  */
-async function lastNotified(
+async function recordAlertState(
   userId: string,
-  reachId: string
-): Promise<LastNotification | null> {
+  reachId: string,
+  observed: FloodCategory,
+  sent: AlertNotification | null
+): Promise<void> {
   try {
-    const snap = await db.collection("notification_logs")
-      .where("userId", "==", userId)
-      .where("reachId", "==", reachId)
-      .orderBy("sentAt", "desc")
-      .limit(1)
-      .get();
-
-    if (snap.empty) return null;
-    const data = snap.docs[0].data();
-    const sentAt = data.sentAt?.toDate?.();
-    if (!(sentAt instanceof Date)) return null;
-
-    const category = typeof data.category === "string" ?
-      data.category as FloodCategory :
-      null;
-    return {category, sentAt};
+    const update: Record<string, unknown> = {observed, updatedAt: new Date()};
+    if (sent !== null) {
+      update.notified = sent.category;
+      update.lastSentAt = new Date();
+    }
+    await db.collection("alert_state")
+      .doc(alertStateId(userId, reachId))
+      .set(update, {merge: true});
   } catch (error) {
-    logger.error("❌ Error reading the last notification", {error});
-    return null;
+    logger.error("❌ Error recording alert state", {error, reachId});
   }
 }
 

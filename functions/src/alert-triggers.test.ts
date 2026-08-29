@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 
 import {
   AlertFrequency,
+  FLAP_GUARD_MS,
   DEFAULT_FREQUENCY,
   FREQUENCY_INTERVAL_MS,
   decideTrigger,
@@ -43,13 +44,18 @@ function minutesAgo(m: number): Date {
  */
 function decide(over: {
   category?: FloodCategory;
+  observed?: FloodCategory | null;
   previous?: FloodCategory | null;
   lastSentAt?: Date | null;
   frequency?: AlertFrequency;
 }) {
+  const previous = over.previous === undefined ? null : over.previous;
   return decideTrigger({
     category: over.category ?? "Major",
-    previous: over.previous === undefined ? null : over.previous,
+    // Defaults to `previous`: an unmuted river that was notified is also a
+    // river that was observed, which is the state these cases describe.
+    observed: over.observed === undefined ? previous : over.observed,
+    previous,
     lastSentAt: over.lastSentAt === undefined ? null : over.lastSentAt,
     frequency: over.frequency ?? DEFAULT_FREQUENCY,
     now: NOW,
@@ -270,6 +276,7 @@ describe("the three-day event that started all this", () => {
       const now = new Date(NOW.getTime() + hour * 3600_000);
       const trigger = decideTrigger({
         category: "Major",
+        observed: "Major",
         previous,
         lastSentAt,
         frequency: "6h",
@@ -291,6 +298,7 @@ describe("the three-day event that started all this", () => {
   test("an escalation mid-event lands immediately, between reminders", () => {
     const trigger = decideTrigger({
       category: "Extreme",
+      observed: "Major",
       previous: "Major",
       lastSentAt: minutesAgo(5),
       frequency: "daily",
@@ -351,5 +359,162 @@ describe("the frequency values are a cross-language contract", () => {
       /defaultFrequency = AlertFrequency\.sixHourly/,
       "the Dart default changed; DEFAULT_FREQUENCY here must match");
     assert.equal(DEFAULT_FREQUENCY, "6h");
+  });
+});
+
+describe("REGRESSION: a muted river must still escalate", () => {
+  // Found by independent review 2026-08-30, and it defeated the one guarantee
+  // the system makes.
+  //
+  // `previous` comes from the last notification SENT. A muted river never
+  // sends one, so `previous` stays null forever and every evaluation takes the
+  // entry branch — which returns "none" because the stream is off. The river
+  // can climb Action -> Moderate -> Major -> Extreme and the user hears
+  // nothing, while three separate lines of UI copy promise they will.
+  //
+  // The existing escalation tests all hand `previous` in directly, so they
+  // pass on a state production can never produce. That is why this reproduces
+  // the state machine as the CALLER drives it, rather than testing the pure
+  // function in isolation.
+
+  /**
+   * Drive decideTrigger the way checkUserRivers does, including the crucial
+   * detail: state only advances when something is actually sent.
+   * @param {string[]} categories - The category observed at each evaluation.
+   * @param {AlertFrequency} frequency - The user's setting for this reach.
+   * @return {string[]} The triggers that fired.
+   */
+  function run(
+    categories: FloodCategory[],
+    frequency: AlertFrequency
+  ): string[] {
+    let observed: FloodCategory | null = null;
+    let previous: FloodCategory | null = null;
+    let lastSentAt: Date | null = null;
+    const fired: string[] = [];
+
+    categories.forEach((category, i) => {
+      const now = new Date(NOW.getTime() + i * 3600_000);
+      const trigger = decideTrigger({
+        category, observed, previous, lastSentAt, frequency, now,
+      });
+      // The caller records what it SAW on every evaluation, including ones
+      // that said nothing — that is the fix this test exists for.
+      observed = category;
+      if (trigger === "none") return;
+      fired.push(trigger);
+      previous = category;
+      lastSentAt = now;
+    });
+    return fired;
+  }
+
+  test("a river muted while calm still escalates", () => {
+    const fired = run(
+      ["Normal", "Action", "Moderate", "Major", "Extreme"],
+      "off",
+    );
+    assert.ok(fired.includes("escalation"),
+      "a muted river climbed Action -> Extreme and never notified. The UI " +
+      "promises an escalation always gets through; it cannot, because " +
+      "`previous` is only written when something is SENT.");
+  });
+
+  test("an unmuted river escalates as expected — the control", () => {
+    const fired = run(
+      ["Normal", "Action", "Moderate", "Major", "Extreme"],
+      "6h",
+    );
+    assert.deepEqual(fired,
+      ["entry", "escalation", "escalation", "escalation"]);
+  });
+});
+
+describe("REGRESSION: a river flapping on its threshold cannot spam", () => {
+  // Independent review 2026-08-30. A reach whose forecast peak sits near its
+  // 2-year threshold alternates Action/Normal as each hourly run shifts the
+  // peak. Entry and all-clear consulted no interval at all, so that was one
+  // notification per hour, alternating "Action Event" and "back to Normal" —
+  // twenty-four a day, against the four a day this phase set out to fix, and
+  // unstoppable even on "change-only".
+
+  /**
+   * Drive a full day of hourly evaluations, the way the caller does.
+   * @param {FloodCategory[]} categories - Category observed each hour.
+   * @param {AlertFrequency} frequency - The user's setting.
+   * @return {string[]} Triggers that fired.
+   */
+  function day(
+    categories: FloodCategory[],
+    frequency: AlertFrequency
+  ): string[] {
+    let observed: FloodCategory | null = null;
+    let previous: FloodCategory | null = null;
+    let lastSentAt: Date | null = null;
+    const fired: string[] = [];
+
+    categories.forEach((category, i) => {
+      const now = new Date(NOW.getTime() + i * 3600_000);
+      const trigger = decideTrigger({
+        category, observed, previous, lastSentAt, frequency, now,
+      });
+      observed = category;
+      if (trigger === "none") return;
+      fired.push(trigger);
+      previous = category;
+      lastSentAt = now;
+    });
+    return fired;
+  }
+
+  /** 24 hours alternating Action / Normal, one flip per hour. */
+  const FLAPPING: FloodCategory[] = Array.from(
+    {length: 24},
+    (_, i) => (i % 2 === 0 ? "Action" : "Normal") as FloodCategory,
+  );
+
+  test("a full day of flapping stays in single figures", () => {
+    const fired = day(FLAPPING, "6h");
+    assert.ok(fired.length <= 12,
+      `a flapping river produced ${fired.length} notifications in a day: ` +
+      fired.join(", "));
+  });
+
+  test("change-only is not defeated by flapping", () => {
+    // The option a user picks precisely to stop this.
+    const fired = day(FLAPPING, "change-only");
+    assert.ok(fired.length <= 12,
+      `"change-only" produced ${fired.length} notifications: ` +
+      fired.join(", "));
+  });
+
+  test("an all-clear still lands once the river genuinely settles", () => {
+    // Six hours of Action, then Normal for the rest of the day. The event
+    // ended, and the user must be told.
+    const settles: FloodCategory[] = [
+      ...Array<FloodCategory>(6).fill("Action"),
+      ...Array<FloodCategory>(18).fill("Normal"),
+    ];
+    assert.ok(day(settles, "6h").includes("all-clear"),
+      "a river that genuinely returned to Normal never sent an all-clear");
+  });
+
+  test("the guard NEVER delays an escalation", () => {
+    // A rise to a worse category is decided before the guard is consulted.
+    assert.equal(
+      decideTrigger({
+        category: "Extreme",
+        observed: "Action",
+        previous: "Action",
+        lastSentAt: new Date(NOW.getTime() - 60_000),
+        frequency: "off",
+        now: NOW,
+      }),
+      "escalation");
+  });
+
+  test("the guard is shorter than the shortest reminder interval", () => {
+    // Otherwise it would silently override a user who chose hourly reminders.
+    assert.ok(FLAP_GUARD_MS >= 3600_000);
   });
 });

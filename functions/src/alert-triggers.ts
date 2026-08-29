@@ -47,6 +47,20 @@ export type AlertTrigger =
  */
 export type AlertFrequency = "hourly" | "6h" | "daily" | "change-only" | "off";
 
+/**
+ * Minimum quiet time between an entry and its all-clear, and vice versa.
+ *
+ * Entry and all-clear are event boundaries, not reminders, so they are not
+ * governed by the user's reminder interval — but they still need a floor, or a
+ * reach hovering on a threshold flips between them on every evaluation.
+ *
+ * Two hours: long enough that an hourly run cannot alternate, short enough
+ * that a genuine flood beginning two hours after one ended is still announced.
+ * A rise to a WORSE category is unaffected — escalation is decided before this
+ * is ever consulted.
+ */
+export const FLAP_GUARD_MS = 2 * 3600_000;
+
 /** The default when a user has expressed no preference for a reach. */
 export const DEFAULT_FREQUENCY: AlertFrequency = "6h";
 
@@ -96,9 +110,26 @@ export interface TriggerInput {
   /** The category this evaluation produced. */
   category: FloodCategory;
   /**
+   * The category we last SAW for this reach, whether or not we told the user.
+   *
+   * **Distinct from [previous], and the distinction is a safety property.**
+   * Independent review 2026-08-30 found that using the last NOTIFIED category
+   * for escalation made escalation unreachable for a muted river: nothing is
+   * ever sent, so nothing is ever recorded, so every evaluation reads as the
+   * start of an event and returns silence. A river muted while calm could
+   * climb Action -> Extreme without a word, while three lines of UI copy
+   * promised otherwise.
+   *
+   * Null only before the first evaluation.
+   */
+  observed: FloodCategory | null;
+  /**
    * The category of the last notification actually SENT for this user and
    * reach, or null when none was ever sent — or when the last send predates
    * this file and carried no category.
+   *
+   * Used for the all-clear rule: "it is over" only goes to someone who was
+   * told it started.
    */
   previous: FloodCategory | null;
   /** When that last notification was sent, or null. */
@@ -118,7 +149,7 @@ export interface TriggerInput {
  * @return {AlertTrigger} What to send.
  */
 export function decideTrigger(input: TriggerInput): AlertTrigger {
-  const {category, previous, lastSentAt, frequency, now} = input;
+  const {category, observed, previous, lastSentAt, frequency, now} = input;
 
   // Unknown means the ladder was incomplete — no thresholds, or a partial set.
   // It is not a category a user has ever been shown, so it can neither start
@@ -126,6 +157,7 @@ export function decideTrigger(input: TriggerInput): AlertTrigger {
   if (category === "Unknown") return "none";
 
   const wasElevated = previous !== null && isElevated(previous);
+  const sawElevated = observed !== null && isElevated(observed);
 
   if (!isElevated(category)) {
     // Back to Normal. Worth saying — "it is over" is news, and nothing sends
@@ -134,11 +166,42 @@ export function decideTrigger(input: TriggerInput): AlertTrigger {
     //
     // Suppressed by "off", because a muted stream should not speak at all
     // except to escalate.
-    if (wasElevated && frequency !== "off") return "all-clear";
-    return "none";
+    if (!wasElevated || frequency === "off") return "none";
+
+    // Dwell. An all-clear must not follow its own entry inside the user's
+    // interval.
+    //
+    // Independent review 2026-08-30: a reach whose forecast peak sits near its
+    // 2-year threshold alternates Action/Normal as each hourly run shifts the
+    // peak, and NEITHER entry nor all-clear consulted the interval. That is one
+    // notification an hour, alternating "Action Event" and "back to Normal" —
+    // twenty-four a day, six times the behaviour this phase set out to fix, and
+    // unstoppable even on "change-only", the option a user would pick to avoid
+    // exactly this.
+    if (lastSentAt !== null &&
+        now.getTime() - lastSentAt.getTime() < FLAP_GUARD_MS) {
+      return "none";
+    }
+    return "all-clear";
   }
 
   // Elevated from here down.
+
+  // Escalation FIRST, and against what we SAW.
+  //
+  // Ordering matters as much as the field. Entry used to come first and
+  // swallowed every rise on a muted river, because `previous` was null and the
+  // entry branch returns "none" when the stream is off. Escalation is the one
+  // thing no setting may suppress, so nothing may shadow it.
+  // Escalation FIRST, and against what we SAW.
+  //
+  // Ordering matters as much as the field. Entry used to come first and
+  // swallowed every rise on a muted river, because `previous` was null and the
+  // entry branch returns "none" when the stream is off. Escalation is the one
+  // thing no setting may suppress, so nothing may shadow it.
+  if (sawElevated && rank(category) > rank(observed as FloodCategory)) {
+    return "escalation";
+  }
 
   if (previous === null || !wasElevated) {
     // Entry. Always sent EXCEPT on a muted stream.
@@ -149,11 +212,21 @@ export function decideTrigger(input: TriggerInput): AlertTrigger {
     // off should be truly silent except escalation. A user who mutes a river is
     // saying "stop telling me about this one", and only the safety override
     // outranks that.
-    return frequency === "off" ? "none" : "entry";
+    if (frequency === "off") return "none";
+
+    // Same dwell on the way in: a re-entry must not follow an all-clear inside
+    // the guard, or the pair simply alternates.
+    if (lastSentAt !== null &&
+        now.getTime() - lastSentAt.getTime() < FLAP_GUARD_MS) {
+      return "none";
+    }
+    return "entry";
   }
 
   if (rank(category) > rank(previous)) {
-    // Escalation. Never suppressed, by anything.
+    // Reachable when `observed` is behind `previous` — a device that sent a
+    // notification but whose observation write did not land. Kept so the
+    // notified state alone can still surface a rise.
     return "escalation";
   }
 
