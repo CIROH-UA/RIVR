@@ -1107,6 +1107,40 @@ name, because a user's custom name for a favourite lives only in device
 `SharedPreferences` and is never written to Firestore. Jerson wants custom
 names synced so alerts can use them; scheduled AFTER this phase.
 
+### How alerting actually works, end to end
+
+Written out in full because it is the part of RIVR hardest to reconstruct from
+the code, and the part most worth explaining to someone who has not seen it.
+
+1. **A model publishes.** NOAA's National Water Model issues a new run; GEOGLOWS
+   issues one per UTC day. Neither tells us — an hourly probe watches for the
+   `referenceTime` to change (decision 6).
+2. **The store refreshes.** `storeRefreshHourly` (:20 past) compares what
+   upstream reports against what is stored and fetches ONLY the products whose
+   run advanced. If nothing advanced it does nothing at all, which is most
+   hours. GEOGLOWS has its own daily pass at 11:30 UTC (decision 8).
+3. **Alerts evaluate immediately afterwards**, in the same invocation, against
+   the documents just written. There is no separate schedule and no clock: if
+   the store wrote nothing, no evaluation happens and nobody is notified. This
+   is what takes time-from-publication-to-alert from up to six hours down to
+   under one.
+4. **Every favourited reach is classified** on the same 2/5/10/25-year ladder
+   the app uses — Normal, Action, Moderate, Major, Extreme — through code
+   pinned to the client's by a drift test (decision 13, guard 3). The alert and
+   the card cannot disagree about what to call the same water.
+5. **The trigger model decides whether that is news** (decision 19). The
+   category is compared against the last one this user was actually told about,
+   read back from `notification_logs`. Entry and escalation always send;
+   a continuing event reminds at the user's per-stream interval; a return to
+   Normal sends an all-clear.
+6. **The notification says how bad and how soon** (decision 20), because those
+   are the only two things a reader can act on.
+
+The cost story: alerts perform **zero** upstream fetches. Everything above is
+Firestore reads against documents the app is already using, so a user's alert
+and the number on their screen are the same value by construction rather than
+by coincidence.
+
 **Build.** `checkRiverAlerts` reads from the store rather than fetching, and
 evaluates when a new run lands rather than on a fixed clock. The four fixed
 Mountain-Time slots (6am / noon / 6pm / midnight) and the global
