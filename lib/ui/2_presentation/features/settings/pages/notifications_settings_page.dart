@@ -239,11 +239,15 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
     });
 
     try {
-      await GetIt.I<IUserSettingsService>().updateRiverAlertFrequency(
-        userId,
-        reachId,
-        frequency.wireValue,
-      );
+      // A null return means the write did not happen — updateRiverAlertFrequency
+      // returns null rather than throwing when the settings document cannot be
+      // read. Without this the row would show the new value and nothing would
+      // be saved, with no error anywhere.
+      final saved = await GetIt.I<IUserSettingsService>()
+          .updateRiverAlertFrequency(userId, reachId, frequency.wireValue);
+      if (saved == null) {
+        throw Exception('settings unavailable');
+      }
     } catch (e) {
       AppLogger.error(
         'NotificationsSettingsPage',
@@ -374,6 +378,12 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
                           RiverAlertFrequencySection(
                         favorites: favorites.favorites,
                         frequencies: _alertFrequencies,
+                        // What an unset river ACTUALLY gets, by the same rule
+                        // the server applies. Review caught the screen telling
+                        // every user "Every 6 hours" while the server used
+                        // "Daily" for them.
+                        defaultFrequency:
+                            AlertFrequency.defaultFor(_notificationFrequency),
                         onChanged: _updateRiverFrequency,
                         isEnabled: !_isUpdating,
                       ),

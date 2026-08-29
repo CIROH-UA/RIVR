@@ -331,6 +331,20 @@ describe("the frequency values are a cross-language contract", () => {
     }
   });
 
+  test("the two sides agree on the rule for an UNSET river", () => {
+    // This is the one that bit. `DEFAULT_FREQUENCY` is NOT what an unset river
+    // gets — `defaultFrequencyFor(notificationFrequency)` is — and until
+    // 2026-08-29 the app had no copy of that rule at all, so every row in the
+    // settings screen read "Every 6 hours" while the server used "daily" for
+    // the default-configured user. The screen stated a frequency nobody would
+    // receive.
+    const dart = readFileSync(DART, "utf8");
+    assert.match(dart,
+      /legacyFrequency == 1 \? AlertFrequency\.daily : AlertFrequency\.sixHourly/,
+      "the app's defaultFor rule no longer matches defaultFrequencyFor in " +
+      "notification-service.ts");
+  });
+
   test("the two sides agree on which value is the default", () => {
     const dart = readFileSync(DART, "utf8");
     assert.match(dart,

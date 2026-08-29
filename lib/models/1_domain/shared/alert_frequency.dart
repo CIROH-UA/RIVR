@@ -44,6 +44,20 @@ enum AlertFrequency {
   /// The app-wide default when a user has expressed no preference for a river.
   static const AlertFrequency defaultFrequency = AlertFrequency.sixHourly;
 
+  /// The effective default for a river the user has not set individually.
+  ///
+  /// **Mirrors `defaultFrequencyFor` in notification-service.ts** and must stay
+  /// mirrored: the server applies its own rule regardless of what this screen
+  /// shows, so a divergence means the settings screen states a frequency the
+  /// user will not actually receive. Review found exactly that — every row read
+  /// "Every 6 hours" while the server used "daily" for the default-configured
+  /// user, because this rule did not exist on the app side at all.
+  ///
+  /// [legacyFrequency] is the old global 1-4 setting, which no longer decides
+  /// WHEN anything is checked — only how often a user is reminded by default.
+  static AlertFrequency defaultFor(int legacyFrequency) =>
+      legacyFrequency == 1 ? AlertFrequency.daily : AlertFrequency.sixHourly;
+
   /// Parse a stored value, falling back to the default.
   ///
   /// Unrecognised values fall back rather than throwing: a preference written
@@ -70,14 +84,26 @@ enum AlertFrequency {
   ///
   /// Written as what the user will experience, not as what the system does.
   String get description => switch (this) {
-    AlertFrequency.hourly => 'A reminder every hour while it stays high',
-    AlertFrequency.sixHourly => 'A reminder every 6 hours while it stays high',
-    AlertFrequency.daily => 'One reminder a day while it stays high',
+    AlertFrequency.hourly => 'A reminder every hour while it stays flooded',
+    AlertFrequency.sixHourly => 'A reminder every 6 hours while it stays flooded',
+    AlertFrequency.daily => 'One reminder a day while it stays flooded',
     AlertFrequency.changeOnly =>
       'No reminders — only when it starts, worsens, or ends',
-    AlertFrequency.off => 'Silent, except if this river gets worse',
+    AlertFrequency.off =>
+      'No alerts for this river — unless it rises to a worse flood level',
   };
 
-  /// Short form for the settings row, e.g. "Every 6 hours".
-  String get shortLabel => label;
+  /// Short form for the settings row.
+  ///
+  /// Genuinely shorter than [label], not an alias for it. `CupertinoListTile`
+  /// lays `additionalInfo` out unconstrained and puts the title in an
+  /// `Expanded`, so a long value eats the river's name: on an iPhone SE,
+  /// "Only when it changes" left the name about one character and an ellipsis.
+  String get shortLabel => switch (this) {
+    AlertFrequency.hourly => 'Hourly',
+    AlertFrequency.sixHourly => '6 hours',
+    AlertFrequency.daily => 'Daily',
+    AlertFrequency.changeOnly => 'Changes only',
+    AlertFrequency.off => 'Off',
+  };
 }
