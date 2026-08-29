@@ -1142,15 +1142,32 @@ So there are two distinct failures, and this decision addresses one of them:
 
 | Failure | Detected by |
 |---|---|
-| The refresher stops writing | **write recency** — this decision |
-| The refresher writes stale content on time | **run currency** — NOT yet built |
+| The refresher stops writing | **write recency** — `assessProductFreshness` |
+| The refresher writes stale content on time | **run currency** — `assessRunCurrency` |
 
-Run currency means comparing each stored document's `runId` against the run
-upstream currently advertises. The ingredients are already in place —
-`checkStoreHealth` reads the probe, and every document carries a `runId` that
-`sampleStoredWindows` does not project — so this is a small addition, and it is
-the one that would have caught the incident that prompted the phase. It is
-recorded here as open.
+**Run currency, added the same day once the review exposed the gap.** It
+measures the age of the RUN rather than the age of the write. Every `runId` is
+an ISO instant — NWM uses the run's `referenceTime`, and GEOGLOWS's date-only
+`forecast_date` is widened to that day's 00Z by `normaliseForecastDate` — so
+the two sources are directly comparable and no probe comparison is needed.
+
+The caps come from measurements already in this repo:
+
+| Product | Cap | Why |
+|---|---|---|
+| `analysisAssimilation`, `shortRange` | 8 h | a five-hour NOAA stall is recorded here as normal; tighter would cry wolf on a good day |
+| `mediumRange` | 24 h | nominally 6-hourly, but the 12Z run was observed landing at 21:20Z |
+| `longRange` | 36 h | same, with a worse observed lag |
+| `geoglowsForecast` | 36 h | one run per UTC day stamped 00Z, published 10:15-10:30 UTC, so a legitimate run reaches ~34.5 h just before the next lands |
+
+Products with no entry are **skipped, never defaulted** — the near-static
+products carry no run identity at all, and inheriting another product's cadence
+is exactly how the hold cap called a healthy store down within a minute of
+reaching production.
+
+Both dimensions are logged side by side, because the pair is what makes a
+healthy verdict checkable: punctual writes carrying yesterday's water look
+perfect in one list and wrong in the other.
 
 `assessProductFreshness` now judges the newest document PER PRODUCT against
 that product's own cap.
@@ -1289,9 +1306,9 @@ that could stick on after data was restored, one that stayed silent on a failed
 cold-start fetch, and a global latch that let one river's success speak for
 another's failure).
 
-What remains before this phase can be called done: run-currency monitoring
-(decision 21), marking held documents as held so guard 3 can be closed
-(decision 22), and a re-review.
+Run-currency monitoring has since been built (decision 21). What remains:
+marking held documents as held so guard 3 can be closed (decision 22), and a
+re-review.
 
 ### How alerting actually works, end to end
 
