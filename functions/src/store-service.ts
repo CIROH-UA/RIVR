@@ -17,6 +17,7 @@ import * as logger from "firebase-functions/logger";
 import {
   FetchedProduct,
   PRODUCTS_BY_SOURCE,
+  StoreRunAssertionError,
   StoreRunReport,
   runStoreUpdate,
 } from "./store-run.js";
@@ -35,15 +36,24 @@ import {
   newUsage,
   readAllUsers,
   readLatestProbe,
-  sampleStoredRun,
+  sampleLiveStoredRuns,
+  sampleStoredWindows,
+  applyWindowExtensions,
 } from "./store-firestore.js";
+import {planWindowExtensions} from "./store-window.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
-import {ForecastProductId, ForecastSourceId} from "./store-keys.js";
+import {StoreDocument, isRunNewer} from "./store-document.js";
+import {
+  ForecastProductId,
+  ForecastSourceId,
+  storageKey,
+} from "./store-keys.js";
 import {canFetch} from "./store-upstream.js";
 import {
   WorkList,
   assertWorkListConsistent,
   deriveWorkList,
+  liveDocumentIdsFor,
 } from "./store-work-list.js";
 
 /** Products the store keeps fresh on the hourly cycle. */
@@ -62,6 +72,100 @@ export const MANAGED_PRODUCTS: readonly ForecastProductId[] = [
  */
 export const GEOGLOWS_PRODUCTS: readonly ForecastProductId[] =
   ["geoglowsForecast"];
+
+/**
+ * The near-static NWM products: a river's name and its flood thresholds.
+ *
+ * Kept OUT of MANAGED_PRODUCTS deliberately. They carry no run identity, so
+ * the probe has nothing to compare and `decideTriggers` could never fire them;
+ * and they hold a 30-day freshness window, so putting them on the hourly cycle
+ * would refetch an unchanging river name 24 times a day per favourite.
+ *
+ * They exist in the store because Phase 5 guard 1 is "a favourite renders with
+ * ZERO upstream calls from the device", and every surface that renders a
+ * favourite reads its name and its thresholds. Without these two products the
+ * hourly cycle keeps the flow numbers fresh while each favourite still makes
+ * two device-side calls to render at all — the store present, and the guard
+ * unreachable. Phase 5 review round 1 found exactly that.
+ */
+export const STATIC_PRODUCTS: readonly ForecastProductId[] = [
+  "reachMetadata",
+  "returnPeriods",
+];
+
+/**
+ * Refresh a static product this long before it expires.
+ *
+ * Not zero. A document refreshed only once already stale leaves a window in
+ * which every device sees it as expired and falls back to fetching upstream —
+ * silently undoing guard 1 for a day, once a month, with nothing in any log to
+ * say so. Seven days of lead on a 30-day window means the daily pass has 7
+ * chances to succeed before any device notices.
+ */
+export const STATIC_REFRESH_LEAD_MS = 7 * 24 * 3600_000;
+
+/**
+ * Whether a static document must be refetched now.
+ *
+ * Pure, and separated from the run so the decision is testable without
+ * Firestore — the same reason deriveWorkList, planWrites and shouldWrite are
+ * pure. It is the whole cost story of the daily pass: return false and the
+ * pass performs a read and no fetch.
+ *
+ * Refetches when there is no document, when the window is missing or
+ * unparseable, or when it expires within {@link STATIC_REFRESH_LEAD_MS}. An
+ * unreadable window is NOT evidence of freshness: trusting it would leave a
+ * document that can never be renewed, and the device would fall back to
+ * fetching upstream forever with nothing in any log.
+ *
+ * @param {StoreDocument | null} existing - The stored document, if any.
+ * @param {Date} now - Reference instant.
+ * @return {boolean} True when the product should be refetched.
+ */
+export function staticRefreshDue(
+  existing: StoreDocument | null,
+  now: Date
+): boolean {
+  const validUntil = existing?.window?.validUntil;
+  if (typeof validUntil !== "string") return true;
+  const expiresAt = Date.parse(validUntil);
+  if (Number.isNaN(expiresAt)) return true;
+  return expiresAt <= now.getTime() + STATIC_REFRESH_LEAD_MS;
+}
+
+/**
+ * Every planned static write ended as either written or failed.
+ *
+ * Extracted so it can be TESTED. Review round 7's objection was not that the
+ * assertion was wrong — it was that reverting it left the suite green, and the
+ * block that looked like its coverage ("a run that loses work cannot report
+ * success") exercises `assertStoreRunConsistent`, a different function this
+ * path does not call. An assertion nothing can fail is decoration.
+ *
+ * It exists because the first deployed run of `storeStaticDaily` reported "ok"
+ * while failing 3 of 29 reaches, caught only because a human counted the
+ * documents back out of Firestore. CLAUDE.md's non-negotiable for these
+ * pipelines: they fail silently, and exit status has never caught one.
+ *
+ * @param {number} planned - Writes the run set out to make.
+ * @param {number} written - Writes that landed.
+ * @param {number} failed - Reaches that failed.
+ * @throws {StoreRunAssertionError} When the outcomes do not account for the
+ *   plan.
+ */
+export function assertStaticAccounting(
+  planned: number,
+  written: number,
+  failed: number
+): void {
+  if (written + failed !== planned) {
+    throw new StoreRunAssertionError(
+      `static refresh planned ${planned} writes but accounted for ` +
+      `${written} written + ${failed} failed — the run lost ` +
+      "work it never reported"
+    );
+  }
+}
 
 /** Upstream fetchers, injected so nothing here reaches NOAA during tests. */
 export interface UpstreamIo {
@@ -93,6 +197,65 @@ async function buildWorkList(usage: FirestoreUsage): Promise<WorkList> {
 }
 
 /**
+ * Re-stamp any stored window that would end before the refresher's next turn.
+ *
+ * Guard 1 says "no new run means zero FETCHES" — it does not say zero writes,
+ * and this performs none of the former. What it costs is one field update per
+ * held document per hour, bounded by the favourite count; what it buys is the
+ * store actually being used during the stretch between refresher runs, which
+ * on 2026-08-28 was 15 minutes of every hour for hourly products and most of
+ * the day for long range.
+ *
+ * Failure here is logged and swallowed: an un-extended window is exactly the
+ * behaviour we had before, so this must never be able to fail a refresh run.
+ *
+ * @param {readonly ForecastProductId[]} products - Products to sweep.
+ * @param {FirestoreUsage} usage - Counters to increment.
+ * @return {Promise<void>} Nothing; outcomes are logged.
+ */
+async function extendWindowCoverage(
+  products: readonly ForecastProductId[],
+  usage: FirestoreUsage
+): Promise<void> {
+  if (products.length === 0) return;
+  try {
+    const samples = await sampleStoredWindows(products, usage);
+    const plan = planWindowExtensions(samples, new Date());
+    const updated = await applyWindowExtensions(plan.extend, usage);
+
+    logger.info("🕰️ store refresh: window coverage", {
+      products,
+      sampled: samples.length,
+      extended: updated,
+      alreadyCovered: plan.covered,
+      abandoned: plan.abandoned.length,
+      malformed: plan.malformed.length,
+    });
+
+    // Abandoned means upstream has been quiet past what "nothing changed" can
+    // explain. Devices fall back to live and users still see numbers, so this
+    // is not an outage — but it is the signal that upstream stopped, and it
+    // must not be silent. CLAUDE.md: these pipelines fail quietly.
+    if (plan.abandoned.length > 0) {
+      logger.error("store windows past their hold cap; letting them expire", {
+        count: plan.abandoned.length,
+        sample: plan.abandoned.slice(0, 10),
+      });
+    }
+    if (plan.malformed.length > 0) {
+      logger.error("store documents with an unreadable window", {
+        count: plan.malformed.length,
+        sample: plan.malformed.slice(0, 10),
+      });
+    }
+  } catch (error) {
+    logger.error("window extension failed; windows left as they were", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * The hourly refresh.
  *
  * @param {UpstreamIo} io - Upstream fetchers.
@@ -117,8 +280,16 @@ export async function runStoreRefresh(
     };
   }
 
-  const stored: Partial<Record<ForecastProductId, string | null>> = {};
-  for (const p of candidates) stored[p] = await sampleStoredRun(p, usage);
+  // The work list is built BEFORE the trigger decision, not after, because the
+  // decision is only meaningful about documents this run could update. See
+  // sampleLiveStoredRuns: orphaned documents from unfavourited reaches froze
+  // the oldest sampled run in the past and made every hour look like a new
+  // publication.
+  const workList = await buildWorkList(usage);
+  const liveDocumentIds = liveDocumentIdsFor(workList, candidates);
+
+  const stored = await sampleLiveStoredRuns(
+    candidates, liveDocumentIds, usage);
 
   const decision = decideTriggers(probe, stored, candidates);
   logger.info("🧭 store refresh: trigger decision", {
@@ -127,6 +298,9 @@ export async function runStoreRefresh(
   });
 
   if (decision.triggered.length === 0) {
+    // Nothing advanced, so nothing is rewritten — but "nothing advanced" is
+    // exactly the case where windows keep ending under correct documents.
+    await extendWindowCoverage(candidates, usage);
     return {
       ran: false,
       reason: "nothing advanced upstream",
@@ -135,7 +309,6 @@ export async function runStoreRefresh(
     };
   }
 
-  const workList = await buildWorkList(usage);
   // The probe's runs go in so guard 3 can tell a lagging reach from a settled
   // one — see lagsProbe.
   // Remapped, for the same reason decideTriggers remaps: handing the raw
@@ -146,6 +319,17 @@ export async function runStoreRefresh(
 
   const report = await runStoreUpdate(
     workList, decision.triggered, firestoreDeps(io, usage), probeRuns);
+
+  // AFTER the update, and over every candidate rather than only the products
+  // that did not advance. A first attempt ran this only for un-advanced
+  // products and would have missed the live case that exposed it: on
+  // 2026-08-29 all four products were triggered, every long-range fetch then
+  // failed because NOAA served no `longRange` section at all, and those
+  // documents were left to expire holding the only long-range data that
+  // existed. Triggered-but-failed leaves a window ending just as surely as
+  // never-triggered does. Documents this run rewrote are already covered, so
+  // sweeping them costs a read and no write.
+  await extendWindowCoverage(candidates, usage);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 store refresh: Firestore usage vs documented free tier", {
@@ -258,8 +442,59 @@ export async function runGeoglowsRefresh(
       usage};
   }
 
+  // Probe one reach before fanning out.
+  //
+  // GEOGLOWS publishes nothing the NWM probe can sample, so "has the run
+  // advanced?" is unanswerable without asking upstream. Asking with ONE reach
+  // rather than all of them is the same bargain the NWM path makes: a run that
+  // finds nothing new costs one fetch instead of the whole set.
+  //
+  // This replaced a fixed 01:30 daily fetch, which never held the current
+  // day's run — see GEOGLOWS_REFRESH_MINUTE for the measurement. Running
+  // hourly and gated on the date means the run lands whenever GEOGLOWS
+  // actually publishes, without anyone having to know when that is.
+  const liveIds = liveDocumentIdsFor(workList, GEOGLOWS_PRODUCTS);
+  const stored = await sampleLiveStoredRuns(GEOGLOWS_PRODUCTS, liveIds, usage);
+  const held = stored.geoglowsForecast ?? null;
+
+  const probeReach = workList.entries[0];
+  let upstream: string | null = null;
+  try {
+    const probed = await io.fetchProduct(
+      probeReach.source, probeReach.reachId, "geoglowsForecast");
+    upstream = probed.referenceTime;
+  } catch (error) {
+    // Same rule as the NWM probe: a failed probe is not evidence that
+    // anything advanced, and fanning out on it would turn every upstream
+    // wobble into a full refetch.
+    logger.warn("🌍 GEOGLOWS probe failed; not fanning out", {
+      reachId: probeReach.reachId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    return {ran: false, reason: "probe failed", report: null, usage};
+  }
+
+  logger.info("🧭 GEOGLOWS refresh: run check", {
+    probeReach: probeReach.reachId, upstream, held,
+  });
+
+  if (upstream !== null && held !== null && !isRunNewer(upstream, held)) {
+    // The common case, most hours of the day. The stored run is still the
+    // newest that exists, so the windows get re-verified and nothing else is
+    // fetched.
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    return {
+      ran: false,
+      reason: `unchanged at ${held}`,
+      report: null,
+      usage,
+    };
+  }
+
   const report = await runStoreUpdate(
     workList, GEOGLOWS_PRODUCTS, firestoreDeps(io, usage));
+  await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 GEOGLOWS refresh: Firestore usage vs free tier", {
@@ -267,7 +502,7 @@ export async function runGeoglowsRefresh(
     written: report.written,
     failed: report.failed,
   });
-  return {ran: true, reason: "daily GEOGLOWS run", report, usage};
+  return {ran: true, reason: `advanced to ${upstream}`, report, usage};
 }
 
 export interface GcOutcome {
@@ -275,6 +510,145 @@ export interface GcOutcome {
   deleted: number;
   refused: string | null;
   usage: FirestoreUsage;
+}
+
+/**
+ * The daily refresh of the near-static products (Phase 5 guard 1).
+ *
+ * Unlike the hourly refresh this is NOT probe-driven — there is no run to
+ * advance — so "has it changed?" is unanswerable without fetching, and
+ * fetching every reach every day to find out is the cost guard 1 forbids.
+ * Instead the decision is made on the stored freshness window: a document is
+ * refetched only when it is missing, unreadable, or within
+ * {@link STATIC_REFRESH_LEAD_MS} of expiring. On a steady state that is one
+ * Firestore READ per reach per product per day and no fetch at all.
+ *
+ * Read cost, stated in full rather than rounded in our favour: 2 reads per
+ * favourited reach per day for the freshness checks, PLUS one `readAllUsers`
+ * scan per run (~18 documents today), PLUS a second read of each DUE document
+ * inside `runStoreUpdate`'s supersession check. Steady state at the ADR's
+ * current scale is under a hundred reads a day against a 50,000/day free tier.
+ * An earlier version of this sentence claimed the 2-per-reach figure was the
+ * whole cost; review round 3 pointed out it was the whole cost only of the
+ * loop directly below it.
+ *
+ * NWM only. GEOGLOWS reaches carry no NOAA metadata or NWM thresholds; its
+ * forecast payload already carries its own return periods.
+ *
+ * @param {UpstreamIo} io - Upstream fetchers.
+ * @return {Promise<RefreshOutcome>} What happened.
+ */
+export async function runStoreStaticRefresh(
+  io: UpstreamIo
+): Promise<RefreshOutcome> {
+  const usage = newUsage();
+  const deps = firestoreDeps(io, usage);
+  const now = deps.now();
+
+  const workList = await buildWorkList(usage);
+  const nwm = workList.entries.filter((e) => e.source === "nwm");
+
+  if (nwm.length === 0) {
+    return {
+      ran: false,
+      reason: "no NWM favourites; nothing static to refresh",
+      report: null,
+      usage,
+    };
+  }
+
+  const merged: StoreRunReport = {
+    productsTriggered: [],
+    planned: 0,
+    written: 0,
+    skippedSameRun: 0,
+    skippedLagging: 0,
+    failed: 0,
+    reachesToRetry: [],
+    results: [],
+    fetches: 0,
+  };
+
+  for (const product of STATIC_PRODUCTS) {
+    if (!canFetch("nwm", product)) continue;
+
+    const due: typeof nwm = [];
+    for (const entry of nwm) {
+      const id = storageKey("nwm", entry.reachId, product);
+      const existing = await deps.readExisting(id);
+      if (staticRefreshDue(existing, now)) due.push(entry);
+    }
+
+    if (due.length === 0) {
+      logger.info("⏭️ static refresh: all current", {
+        product, reaches: nwm.length,
+      });
+      continue;
+    }
+
+    const scoped: WorkList = {
+      entries: due,
+      summary: {
+        ...workList.summary,
+        distinctReaches: due.length,
+        bySource: {nwm: due.length, geoglows: 0},
+      },
+    };
+
+    const report = await runStoreUpdate(scoped, [product], deps);
+
+    merged.productsTriggered.push(product);
+    merged.planned += report.planned;
+    merged.written += report.written;
+    merged.skippedSameRun += report.skippedSameRun;
+    merged.skippedLagging += report.skippedLagging;
+    merged.failed += report.failed;
+    merged.fetches += report.fetches;
+    merged.results.push(...report.results);
+    for (const r of report.reachesToRetry) {
+      if (!merged.reachesToRetry.includes(r)) merged.reachesToRetry.push(r);
+    }
+  }
+
+  // Counts, asserted — not an exit status. CLAUDE.md's non-negotiable for
+  // these pipelines is that they fail SILENTLY, and the first deployed run of
+  // this very function proved it again: it reported "ok" while failing 3 of 29
+  // reaches, caught only because a human read the document counts back out of
+  // Firestore. Review round 6 pointed out the fetcher was fixed and the
+  // REPORTING hole that let it pass was not.
+  assertStaticAccounting(merged.planned, merged.written, merged.failed);
+
+  // A failure is never an INFO-level detail here: every one is a reach whose
+  // river name or flood thresholds are now up to 30 days stale on device.
+  if (merged.failed > 0) {
+    logger.error("🚨 static refresh FAILED for some reaches", {
+      failed: merged.failed,
+      planned: merged.planned,
+      written: merged.written,
+      reaches: merged.results
+        .filter((r) => r.outcome === "failed")
+        .map((r) => r.documentId),
+    });
+  }
+
+  logger.info("🪨 static refresh complete", {
+    products: merged.productsTriggered,
+    planned: merged.planned,
+    written: merged.written,
+    failed: merged.failed,
+    reads: usage.reads,
+  });
+
+  if (merged.planned === 0) {
+    return {
+      ran: false,
+      reason: "every static document is still current",
+      report: merged,
+      usage,
+    };
+  }
+  return {ran: true, reason: "static products due for refresh", report: merged,
+    usage};
 }
 
 /**

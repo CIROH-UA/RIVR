@@ -11,6 +11,10 @@ import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_coordinator.dart';
+import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 import 'package:rivr/services/4_infrastructure/shared/error_service.dart';
 import 'package:rivr/services/5_injection/dependency_container.dart';
 import 'package:provider/provider.dart';
@@ -85,6 +89,11 @@ Future<void> main() async {
   // and the service falls back to deriving the id from today's date.
   unawaited(GetIt.I<FloodTilesetService>().initialize());
 
+  // ADR 0011 Phase 5's kill switch. Same rule: startup never waits on the
+  // network. Until it resolves the switch reads its default (false), so the
+  // app takes the live path — exactly today's behaviour.
+  unawaited(GetIt.I<StoreReadSwitch>().initialize());
+
   // Catch Flutter framework errors (widget build failures, layout errors, etc.)
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -116,9 +125,28 @@ class RivrApp extends StatefulWidget {
   State<RivrApp> createState() => _RivrAppState();
 }
 
-class _RivrAppState extends State<RivrApp> {
+class _RivrAppState extends State<RivrApp> with WidgetsBindingObserver {
   bool _hasSeenOnboarding = true; // Default true so failure skips onboarding
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// Owned here rather than created inside MultiProvider, because the ADR 0011
+  /// store coordinator has to follow it and therefore needs a reference. Owning
+  /// it also means owning its disposal — see [dispose].
+  final FavoritesProvider _favorites = FavoritesProvider();
+
+  /// ADR 0011 Phase 5. Reads the cloud store for favourited reaches when the
+  /// kill switch allows it.
+  ///
+  /// Released on [AppLifecycleState.detached], NOT in [dispose]. This is the
+  /// root widget passed to `runApp`, and Flutter never disposes it — the
+  /// process is killed instead — so a `dispose` that claimed to release
+  /// listeners would be describing a path that does not run. Review round 2
+  /// found exactly that claim here.
+  ///
+  /// Within a session the releases that actually matter are elsewhere and are
+  /// tested: sign-out (`AuthProvider._detachStoreListeners`), the kill switch
+  /// turning off, and a changed favourite set.
+  StoreReadCoordinator? _storeReads;
 
   @override
   void initState() {
@@ -128,6 +156,54 @@ class _RivrAppState extends State<RivrApp> {
     // Provide the navigator key to the FCM service so notification taps
     // can route to the relevant forecast page.
     GetIt.I<IFCMService>().navigatorKey = _navigatorKey;
+
+    _storeReads = StoreReadCoordinator(
+      subscriptions: GetIt.I<StoreSubscriptionService>(),
+      readSwitch: GetIt.I<StoreReadSwitch>(),
+      cache: GetIt.I<IRiverDataCache>(),
+      favouritesListenable: _favorites,
+      favourites: () => [
+        for (final f in _favorites.favorites)
+          (source: f.source, reachId: f.reachId),
+      ],
+    );
+
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // `detached` is RESUMABLE on Android, so NOTHING here may be terminal.
+    //
+    // Round 5, B2: this called `_storeReads.dispose()`, which disposes the
+    // shared StoreSubscriptionService singleton — permanently, since
+    // `initState` does not run again. After a detached -> resumed, Phase 5 was
+    // dead for the rest of the process and the kill switch could not turn it
+    // back on. The comment right below already explained that exact hazard for
+    // the StoreReadSwitch and did not apply the same reasoning one line up.
+    //
+    // `detach()` releases every listener and stays usable; `resumed` puts them
+    // back. The listeners die with the process anyway, so releasing them is
+    // the only thing this hook was ever protecting.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_storeReads?.sync());
+      return;
+    }
+    if (state != AppLifecycleState.detached) return;
+    unawaited(_storeReads?.release());
+
+  }
+
+  @override
+  void dispose() {
+    // Flutter does not dispose the root widget, so this runs only in tests
+    // that pump RivrApp directly. Kept correct rather than removed: it is the
+    // honest teardown for those, and the lifecycle observer above is what
+    // covers the real app.
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_storeReads?.dispose());
+    _favorites.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeServices() async {
@@ -149,7 +225,7 @@ class _RivrAppState extends State<RivrApp> {
       providers: [
         ChangeNotifierProvider(create: (context) => AuthProvider()),
         ChangeNotifierProvider(create: (context) => ReachDataProvider()),
-        ChangeNotifierProvider(create: (context) => FavoritesProvider()),
+        ChangeNotifierProvider<FavoritesProvider>.value(value: _favorites),
         ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
       ],
       child: CupertinoApp(

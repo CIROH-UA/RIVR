@@ -19,8 +19,14 @@ import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
+import 'package:rivr/services/1_contracts/shared/i_reach_cache_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
 import 'package:rivr/services/5_injection/forecast_dependencies.dart';
+import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_backed_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 
 class _StubUnit implements IFlowUnitPreferenceService {
   @override
@@ -38,14 +44,27 @@ class _StubNoaa implements INoaaApiService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// Registered by a different setup function in production; the Phase 5 wiring
+/// tests resolve the whole SourceRegistry, which reaches it through
+/// IForecastService.
+class _StubReachCache implements IReachCacheService {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
 void main() {
   final sl = GetIt.instance;
 
-  setUp(() {
-    sl.reset();
+  // AWAITED, both of them. `GetIt.reset()` returns a Future and disposes the
+  // singletons it created; the Phase 5 switch's dispose is async. Unawaited,
+  // the reset finished DURING the next test and wiped the registration this
+  // setUp had just made — which surfaced as "Error while creating
+  // INoaaApiService" in a test that never touches it.
+  setUp(() async {
+    await sl.reset();
     sl.registerLazySingleton<IFlowUnitPreferenceService>(() => _StubUnit());
   });
-  tearDown(() => sl.reset());
+  tearDown(() async => sl.reset());
 
   test('the geocoder is registered and resolvable', () {
     setupForecastDependencies();
@@ -98,6 +117,68 @@ void main() {
       expect(identical(sl<IRiverDataCache>(), sl<IRiverDataCache>()), isTrue,
           reason: 'a factory hands the pinner, the clearer and the repository '
               'three different caches — pins protect nothing anyone reads');
+    });
+  });
+
+  // ADR 0011 Phase 5, review round 3, non-blocking 1 — the FAKE GUARD.
+  //
+  // Every Phase 5 object was well tested in isolation, and NOTHING asserted
+  // any of them was installed. The reviewer unwrapped StoreBackedDataSource
+  // here and registered a bare NwmDataSource — deleting the entire read path —
+  // and all 1136 tests passed. The pieces were guarded; the wiring was not.
+  group('the Phase 5 read path is actually wired in', () {
+    setUp(() {
+      sl.registerLazySingleton<IReachCacheService>(() => _StubReachCache());
+    });
+
+    test('every registered source is store-backed', () {
+      setupForecastDependencies();
+
+      final registry = sl<SourceRegistry>();
+      for (final src in [ForecastSource.nwm, ForecastSource.geoglows]) {
+        expect(registry.forSource(src), isA<StoreBackedDataSource>(),
+            reason: 'unwrapped, $src goes straight to upstream and guard 1 — '
+                'the phase\'s central guard — is silently off with every '
+                'other test still green');
+      }
+    });
+
+    test('the wrapper keeps each source\'s identity', () {
+      setupForecastDependencies();
+
+      final registry = sl<SourceRegistry>();
+      // If the wrapper did not delegate `source`, the registry would route
+      // both networks to whichever it happened to build first.
+      expect(registry.forSource(ForecastSource.nwm).source,
+          ForecastSource.nwm);
+      expect(registry.forSource(ForecastSource.geoglows).source,
+          ForecastSource.geoglows);
+    });
+
+    test('the switch and the subscription service are single instances', () {
+      setupForecastDependencies();
+
+      expect(identical(sl<StoreReadSwitch>(), sl<StoreReadSwitch>()), isTrue,
+          reason: 'two switches means the one main() initialises is not the '
+              'one the sources read, and the kill switch never fires');
+      expect(
+          identical(
+              sl<StoreSubscriptionService>(), sl<StoreSubscriptionService>()),
+          isTrue,
+          reason: 'two subscription services hold two sets of listeners and '
+              'only one is ever detached');
+    });
+
+    test('the whole graph resolves without an initialised Firebase app', () {
+      // Not incidental. These types used to resolve FirebaseRemoteConfig and
+      // FirebaseFirestore in their CONSTRUCTORS, which throws with no Firebase
+      // app — so the production wiring could not be exercised by any plain
+      // unit test, which is precisely how it stayed unguarded.
+      setupForecastDependencies();
+
+      expect(() => sl<SourceRegistry>(), returnsNormally);
+      expect(() => sl<StoreReadSwitch>(), returnsNormally);
+      expect(() => sl<StoreSubscriptionService>(), returnsNormally);
     });
   });
 }

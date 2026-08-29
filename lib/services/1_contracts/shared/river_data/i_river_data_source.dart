@@ -18,10 +18,24 @@ class SourceFetchResult {
   /// stored data, without re-deriving anything from the network).
   final String? runId;
 
+  /// The freshness window this value ALREADY carries, when the source knows it
+  /// better than the repository can compute it.
+  ///
+  /// Normally null: a live fetch happened now, so the repository derives the
+  /// window from the source's publish schedule and the read clock. But a value
+  /// served from the ADR 0011 cloud store was fetched by the server at some
+  /// earlier time and carries the window the server stamped. Recomputing it
+  /// from the READ clock silently extends it — for the 30-day static products
+  /// a name fetched 29 days ago would be given another 30, so the same
+  /// document has two different expiries depending on which path served it.
+  /// Review round 3, non-blocking 5.
+  final DateTime? validUntil;
+
   const SourceFetchResult({
     required this.payload,
     required this.unit,
     this.runId,
+    this.validUntil,
   });
 }
 

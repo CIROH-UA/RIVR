@@ -71,8 +71,93 @@ class RiverDataRepository implements IRiverDataRepository {
     return _cache.listenable(key);
   }
 
+  /// Accept a value pushed in from outside (the ADR 0011 cloud store).
+  ///
+  /// **Supersession, mirroring the server's own `shouldWrite`** (Phase 4
+  /// guard 6, "overlapping runs cannot write backwards"). Round 4, B3: this
+  /// was an unconditional `_cache.put`, so a store document carrying an OLDER
+  /// run replaced a fresher live-path value and `read` then served the older
+  /// one — the user watching the flow go backwards. It is reachable two ways:
+  /// the initial snapshot on attach delivers every watched document while
+  /// `FavoritesProvider`'s 500 ms refresh-all routinely lands first, and in
+  /// steady state between :00 and :20 past the hour the store still holds the
+  /// previous run. The server refuses exactly this write; the client accepted
+  /// it.
+  ///
+  /// An EXPIRED entry is refused too. Ingesting one would put a value in the
+  /// cache that `read` immediately treats as stale and revalidates upstream —
+  /// a guaranteed network call caused by the store, which is the opposite of
+  /// what the store is for. `StoreBackedDataSource` already refuses expired
+  /// documents at the other door; this closes the pair.
+  /// Serialises [ingest] per key. Round 5, non-blocking 1: ingest became a
+  /// read-modify-write (get, compare runs, put) and `_onSnapshot` fires them
+  /// unawaited per document, so two snapshots for the same key could both read
+  /// the old value and the OLDER write could land last — reintroducing exactly
+  /// the backwards-walk the supersession check exists to stop.
+  final Map<String, Future<void>> _ingesting = {};
+
   @override
-  Future<void> ingest(RiverDataEntry entry) => _cache.put(entry);
+  Future<void> ingest(RiverDataEntry entry) {
+    final k = entry.key.storageKey;
+    final chained = (_ingesting[k] ?? Future<void>.value())
+        .then((_) => _ingestLocked(entry));
+    // Kept separately from `chained`: the map holds the error-swallowing
+    // wrapper so one bad ingest cannot poison the chain, while the CALLER gets
+    // the real future. Round 6 found the previous cleanup compared the wrapper
+    // with `chained` — never identical — so the entry was never removed and
+    // the map grew one completed chain per key for the process lifetime. Small
+    // and bounded, but it was dead code that read as live.
+    final guarded = chained.catchError((Object _) {});
+    _ingesting[k] = guarded;
+    unawaited(guarded.whenComplete(() {
+      if (identical(_ingesting[k], guarded)) _ingesting.remove(k);
+    }));
+    return chained;
+  }
+
+  Future<void> _ingestLocked(RiverDataEntry entry) async {
+    if (!entry.window.validUntil.isAfter(_now().toUtc())) {
+      AppLogger.info(
+        _tag,
+        'ignoring expired ingest for ${entry.key.storageKey}',
+      );
+      return;
+    }
+
+    final existing = await _cache.get(entry.key);
+    if (!_supersedes(entry, existing)) {
+      AppLogger.info(
+        _tag,
+        'ignoring ingest for ${entry.key.storageKey}: run ${entry.runId} does '
+        'not supersede ${existing?.runId}',
+      );
+      return;
+    }
+    await _cache.put(entry);
+  }
+
+  /// Whether [incoming] may replace [existing]. Same ordering the server uses.
+  static bool _supersedes(RiverDataEntry incoming, RiverDataEntry? existing) {
+    if (existing == null) return true;
+
+    final had = existing.runId;
+    final has = incoming.runId;
+
+    // Both identified: only a strictly newer run wins. Equal runs are the same
+    // data, so rewriting would churn observers for nothing.
+    if (had != null && has != null) return _isRunNewer(has, had);
+    // Losing run identity loses the ability to order anything afterwards.
+    if (had != null && has == null) return false;
+    return true;
+  }
+
+  static bool _isRunNewer(String candidate, String current) {
+    final a = DateTime.tryParse(candidate);
+    final b = DateTime.tryParse(current);
+    if (a != null && b != null) return a.isAfter(b);
+    // Non-ISO run formats (GEOGLOWS uses a date string) still order sensibly.
+    return candidate.compareTo(current) > 0;
+  }
 
   Future<RiverDataEntry> _fetchAndCache(RiverDataKey key) {
     return _inFlight.putIfAbsent(key.storageKey, () {
@@ -92,7 +177,12 @@ class RiverDataRepository implements IRiverDataRepository {
       key: key,
       window: FreshnessWindow(
         fetchedAt: now,
-        validUntil: source.validUntil(key.product, now),
+        // The source's own window wins when it has one. Only the cloud store
+        // supplies it, and only because its value was fetched earlier by the
+        // server: recomputing from the read clock would extend the server's
+        // expiry every time a device read it. Everything else passes null and
+        // gets the publish-aligned window as before.
+        validUntil: result.validUntil ?? source.validUntil(key.product, now),
       ),
       unit: result.unit,
       runId: result.runId,

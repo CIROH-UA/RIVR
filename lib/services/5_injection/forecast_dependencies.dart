@@ -17,6 +17,9 @@ import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.d
 import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
 import 'package:rivr/services/4_infrastructure/river_data/river_data_repository.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_backed_data_source.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_read_switch.dart';
+import 'package:rivr/services/4_infrastructure/river_data/store_subscription_service.dart';
 
 void setupForecastDependencies() {
   final sl = GetIt.instance;
@@ -63,17 +66,47 @@ void setupForecastDependencies() {
   // one entry here + an IRiverDataSource impl. Consumed by the
   // RiverDataRepository, which the map sheet, both forecast-page branches and
   // the weekly outlook all read through as of ADR 0011 Phase 1.
+  //
+  // ADR 0011 Phase 5: each source is WRAPPED so a favourite is served from the
+  // cloud store instead of upstream. This wrapping is what makes guard 1 — "a
+  // favourite renders with zero upstream calls from the device" — structural
+  // rather than a race. Phase 5's first implementation pushed store documents
+  // into the shared cache and relied on the repository finding them fresh, but
+  // the repository ALSO revalidates upstream on a stale entry and fetches on a
+  // miss, and nothing arbitrated which landed first. Review round 2.
+  //
+  // The wrapper is transparent: same ForecastSource, same supportedProducts,
+  // same validUntil.
+  //
+  // Guard 7 is "values match what the old path produced, field by field", and
+  // there is ONE raw difference: the server writes `formattedLocation: null`
+  // while the live path writes `ReachData.formattedLocation`, which is '' when
+  // city and state are unknown. It is not observable — every consumer gates on
+  // emptiness — and store_backed_data_source_test's "guard 7" group asserts
+  // that rather than asserting a raw equality no screen could render. An
+  // earlier version of this comment claimed flatly that nothing downstream can
+  // tell, which was an assertion with no test behind it (round 5).
   sl.registerLazySingleton<SourceRegistry>(
     () => SourceRegistry([
-      NwmDataSource(
-        geocoder: sl<IGeocodingService>(),
-        api: sl<INoaaApiService>(),
-        forecastService: sl<IForecastService>(),
-        unitService: sl<IFlowUnitPreferenceService>(),
+      StoreBackedDataSource(
+        readSwitch: sl<StoreReadSwitch>(),
+        // Lazy: the subscription service depends on the repository, which
+        // depends on this registry, so resolving it here would be a cycle.
+        storeBackedIds: () => sl<StoreSubscriptionService>().watchedIds,
+        inner: NwmDataSource(
+          geocoder: sl<IGeocodingService>(),
+          api: sl<INoaaApiService>(),
+          forecastService: sl<IForecastService>(),
+          unitService: sl<IFlowUnitPreferenceService>(),
+        ),
       ),
-      GeoglowsDataSource(
-        api: sl<IGeoglowsApiService>(),
-        unitService: sl<IFlowUnitPreferenceService>(),
+      StoreBackedDataSource(
+        readSwitch: sl<StoreReadSwitch>(),
+        storeBackedIds: () => sl<StoreSubscriptionService>().watchedIds,
+        inner: GeoglowsDataSource(
+          api: sl<IGeoglowsApiService>(),
+          unitService: sl<IFlowUnitPreferenceService>(),
+        ),
       ),
     ]),
   );
@@ -92,6 +125,15 @@ void setupForecastDependencies() {
       cache: sl<IRiverDataCache>(),
       registry: sl<SourceRegistry>(),
     ),
+  );
+
+  // ADR 0011 Phase 5 — the store read path. Registered here next to the
+  // repository it feeds. Singletons: two subscription services would hold two
+  // sets of Firestore listeners and bill for both, and the coordinator is the
+  // only thing allowed to attach them.
+  sl.registerLazySingleton<StoreReadSwitch>(() => StoreReadSwitch());
+  sl.registerLazySingleton<StoreSubscriptionService>(
+    () => StoreSubscriptionService(repository: sl<IRiverDataRepository>()),
   );
 
   // Weekly Outlook assembly (ADR 0011 Phase 3): built HERE so the page

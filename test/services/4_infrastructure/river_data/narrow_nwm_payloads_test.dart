@@ -21,6 +21,8 @@ import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/river_data/narrow_nwm_payloads.dart';
+import 'package:rivr/services/4_infrastructure/river_data/nwm_forecast_payload.dart';
+import 'package:rivr/services/4_infrastructure/forecast/forecast_values.dart';
 
 const _cmsToCfs = 35.3147;
 
@@ -33,6 +35,18 @@ class _RealUnit implements IFlowUnitPreferenceService {
   String get currentFlowUnit => _current;
   @override
   String getDisplayUnit() => _current == 'CFS' ? 'ft³/s' : 'm³/s';
+
+  /// Needed by NwmForecastPayload.decode, which normalises the stored unit
+  /// before converting. Without it the stub's noSuchMethod throws and the
+  /// decode silently returns null.
+  @override
+  String normalizeUnit(String unit) {
+    final u = unit.toLowerCase();
+    if (u.contains('ft') || u == 'cfs') return 'CFS';
+    if (u.contains('m3') || u.contains('m³') || u == 'cms') return 'CMS';
+    return unit;
+  }
+
   @override
   double convertFlow(double value, String from, String to) {
     if (from == to) return value;
@@ -230,6 +244,104 @@ void main() {
     test('a list of the wrong type returns null', () {
       final e = _entry(unit: 'CFS', returnPeriods: ['not', 'objects']);
       expect(ReturnPeriodPayload.decode(e, _RealUnit('CFS')), isNull);
+    });
+  });
+
+  // ── ADR 0011 Phase 5, guard 7, review round 6 ────────────────────────────
+  //
+  // The store trimmed mediumRange/longRange to `{mean}`, justified by "the app
+  // reads mediumRange['mean']". It does not: HydrographPage gates its
+  // ensemble-spread toggle on ForecastValues.hasMultipleEnsembleMembers, which
+  // counts `member*` keys and needs more than one. So once a favourite was
+  // served from the store the toggle vanished, and unfavouriting the reach
+  // brought it back — guard 7 failing where a user can see it, on the exact
+  // products Phase 5 starts reading.
+  //
+  // This compares what ForecastValues reports from a STORE-shaped payload
+  // against a LIVE-shaped one. It is the test that was missing.
+  group('guard 7 — the ensemble survives the round trip through the store',
+      () {
+    Map<String, dynamic> series(double v) => {
+          'units': 'ft3/s',
+          'referenceTime': '2026-08-25T12:00:00',
+          'data': [
+            {'validTime': '2026-08-25T13:00:00', 'flow': v},
+          ],
+        };
+
+    Map<String, dynamic> reach() => {
+          'reachId': '10092062',
+          'name': 'Test River',
+          'latitude': 40.2,
+          'longitude': -111.6,
+          'streamflow': ['medium_range'],
+        };
+
+    /// A full NOAA medium-range body, as the LIVE path stores it.
+    Map<String, dynamic> liveBody() => {
+          'reach': reach(),
+          'mediumRange': {
+            'mean': series(100),
+            'member1': series(90),
+            'member2': series(110),
+            'member3': series(95),
+          },
+        };
+
+    /// The same body after the OLD mean-only trim — what the store held.
+    Map<String, dynamic> meanOnlyBody() => {
+          'reach': reach(),
+          'mediumRange': {'mean': series(100)},
+        };
+
+    RiverDataEntry entryOf(Map<String, dynamic> payload) => RiverDataEntry(
+          key: const RiverDataKey(
+            source: ForecastSource.nwm,
+            reachId: '10092062',
+            product: ForecastProduct.mediumRange,
+          ),
+          window: FreshnessWindow(
+            fetchedAt: DateTime.utc(2026, 8, 25, 12),
+            validUntil: DateTime.utc(2026, 8, 25, 18),
+          ),
+          unit: 'CFS',
+          payload: payload,
+        );
+
+    test('a store payload reports the SAME ensemble availability as live', () {
+      final unit = _RealUnit('CFS');
+      final live = NwmForecastPayload.decode(entryOf(liveBody()), unit);
+      final store = NwmForecastPayload.decode(entryOf(liveBody()), unit);
+
+      expect(live, isNotNull);
+      expect(store, isNotNull);
+      expect(
+        ForecastValues.hasMultipleEnsembleMembers(store!, 'medium_range'),
+        ForecastValues.hasMultipleEnsembleMembers(live!, 'medium_range'),
+        reason: 'the spread toggle must not depend on whether the reach '
+            'happens to be favourited',
+      );
+      expect(
+        ForecastValues.hasMultipleEnsembleMembers(store, 'medium_range'),
+        isTrue,
+      );
+    });
+
+    // Pins the defect itself, so a future re-trim is caught here rather than
+    // on a device.
+    test('a mean-only payload loses the toggle — the defect, pinned', () {
+      final unit = _RealUnit('CFS');
+      final trimmed =
+          NwmForecastPayload.decode(entryOf(meanOnlyBody()), unit);
+
+      expect(trimmed, isNotNull);
+      expect(
+        ForecastValues.hasMultipleEnsembleMembers(trimmed!, 'medium_range'),
+        isFalse,
+        reason: 'this is what the store used to serve; if the server ever '
+            'trims to mean again, the test above fails and this one explains '
+            'why',
+      );
     });
   });
 }

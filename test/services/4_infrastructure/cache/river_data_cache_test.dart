@@ -13,6 +13,7 @@ import 'package:rivr/services/4_infrastructure/cache/river_data_cache.dart';
 
 void main() {
   phase2Tests();
+  guard9EvictOrderingTests();
   phase2Round2Tests();
   late Directory tempDir;
 
@@ -990,6 +991,75 @@ void phase2Round2Tests() {
       expect(await cache.get(_keyFor('a')), isNull,
           reason: 'pins belong to the account that declared them; surviving '
               'clear() shields the previous user\'s reaches from the next');
+    });
+  });
+}
+
+/// Phase 5 guard 9, 2026-08-29.
+///
+/// The kill switch evicts a favourite's entries so the live path takes over.
+/// `put` puts its disk write on the cache's serial chain; `evict` deleted the
+/// file OUTSIDE it. So a write already queued ran after the delete and put the
+/// entry straight back — memory clean, disk dirty — and the next cold start
+/// served the resurrected value with the switch off, making zero upstream
+/// calls. Found on a device; eight review rounds had not.
+void guard9EvictOrderingTests() {
+  late Directory tempDir;
+
+  const key = RiverDataKey(
+    source: ForecastSource.nwm,
+    reachId: '18471070',
+    product: ForecastProduct.analysisAssimilation,
+  );
+
+  RiverDataEntry entry() => RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: DateTime.utc(2026, 8, 29, 4, 20),
+          validUntil: DateTime.utc(2026, 8, 29, 5, 30),
+        ),
+        unit: 'CFS',
+        payload: const {'currentFlow': 16702.1},
+      );
+
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('rivr_guard9');
+  });
+  tearDown(() async {
+    if (await tempDir.exists()) await tempDir.delete(recursive: true);
+  });
+
+  group('guard 9: an evict cannot be undone by a write already queued', () {
+    test('a put in flight when evict runs does not survive it', () async {
+      final cache = RiverDataCache(cacheDirProvider: () async => tempDir);
+
+      // The store listener's ingest is in flight...
+      final pending = cache.put(entry());
+      // ...when the kill switch evicts.
+      final eviction = cache.evict(key);
+      await Future.wait([pending, eviction]);
+
+      expect(await cache.get(key), isNull,
+          reason: 'memory still holds the evicted entry');
+
+      // The one that actually mattered: a cold start reads DISK.
+      final afterRestart =
+          RiverDataCache(cacheDirProvider: () async => tempDir);
+      expect(await afterRestart.get(key), isNull,
+          reason: 'the entry came back from disk after a restart — this is '
+              'the kill switch failing exactly as it did on the device');
+    });
+
+    test('an ordinary evict still removes the file', () async {
+      final cache = RiverDataCache(cacheDirProvider: () async => tempDir);
+      await cache.put(entry());
+      expect(await cache.get(key), isNotNull);
+
+      await cache.evict(key);
+
+      final afterRestart =
+          RiverDataCache(cacheDirProvider: () async => tempDir);
+      expect(await afterRestart.get(key), isNull);
     });
   });
 }

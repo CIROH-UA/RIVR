@@ -433,24 +433,118 @@ it. Moving it back to module scope will break deploys.
 
 ### ADR 0011 cloud store (Phase 4, live since 2026-08-25)
 
-Six functions keep a Firestore `river_data` collection fresh for every
+Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
-fetching its own. Server-only — the app does not read it until Phase 5.
+fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
+6 -> 7, not by the deploy's exit status).
 
 | Function | Cadence |
 |---|---|
 | `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
-| `storeGeoglowsDaily` | 01:30 UTC |
+| `storeGeoglowsDaily` | 11:30 UTC — probes ONE reach for `forecast_date`, fans out only when the day's run advances |
+| `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
 | `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
 | `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
 | `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
+
+**GEOGLOWS runs at 11:30 UTC, not 01:30, and the schedule is not trusted.**
+It was 01:30, on the assumption the 00Z run had published by then. Measured
+2026-08-29: it never had. 01:30 on the 28th returned the 27th's run, 01:30 on
+the 29th returned the 28th's, and a direct query at 03:07 on the 29th still
+returned the 28th's. So the store never once held the current day's GEOGLOWS
+run — it took yesterday's and held it 24 hours, while any device on the live
+path picked the new one up as soon as it appeared. That is Phase 5 guard 2
+(two devices, one river, identical values) failing by construction every day,
+found from a device log rather than from review.
+
+**11:30 comes from a measurement this repo already held**:
+`functions_geoglows/main.py` records the daily run publishing at **10:15-10:30
+UTC**, from S3 Last-Modified on two consecutive days, and the flood builder is
+scheduled at 11:00 because of it. Do not re-derive it; do not call it unknown.
+
+The hour is still not trusted on its own. `runGeoglowsRefresh` probes ONE reach
+for its `forecast_date` and fans out only when that date advances, so a late
+publication is a cheap no-op rather than another silent day of yesterday's
+water. **An hourly version of this was written and reverted the same night**:
+it turned 4 fetches a day into 24 to rediscover a number already on disk, and a
+cold proxy call costs 10-14s against a zarr on S3 (2.5s only when an instance
+still has that river cached) — the exact waste the store exists to remove.
+
+**The near-static products are not on the hourly cycle.** `reachMetadata` and
+`returnPeriods` carry no run identity for the probe to compare and hold a
+30-day window, so `storeStaticDaily` owns them and refetches only what is
+missing or nearly expired. They are in the store at all because Phase 5 guard 1
+is "a favourite renders with ZERO upstream calls from the device", and every
+surface that renders a favourite reads the river's NAME and its THRESHOLDS —
+without them the flow numbers stay fresh while each favourite still makes two
+device-side calls just to draw itself.
+
+**Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
+published by the flood builder. It **exists and is `true`** — created by hand
+in the Firebase console 2026-08-28. Absent, `getBool` returns false, which is
+the safe default: every device takes the live path. Set it to `true` to let
+devices read the store; flip to `false` and every open app detaches its
+listeners and evicts every cached entry for a favourite, so the live path takes
+over rather than waiting for the stored window to expire (up to 30 days for
+river names and flood thresholds).
+
+**Delivery is minutes, not seconds.** Measured twice on a device 2026-08-29:
+a publish reached the app in ~4 minutes both times, through Remote Config's
+real-time `onConfigUpdated` listener. Plan an incident around minutes.
+
+**Publishing it programmatically is a FORCE OVERWRITE.** The REST API returns
+no ETag for this project (verified 2026-08-29 — the response carries no `etag`
+header at all), so a write needs `If-Match: *`. That is survivable only by
+reading the whole template first and putting every parameter back unchanged;
+the flood builder publishes its three parameters at ~13:30 UTC, so never do
+this near that hour. Read back and check all four values afterwards.
+
+**Guard 9 failed here once, and quietly.** Verified on a device 2026-08-29
+after the fix: with the switch off, a cold start makes real upstream calls
+(51, both favourite reaches) and parses a full NOAA payload
+(`analysis_assimilation (120 points)`). Before the fix the same test made
+ZERO upstream calls and parsed the store's trimmed shape. See
+`store_subscription_service.dart` — an ingest that outlived a detach, and an
+`evict` that raced the write chain.
+
+That eviction is deliberately broader than "what the store wrote" — cache
+entries carry no provenance marker, and the switch means "the store may have
+poisoned this", so paying a refetch is the right price. It fires only on the
+ON -> OFF **transition** (persisted across launches), never while the switch is
+merely off: doing it on the off *state* wiped the pinned favourites on every
+`notifyListeners`, which made the app fetch more than it did before Phase 5.
+
+**A change to the stored PAYLOAD SHAPE does not propagate until the upstream
+run advances.** Supersession is keyed on `runId` alone: if the stored document
+already carries the current run, `shouldWrite` refuses the rewrite even though
+the new code would store a different shape. Observed 2026-08-25 — after the
+ensemble-truncation fix, a forced refresh reported `written: 2,
+skippedSameRun: 110` and every `mediumRange` document kept its old mean-only
+payload until the next 6-hourly run. Plan for it: either wait for the cycle
+(hourly products ≤1 h, medium/long ≤6 h, static products 30 days), or delete
+the affected documents so they are re-fetched. Bumping
+`RiverDataEntry.schemaVersion` also works but is a cross-language contract
+change that makes every client discard every document.
+
+**The store's fetchers never retry** — including these two, which is why they
+do NOT go through `noaa-client`'s `fetchWithRetry` or `getReturnPeriods`. The
+latter also falls back to a `return_period_cache` entry of any age, and writing
+that into the store would stamp an arbitrarily old value with a fresh 30-day
+window.
 
 **Document IDs ARE the client's cache key** (`nwm__<reachId>__<product>`,
 matching `RiverDataKey.storageKey`), and the envelope is exactly
 `RiverDataEntry.toJson()`. Both are cross-language contracts pinned by tests
 that read the Dart source off disk — a rename on either side fails the build
 rather than silently storing documents the app never reads.
+
+**`publish_cadence_log` is the only collection that grows without bound**, and
+since 2026-08-29 it no longer does: a Firestore TTL on `expiresAt` deletes
+samples after 90 days. The field is separate from `sampledAt` on purpose — a
+TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
+delete every sample the moment it was written. `river_data` never needed this;
+it is overwritten in place and swept by `storeGcDaily`.
 
 **Requires the composite index `river_data(product ASC, runId ASC)`.** Without
 it every hourly run aborts on FAILED_PRECONDITION. Declared in
