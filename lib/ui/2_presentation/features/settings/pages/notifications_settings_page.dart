@@ -1,6 +1,7 @@
 // lib/ui/2_presentation/features/settings/pages/notifications_settings_page.dart
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:get_it/get_it.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +14,25 @@ import 'package:rivr/ui/2_presentation/features/settings/widgets/notification_fr
 import 'package:rivr/ui/2_presentation/features/settings/widgets/river_alert_frequency_section.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/models/1_domain/shared/alert_frequency.dart';
+
+/// Whether to show the push-registration diagnostics.
+///
+/// Pure and top-level because widget tests always run with `kDebugMode` true,
+/// so the RELEASE branch — the one that decides what users actually see — is
+/// unreachable from a widget test. Passing the flag in makes both branches
+/// testable.
+///
+/// Only the broken state ships. A healthy app announcing "6 push
+/// registrations" tells a user nothing they can act on; "not registered" tells
+/// them notifications will not arrive and what to try.
+bool shouldShowRegistrationStatus({
+  required bool hasToken,
+  required bool isPending,
+  required bool isDebug,
+}) {
+  if (isDebug) return true;
+  return !hasToken && !isPending;
+}
 
 class NotificationsSettingsPage extends StatefulWidget {
   const NotificationsSettingsPage({super.key});
@@ -539,10 +559,33 @@ class _NotificationsSettingsPageState extends State<NotificationsSettingsPage>
     );
   }
 
+  /// Push-registration status.
+  ///
+  /// **Only the BROKEN state ships to users.** The healthy and pending states
+  /// are developer diagnostics — a working app announcing "6 push
+  /// registrations" tells a user nothing they can act on, and no shipped app
+  /// shows this. Jerson's call after seeing it on device: useful to us,
+  /// not to them.
+  ///
+  /// "Not registered" stays in release, because it is the one state a user can
+  /// do something about — it means notifications will not arrive, and the
+  /// footer says what to try. That is a support answer, not a diagnostic.
+  ///
+  /// ADR 0008 is why the diagnostics exist at all: push notifications were
+  /// silently dead for roughly six months because no FCM token was ever issued,
+  /// and nothing anywhere said so. They stay, in debug.
   Widget _buildRegistrationStatusSection() {
     final tokens = _userSettings?.fcmTokens ?? [];
     final hasToken = tokens.isNotEmpty;
     final isPending = tokens.length == 1 && tokens.first == 'pending';
+
+    if (!shouldShowRegistrationStatus(
+      hasToken: hasToken,
+      isPending: isPending,
+      isDebug: kDebugMode,
+    )) {
+      return const SizedBox.shrink();
+    }
 
     final Color iconColor;
     final IconData icon;
