@@ -95,6 +95,12 @@ export interface AlertData {
    * to the Dart ladder by test.
    */
   category: FloodCategory;
+  /**
+   * ISO instant the peak is forecast for, or null when the series carried no
+   * usable time. Drives the "peaking in ~14 hours" line, which is the only
+   * part of an alert a reader can act on.
+   */
+  peakAt: string | null;
 }
 
 /** Pre-fetched data for a single reach, shared across all users. */
@@ -434,11 +440,12 @@ export function evaluateAlert(
     return null;
   }
 
-  const maxForecastFlow = getMaxForecastFlow(reachData.forecast);
-  if (maxForecastFlow === null) {
+  const peak = getMaxForecastFlow(reachData.forecast);
+  if (peak === null) {
     logger.warn(`⚠️ No valid forecast values for reach ${reachId}`);
     return null;
   }
+  const maxForecastFlow = peak.value;
 
   const thresholds = extractReturnPeriodThresholds(reachData.returnPeriods);
   const forecastCms = maxForecastFlow * 0.0283168;
@@ -507,6 +514,7 @@ export function evaluateAlert(
         returnPeriod,
         riverName: reachData.riverName,
         category,
+        peakAt: peak.validTime,
       };
     }
   }
@@ -541,21 +549,39 @@ async function sendAlert(
   const isRepeat = await checkRecentAlert(user.userId, reachId);
   const unitLabel = user.preferredFlowUnit.toUpperCase();
 
-  // Lead with the CATEGORY, not the number.
+  // Category in the TITLE, timing in the body, and the river named once.
   //
   // The body used to read "Forecast: 147362 CFS (Exceeds 25-year flood
-  // threshold)". Jerson's judgement 2026-08-29, and it is plainly right: a raw
-  // streamflow figure on a lock screen is meaningless — nobody knows whether
-  // 147362 CFS is a lot for that river, which is the entire question. The
-  // category is the word the app already uses on the card, so the alert and
-  // the screen now say the same thing.
+  // threshold)". A raw streamflow number on a lock screen is meaningless —
+  // nobody knows whether 147362 CFS is a lot for that river, which is the
+  // entire question — and the earlier fix then said the river's name twice in
+  // a message with room for about two lines.
   //
-  // The number stays, after the category, for the reader who does want it.
-  const stillPrefix = isRepeat ? "still at" : "now at";
-  const body = `${alertData.riverName} is ${stillPrefix} ` +
-    `${alertData.category} flood level — ` +
-    `${alertData.forecastFlow.toLocaleString("en-US")} ${unitLabel}, ` +
-    `above the ${alertData.returnPeriod} threshold`;
+  // Shape settled with Jerson 2026-08-29:
+  //
+  //     White River — Major Event
+  //     Peaking in ~14 hours at 12,400 CFS.
+  //
+  //     White River — still Major Event
+  //     Now peaking in ~6 hours at 13,100 CFS.
+  //
+  // The recurrence interval ("25-year") is deliberately NOT shown. It is still
+  // carried in the data payload for the app, but it competed for space with
+  // the two things a reader can use: how bad, and how soon.
+  const title = isRepeat ?
+    `${alertData.riverName} — still ${alertData.category} Event` :
+    `${alertData.riverName} — ${alertData.category} Event`;
+
+  const flow = `${alertData.forecastFlow.toLocaleString("en-US")} ${unitLabel}`;
+  const when = timeToPeak(alertData.peakAt);
+
+  // No usable peak time — a stale forecast, or one whose peak has already
+  // passed. Say less rather than saying something wrong.
+  const body = when === null ?
+    `Peaking at ${flow}.` :
+    isRepeat ?
+      `Now peaking ${when} at ${flow}.` :
+      `Peaking ${when} at ${flow}.`;
 
   const staleTokens: string[] = [];
   let anySent = false;
@@ -566,7 +592,7 @@ async function sendAlert(
       const message = {
         token,
         notification: {
-          title: `🌊 ${alertData.category}: ${alertData.riverName}`,
+          title,
           body,
         },
         data: {
@@ -699,31 +725,81 @@ async function checkRecentAlert(
  * @param {object} forecastData - Forecast data from NOAA API
  * @return {number|null} Maximum flow value or null if no valid data
  */
+/** The peak forecast value and WHEN it arrives. */
+export interface ForecastPeak {
+  value: number;
+  /** ISO instant the peak is forecast for, or null when the point carried none. */
+  validTime: string | null;
+}
+
+/**
+ * The highest forecast value across the short and medium range, WITH its time.
+ *
+ * The time used to be discarded. It is the only part of an alert a reader can
+ * act on — "peaking in about 14 hours" tells you whether to move the truck
+ * tonight, where a streamflow number does not — and it was sitting in the
+ * payload the whole time.
+ *
+ * @param {object} forecastData - Short and medium range series.
+ * @return {ForecastPeak | null} The peak, or null when there is no valid value.
+ */
 function getMaxForecastFlow(forecastData: {
   shortRange: ForecastData | null;
   mediumRange: ForecastData | null;
-}): number | null {
-  let maxFlow = -Infinity;
+}): ForecastPeak | null {
+  let peak: ForecastPeak | null = null;
 
-  // Check short range data
-  if (forecastData.shortRange?.values) {
-    for (const point of forecastData.shortRange.values) {
-      if (point.value > maxFlow && point.value > -9000) {
-        maxFlow = point.value;
+  for (const series of [forecastData.shortRange, forecastData.mediumRange]) {
+    for (const point of series?.values ?? []) {
+      // -9999 is NOAA's no-data sentinel; keeping the guard as it was.
+      if (point.value <= -9000) continue;
+      if (peak === null || point.value > peak.value) {
+        peak = {
+          value: point.value,
+          validTime: typeof point.validTime === "string" &&
+            point.validTime !== "" ? point.validTime : null,
+        };
       }
     }
   }
 
-  // Check medium range data
-  if (forecastData.mediumRange?.values) {
-    for (const point of forecastData.mediumRange.values) {
-      if (point.value > maxFlow && point.value > -9000) {
-        maxFlow = point.value;
-      }
-    }
-  }
+  return peak;
+}
 
-  return maxFlow === -Infinity ? null : maxFlow;
+/**
+ * "in ~14 hours" — how long until [validTime], or null when it cannot be said.
+ *
+ * Deliberately RELATIVE. We do not store the user's timezone anywhere, so an
+ * absolute "Saturday 4 PM" would be wrong for every user outside Mountain Time
+ * and there would be nothing in the message to reveal it. Relative durations
+ * are correct for everyone.
+ *
+ * Returns null for a peak already in the past (a stale forecast, or one whose
+ * peak has passed while the value stayed high) — the caller then omits the
+ * timing rather than printing "in ~-3 hours".
+ *
+ * @param {string | null} validTime - ISO instant of the peak.
+ * @param {Date} now - Reference instant.
+ * @return {string | null} A human phrase, or null.
+ */
+export function timeToPeak(
+  validTime: string | null,
+  now: Date = new Date()
+): string | null {
+  if (!validTime) return null;
+  const at = Date.parse(validTime);
+  if (Number.isNaN(at)) return null;
+
+  const ms = at - now.getTime();
+  if (ms <= 0) return null;
+
+  const hours = Math.round(ms / 3600_000);
+  if (hours < 1) return "within the hour";
+  if (hours === 1) return "in ~1 hour";
+  if (hours < 48) return `in ~${hours} hours`;
+
+  const days = Math.round(hours / 24);
+  return `in ~${days} days`;
 }
 
 /**

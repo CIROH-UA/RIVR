@@ -32,7 +32,8 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
-import {evaluateAlert, ReachData} from "./notification-service.js";
+import {evaluateAlert, ReachData, timeToPeak}
+  from "./notification-service.js";
 import {categoryFor} from "./flow-classification.js";
 
 /** The conversion evaluateAlert applies to forecast values (CFS → CMS). */
@@ -273,5 +274,121 @@ describe("evaluateAlert — the category the user will also see", () => {
       assert.equal(alert?.category, direct,
         `alert and shared classifier disagree at ${cfs} CFS`);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// When the peak arrives. Added 2026-08-29 with the copy rewrite.
+//
+// The forecast points always carried a validTime and getMaxForecastFlow threw
+// it away, so an alert could say how much water was coming but never when.
+// That is the half a reader can act on: "in ~14 hours" decides whether you move
+// the truck tonight; "147362 CFS" decides nothing.
+//
+// Relative, never absolute. No user timezone is stored anywhere, so "Saturday
+// 4 PM" would be silently wrong for every user outside Mountain Time.
+
+describe("timeToPeak", () => {
+  const now = new Date("2026-08-29T12:00:00Z");
+
+  test("rounds to whole hours", () => {
+    assert.equal(timeToPeak("2026-08-30T02:00:00Z", now), "in ~14 hours");
+    assert.equal(timeToPeak("2026-08-29T18:20:00Z", now), "in ~6 hours");
+  });
+
+  test("singular at one hour", () => {
+    assert.equal(timeToPeak("2026-08-29T13:00:00Z", now), "in ~1 hour");
+  });
+
+  test("under an hour reads as within the hour", () => {
+    assert.equal(timeToPeak("2026-08-29T12:20:00Z", now), "within the hour");
+  });
+
+  test("beyond two days switches to days", () => {
+    assert.equal(timeToPeak("2026-09-01T12:00:00Z", now), "in ~3 days");
+  });
+
+  test("a peak already past is null, not a negative duration", () => {
+    // Reachable: a stale forecast, or a peak that has passed while the flow
+    // stayed high. "in ~-3 hours" would be worse than saying nothing.
+    assert.equal(timeToPeak("2026-08-29T09:00:00Z", now), null);
+    assert.equal(timeToPeak("2026-08-29T12:00:00Z", now), null);
+  });
+
+  test("a missing or unparseable time is null", () => {
+    assert.equal(timeToPeak(null, now), null);
+    assert.equal(timeToPeak("", now), null);
+    assert.equal(timeToPeak("not a date", now), null);
+  });
+});
+
+describe("evaluateAlert — the peak's time survives to the alert", () => {
+  test("the alert carries the validTime of the PEAK point", () => {
+    const data: ReachData = {
+      forecast: {
+        shortRange: {
+          values: [
+            {value: 1200, validTime: "2026-08-29T12:00:00Z"},
+            {value: 4500, validTime: "2026-08-30T02:00:00Z"},
+            {value: 1300, validTime: "2026-08-30T06:00:00Z"},
+          ],
+        },
+        mediumRange: null,
+      },
+      returnPeriods: RETURN_PERIODS,
+      riverName: "Test River",
+    };
+    const alert = evaluateAlert("123", data, "cfs");
+    assert.equal(alert?.peakAt, "2026-08-30T02:00:00Z",
+      "the time carried must belong to the highest point, not the first");
+    assert.equal(alert?.forecastFlow, 4500);
+  });
+
+  test("the peak may come from the MEDIUM range", () => {
+    const data: ReachData = {
+      forecast: {
+        shortRange: {
+          values: [{value: 1200, validTime: "2026-08-29T12:00:00Z"}],
+        },
+        mediumRange: {
+          values: [{value: 4500, validTime: "2026-09-02T00:00:00Z"}],
+        },
+      },
+      returnPeriods: RETURN_PERIODS,
+      riverName: "Test River",
+    };
+    assert.equal(evaluateAlert("123", data, "cfs")?.peakAt,
+      "2026-09-02T00:00:00Z");
+  });
+
+  test("NOAA's no-data sentinel never becomes the peak", () => {
+    const data: ReachData = {
+      forecast: {
+        shortRange: {
+          values: [
+            {value: -9999, validTime: "2026-08-29T12:00:00Z"},
+            {value: 1200, validTime: "2026-08-30T02:00:00Z"},
+          ],
+        },
+        mediumRange: null,
+      },
+      returnPeriods: RETURN_PERIODS,
+      riverName: "Test River",
+    };
+    const alert = evaluateAlert("123", data, "cfs");
+    assert.equal(alert?.forecastFlow, 1200);
+    assert.equal(alert?.peakAt, "2026-08-30T02:00:00Z");
+  });
+
+  test("a peak point with no time yields a null peakAt, not a crash", () => {
+    const data: ReachData = {
+      forecast: {
+        shortRange: {values: [{value: 4500, validTime: ""}]},
+        mediumRange: null,
+      },
+      returnPeriods: RETURN_PERIODS,
+      riverName: "Test River",
+    };
+    assert.equal(evaluateAlert("123", data, "cfs")?.peakAt, null);
   });
 });
