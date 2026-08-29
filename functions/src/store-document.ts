@@ -117,6 +117,130 @@ export function nextUtcMidnight(now: Date): Date {
   return new Date(dayStart + 24 * 3600_000);
 }
 
+// ── Refresh coverage (store-only) ────────────────────────────────────────────
+//
+// `validUntil` above answers "when could upstream next publish?". That is the
+// right question for a LIVE fetch on the device, and the two Dart data sources
+// answer it identically — the drift test pins the skews.
+//
+// It is the WRONG question for a stored document, and Phase 5 proved it on a
+// real phone. A stored value is not replaced when upstream publishes; it is
+// replaced when OUR refresher next runs and writes a new one. Those are
+// different instants, and the gap between them is dead air: the document is
+// present, correct, still the newest that exists, and marked stale, so every
+// device abandons the store and fetches live.
+//
+// Measured 2026-08-28: hourly documents were written at :20 and stamped
+// valid until :05, so from :05 to :20 — 15 minutes of every hour — every
+// hourly document in the store was expired. A clean-install device tested at
+// 15:14 UTC fell through to 78 NOAA calls. The same device tested at 15:34,
+// inside the covered window, made zero. GEOGLOWS has the same shape daily
+// (expires 00:15, refreshes 01:30 — 75 minutes) and long range is worse still.
+//
+// So a stored window carries a FLOOR: it never ends before the refresher that
+// owns it has had its next turn, plus room to finish. The skew constants are
+// untouched and still mirror the client exactly; this is an additional store
+// -only guarantee layered on top, not a redefinition of publication lag.
+//
+// The trade, stated plainly: inside the floor a device may render the previous
+// run for up to one refresh interval rather than fetching a newer one itself.
+// That is the Phase 5 bargain — trust the store — and it buys back 15 minutes
+// an hour during which every device was bypassing the store entirely.
+
+/** Minute past the hour that `storeRefreshHourly` is scheduled for. */
+export const REFRESH_MINUTE = 20;
+
+/** UTC hour and minute that `storeGeoglowsDaily` is scheduled for. */
+export const GEOGLOWS_REFRESH_HOUR = 1;
+export const GEOGLOWS_REFRESH_MINUTE = 30;
+
+/**
+ * Room for a refresh run to actually finish after it starts.
+ *
+ * Observed spread of `fetchedAt` across one run is ~2 minutes for 30 reaches
+ * (09:20:13 to 09:21:56 on 2026-08-28). Ten minutes is that with room for a
+ * slow upstream, and it is still far inside the next cycle.
+ */
+export const REFRESH_MARGIN_MS = 10 * 60 * 1000;
+
+/**
+ * When the hourly refresher next starts, strictly after [now].
+ *
+ * @param {Date} now - Reference instant.
+ * @return {Date} The next :REFRESH_MINUTE past the hour.
+ */
+export function nextHourlyRefresh(now: Date): Date {
+  const at = Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    now.getUTCHours(), REFRESH_MINUTE);
+  return at > now.getTime() ? new Date(at) : new Date(at + 3600_000);
+}
+
+/**
+ * When the daily GEOGLOWS refresher next starts, strictly after [now].
+ *
+ * @param {Date} now - Reference instant.
+ * @return {Date} The next 01:30 UTC.
+ */
+export function nextGeoglowsRefresh(now: Date): Date {
+  const at = Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    GEOGLOWS_REFRESH_HOUR, GEOGLOWS_REFRESH_MINUTE);
+  return at > now.getTime() ? new Date(at) : new Date(at + 24 * 3600_000);
+}
+
+/**
+ * The floor a stored document's window must not end before: the next turn of
+ * whichever refresher owns this product, plus room to finish.
+ *
+ * @param {ForecastSourceId} source - Which network.
+ * @param {ForecastProductId} product - Which product.
+ * @param {Date} now - Reference instant.
+ * @return {Date} Earliest acceptable validUntil for a stored document.
+ */
+export function refreshFloor(
+  source: ForecastSourceId,
+  product: ForecastProductId,
+  now: Date
+): Date {
+  // Looked up from `now + margin`, not `now`. A run that starts a few minutes
+  // BEFORE the scheduled minute — an off-cycle manual trigger, a retry, clock
+  // skew — would otherwise pick the refresh that is about to start as its
+  // rescuer, stamp a window ending before the one AFTER that, and leave the
+  // very gap this floor exists to close. Observed 2026-08-29: a sweep at 02:16
+  // stamped 03:05 while the next run it could rely on was 03:20.
+  //
+  // Reading it forward means "the next refresh that is far enough away to be a
+  // real rescuer", which is the only one worth counting on.
+  const from = new Date(now.getTime() + REFRESH_MARGIN_MS);
+  const next = source === "geoglows" ?
+    nextGeoglowsRefresh(from) :
+    nextHourlyRefresh(from);
+  return new Date(next.getTime() + REFRESH_MARGIN_MS);
+}
+
+/**
+ * The window a STORED document carries: publication lag, floored by refresh
+ * coverage.
+ *
+ * Static products already hold a 30-day window, which dwarfs any floor, so
+ * this is a no-op for them.
+ *
+ * @param {ForecastSourceId} source - Which network.
+ * @param {ForecastProductId} product - Which product.
+ * @param {Date} now - When the value was fetched, or re-verified.
+ * @return {Date} The validUntil to stamp.
+ */
+export function storeValidUntil(
+  source: ForecastSourceId,
+  product: ForecastProductId,
+  now: Date
+): Date {
+  const publish = validUntil(source, product, now);
+  const floor = refreshFloor(source, product, now);
+  return publish.getTime() >= floor.getTime() ? publish : floor;
+}
+
 /** Thirty days — products that do not move day to day. */
 const STATIC_PRODUCT_MS = 30 * 24 * 3600_000;
 
@@ -226,7 +350,7 @@ export function buildStoreDocument(input: BuildDocumentInput): StoreDocument {
     product,
     window: {
       fetchedAt: fetchedAt.toISOString(),
-      validUntil: validUntil(source, product, fetchedAt).toISOString(),
+      validUntil: storeValidUntil(source, product, fetchedAt).toISOString(),
     },
     unit,
     payload,

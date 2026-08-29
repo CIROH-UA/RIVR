@@ -17,6 +17,7 @@ import * as logger from "firebase-functions/logger";
 
 import {StoreDocument, shouldWrite} from "./store-document.js";
 import {FatalRunError, FetchedProduct, StoreRunDeps} from "./store-run.js";
+import {StoredWindowSample, WindowExtension} from "./store-window.js";
 import {ForecastProductId, ForecastSourceId, STORE_COLLECTION}
   from "./store-keys.js";
 import {FavouritingUser} from "./store-work-list.js";
@@ -220,6 +221,75 @@ export async function listStoredDocuments(
     documentId: d.id,
     fetchedAt: (d.data().window?.fetchedAt as string) ?? "",
   }));
+}
+
+/**
+ * Read the window fields of every stored document for the given products.
+ *
+ * Selects only what the window decision needs — Firestore still bills a read
+ * per document, but the payloads (which are the large part) never leave the
+ * server.
+ *
+ * @param {readonly ForecastProductId[]} products - Products to sample.
+ * @param {FirestoreUsage} usage - Counters to increment.
+ * @return {Promise<StoredWindowSample[]>} One sample per document.
+ */
+export async function sampleStoredWindows(
+  products: readonly ForecastProductId[],
+  usage: FirestoreUsage
+): Promise<StoredWindowSample[]> {
+  const samples: StoredWindowSample[] = [];
+  for (const product of products) {
+    const snap = await db.collection(STORE_COLLECTION)
+      .where("product", "==", product)
+      .select("source", "product", "window")
+      .get();
+    usage.reads += snap.size;
+    for (const d of snap.docs) {
+      const data = d.data();
+      samples.push({
+        documentId: d.id,
+        source: data.source as ForecastSourceId,
+        product: data.product as ForecastProductId,
+        fetchedAt: (data.window?.fetchedAt as string) ?? "",
+        validUntil: (data.window?.validUntil as string) ?? "",
+      });
+    }
+  }
+  return samples;
+}
+
+/**
+ * Re-stamp `window.validUntil` on documents the plan selected.
+ *
+ * Deliberately a field update, not a document write: the payload, the run and
+ * `fetchedAt` are untouched, so this cannot be mistaken for new data and
+ * cannot move supersession. `fetchedAt` in particular MUST stay put — it is
+ * what the hold cap is measured from, and refreshing it here would let a
+ * document be held forever one extension at a time.
+ *
+ * @param {readonly WindowExtension[]} extensions - Windows to re-stamp.
+ * @param {FirestoreUsage} usage - Counters to increment.
+ * @return {Promise<number>} How many documents were updated.
+ */
+export async function applyWindowExtensions(
+  extensions: readonly WindowExtension[],
+  usage: FirestoreUsage
+): Promise<number> {
+  let updated = 0;
+  const CHUNK = 200;
+  for (let i = 0; i < extensions.length; i += CHUNK) {
+    const batch = db.batch();
+    for (const e of extensions.slice(i, i + CHUNK)) {
+      batch.update(
+        db.collection(STORE_COLLECTION).doc(e.documentId),
+        {"window.validUntil": e.validUntil});
+    }
+    await batch.commit();
+    updated += Math.min(CHUNK, extensions.length - i);
+  }
+  usage.writes += updated;
+  return updated;
 }
 
 /**

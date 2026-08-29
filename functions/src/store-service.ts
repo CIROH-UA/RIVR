@@ -37,7 +37,10 @@ import {
   readAllUsers,
   readLatestProbe,
   sampleStoredRun,
+  sampleStoredWindows,
+  applyWindowExtensions,
 } from "./store-firestore.js";
+import {planWindowExtensions} from "./store-window.js";
 import {assertGcSane, selectGarbage} from "./store-gc.js";
 import {StoreDocument} from "./store-document.js";
 import {
@@ -165,6 +168,65 @@ async function buildWorkList(usage: FirestoreUsage): Promise<WorkList> {
  * @param {ForecastProductId[]} candidates - Products to consider.
  * @return {Promise<RefreshOutcome>} What happened.
  */
+/**
+ * Re-stamp any stored window that would end before the refresher's next turn.
+ *
+ * Guard 1 says "no new run means zero FETCHES" — it does not say zero writes,
+ * and this performs none of the former. What it costs is one field update per
+ * held document per hour, bounded by the favourite count; what it buys is the
+ * store actually being used during the stretch between refresher runs, which
+ * on 2026-08-28 was 15 minutes of every hour for hourly products and most of
+ * the day for long range.
+ *
+ * Failure here is logged and swallowed: an un-extended window is exactly the
+ * behaviour we had before, so this must never be able to fail a refresh run.
+ *
+ * @param {readonly ForecastProductId[]} products - Products to sweep.
+ * @param {FirestoreUsage} usage - Counters to increment.
+ * @return {Promise<void>} Nothing; outcomes are logged.
+ */
+async function extendWindowCoverage(
+  products: readonly ForecastProductId[],
+  usage: FirestoreUsage
+): Promise<void> {
+  if (products.length === 0) return;
+  try {
+    const samples = await sampleStoredWindows(products, usage);
+    const plan = planWindowExtensions(samples, new Date());
+    const updated = await applyWindowExtensions(plan.extend, usage);
+
+    logger.info("🕰️ store refresh: window coverage", {
+      products,
+      sampled: samples.length,
+      extended: updated,
+      alreadyCovered: plan.covered,
+      abandoned: plan.abandoned.length,
+      malformed: plan.malformed.length,
+    });
+
+    // Abandoned means upstream has been quiet past what "nothing changed" can
+    // explain. Devices fall back to live and users still see numbers, so this
+    // is not an outage — but it is the signal that upstream stopped, and it
+    // must not be silent. CLAUDE.md: these pipelines fail quietly.
+    if (plan.abandoned.length > 0) {
+      logger.error("store windows past their hold cap; letting them expire", {
+        count: plan.abandoned.length,
+        sample: plan.abandoned.slice(0, 10),
+      });
+    }
+    if (plan.malformed.length > 0) {
+      logger.error("store documents with an unreadable window", {
+        count: plan.malformed.length,
+        sample: plan.malformed.slice(0, 10),
+      });
+    }
+  } catch (error) {
+    logger.error("window extension failed; windows left as they were", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function runStoreRefresh(
   io: UpstreamIo,
   candidates: readonly ForecastProductId[] = MANAGED_PRODUCTS
@@ -193,6 +255,9 @@ export async function runStoreRefresh(
   });
 
   if (decision.triggered.length === 0) {
+    // Nothing advanced, so nothing is rewritten — but "nothing advanced" is
+    // exactly the case where windows keep ending under correct documents.
+    await extendWindowCoverage(candidates, usage);
     return {
       ran: false,
       reason: "nothing advanced upstream",
@@ -212,6 +277,17 @@ export async function runStoreRefresh(
 
   const report = await runStoreUpdate(
     workList, decision.triggered, firestoreDeps(io, usage), probeRuns);
+
+  // AFTER the update, and over every candidate rather than only the products
+  // that did not advance. A first attempt ran this only for un-advanced
+  // products and would have missed the live case that exposed it: on
+  // 2026-08-29 all four products were triggered, every long-range fetch then
+  // failed because NOAA served no `longRange` section at all, and those
+  // documents were left to expire holding the only long-range data that
+  // existed. Triggered-but-failed leaves a window ending just as surely as
+  // never-triggered does. Documents this run rewrote are already covered, so
+  // sweeping them costs a read and no write.
+  await extendWindowCoverage(candidates, usage);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 store refresh: Firestore usage vs documented free tier", {
