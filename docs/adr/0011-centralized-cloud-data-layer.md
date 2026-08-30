@@ -1598,6 +1598,28 @@ number isn't current the app says so before they have to wonder.
 
 ## Phase 8 — Prove it on device ▶ IN PROGRESS
 
+### Guard 6 — unit switching on device (2026-08-30)
+
+**Every surface repainted; ZERO refetches.** CMS → CFS switched in Settings on
+the iPhone, then back to favourites. 480 log lines captured across the switch
+and **not one** upstream call, `_doFetch`, background revalidation or any
+`RIVER_DATA_REPO` activity at all. All six favourite cards logged new values.
+
+Round trip, White River: 13744 CFS → **389 CMS** → 13744.1 CFS. 13744 ÷ 35.3147
+= 389.2, so the conversion is right in both directions and does not drift.
+Categories held — every card stayed on the same rung, which is the point: the
+units changed, the water did not.
+
+**This took two attempts, and the first one is worth recording.** The visible
+half was checked on a profile build — no spinner, no flicker, values changed
+smoothly — but the log tap captured nothing, because `AppLogger` is wrapped in
+`kDebugMode` and a profile build emits no debug logs at all. The build chosen
+for honest TIMINGS was the one that could not answer "did it refetch?", and the
+conflict was invisible until the tap came back empty. Repeated on a debug build
+to get the evidence, because a spinner is something a person notices and a fast
+background fetch is not — and that is exactly the class of defect that got
+through repeatedly this week.
+
 ### Guard 4 — airplane mode (2026-08-30)
 
 **Favourites render, with their flow numbers.** Airplane mode on, RIVR
