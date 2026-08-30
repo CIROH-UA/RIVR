@@ -310,17 +310,28 @@ export function assessProductFreshness(
  * rather than live today — NOAA currently returns one reference time per
  * section — but silence is the wrong failure direction here.
  *
+ * **The OLDEST segment governs**, and the first version of this took the
+ * newest. Four things point the same way. `referenceTimeOf` builds the form
+ * with `Array.from(found).sort().join("|")` — oldest first — and says it
+ * exists "so an inconsistent series stays visible", which newest-wins hides.
+ * `isRunNewer` cannot parse the pipe form and falls back to a lexicographic
+ * compare, which is decided by the LEADING (oldest) segment, so newest-wins
+ * would have the trigger and the monitor ordering the same document
+ * differently. `oldestLiveRun` in this same file makes the identical argument
+ * for the identical reason. And semantically a payload spanning several runs
+ * is only as fresh as the oldest water in it.
+ *
  * @param {string} runId - The stored run identity.
- * @return {number | null} Epoch ms of the newest segment, or null.
+ * @return {number | null} Epoch ms of the oldest segment, or null.
  */
 export function parseRunInstant(runId: string): number | null {
-  let newest: number | null = null;
+  let oldest: number | null = null;
   for (const part of runId.split("|")) {
     const t = Date.parse(part.trim());
     if (Number.isNaN(t)) continue;
-    if (newest === null || t > newest) newest = t;
+    if (oldest === null || t < oldest) oldest = t;
   }
-  return newest;
+  return oldest;
 }
 
 /** One product's run currency, as the health check sees it. */
@@ -406,6 +417,17 @@ const CAUSE_GROUP: Readonly<Record<string, string>> = {
  * @return {string} A cause key.
  */
 function causeOf(problem: string): string {
+  // The collection-wide lines are matched explicitly. Deriving a key from the
+  // first token collapsed "no successful write for 10h" and "no probe sample
+  // has ever been recorded" onto `"no"` — two unrelated failures reported as
+  // one cause, which under-reports a real outage as `degraded` (HTTP 200).
+  // Under-reporting is the dangerous direction for the grouping, since the
+  // whole reason it exists is to stop over-reporting.
+  if (problem.startsWith("no successful write")) return "no-writes";
+  if (problem.startsWith("the store has never been written")) return "empty";
+  if (problem.startsWith("no probe sample")) return "probe";
+  if (problem.startsWith("probe last sampled")) return "probe";
+
   const product = problem.split(" ")[0];
   return CAUSE_GROUP[product] ?? product;
 }

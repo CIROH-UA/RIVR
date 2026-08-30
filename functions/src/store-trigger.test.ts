@@ -390,7 +390,7 @@ describe("run currency — the failure write recency cannot see", () => {
   });
 
   test("the cap is per product, not one number", () => {
-    // 30h: past shortRange's 8h, inside longRange's 36h.
+    // 30h: past shortRange's 16h cap, inside longRange's 36h.
     const h = assessStoreHealth(
       new Date(NOW.getTime() - 600_000),
       new Date(NOW.getTime() - 600_000),
@@ -447,8 +447,14 @@ describe("run currency — the failure write recency cannot see", () => {
     ] as never, NOW);
 
     assert.equal(runs.length, 1, "the pipe-joined run was dropped entirely");
-    // The NEWEST segment is the run we actually hold.
-    assert.ok(Math.abs(runs[0].runAgeMs - 20 * 3600_000) < 60_000);
+    // The OLDEST segment governs. A payload spanning several runs is only as
+    // fresh as the oldest water in it, `referenceTimeOf` sorts oldest-first
+    // precisely so an inconsistent series stays visible, and `isRunNewer`'s
+    // lexicographic fallback is decided by that same leading segment — so
+    // taking the newest would have the trigger and the monitor ordering one
+    // document differently.
+    assert.ok(Math.abs(runs[0].runAgeMs - 40 * 3600_000) < 60_000,
+        "the newest segment was taken; the oldest is what governs freshness");
   });
 
   test("an unparseable runId is ignored, not read as age zero", () => {
@@ -543,6 +549,23 @@ describe("the alarm must not call a documented-normal day an outage", () => {
 
     assert.notEqual(h.status, "down",
       "one upstream series pausing must never read as a full outage: " +
+      h.problems.join("; "));
+  });
+
+  // The collection-wide lines get explicit cause keys. Deriving them from the
+  // first token collapsed two unrelated failures onto "no", so a store that
+  // had stopped writing AND had never recorded a probe reported one cause —
+  // degraded, HTTP 200. Under-reporting is the dangerous direction here.
+  test("a stopped writer and a missing probe are TWO causes", () => {
+    const h = assessStoreHealth(
+      new Date(NOW.getTime() - 10 * 3600_000),
+      null,
+      NOW,
+      []);
+
+    assert.equal(h.problems.length, 2);
+    assert.equal(h.status, "down",
+      "two unrelated failures collapsed into one cause: " +
       h.problems.join("; "));
   });
 

@@ -445,7 +445,7 @@ fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
 | `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |
 | `storeHeartbeat` | 2-hourly, logs at ERROR when the store goes quiet |
-| `storeHealth` | HTTPS — `{"status":"healthy"}` or 503 |
+| `storeHealth` | HTTPS — JSON `{status, problems[], products[], runs[]}`. **Only `"down"` returns 503**; `"degraded"` returns 200, so read `status`, never the HTTP code alone. `"degraded"` means exactly one cause — e.g. one NOAA series pausing, which this repo documents as normal — and a store serving a run three days old reports `degraded` with HTTP 200. Both non-healthy states log at ERROR |
 | `storeWriteThroughOnFavourite` | Firestore trigger on `users/{userId}` |
 
 **GEOGLOWS runs at 11:30 UTC, not 01:30, and the schedule is not trusted.**

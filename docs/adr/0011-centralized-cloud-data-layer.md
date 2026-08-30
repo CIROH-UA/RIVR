@@ -1155,9 +1155,9 @@ The caps come from measurements already in this repo:
 
 | Product | Cap | Why |
 |---|---|---|
-| `analysisAssimilation`, `shortRange` | 8 h | a five-hour NOAA stall is recorded here as normal; tighter would cry wolf on a good day |
-| `mediumRange` | 24 h | nominally 6-hourly, but the 12Z run was observed landing at 21:20Z |
-| `longRange` | 36 h | same, with a worse observed lag |
+| `analysisAssimilation`, `shortRange` | 16 h | **Measured.** 8 h was the first answer and it was wrong: it counted the documented five-hour NOAA stall but not the ~3 h baseline publish lag that precedes it. Replaying 163 hourly `publish_cadence_log` samples, 8 h would have fired on **29 of them (17.8%)**; the worst run age observed is 11.0 h |
+| `mediumRange` | 24 h | **Measured.** 0 of 153 samples would have fired; worst observed 13.0 h. Nominally 6-hourly, but the 12Z run was observed landing at 21:20Z |
+| `longRange` | 36 h | **Measured.** 0 of 155 samples; worst observed 21.0 h |
 | `geoglowsForecast` | 42 h | **Measured.** What matters is when WE fetch, not when GEOGLOWS publishes: `storeGeoglowsDaily` runs at 11:30 UTC with no retry, so a stored run legitimately reaches 35.5 h. Confirmed in production — the run check at 2026-08-29T11:30:34Z logged `held: 2026-08-28T00:00:00Z` against `upstream: 2026-08-29T00:00:00Z`, replacing it seconds later. A 36 h cap left ~25 minutes |
 
 Products with no entry are **skipped, never defaulted** — the near-static
