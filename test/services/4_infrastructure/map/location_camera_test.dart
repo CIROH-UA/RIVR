@@ -124,4 +124,85 @@ void main() {
               'open');
     });
   });
+
+  group('a refused location is not a silent dead end', () {
+    // Added 2026-08-30 after Jerson asked what happens when location is not
+    // granted. The honest answer was: nothing visible, and no test covered
+    // any denied path. The five guards above pin the zoom, the puck and the
+    // first-open flag — none of them touch permission at all.
+
+    test('the service records WHY, not just that it failed', () {
+      // initializeLocation returns Position?, collapsing four situations into
+      // one null: services off, refused, refused permanently, and no fix.
+      // The caller cannot say anything useful, or know whether Settings would
+      // even help, without knowing which.
+      final src = _code(controls);
+
+      expect(src.contains('LocationDenial? get lastDenial'), isTrue,
+          reason: 'the page has no way to tell the four apart');
+      for (final cause in const [
+        'LocationDenial.serviceDisabled',
+        'LocationDenial.denied',
+        'LocationDenial.deniedForever',
+        'LocationDenial.noFix',
+      ]) {
+        expect(src.contains('_lastDenial = $cause'), isTrue,
+            reason: '$cause is never recorded, so that case would show the '
+                'wrong message or none');
+      }
+    });
+
+    test('a SUCCESSFUL fix clears the denial', () {
+      // Otherwise the first refusal sticks: the user grants access, the map
+      // centres correctly, and the dialog still appears on the next tap.
+      final src = _code(controls);
+      expect(src.contains('_lastDenial = null'), isTrue,
+          reason: 'a stale denial would show a dialog over a working map');
+    });
+
+    test('the recentre button shows the dialog when there is no location', () {
+      // **This assertion was wrong the first time it was written**, and the
+      // mutation caught it rather than the code: deleting the dialog CALL
+      // left the test green, because the pattern reached forward far enough
+      // to match the method's own DECLARATION a few lines below. A guard that
+      // matches a definition instead of an invocation proves the method
+      // exists, which nobody doubted.
+      //
+      // Now the argument is part of the match, so only a real call satisfies
+      // it — `_showLocationDenialDialog(denial)` appears exactly once, at the
+      // call site, and the declaration reads `(LocationDenial denial)`.
+      final src = _code(page);
+
+      expect(src.contains('_showLocationDenialDialog(denial);'), isTrue,
+          reason: 'the tap must produce a message; before this it produced '
+              'nothing at all — the service logged and returned');
+
+      final handler = RegExp(
+        r'_recenterToLocation\(\) async \{[\s\S]{0,800}?'
+        r'lastDenial[\s\S]{0,200}?_showLocationDenialDialog\(denial\);',
+      );
+      expect(handler.hasMatch(src), isTrue,
+          reason: 'the call must be inside the recentre handler, reached from '
+              'lastDenial — not merely present somewhere in the file');
+    });
+
+    test('the dialog offers Open Settings, and only when it helps', () {
+      final src = _code(page);
+
+      expect(src.contains('openAppSettings()'), isTrue,
+          reason: 'a permanent refusal can only be undone in Settings');
+      expect(src.contains('if (message.openSettings)'), isTrue,
+          reason: 'the button must be conditional — offering Settings for a '
+              'missing GPS fix sends the user on an errand that cannot work');
+    });
+
+    test('the location accuracy is logged, since the ring is drawn from it',
+        () {
+      // When a ring looks wrong on a device this is the number that explains
+      // it, and it is also the measurement that would settle how far off an
+      // iOS approximate fix actually is — recorded as unverified in ADR 0013.
+      final src = _code(controls);
+      expect(src.contains('position.accuracy'), isTrue);
+    });
+  });
 }

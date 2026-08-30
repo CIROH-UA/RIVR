@@ -30,6 +30,8 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_offline_notice.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:rivr/models/1_domain/shared/location_denial.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -592,9 +594,54 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  // NEW: Recenter to device location
+  /// Recentre on the device, and SAY SOMETHING when that is not possible.
+  ///
+  /// This used to be a silent dead end: with location refused, the tap
+  /// produced no message, no prompt and no route to Settings — the service
+  /// logged an error and returned. The streams button beside it has shown a
+  /// dialog for its own empty case since long before. Found by Jerson asking
+  /// what happens when location is not granted, not by a test.
   void _recenterToLocation() async {
     await _controlsService.recenterToDeviceLocation();
+    if (!mounted) return;
+
+    // Success is a moved camera and nothing to say. Only a denial speaks.
+    final denial = _controlsService.lastDenial;
+    if (denial == null) return;
+
+    _showLocationDenialDialog(denial);
+  }
+
+  /// Explain why the map could not centre, and offer Settings when Settings
+  /// is actually the fix.
+  void _showLocationDenialDialog(LocationDenial denial) {
+    final message = locationDenialMessage(denial);
+
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(message.title),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(message.body),
+        ),
+        actions: [
+          if (message.openSettings)
+            CupertinoDialogAction(
+              onPressed: () {
+                Navigator.pop(context);
+                openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.pop(context),
+            child: Text(message.openSettings ? 'Not Now' : 'OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {

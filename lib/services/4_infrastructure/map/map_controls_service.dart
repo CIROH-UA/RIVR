@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rivr/services/4_infrastructure/map/map_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/map_base_layer.dart';
+import 'package:rivr/models/1_domain/shared/location_denial.dart';
 
 class MapControlsService {
   MapboxMap? _mapboxMap;
@@ -31,6 +32,18 @@ class MapControlsService {
   // 12 is the sharpest zoom the data actually supports.
   static const double _defaultZoom = 12.0;
   static const int _animationDurationMs = 1000;
+
+  /// Why the last location attempt produced nothing, or null if it succeeded.
+  ///
+  /// `initializeLocation` returns `Position?`, which collapses four different
+  /// situations into one null — services off, refused, refused permanently,
+  /// and simply no fix. The caller needs to tell them apart to say anything
+  /// useful, and to know whether Settings would even help. Without this the
+  /// recentre button was a silent dead end.
+  LocationDenial? _lastDenial;
+
+  /// See [_lastDenial]. Null when the last attempt succeeded.
+  LocationDenial? get lastDenial => _lastDenial;
   static const String _terrain3DKey = 'terrain_3d_enabled';
   // The map camera is deliberately not persisted. It opens on the user's
   // location when one is available and on the configured default otherwise,
@@ -285,6 +298,7 @@ class MapControlsService {
       bool serviceEnabled = await geo.Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         AppLogger.error('MapControlsService', 'Location services are disabled');
+        _lastDenial = LocationDenial.serviceDisabled;
         return null;
       }
 
@@ -295,12 +309,14 @@ class MapControlsService {
         permission = await geo.Geolocator.requestPermission();
         if (permission == geo.LocationPermission.denied) {
           AppLogger.error('MapControlsService', 'Location permissions are denied');
+          _lastDenial = LocationDenial.denied;
           return null;
         }
       }
 
       if (permission == geo.LocationPermission.deniedForever) {
         AppLogger.error('MapControlsService', 'Location permissions are permanently denied');
+        _lastDenial = LocationDenial.deniedForever;
         return null;
       }
 
@@ -313,10 +329,18 @@ class MapControlsService {
       );
 
       _lastKnownLocation = position;
-      AppLogger.debug('MapControlsService', 'Current location: ${position.latitude}, ${position.longitude}');
+      _lastDenial = null;
+      // Accuracy is logged because the puck's ring is drawn from it: when a
+      // ring looks wrong on a device, this is the number that explains it.
+      AppLogger.debug('MapControlsService',
+          'Current location: ${position.latitude}, ${position.longitude} '
+          '(accuracy ${position.accuracy.toStringAsFixed(0)} m)');
       return position;
     } catch (e) {
+      // Permission is fine; the device simply could not produce a fix — most
+      // often the 10-second limit elapsing indoors.
       AppLogger.error('MapControlsService', 'Error getting location', e);
+      _lastDenial = LocationDenial.noFix;
       return null;
     }
   }
