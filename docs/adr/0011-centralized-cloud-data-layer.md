@@ -2126,6 +2126,33 @@ ignoring the live set restores the false alarm, and skipping every sample
 silences the real one. The second mutation matters more: this must not become
 a way to stop hearing about genuine upstream stalls.
 
+**The other half of the noise: 103 push failures, one user, one cause.**
+Every `❌ Failed to send to token` in seven days was
+`messaging/third-party-auth-error` — "Invalid APNs credential" — for a single
+user. That is a build installed from Xcode: it registers against Apple's
+SANDBOX push environment, and this project has a Production APNs key and no
+development one, so every send to it fails forever. This repo already
+documents that; nothing connected it to the error log.
+
+**It must never be pruned, and that is the interesting part.** The obvious fix
+is to add the code to the stale-token cleanup. It reports OUR credential not
+covering the token's environment, not the token being dead — so if the
+PRODUCTION key were ever misconfigured, the same code fires for every user at
+once and the "cleanup" would erase every push token in the system in one run.
+An auto-remediation that can delete all user state on a config mistake is
+worse than the noise.
+
+So the per-send line is a WARN naming the real cause, and a per-run count
+raises ERROR once **two different users** fail the same way — one is a debug
+build, two is the production key being broken, which silently kills every
+notification the app sends. The accumulator is cleared at the top of each run
+because warm Cloud Functions instances reuse module state, and without that
+one debug build becomes a fake outage on the second invocation.
+
+Together with the orphan alarm, **essentially the project's entire ERROR
+volume for the week was two known-benign conditions.** That is the mechanism by
+which a real outage would have been missed.
+
 **Also observed, and left alone because it is correct behaviour:** at 16:00
 UTC NOAA returned HTTP 504 on all five probe endpoints, so the probe recorded
 null runs and the 16:20 refresh triggered nothing. "No new run means zero

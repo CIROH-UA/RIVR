@@ -97,3 +97,76 @@ describe("stale FCM tokens are actually removed", () => {
       `${offenders.join(", ")}. Add them to CLEANUP_SOURCES.`);
   });
 });
+
+describe("an APNs credential failure is not a stale token", () => {
+  // Measured 2026-08-30: 103 send failures in seven days, all
+  // `messaging/third-party-auth-error`, all from ONE user. That is a build
+  // installed from Xcode — it registers against Apple's SANDBOX push
+  // environment, and this project has a Production APNs key and no
+  // development one, so every send to it fails forever.
+  //
+  // Two things must both stay true, and they pull in opposite directions.
+  //
+  // Source-level guards, and they say so: exercising the real behaviour needs
+  // the FCM SDK, which this suite does not run. What they pin is the branch
+  // structure, which is what would actually be got wrong.
+  const src = readFileSync(
+    resolve(__dirname, "..", "src", "notification-service.ts"), "utf8");
+
+  test("it is NEVER added to the prune list", () => {
+    // The dangerous "fix" for the noise. This error means our credential does
+    // not cover the token's environment — the token itself is fine. If the
+    // PRODUCTION key were ever misconfigured, this same code fires for every
+    // user at once, and pruning on it would erase every push token in the
+    // system in a single run. An auto-remediation that can delete all user
+    // state on a config mistake is worse than the noise it removes.
+    const branch =
+      /messaging\/third-party-auth-error[\s\S]{0,3000}?\n {6}\} else \{/
+        .exec(src);
+    assert.notEqual(branch, null,
+      "the third-party-auth-error branch is gone; if the handling moved, " +
+      "this guard must follow it");
+    assert.ok(!/staleTokens\.push/.test(branch![0]),
+      "third-party-auth-error must not prune: it reports OUR credential " +
+      "being wrong, not the token being dead, and on a production key " +
+      "mistake it fires for everybody at once");
+  });
+
+  test("the stale-token list still names only genuine token errors", () => {
+    const list = /errorCode === "messaging\/registration-token-not-registered"[\s\S]{0,400}?\)/
+      .exec(src);
+    assert.notEqual(list, null);
+    assert.ok(!list![0].includes("third-party-auth"),
+      "adding it to the prune condition is the same defect by another route");
+  });
+
+  test("MANY users failing the same way is still raised loudly", () => {
+    // The other direction, which matters more than the silence. Quieting the
+    // per-send log must not quiet the case it can hide: the production APNs
+    // key broken for everyone, which silently kills every notification the
+    // app sends. One user is a debug build; two is an outage.
+    //
+    // **Honest note on strength.** Deleting the ERROR block outright is
+    // caught by `tsc`, not by this test — `APNS_OUTAGE_THRESHOLD` becomes an
+    // unused constant and `npm test` builds before it runs, so the suite
+    // never executes. A mutation that does not compile proves nothing about
+    // the assertion. What this DOES catch is the block being kept and
+    // weakened: the threshold raised out of reach, or `logger.error`
+    // downgraded to a warn, both of which compile cleanly and are the
+    // realistic ways this protection would rot.
+    assert.match(src, /APNS_OUTAGE_THRESHOLD = 2/,
+      "the per-run threshold is what separates a debug build from an outage");
+    assert.match(src, /apnsCredentialFailures\.size >= APNS_OUTAGE_THRESHOLD[\s\S]{0,200}?logger\.error/,
+      "crossing the threshold must log at ERROR, or downgrading the " +
+      "per-send line just deletes the signal");
+  });
+
+  test("the per-run accumulator is CLEARED at the start of a run", () => {
+    // Cloud Functions instances are reused, so module state survives between
+    // invocations. Without the clear, one debug build's failure accumulates
+    // and the second warm run reports a fake outage — which would train
+    // exactly the dismissal this whole change is removing.
+    assert.match(src, /apnsCredentialFailures\.clear\(\)/,
+      "a warm instance would otherwise carry failures between runs");
+  });
+});
