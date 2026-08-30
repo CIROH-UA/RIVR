@@ -431,7 +431,7 @@ silently migrates the deployed functions to a different runtime. Also note the
 function signatures, so it is imported lazily inside the one function that uses
 it. Moving it back to module scope will break deploys.
 
-### ADR 0011 cloud store (Phase 4, live since 2026-08-25)
+### ADR 0011 cloud store (Phases 4-7 complete; store live since 2026-08-25)
 
 Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
@@ -479,6 +479,46 @@ is "a favourite renders with ZERO upstream calls from the device", and every
 surface that renders a favourite reads the river's NAME and its THRESHOLDS —
 without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
+
+**Phase 7 removed every freshness timestamp from the value surfaces, so
+SILENCE NOW MEANS CURRENT.** The favourites card no longer shows "3h ago" or a
+green tick — the tick mattered most, because a per-card claim of "current"
+trains the eye to look for it and is then wrong exactly once. One indicator
+speaks for the app: `SyncStatusBanner`, full form on the favourites page,
+offline-only on the reach forecast page (where a flood notification lands), and
+the map keeps its own notice. The weekly outlook page has none.
+
+The banner is driven by `IRiverDataRepository.outOfSync`, which rises when a
+value was served that we cannot vouch for: past its window with a failed
+refresh, held longer than its product's cap, or carrying a RUN older than its
+cap. Marks are per key and decay after 30 minutes, because a version that
+latched forever put a permanent warning over perfectly current data.
+
+**The client and server share both thresholds, and a drift test enforces it.**
+`lib/services/4_infrastructure/river_data/hold_policy.dart` mirrors
+`MAX_HOLD_MS` and `MAX_RUN_AGE_MS` from `functions/src/store-window.ts`;
+`functions/src/hold-policy-drift.test.ts` reads the Dart off disk and fails if
+either side moves alone. Do not change one without the other.
+
+**Two dimensions, and the distinction matters.** Write recency asks how long
+since we wrote; run currency asks how old the water is. A refresher writing
+punctually every day while carrying yesterday's forecast passes the first and
+fails the second — which is exactly what GEOGLOWS did until 2026-08-29. The
+caps are measured, not reasoned: replaying `publish_cadence_log` gives worst
+observed run ages of 11.0h / 8.0h / 13.0h / 21.0h against caps of 16/16/24/36h,
+and GEOGLOWS is 42h because a stored run legitimately reaches 35.5h before our
+11:30 fetch replaces it.
+
+**`storeHealth` returns 200 for `degraded` and 503 only for `down`.** Read the
+`status` field, never the HTTP code alone: one NOAA series pausing is a
+`degraded` this repo documents as normal, and a store serving a run three days
+old also reports `degraded`. Both log at ERROR.
+
+**GEOGLOWS values expire at PUBLICATION, not midnight.** It stamps its run 00Z
+but publishes 10:15-10:30 UTC. `GeoglowsDataSource.windowFor` expires at the
+next publication and takes the run received into account, retrying in 30
+minutes when publication is late. The old next-midnight window let a device
+hold yesterday's forecast a full extra day.
 
 **Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
 published by the flood builder. It **exists and is `true`** — created by hand
