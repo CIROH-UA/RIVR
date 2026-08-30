@@ -562,12 +562,13 @@ reason: otherwise an in-flight read plants a fresh 30-day copy after the
 reclaim has already run. Both were found broken by the Phase 8 reviews (ADR
 0011 decision 23).
 
-**The kill switch is NOT being removed** (ADR 0011 decision 25, 2026-08-30).
-Phase 9 planned to delete it "once the store has run clean"; the store had
-logged 83 errors in seven days, all benign and all unnoticed, so that
-precondition was false. And it is the only way to stop devices reading the
-store without an App Review turnaround, which matters most at a launch that
-has not happened yet. Revisit after a clean production month.
+**The kill switch is NOT being removed, and is not scheduled for removal**
+(ADR 0011 decision 25, 2026-08-30). Phase 9 planned to delete it "once the
+store has run clean"; the store had logged 83 errors in seven days, all benign
+and all unnoticed, so that precondition was false. Jerson's call is to keep it
+outright — it costs nothing to leave in place and is a useful operational
+lever, letting any developer move every device off the store within minutes.
+**Do not re-propose removing it as cleanup.**
 
 **Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
 published by the flood builder. It **exists and is `true`** — created by hand
