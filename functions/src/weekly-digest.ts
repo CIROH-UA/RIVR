@@ -188,7 +188,7 @@ function sourceFor(user: DigestUser, reachId: string): ReachSource {
 }
 
 /** Summarize each of a user's favorites, most-newsworthy first. */
-function buildRows(
+export function buildRows(
   user: DigestUser,
   reachDataMap: Map<string, ReachData>,
   now: Date
@@ -199,8 +199,23 @@ function buildRows(
     const reach = reachDataMap.get(reachKey(source, reachId));
     if (!reach) continue;
 
-    const series = seriesFor(reach);
-    if (series.length === 0) continue;
+    const all = seriesFor(reach);
+    if (all.length === 0) continue;
+
+    // Window to WHAT IS AHEAD before deriving anything, exactly as the client
+    // does in `WeeklyOutlookService._assemble`.
+    //
+    // Both sides ran the identical peak-anchored trend rule — the comment on
+    // `trendOf` says so, and it is true of the arithmetic. It was false of the
+    // INPUTS: the client drops past points first, the server did not. Measured
+    // on 2026-08-30 across all seven of a real user's favourites, exactly one
+    // disagreed — White River (18471070), rising to the server and falling to
+    // the client — which is precisely why the notification said "6 rising"
+    // while the page it opens said "5 rising".
+    //
+    // The peak had the same flaw and it is the worse half: computed over the
+    // whole series, the digest can announce a crest that has already happened.
+    const series = upcomingFrom(all, now);
 
     let peak = series[0];
     for (const p of series) if (p.value > peak.value) peak = p;
@@ -236,6 +251,30 @@ function seriesFor(reach: ReachData): Array<{value: number; validTime: string}> 
   const short = f.shortRange?.values ?? [];
   const series = medium.length > 0 ? medium : short;
   return series.filter((p) => typeof p.value === "number" && p.value > -9000);
+}
+
+/**
+ * The part of a series that is still ahead, or the whole thing when none of it
+ * is.
+ *
+ * Mirrors the client's `ForecastPeak.upcomingPoints` plus its
+ * `upcoming.isNotEmpty ? upcoming : points` fallback. The fallback matters: a
+ * reach whose forecast has entirely lapsed should still produce a row rather
+ * than vanish from the digest.
+ *
+ * @param {Array<{value: number, validTime: string}>} series - Full series.
+ * @param {Date} now - Reference instant.
+ * @return {Array<{value: number, validTime: string}>} The forward window.
+ */
+export function upcomingFrom(
+  series: Array<{value: number; validTime: string}>,
+  now: Date
+): Array<{value: number; validTime: string}> {
+  const ahead = series.filter((p) => {
+    const t = Date.parse(p.validTime);
+    return !Number.isNaN(t) && t >= now.getTime();
+  });
+  return ahead.length > 0 ? ahead : series;
 }
 
 /** Peak-anchored trend, identical rule to the client's computeFlowTrend. */
