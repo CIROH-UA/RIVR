@@ -1724,6 +1724,12 @@ forecast PEAK (220 CFS, Extreme), the card reports what the river is doing NOW
 find the pair confusing. This is the same tension the reach detail sheet's peak
 strip exists for, and it belongs with that redesign rather than here.
 
+**The stale-token fix is verified by the same run.** The account carried 7 FCM
+tokens before it deployed; the 04:20 cycle logged 9 stale-token prunes with no
+cleanup errors, and the document now holds **4**. That is the deploy confirmed
+by its effect rather than by its exit status — and it is why `deviceCount` read
+4 rather than 7.
+
 **Earlier that hour the same cycle failed to deliver**, which is what sent us
 to TestFlight: three of the four registered devices are dead sandbox tokens
 from local builds and still fail with `Invalid APNs credential`. The fourth is

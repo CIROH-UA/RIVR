@@ -480,6 +480,13 @@ surface that renders a favourite reads the river's NAME and its THRESHOLDS —
 without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
 
+**The full alert loop is verified end to end** (2026-08-30, 04:20 UTC, on the
+TestFlight build of 2026.2.0+719): NOAA published, the store wrote, evaluation
+ran in the same invocation over 12 reaches, three rivers were classified
+against their own return periods, and three notifications reached a real lock
+screen. The trigger model shows in the copy — two `entry`, one `persistence`
+reading "still Action Event".
+
 **Alerts CANNOT be tested from a locally-built iOS app.** Firebase has a
 Production APNs auth key (`P663R3US8S`, team `2UL5XK6YRM`) and **no development
 key**. A build installed from Xcode registers against Apple's sandbox push
@@ -490,8 +497,9 @@ work normally. To test alerts on a debug build, upload the same `.p8` to the
 empty *development* slot in Project Settings → Cloud Messaging; otherwise use
 TestFlight. This costs an hour if you do not know it.
 
-**Phase 8 (prove it on device) is 8 of 9 guards**, measured 2026-08-30 and
-recorded in ADR 0011 with the build each number came from: favourites paint in
+**Phase 8 (prove it on device) is 8 of 9 guards — only the independent review
+remains.** Measured 2026-08-30 and recorded in ADR 0011 with the build each
+number came from: favourites paint in
 **969 ms** cold on iPhone and **2473 ms** on an Android emulator (bar: 3 s),
 two accounts on two platforms show identical values, airplane mode renders,
 and a unit switch repaints every card with **zero** refetches. Retaking Phase
