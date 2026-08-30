@@ -249,12 +249,14 @@ void main() {
   // Every coordinator test uses a fake that overrides `isResolved`, so only
   // these can reach the real getter.
   group('isResolved', () {
-    test('is false before initialize', () {
+    test('is false before initialize', () async {
       final rc = _FakeRc();
       final s = StoreReadSwitch(remoteConfig: rc);
       expect(s.isResolved, isFalse,
           reason: 'nothing has been fetched; a false switch here is an '
               'absence of information, not a decision');
+      await s.dispose();
+      await rc.close();
     });
 
     test('is true after a successful fetch', () async {
@@ -262,6 +264,8 @@ void main() {
       final s = StoreReadSwitch(remoteConfig: rc);
       await s.initialize();
       expect(s.isResolved, isTrue);
+      await s.dispose();
+      await rc.close();
     });
 
     // A failed fetch STILL resolves: Remote Config then serves the last
@@ -275,6 +279,8 @@ void main() {
       expect(s.isResolved, isTrue,
           reason: 'an offline launch must not disable the kill switch for the '
               'rest of the session');
+      await s.dispose();
+      await rc.close();
     });
   });
 

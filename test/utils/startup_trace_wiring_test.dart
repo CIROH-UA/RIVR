@@ -88,10 +88,28 @@ void main() {
     test('both load paths settle the flow flag', () {
       final page = _read(
           'lib/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart');
-      final settles = '_flowSettled = true'.allMatches(page).length;
-      expect(settles, greaterThanOrEqualTo(3),
-          reason: 'expected the NWM read plus BOTH GEOGLOWS outcomes to '
-              'settle the flag; found $settles');
+
+      // COUNTING was not enough, and round 4 proved it: removing the GEOGLOWS
+      // settle and adding a redundant one in the NWM branch — the exact
+      // round-3 defect, restored — kept the count at three and this test
+      // passed. So it checks WHERE the settles are, not how many.
+      final geoStart = page.indexOf('Future<void> _loadGeoglows()');
+      expect(geoStart, greaterThan(-1),
+          reason: '_loadGeoglows is gone or renamed; this guard must follow '
+              'it rather than silently passing');
+      final geoBody = page.substring(geoStart);
+
+      final inGeoglows = '_flowSettled = true'.allMatches(geoBody).length;
+      expect(inGeoglows, greaterThanOrEqualTo(2),
+          reason: 'both GEOGLOWS outcomes — the successful decode and the '
+              'caught error — must settle the flag, or a global river that '
+              'decodes to no points shows a blank gauge and says nothing '
+              'about why. Found $inGeoglows inside _loadGeoglows.');
+
+      final beforeGeo = page.substring(0, geoStart);
+      expect('_flowSettled = true'.allMatches(beforeGeo).length,
+          greaterThanOrEqualTo(1),
+          reason: 'the NWM read must settle it too');
     });
   });
 }

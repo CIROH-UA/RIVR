@@ -1873,6 +1873,30 @@ For contrast, guard 1's retaken table says a single `analysis_assimilation`
 call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
 screen now paints in a quarter of one such call, because it makes none.
 
+### Carried to Phase 9 — the alert peak is not windowed (2026-08-30)
+
+Found by the fourth Phase 8 review while checking the digest's window, and
+**not fixed here** because it is Phase 6 code that predates this phase.
+
+`getMaxForecastFlow` in `functions/src/notification-service.ts` takes the
+maximum over the WHOLE forecast series, exactly as the digest did before
+`b1cf108`. `timeToPeak` already returns null for a peak in the past, so no
+false timing is printed — that is why Diamond Creek's notification read
+"Peaking at 220 CFS" with no horizon. But the FLOW and the CATEGORY can still
+come from a crest that has already passed, which is how an alert can announce
+Extreme for water that has receded.
+
+That is visible in tonight's own evidence: the notification said Extreme at
+220 CFS while the card said Major at 107 CFS. Decision 22's account of that
+pair — "the alert reports the forecast peak, the card reports now" — is
+correct as far as it goes, and incomplete: the alert's peak is not windowed to
+what is ahead, so part of that gap is this defect rather than the intended
+distinction.
+
+The fix is the same shape as the digest's: window with the equivalent of
+`ForecastPeak.upcomingPoints` before taking the maximum. Deferred to Phase 9
+rather than changed under a phase gate that is already four reviews deep.
+
 ### Decision 23 — eviction waits for a decision, not a default (2026-08-30)
 
 The Phase 5 kill switch reclaims by evicting every favourite's stored entries,

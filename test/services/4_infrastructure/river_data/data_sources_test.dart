@@ -530,11 +530,17 @@ void main() {
       expect(skew, lessThan(const Duration(seconds: 5)),
           reason: 'expected roughly $expected, got ${result.validUntil}');
 
-      // And the property that actually matters: it is nowhere near the old
-      // next-midnight behaviour this replaced.
-      final nextMidnight = DateTime.utc(
-        before.year, before.month, before.day).add(const Duration(days: 1));
-      expect(result.validUntil!.isBefore(nextMidnight), isTrue,
+      // And the property that actually matters, stated as a DURATION rather
+      // than a wall-clock boundary.
+      //
+      // The first attempt compared against the next midnight, which made this
+      // fail deterministically between 23:30 and 24:00 UTC — the late-retry
+      // branch returns `now + 30 min`, which crosses midnight in that window.
+      // That is a narrower version of the very flake this test was rewritten
+      // to remove, and round 4 of the Phase 8 review caught it. A bound with
+      // no boundary in it cannot be wrong at a particular hour.
+      expect(result.validUntil!.difference(before),
+          lessThan(const Duration(hours: 1)),
           reason: 'a run this old must be re-checked shortly, not held until '
               'the next midnight — which is the bug this fixed');
     });
