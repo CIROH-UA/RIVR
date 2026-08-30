@@ -2368,6 +2368,35 @@ it is now pinned in both languages and mutation-checked.
   passed the finished string in as a parameter), is now a public function with
   its own cases.
 
+**VERIFIED IN PRODUCTION at the 17:20 UTC run, 2026-08-30.** Three things,
+counted rather than inferred from a "done" message:
+
+1. **The rename landed: 27 `currentFlow` documents, against a work list of
+   exactly 27 favourited NWM reaches.** Every one matched — no reach missing.
+2. **The store's hourly ERROR is gone.** Zero store errors in that run, against
+   one every hour for the preceding week.
+3. **The APNs failures now read as what they are** — `📵 APNs credential does
+   not cover this token's environment (user …) — expected for a debug build`,
+   at WARN, and the run completed alerts normally and sent notifications.
+
+**My expected count was wrong, and that is worth recording.** I predicted 31
+`currentFlow` documents from the 31 old `analysisAssimilation` ones. The right
+answer is 27: the old 31 included the four ORPHANED reaches nobody favourites,
+which no run rewrites. Checking against the work list rather than against the
+previous count is what turned "4 documents missing, investigate" into "exact
+match". A count is only a verification if you derived the expected number from
+the right thing.
+
+The 4 old-name documents for those orphans, plus the 27 superseded ones, are
+swept by `storeGcDaily` after its 7-day grace.
+
+**Two upstream outages happened during this, and the store handled both
+correctly.** At 16:00 UTC NOAA returned HTTP 504 on all five probe endpoints,
+so the probe recorded null runs and the 16:20 refresh triggered nothing —
+"no new run means zero fetches", on a real outage, twenty minutes after a
+deploy, which is exactly when it is easiest to blame the deploy. At 17:00 four
+of five endpoints recovered and the run proceeded.
+
 **Deployed and verified by composition, 2026-08-30 15:39 UTC:** seven store
 functions present (counted, not inferred from the deploy's exit status),
 `storeHealth` 200 `{"status":"healthy"}`, and `reachId` confirmed to be a real
