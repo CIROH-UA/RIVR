@@ -1686,7 +1686,50 @@ to get the evidence, because a spinner is something a person notices and a fast
 background fetch is not — and that is exactly the class of defect that got
 through repeatedly this week.
 
-### Guard 5 — a full publish cycle, observed (2026-08-30) ▶ PARTIAL
+### Guard 5 — a full publish cycle, observed (2026-08-30) ▶ MET
+
+**Completed at 04:20 UTC on the TestFlight build of 2026.2.0+719.** Three
+notifications arrived on the lock screen, `alertsSent: 3, errors: 0`:
+
+    Diamond Creek — Extreme Event
+    Peaking at 220 CFS.
+
+    Stream 640469625 — Major Event
+    Peaking in ~3 days at 29,294 CFS.
+
+    Test river name — still Action Event
+    Now peaking in ~41 hours at 982 CFS.
+
+Every link, measured rather than inferred: the probe detected a new NWM run,
+the store wrote it, alert evaluation ran in the same invocation over 12 reaches
+and 3 users, all three were classified against their own return periods
+(Extreme at the 100-year, Major at the 10-year, Action at the 2-year), and the
+pushes reached a real device.
+
+**The trigger model is visible in the copy.** Diamond Creek and 640469625 both
+fired as `entry` — first time above the threshold. The third fired as
+`persistence` and says "**still** Action Event" with "**Now** peaking in ~41
+hours", because that user had already been told and the water had not gone
+away. That distinction is decision 19 working in production.
+
+**Diamond Creek's line carries no time, and that is correct.** Its peak is
+behind it — current flow was above the forecast peak when it was favourited —
+so `timeToPeak` had nothing to offer and the copy degrades to "Peaking at 220
+CFS" rather than inventing a horizon.
+
+**One thing to look at, not a defect: the notification says Extreme while the
+card says MAJOR.** They answer different questions — the alert reports the
+forecast PEAK (220 CFS, Extreme), the card reports what the river is doing NOW
+(107 CFS, Major, having receded from 155). Both are right and a user may still
+find the pair confusing. This is the same tension the reach detail sheet's peak
+strip exists for, and it belongs with that redesign rather than here.
+
+**Earlier that hour the same cycle failed to deliver**, which is what sent us
+to TestFlight: three of the four registered devices are dead sandbox tokens
+from local builds and still fail with `Invalid APNs credential`. The fourth is
+the TestFlight build, and each alert succeeded after those three failed.
+
+
 
 **Four of the five links verified in one cycle; the fifth is blocked by a
 local-build gap, not a defect.** A NOAA river was deliberately favourited from
