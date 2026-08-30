@@ -43,6 +43,19 @@ class MapPageState extends State<MapPage> {
   late final MapReachSelectionService _reachSelectionService;
   late final MapMarkerService _markerService;
   late final MapControlsService _controlsService;
+
+  /// Whether the camera has already been moved to the user, this app run.
+  ///
+  /// **Static on purpose.** `_MapPageState` is recreated every time the map
+  /// tab is opened, so an instance field would be false again on the second
+  /// open and the camera would jump — exactly the behaviour being removed.
+  /// Static makes "first open" mean first open of the app run, which is what
+  /// a person means by it.
+  ///
+  /// Not persisted across launches: a fresh launch centring on you once is
+  /// helpful, and the alternative is a stored flag that makes the app behave
+  /// differently on day two for reasons the user cannot see.
+  static bool _hasCenteredOnUser = false;
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
@@ -310,14 +323,32 @@ class MapPageState extends State<MapPage> {
 
       AppLogger.debug('MapPage', 'Services initialized, waiting for style to load...');
 
-      // Start location initialization (does not depend on style being loaded)
-      // Centre on the user whenever a location is available, on every open —
-      // not just the first. Without a fix (permission refused, or no signal)
-      // the map simply stays on the configured default.
+      // Start location initialization (does not depend on style being loaded).
+      //
+      // **Centre on the FIRST open only.** This used to recentre on every
+      // open, which was reasonable while the map showed no location marker at
+      // all — the jump was the only way to know where you were. Now that the
+      // puck draws the user's position, recentring on every open just takes
+      // them away from wherever they had panned to, and the puck tells them
+      // where they are without moving the camera. Jerson's call, 2026-08-30.
+      //
+      // After the first open, the recentre button is the way back.
+      //
+      // The location is still REQUESTED every time: the puck needs a fix to
+      // draw, and `initializeLocation` is what prompts for permission. Only
+      // the camera move is first-open-only.
       _controlsService.initializeLocation().then((position) {
         if (position != null && mounted) {
-          _controlsService.recenterToDeviceLocation();
-          AppLogger.info('MapPage', 'Centered on device location');
+          if (!_hasCenteredOnUser) {
+            _hasCenteredOnUser = true;
+            _controlsService.recenterToDeviceLocation();
+            AppLogger.info('MapPage', 'Centered on device location (first open)');
+          } else {
+            AppLogger.info(
+              'MapPage',
+              'Location available; camera left where the user put it',
+            );
+          }
         } else {
           AppLogger.info(
             'MapPage',
@@ -352,6 +383,14 @@ class MapPageState extends State<MapPage> {
 
       // Apply lightPreset for Standard style (handles initial load + basemap changes)
       await _controlsService.applyLightPreset();
+
+      // The blue dot, and the accuracy ring around it.
+      //
+      // Re-applied on EVERY style load, not just the first: changing the
+      // basemap rebuilds the style and takes the location component with it,
+      // so a puck enabled once would silently vanish the first time someone
+      // switched to satellite.
+      await _controlsService.enableLocationPuck();
 
       // Reset vector tiles state (safe for both initial and subsequent loads).
       // Same race as the marker init below — bail rather than force-unwrap.
