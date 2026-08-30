@@ -170,6 +170,32 @@ came back to San Rafael Swell rather than Provo. Three mutations verified
 failing — idle stops recording, open ignores the memory, and the field made
 non-static.
 
+### Static outlives the page — and it also outlived the ACCOUNT
+
+Found by the audit behind "did you write the tests", not by a test.
+
+Both `_hasCenteredOnUser` and `_rememberedCamera` are static so they survive a
+page `Navigator.pushNamed` rebuilds on every open. That is deliberate and
+necessary. **Static also survives a change of user**, and that is not, because
+the two defects compound:
+
+- The next person's map would open on the **previous person's river**. Where
+  someone was looking is their business.
+- `_hasCenteredOnUser` would already be `true`, so the next person would
+  **never be centred on themselves** — they would land on the previous user's
+  camera instead.
+
+Sign-out already clears the biometric cache, user settings, the FCM token cache
+and the river-data cache. `MapPageState.forgetMapState()` now sits in that
+list. Three mutations verified failing: clearing only the camera, clearing only
+the flag, and sign-out not calling it at all.
+
+**Worth noting how this arrived.** The reasoning for making the fields static
+was written out carefully in both places, and it was correct as far as it went
+— it addressed the page lifetime and stopped there. A justification that is
+right about the case you were thinking of is exactly the kind that hides the
+case you were not.
+
 ## Unverified
 
 **How far off an iOS approximate fix actually is.** Stated from memory as

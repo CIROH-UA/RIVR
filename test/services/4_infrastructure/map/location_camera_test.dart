@@ -141,6 +141,50 @@ void main() {
     });
   });
 
+  group('map state does not survive a change of user', () {
+    // Found by auditing after "did you write the tests", not by a test — the
+    // same audit that has found something every time it has been run today.
+    //
+    // Both fields are static so they outlive a page that `pushNamed` rebuilds
+    // on every open. That is the point. But static also outlives the ACCOUNT,
+    // and the two defects compound: the next person's map would open on the
+    // previous person's river, AND `_hasCenteredOnUser` would already be true
+    // so they would never be centred on themselves.
+    //
+    // Sign-out already clears the biometric cache, user settings, the FCM
+    // token cache and the river-data cache. This belongs in that list.
+
+    test('a reset exists and clears BOTH fields', () {
+      final src = _code(page);
+      final reset = RegExp(
+        r'static void forgetMapState\(\) \{[\s\S]{0,200}?'
+        r'_hasCenteredOnUser = false;[\s\S]{0,120}?'
+        r'_rememberedCamera = null;',
+      );
+
+      expect(reset.hasMatch(src), isTrue,
+          reason: 'clearing only the camera still skips the next user\'s '
+              'first centring; clearing only the flag still shows them the '
+              'previous user\'s river');
+    });
+
+    test('sign-out actually calls it', () {
+      // The wiring. A reset nothing calls is the defect with extra steps.
+      final auth = _code('lib/ui/1_state/features/auth/auth_provider.dart');
+
+      expect(auth.contains('MapPageState.forgetMapState();'), isTrue,
+          reason: 'the map state would otherwise cross the account boundary');
+
+      final inSignOut = RegExp(
+        r"_clearRiverDataCache\(\);[\s\S]{0,300}?"
+        r'MapPageState\.forgetMapState\(\);',
+      );
+      expect(inSignOut.hasMatch(auth), isTrue,
+          reason: 'it must sit with the other sign-out cache clears, not '
+              'somewhere that only runs on some paths');
+    });
+  });
+
   group('the camera moves on the first open only', () {
     test('centring is gated on a flag', () {
       final src = _code(page);

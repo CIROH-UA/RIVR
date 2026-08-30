@@ -74,6 +74,27 @@ class MapPageState extends State<MapPage> {
   /// the reason the camera was un-persisted on 2026-08-20, and the second is
   /// why session memory is worth having.
   static ({double lat, double lon, double zoom})? _rememberedCamera;
+
+  /// Forget both pieces of map state.
+  ///
+  /// **Called on sign-out, and the reason is an account boundary.** Both
+  /// fields are static so they survive a page being pushed fresh — which is
+  /// the point — but static also means they survive a change of USER, and
+  /// that is not the point:
+  ///
+  /// - `_rememberedCamera` would open the next person's map on the previous
+  ///   person's river. Where someone was looking is their business.
+  /// - `_hasCenteredOnUser` would already be true, so the next person would
+  ///   NOT be centred on themselves on their first open — they would land on
+  ///   the previous user's camera instead. The two defects compound.
+  ///
+  /// Found by auditing after "did you write the tests", not by a test. Sign-out
+  /// already clears the biometric cache, user settings, the FCM token cache
+  /// and the river-data cache; this belongs in exactly that list.
+  static void forgetMapState() {
+    _hasCenteredOnUser = false;
+    _rememberedCamera = null;
+  }
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
