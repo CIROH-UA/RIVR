@@ -1327,15 +1327,30 @@ mechanism that keeps the flood-category ladder honest across the two
 languages. A client holding LONGER than the server would keep showing water the
 server had already given up on, silently, which is this scenario again.
 
-**Found by the fourth review and deliberately NOT fixed here: the GEOGLOWS
-LIVE path warns truthfully for about six hours a day.** Device testing on
+**Found by the fourth review and FIXED 2026-08-30 rather than deferred: the
+GEOGLOWS LIVE path warned truthfully for about six hours a day.** Device testing on
 2026-08-30 narrowed who this reaches: with the store read switch ON, favourites
 are served entirely from the store (zero upstream calls observed), so the live
 path — and this warning — is reached only by non-favourite rivers browsed on
 the map, or by everyone if the Phase 5 kill switch is ever flipped OFF. That
-last case is the reason it is written down rather than forgotten: flipping the
-switch is something done during an incident, and it would add a six-hour daily
-warning to whatever else was going wrong. `GeoglowsDataSource`
+last case is why it was fixed now rather than left for Phase 9: flipping the
+switch is something done DURING an incident, and it would have added a
+six-hour daily warning to whatever else was going wrong.
+
+**The fix is that the window now follows PUBLICATION, and the run actually
+received.** `GeoglowsDataSource` expired its values at the next UTC midnight,
+conflating the run's 00Z stamp with when GEOGLOWS actually publishes —
+10:15-10:30 UTC, a measurement `functions_geoglows/main.py` has recorded all
+along and which is why the flood builder runs at 11:00. A device fetching at
+00:20 therefore held the previous day's run for another 24 hours while a newer
+one had existed since 10:15.
+
+`windowFor` now expires at the next publication plus slack, and takes the run
+identity into account: holding today's run waits for tomorrow's publication;
+holding yesterday's before the expected time waits for today's; holding
+yesterday's AFTER it means publication is late, so it looks again in 30
+minutes rather than sitting on old water for a day. A test sweeps all 24 hours
+and asserts a held run can never reach the 42 h cap that makes the app warn. `GeoglowsDataSource`
 sets `validUntil` to next UTC midnight + 15 min, but GEOGLOWS actually
 publishes at 10:15-10:30 UTC. So a device on the live path holds the previous
 day's 00Z run in-window until midnight, reaching ~48 h of run age against a

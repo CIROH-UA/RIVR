@@ -387,14 +387,98 @@ void main() {
       expect(geoglows.supportedProducts, {ForecastProduct.geoglowsForecast});
     });
 
-    test('validUntil: forecast valid until next 00Z + skew', () {
-      expect(
-        geoglows.validUntil(
-          ForecastProduct.geoglowsForecast,
-          DateTime.utc(2026, 7, 10, 15, 20),
-        ),
-        DateTime.utc(2026, 7, 11, 0, 15),
-      );
+    // GEOGLOWS stamps its run 00Z but PUBLISHES at 10:15-10:30 UTC — measured
+    // from S3 Last-Modified on two consecutive days, and the reason the flood
+    // builder is scheduled at 11:00. This window used to run to the next
+    // MIDNIGHT, conflating the two: a device fetching at 00:20 held the
+    // previous day's run for another 24 hours while a newer one had existed
+    // since 10:15. Nothing surfaced it until Phase 7's run-age check started
+    // warning, correctly, for about six hours a day on the live path.
+    group('validUntil follows PUBLICATION, not the run stamp', () {
+      test('after publication, waits for tomorrow\'s', () {
+        expect(
+          geoglows.validUntil(
+            ForecastProduct.geoglowsForecast,
+            DateTime.utc(2026, 7, 10, 15, 20),
+          ),
+          DateTime.utc(2026, 7, 11, 10, 45),
+        );
+      });
+
+      test('before publication, waits for TODAY\'s', () {
+        // The old behaviour's worst case: fetching just after midnight used
+        // to buy a 24-hour window when the new run was ten hours away.
+        expect(
+          geoglows.validUntil(
+            ForecastProduct.geoglowsForecast,
+            DateTime.utc(2026, 7, 10, 0, 20),
+          ),
+          DateTime.utc(2026, 7, 10, 10, 45),
+        );
+      });
+    });
+
+    group('windowFor uses the run actually received', () {
+      test('holding TODAY\'s run waits for tomorrow\'s publication', () {
+        expect(
+          GeoglowsDataSource.windowFor(
+            DateTime.utc(2026, 7, 10, 12, 0),
+            DateTime.utc(2026, 7, 10), // today's 00Z run
+          ),
+          DateTime.utc(2026, 7, 11, 10, 45),
+        );
+      });
+
+      test('holding YESTERDAY\'s before publication waits for today\'s', () {
+        expect(
+          GeoglowsDataSource.windowFor(
+            DateTime.utc(2026, 7, 10, 6, 0),
+            DateTime.utc(2026, 7, 9),
+          ),
+          DateTime.utc(2026, 7, 10, 10, 45),
+        );
+      });
+
+      // The bug's second home. Without this, a device that looked just after
+      // the expected time and found publication late would sit on yesterday's
+      // water until the NEXT day's window — the same failure, one publication
+      // later.
+      test('holding YESTERDAY\'s AFTER publication retries shortly', () {
+        final now = DateTime.utc(2026, 7, 10, 11, 0);
+        expect(
+          GeoglowsDataSource.windowFor(now, DateTime.utc(2026, 7, 9)),
+          now.add(const Duration(minutes: 30)),
+        );
+      });
+
+      test('no run identity falls back to the publication schedule', () {
+        expect(
+          GeoglowsDataSource.windowFor(DateTime.utc(2026, 7, 10, 6, 0), null),
+          DateTime.utc(2026, 7, 10, 10, 45),
+        );
+        expect(
+          GeoglowsDataSource.windowFor(DateTime.utc(2026, 7, 10, 12, 0), null),
+          DateTime.utc(2026, 7, 11, 10, 45),
+        );
+      });
+
+      // The whole point: the window must never let a held run reach the
+      // run-age cap that makes the app warn. 42h is MAX_RUN_AGE_MS.
+      test('a held run never reaches the 42h cap that triggers the warning',
+          () {
+        for (var h = 0; h < 24; h++) {
+          final now = DateTime.utc(2026, 7, 10, h, 0);
+          final run = DateTime.utc(2026, 7, 10); // today's, once published
+          final until = GeoglowsDataSource.windowFor(
+            now, now.hour >= 11 ? run : DateTime.utc(2026, 7, 9));
+          final runHeld = now.hour >= 11 ? run : DateTime.utc(2026, 7, 9);
+          final ageAtExpiry = until.difference(runHeld);
+          expect(ageAtExpiry.inHours, lessThan(42),
+              reason: 'at $now the window runs to $until, leaving the run '
+                  '${ageAtExpiry.inHours}h old — past the cap, so the app '
+                  'would warn about data it could have refreshed');
+        }
+      });
     });
 
     test('fetch serializes the forecast and tags the canonical unit', () async {
@@ -408,6 +492,51 @@ void main() {
       expect(points.length, 2);
       expect((points.first as Map)['median'], 10);
       expect(api.calls, contains('gforecast:210230337'));
+    });
+
+    // Mutation-checked, and it mattered: deleting the per-fetch `validUntil`
+    // left all 1269 tests green. The schedule-only form would still be used,
+    // which is better than the old midnight window but blind to WHICH run came
+    // back — so a device handed yesterday's forecast after publication would
+    // hold it a full day instead of looking again shortly.
+    test('fetch supplies a window computed from the run it received',
+        () async {
+      final result = await geoglows.fetch(const RiverDataKey(
+        source: ForecastSource.geoglows,
+        reachId: '210230337',
+        product: ForecastProduct.geoglowsForecast,
+      ));
+
+      expect(result.validUntil, isNotNull,
+          reason: 'without this the repository falls back to the '
+              'schedule-only window and loses the run-awareness entirely');
+
+      // The fake reports the 2026-07-10 00Z run.
+      expect(
+        result.validUntil,
+        GeoglowsDataSource.windowFor(
+          DateTime.now().toUtc(), DateTime.utc(2026, 7, 10)),
+      );
+    });
+
+    test('a fallback run stamp yields the schedule-only window', () async {
+      // No run identity means we cannot tell which run this is, so there is
+      // nothing better than the publication schedule — and inventing one is
+      // what `generatedAtIsFallback` exists to prevent.
+      final fallbackApi = _FakeGeoglows()..generatedAtIsFallback = true;
+      final src = GeoglowsDataSource(
+        api: fallbackApi,
+        unitService: _FakeUnit('CFS'),
+      );
+      final result = await src.fetch(const RiverDataKey(
+        source: ForecastSource.geoglows,
+        reachId: '210230337',
+        product: ForecastProduct.geoglowsForecast,
+      ));
+
+      expect(result.runId, isNull);
+      expect(result.validUntil,
+          GeoglowsDataSource.windowFor(DateTime.now().toUtc(), null));
     });
   });
 }
