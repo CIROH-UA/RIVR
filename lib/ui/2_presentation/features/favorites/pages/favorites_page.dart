@@ -23,6 +23,7 @@ import 'package:rivr/ui/2_presentation/shared/widgets/sync_status_banner.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/notification_prompt_banner.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
+import 'package:rivr/models/1_domain/shared/favorite_rename.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/services/1_contracts/shared/i_fcm_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_user_settings_service.dart';
@@ -1281,13 +1282,17 @@ class _FavoritesPageState extends State<FavoritesPage>
     // null correctly means no button, exactly as an NWM reach with no name
     // gets none. A button that restores to nothing would be worse than its
     // absence.
-    final restoreTarget = (favorite.riverName?.trim().isNotEmpty ?? false)
-        ? favorite.riverName!.trim()
-        : context.read<FavoritesProvider>().getPlaceLabel(favorite.reachId);
-
-    final hasDefaultName =
-        restoreTarget != null && restoreTarget.trim().isNotEmpty;
-    final defaultName = restoreTarget ?? 'Station ${favorite.reachId}';
+    // The whole decision, including "is it already the default?", lives in
+    // `restoreTargetFor` so it can be tested without a widget harness. It was
+    // inline here, and a dead button — "Restore to Pitumarca, Peru" on a
+    // river already called Pitumarca, Peru — shipped past source-level guards
+    // because of it.
+    final restoreTarget = restoreTargetFor(
+      customName: favorite.customName,
+      riverName: favorite.riverName,
+      placeLabel:
+          context.read<FavoritesProvider>().getPlaceLabel(favorite.reachId),
+    );
 
     showCupertinoDialog(
       context: context,
@@ -1302,12 +1307,12 @@ class _FavoritesPageState extends State<FavoritesPage>
               textAlign: TextAlign.center,
               autofocus: true,
             ),
-            if (hasDefaultName && favorite.customName != null) ...[
+            if (restoreTarget != null) ...[
               const SizedBox(height: 12),
               CupertinoButton(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 onPressed: () {
-                  controller.text = defaultName;
+                  controller.text = restoreTarget;
                 },
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1319,7 +1324,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      'Restore to "$defaultName"',
+                      'Restore to "$restoreTarget"',
                       style: TextStyle(
                         fontSize: 14,
                         color: CupertinoColors.systemBlue,
