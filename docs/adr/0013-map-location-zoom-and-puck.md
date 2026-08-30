@@ -72,6 +72,42 @@ reasons the user cannot see.
 draw, and `initializeLocation` is what prompts for permission; only the camera
 move is first-open-only.
 
+## 4. A refused location is no longer a silent dead end
+
+Jerson, after the above shipped: *"what happens if location is not granted?"*
+
+**Opening the map degraded correctly** — permission refused, `initializeLocation`
+returns null, the map stays on the default view. Nothing broken.
+
+**The recentre button did not.** Tapping it with location refused produced
+**nothing at all**: no message, no prompt, no route to Settings. The service
+logged an error and returned. The streams button beside it has shown a "No
+Streams Visible" dialog for its own empty case since long before — the pattern
+existed in the same file and this button did not use it.
+
+**And no test covered any denied path.** The five guards written for the zoom,
+the puck and the first-open flag touch permission nowhere. Asked directly, that
+was the honest answer.
+
+**`initializeLocation` returned `Position?`, collapsing four situations into
+one null** — services off, refused, refused permanently, and simply no fix. The
+caller could not say anything useful, or know whether Settings would even help.
+It now records which, and the page shows a dialog with **Open Settings** —
+offered only for the two states Settings can actually fix. A plain refusal can
+still be resolved by the system prompt on the next tap, and a missing GPS fix
+is not a permissions problem at all; offering Settings there sends people on an
+errand and teaches them the button lies.
+
+**A successful fix clears the denial**, or the first refusal would stick and
+the dialog would appear over a working map.
+
+**One of these guards was wrong when first written, and the mutation caught it
+rather than the code.** Deleting the dialog CALL left the test green, because
+the pattern reached far enough forward to match the method's own DECLARATION.
+A guard that matches a definition instead of an invocation proves the method
+exists, which nobody doubted. Fixed to match the call with its argument, and
+re-verified.
+
 ## Unverified
 
 **How far off an iOS approximate fix actually is.** Stated from memory as
