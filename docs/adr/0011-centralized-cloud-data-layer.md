@@ -2159,8 +2159,44 @@ null runs and the 16:20 refresh triggered nothing. "No new run means zero
 fetches" working as designed, on a real outage, twenty minutes after a deploy —
 which is exactly when it would have been easiest to blame the deploy.
 
-**Code.** Remove the Phase 5 kill switch and its Remote Config parameter once the
-store has run clean through Phase 8. Delete everything with no callers — **the
+### Decision 25 — the kill switch STAYS (2026-08-30)
+
+Phase 9 was written to remove the Phase 5 kill switch and its Remote Config
+parameter "once the store has run clean through Phase 8". **That precondition
+was checked today and is false**, and even if it had been true the removal
+would still be wrong right now.
+
+**The evidence against "run clean".** 83 store ERROR entries in seven days,
+plus 103 push failures, and every one of them a benign condition nobody had
+looked at — see the section above. A store whose alarm channel was full of
+noise for a week has not demonstrated that it can be trusted without a way to
+switch it off; it has demonstrated the opposite, that a genuine failure would
+have gone unnoticed.
+
+**The order is also wrong.** The switch is the only way to stop devices reading
+the store WITHOUT an app release. RIVR has never shipped to either store, and
+launch is a coordinated dual-store release — so the first moment this really
+matters is still ahead, not behind. Deleting the emergency stop immediately
+before the first public launch inverts the reason it was built: an App Review
+turnaround is days, and a store serving poisoned values for days is exactly the
+scenario decision 23 and Phase 7's whole trust model exist to bound.
+
+**Against keeping it**, honestly: it is 534 lines plus eviction machinery, it
+broke in both directions during Phase 8 review (decision 23), and dead code is
+what Phase 9 exists to remove. That is a real cost. It is outweighed by the
+switch being *fixed, tested and verified on a device* since those breaks, and
+by the fact that the thing it protects against is unbounded.
+
+**Revisit when both are true:** the app has shipped and run in production
+through at least one full store incident-free month, AND the error channel is
+quiet enough that a new alarm would actually be noticed. Neither holds today.
+
+The Remote Config parameter `store_read_enabled` therefore stays too, and
+stays `true`.
+
+**Code.** ~~Remove the Phase 5 kill switch and its Remote Config parameter once
+the store has run clean through Phase 8.~~ **Superseded by decision 25 — it
+stays.** Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
 `reach_data_provider` and was wrong).
 
