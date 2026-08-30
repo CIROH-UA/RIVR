@@ -12,6 +12,7 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
+import {windowSampleFrom} from "./store-firestore.js";
 
 import {
   REFRESH_MARGIN_MS,
@@ -429,5 +430,151 @@ describe("an orphan is not an outage", () => {
     assert.deepEqual(plan.extend, []);
     assert.equal(plan.orphaned, 1);
     assert.equal(plan.covered, 0);
+  });
+});
+
+describe("the island cap reaches the abandonment decision", () => {
+  // Phase 9 review, finding 2. The pure planner was thoroughly tested with
+  // hand-built samples and the CONNECTION into it was not, so both of these
+  // passed 438/438:
+  //
+  //   store-firestore.ts  reachId: ""                    (sampler drops it)
+  //   store-window.ts     maxHoldMs(s.product, "23021904") (planner ignores it)
+  //
+  // Same shape as the Dart fakes that accepted `reachId` and threw it away —
+  // fixed on one side of the language boundary only. `assessProductFreshness`
+  // and `assessRunCurrency` were already pinned, which made this look
+  // accidental rather than considered.
+  //
+  // What it costs: a healthy Hawaii short-range document, 12 h old on a
+  // 12-hourly run, is judged by the CONUS 6-hour cap — abandoned every cycle,
+  // never extended, every device holding that favourite dropping to the live
+  // path for half of each cycle. That is guard 1's exact failure, plus an
+  // hourly `store windows past their hold cap` error of precisely the kind
+  // this phase spent the day removing.
+  const NOW = new Date("2026-08-30T16:20:00.000Z");
+  const ISLAND = "800000010";
+  const CONUS = "23021904";
+
+  /**
+   * A short-range document fetched `ageHours` ago.
+   * @param {string} reachId - Which reach.
+   * @param {number} ageHours - How long ago it was written.
+   * @return {StoredWindowSample} The sample.
+   */
+  function doc(reachId: string, ageHours: number): StoredWindowSample {
+    return {
+      documentId: `nwm__${reachId}__shortRange`,
+      source: "nwm",
+      reachId,
+      product: "shortRange",
+      fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
+      validUntil: NOW.toISOString(),
+    };
+  }
+
+  test("a 12h-old ISLAND document is not abandoned", () => {
+    // 12 h is one whole Hawaii cycle: the newest value that exists.
+    const s = doc(ISLAND, 12);
+    const plan = planWindowExtensions(new Set([s.documentId]), [s], NOW);
+
+    assert.deepEqual(plan.abandoned, [],
+      "judged by the CONUS 6-hour cap this is abandoned every cycle, and " +
+      "every device with that favourite falls to the live path");
+    assert.equal(plan.extend.length, 1,
+      "and it must be EXTENDED, not merely left alone");
+  });
+
+  test("the same age on a CONUS document IS abandoned", () => {
+    // The direction that matters more: the island cap must not leak onto
+    // CONUS reaches, or a genuinely stalled document is held for a day.
+    const s = doc(CONUS, 12);
+    const plan = planWindowExtensions(new Set([s.documentId]), [s], NOW);
+
+    assert.deepEqual(plan.abandoned, [s.documentId]);
+  });
+
+  test("a mixed sweep decides each document by ITS OWN reach", () => {
+    // The wiring, stated as a difference. A planner that reads one constant
+    // reach for every sample passes both tests above in isolation.
+    const island = doc(ISLAND, 12);
+    const conus = doc(CONUS, 12);
+    const plan = planWindowExtensions(
+      new Set([island.documentId, conus.documentId]), [island, conus], NOW);
+
+    assert.deepEqual(plan.abandoned, [conus.documentId],
+      "exactly one of these two is stale, and which one depends on the reach");
+    assert.equal(plan.extend.length, 1);
+  });
+
+  test("an island document past even ITS cap is still abandoned", () => {
+    // Not "hold forever": 25 h is past the 24 h island cap.
+    const s = doc(ISLAND, 25);
+    const plan = planWindowExtensions(new Set([s.documentId]), [s], NOW);
+    assert.deepEqual(plan.abandoned, [s.documentId]);
+  });
+});
+
+describe("the sample carries the reach out of Firestore", () => {
+  // The other half of Phase 9 review finding 2, and the half my first fix
+  // missed: the tests above build samples by hand, so dropping `reachId` in
+  // the Firestore mapping still passed all 442. The mapping was inline in a
+  // loop that needs an emulator; it is now `windowSampleFrom`, which is pure.
+  //
+  // `reachId` is not one field among several here. It decides which hold and
+  // run-age cap the document is judged by, and an empty one is silently CONUS
+  // — so losing it makes every island document expire between runs while
+  // every test stays green.
+
+  test("reachId survives the mapping", () => {
+    const s = windowSampleFrom("nwm__800000010__shortRange", {
+      source: "nwm",
+      reachId: "800000010",
+      product: "shortRange",
+      window: {
+        fetchedAt: "2026-08-30T04:20:00.000Z",
+        validUntil: "2026-08-30T16:30:00.000Z",
+      },
+      runId: "2026-08-30T00:00:00Z",
+    });
+
+    assert.equal(s.reachId, "800000010",
+      "an empty reachId is silently CONUS, so every island document would " +
+      "be judged by a cap six times too short");
+    assert.equal(s.documentId, "nwm__800000010__shortRange");
+    assert.equal(s.fetchedAt, "2026-08-30T04:20:00.000Z");
+    assert.equal(s.validUntil, "2026-08-30T16:30:00.000Z");
+    assert.equal(s.runId, "2026-08-30T00:00:00Z");
+  });
+
+  test("the mapped sample decides by its own reach, end to end", () => {
+    // Mapping and planner together, which is the connection that was broken.
+    const NOW = new Date("2026-08-30T16:20:00.000Z");
+    const twelveHoursAgo =
+      new Date(NOW.getTime() - 12 * 3600_000).toISOString();
+
+    const island = windowSampleFrom("nwm__800000010__shortRange", {
+      source: "nwm", reachId: "800000010", product: "shortRange",
+      window: {fetchedAt: twelveHoursAgo, validUntil: NOW.toISOString()},
+    });
+
+    const plan = planWindowExtensions(
+      new Set([island.documentId]), [island], NOW);
+
+    assert.deepEqual(plan.abandoned, [],
+      "a healthy Hawaii document, read from Firestore and planned, must " +
+      "survive its own 24-hour cap rather than CONUS's six");
+  });
+
+  test("a document with no reachId does not crash, it degrades to CONUS", () => {
+    // The safe direction, stated so it is a decision. A malformed document
+    // should cost an extra refetch, never a thrown planner.
+    const s = windowSampleFrom("nwm__x__shortRange", {
+      source: "nwm", product: "shortRange",
+      window: {fetchedAt: "2026-08-30T04:20:00.000Z", validUntil: "x"},
+    });
+    assert.equal(s.reachId, "");
+    assert.doesNotThrow(() =>
+      planWindowExtensions(new Set([s.documentId]), [s], new Date()));
   });
 });

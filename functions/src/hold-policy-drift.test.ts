@@ -277,7 +277,7 @@ describe("guard 4 — the island caps are shared too", () => {
     // A near-miss found while verifying the deploy on 2026-08-30. GEOGLOWS
     // river ids are also 9 digits, and nothing stops one landing inside the
     // NWM island COMID band — `isIslandReach` reads the number, not the
-    // network. None of the 36 reaches in the store today collide, but that is
+    // network. None of the reaches in the store today collide, but that is
     // luck, not design.
     //
     // What actually makes it safe is that the island tables name ONLY

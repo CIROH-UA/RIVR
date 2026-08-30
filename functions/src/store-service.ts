@@ -397,7 +397,7 @@ export async function runStoreWriteThrough(
   // failures, and every GEOGLOWS favourite produced nothing at all while
   // reporting a failure. Round 2, F3.
   const products = PRODUCTS_BY_SOURCE[source].filter(
-    (p) => canFetch(source, p));
+    (p) => canFetch(source, p, reachId));
 
   if (products.length === 0) {
     logger.info("⏭️ write-through skipped: nothing fetchable for this source", {
@@ -582,10 +582,15 @@ export async function runStoreStaticRefresh(
   };
 
   for (const product of STATIC_PRODUCTS) {
-    if (!canFetch("nwm", product)) continue;
-
     const due: typeof nwm = [];
     for (const entry of nwm) {
+      // Per REACH, not per product: since Phase 9 fetchability depends on the
+      // NWM domain, and this loop is the wrong way round to hoist it out.
+      // Both static products happen to exist for every domain, so this is a
+      // no-op today — kept anyway, because the next product added here will
+      // not necessarily be, and a hoisted check would silently plan work
+      // NOAA cannot serve.
+      if (!canFetch("nwm", product, entry.reachId)) continue;
       const id = storageKey("nwm", entry.reachId, product);
       const existing = await deps.readExisting(id);
       if (staticRefreshDue(existing, now)) due.push(entry);

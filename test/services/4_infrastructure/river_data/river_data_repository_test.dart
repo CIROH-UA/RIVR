@@ -307,6 +307,52 @@ void main() {
       expect(source.validUntilReaches, isNot(contains(key.reachId)));
     });
 
+    // Phase 9 review, finding 3. The `validUntil` half of this wiring was
+    // pinned; the FRESHNESS half was not, and replacing `key.reachId` with a
+    // CONUS constant at river_data_repository.dart:106/:112 passed all 1343
+    // tests. The ADR said the wiring was "pinned and mutation-checked", which
+    // was true of one call and read as covering both.
+    //
+    // What it costs an island favourite: `heldTooLong` and `runTooOld` judge
+    // it by CONUS caps, so a healthy Oahu reach — measured at 15.3 h of run
+    // age against a CONUS cap of 16 h and a 6 h hold cap — trips both
+    // routinely, and SyncStatusBanner shows a permanent "may be out of date"
+    // over completely current data. Exactly the false alarm this phase spent
+    // the day removing, moved to the client.
+    test('freshness judges an island reach by ISLAND caps', () async {
+      const island = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '800000010',
+        product: ForecastProduct.shortRange,
+      );
+
+      // A run 20 h old and a fetch 12 h ago: fine for a 12-hourly island
+      // product (24 h hold / 28 h run-age), stale for CONUS (6 h / 16 h).
+      source.nextRunId = now.subtract(const Duration(hours: 20))
+          .toIso8601String();
+      source.nextFetchedAt = now.subtract(const Duration(hours: 12));
+
+      await repo.read(island);
+
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'judged as CONUS, a perfectly current island value puts a '
+              'permanent staleness warning over the whole app');
+    });
+
+    test('the SAME values on a CONUS reach do raise the warning', () async {
+      // The other direction, and the one that matters more: island caps must
+      // not be applied to CONUS reaches, or the warning stops working at all.
+      source.nextRunId = now.subtract(const Duration(hours: 20))
+          .toIso8601String();
+      source.nextFetchedAt = now.subtract(const Duration(hours: 12));
+
+      await repo.read(key);
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'a CONUS reach silent for 12 h with a 20 h-old run really '
+              'is unvouchable');
+    });
+
     test('a failed fetch on a cache MISS raises it', () async {
       source.offline = true;
       await expectLater(repo.read(key), throwsA(anything));

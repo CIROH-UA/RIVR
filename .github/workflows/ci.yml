@@ -35,8 +35,26 @@ jobs:
         # errors fatal, but don't fail the build on infos.
         run: flutter analyze --no-fatal-infos
 
+      # Everything under test/ EXCEPT integration_test, which has ~27
+      # long-standing pre-existing failures and needs a device.
+      #
+      # Enumerated by exclusion rather than by an allow-list, because the
+      # allow-list silently dropped a whole directory. `test/docs/` was added
+      # in ADR 0011 Phase 9 and ran nowhere: the guard written so that
+      # CLAUDE.md's path-rot "no longer needs a human" was itself enforced
+      # only by a human remembering to run bare `flutter test`. Found by the
+      # Phase 9 review.
+      #
+      # This is the SECOND time CI's coverage was narrower than everyone
+      # believed — see the note below about the functions suite. An allow-list
+      # of directories is a promise that someone will remember to update it.
       - name: Test (unit & widget only)
-        run: flutter test test/models test/services test/ui test/utils test/helpers
+        run: |
+          dirs=$(find test -maxdepth 1 -mindepth 1 -type d \
+                   ! -name integration_test | sort | tr '\n' ' ')
+          echo "Running: $dirs"
+          test -n "$dirs" || { echo "No test directories found"; exit 1; }
+          flutter test $dirs
 
       # The Cloud Functions suite was never run by CI, which made a claim in
       # several files false: comments in flow-classification.ts, CLAUDE.md and

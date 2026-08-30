@@ -191,7 +191,7 @@ describe("the run identity is the forecast date, never invented", () => {
 describe("GEOGLOWS is wired into the store, not excluded", () => {
   test("geoglowsForecast is fetchable", () => {
     assert.deepEqual(CAN_FETCH.geoglows, ["geoglowsForecast"]);
-    assert.equal(canFetch("geoglows", "geoglowsForecast"), true);
+    assert.equal(canFetch("geoglows", "geoglowsForecast", "23021904"), true);
   });
 
   test("the stored unit is GEOGLOWS' native m3/s, not a user preference", () => {
