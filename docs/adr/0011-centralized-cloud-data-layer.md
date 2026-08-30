@@ -1875,10 +1875,36 @@ For contrast, guard 1's retaken table says a single `analysis_assimilation`
 call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
 screen now paints in a quarter of one such call, because it makes none.
 
-### Carried to Phase 9 — the alert peak is not windowed (2026-08-30)
+### The alert peak is not windowed — CARRIED to Phase 9, FIXED there 2026-08-30
 
 Found by the fourth Phase 8 review while checking the digest's window, and
-**not fixed here** because it is Phase 6 code that predates this phase.
+**not fixed there** because it is Phase 6 code that predates that phase.
+
+**Fixed in Phase 9.** `upcomingFrom` moved out of `weekly-digest.ts` into
+`forecast-window.ts`, and `getMaxForecastFlow` now windows both series through
+it before taking the maximum. The move is the point: **a windowing rule owned
+by one consumer is a rule the other keeps forgetting.** The digest was fixed on
+2026-08-30 and the alert path was not, because the function lived in the
+digest's file and nothing connected them.
+
+Three things came out of doing it:
+
+- **`assessReach` and `evaluateAlert` now take an injectable `now`.** Windowing
+  makes them clock-dependent, and an existing test — "the alert carries the
+  validTime of the PEAK point" — went red for exactly that reason: its fixture
+  dates had drifted into the past, so the answer depended on the day the suite
+  ran. That is the trap that cost three review rounds in Phase 8, each fix
+  removing one wall-clock dependency and adding another. The seam is the fix;
+  the number is not.
+- **The drift guard passed on a COMMENT.** Its first version asserted
+  `/upcomingFrom/` against raw source, and both files explain the rule in prose
+  that contains the name — so deleting the call and its import compiled cleanly
+  and left the guard green. It now strips comments and matches a CALL. Same
+  lesson as Phase 9's `loadCompleteReachData` guard, learned twice in one day.
+- **Mutation-checked in both directions**, and the second matters more:
+  over-filtering with `t >= now` instead of anchoring drops the most recent
+  past reading — the current value — and fails four tests. Silencing a stale
+  crest must not silence the real one.
 
 `getMaxForecastFlow` in `functions/src/notification-service.ts` takes the
 maximum over the WHOLE forecast series, exactly as the digest did before

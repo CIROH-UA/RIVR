@@ -112,11 +112,38 @@ describe("the digest's window is still a port of the app's", () => {
       "upcomingFrom and simplify it");
   });
 
-  test("the digest names the file it was ported from", () => {
-    // So the next person changing one finds the other.
-    const digest = readFileSync(
-      resolve(__dirname, "..", "src", "weekly-digest.ts"), "utf8");
-    assert.match(digest, /forecast_peak\.dart/,
+  test("the shared window names the file it was ported from", () => {
+    // So the next person changing one finds the other. Moved from
+    // weekly-digest.ts to forecast-window.ts on 2026-08-30, when the ALERT
+    // path turned out to have the same unwindowed-peak defect the digest had:
+    // a rule owned by one consumer is a rule the other keeps forgetting.
+    const shared = readFileSync(
+      resolve(__dirname, "..", "src", "forecast-window.ts"), "utf8");
+    assert.match(shared, /forecast_peak\.dart/,
       "upcomingFrom must point at its source of truth by path");
+  });
+
+  test("BOTH notification paths use the shared window", () => {
+    // The defect this file now exists to prevent twice over. The digest was
+    // fixed on 2026-08-30 and the alert path was not, because the function
+    // lived in the digest's file and nothing said the alert needed it.
+    for (const file of ["weekly-digest.ts", "notification-service.ts"]) {
+      // COMMENTS STRIPPED, and matching a CALL rather than a mention.
+      //
+      // The first version of this asserted `/upcomingFrom/` against the raw
+      // source, and passed when the call was deleted — because both files
+      // explain the windowing rule in prose, and the prose says the name.
+      // Mutation-checked: removing the call and its import compiles cleanly
+      // and left this green. A guard that a comment can satisfy is not a
+      // guard, which is the same lesson Phase 9 learned on the deleted
+      // `loadCompleteReachData`.
+      const src = readFileSync(resolve(__dirname, "..", "src", file), "utf8")
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+        .join("\n");
+      assert.match(src, /upcomingFrom\(/,
+        `${file} computes a peak or trend without windowing to what is ` +
+        "still ahead — it can announce a crest that already happened");
+    }
   });
 });
