@@ -758,7 +758,17 @@ async function sendAlert(
   if (staleTokens.length > 0) {
     try {
       const updateData: Record<string, unknown> = {
-        fcmTokens: admin.firestore.FieldValue.arrayRemove(staleTokens),
+        // SPREAD, not the array itself. `arrayRemove` takes varargs; handing
+        // it one array asks Firestore to remove a single element that happens
+        // to BE an array, which it rejects outright: "Element at index 0 is
+        // not a valid array element. Nested arrays are not supported."
+        //
+        // So this threw on every cycle that found a stale token, and no token
+        // was ever pruned. Observed live 2026-08-30 during Phase 8 guard 5 —
+        // the same run logged four stale tokens and four cleanup failures.
+        // Recorded in ADR 0008 as a defect and carried as a Phase 9 item;
+        // fixed here because it was firing in front of us.
+        fcmTokens: admin.firestore.FieldValue.arrayRemove(...staleTokens),
       };
       // If all tokens are stale, disable notifications
       if (staleTokens.length === user.fcmTokens.length) {

@@ -1686,6 +1686,47 @@ to get the evidence, because a spinner is something a person notices and a fast
 background fetch is not — and that is exactly the class of defect that got
 through repeatedly this week.
 
+### Guard 5 — a full publish cycle, observed (2026-08-30) ▶ PARTIAL
+
+**Four of the five links verified in one cycle; the fifth is blocked by a
+local-build gap, not a defect.** A NOAA river was deliberately favourited from
+the map minutes beforehand — Diamond Creek (2875501, Cheyenne WY), showing
+Extreme now with a Major peak — and the 03:20 UTC cycle was watched end to end
+in the function logs.
+
+| link | result |
+|---|---|
+| probe detects a new run | **yes** — `reason: "nwm run advanced"` |
+| store updates | **yes** — write-through had already stored the new favourite's flow, forecast, thresholds and name on favouriting |
+| alert evaluation runs | **yes** — 13 reaches, 3 users, in the same invocation |
+| conditions correctly classified | **yes** — Major on 640469625 (10-year threshold), Action on 620569308, and a send attempted for Diamond Creek |
+| notification delivered | **NO** — 12 sends, all rejected: `messaging/third-party-auth-error`, "Invalid APNs credential" |
+
+**The delivery failure is an environment gap and production is unaffected.**
+Firebase has a **Production** APNs auth key (`P663R3US8S`) and no **development**
+one. A build installed from Xcode registers with Apple's sandbox environment,
+which that key cannot authenticate against; TestFlight and App Store builds use
+production and work — confirmed by Jerson receiving alerts every six hours from
+the last TestFlight build. So alerts are not broken for users; they are
+**untestable from a local build**, which is its own real cost: this is the
+second time this session that the build needed for one kind of evidence was
+the build that made another kind impossible.
+
+Completing this guard needs either a development `.p8` uploaded to the empty
+slot, or a TestFlight build. Deferred rather than faked.
+
+**The cycle also exposed a live defect, now fixed.** Four stale FCM tokens were
+detected and all four cleanups threw:
+
+    ❌ Failed to clean up stale tokens
+    "Element at index 0 is not a valid array element. Nested arrays are not
+     supported."
+
+`FieldValue.arrayRemove` takes varargs; it was being handed the array itself.
+So no stale token was ever pruned and every cycle retried the same dead devices
+indefinitely. Recorded in ADR 0008 and carried as a Phase 9 item — fixed here
+because it was firing in front of us.
+
 ### Guard 3 — two accounts, two devices, one river (2026-08-30)
 
 **Identical: 13966 CFS, Normal, on both.** iPhone (iOS 26.6, debug at
