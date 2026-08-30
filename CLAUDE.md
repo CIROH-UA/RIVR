@@ -71,6 +71,23 @@ functions_geoglows/                      -- Firebase Cloud Functions (Python, "g
   vpu_slices.json                        -- bundled VPU -> river-slice index (stream conditions)
 ```
 
+### Map camera and the location puck (ADR 0013)
+
+**The location zoom is 12, and that is the tileset's ceiling, not a taste
+call.** `nwm-channels-v3` is tiled z0-12; above that Mapbox stretches the z12
+tile, so lines thicken and no new stream appears. Zoom 14 (the old value) shows
+1.6 km on a Pro Max against 6.4 km at 12 — three quarters of the view thrown
+away for no extra data.
+
+**The blue dot is Mapbox's own location component**, with `showAccuracyRing`
+on, so a vague fix draws a visible circle instead of implying precision. Every
+setting defaults to false, which is why the map drew nothing before. It is
+re-applied on every style load — a basemap change rebuilds the style and takes
+the component with it.
+
+**The camera centres on the FIRST open only**; after that the recentre button.
+The flag is static because the page state is recreated on every open.
+
 ### Flood colours — current design (superseded the Cloud Function pipeline)
 
 **The four `geoglows_conditions_*` Cloud Functions are DELETED.** They ran a

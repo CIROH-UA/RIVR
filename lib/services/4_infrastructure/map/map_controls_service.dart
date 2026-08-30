@@ -15,8 +15,21 @@ class MapControlsService {
   bool _isToggling3D = false;
   String _currentLightPreset = 'day';
 
-  // Default camera settings (you can adjust these based on your app's needs)
-  static const double _defaultZoom = 14.0;
+  // Zoom used when the camera moves to the device's location.
+  //
+  // **Twelve, not fourteen, and the tileset is why.**
+  // `byu-hydroinformatics.nwm-channels-v3` is tiled z0-12 (confirmed from its
+  // Mapbox metadata). Above 12 there is no more stream data — Mapbox stretches
+  // the z12 tile, so the lines get thicker and no new stream ever appears.
+  //
+  // What the user lost for that: at zoom 14 a Pro Max shows about 1.6 km of
+  // ground, at 12 about 6.4 km. So 14 threw away three quarters of the visible
+  // area and bought nothing, and on a screen that narrow a small stream often
+  // simply is not in frame. Reported by Jerson 2026-08-30: "streams are not
+  // visible at that level usually."
+  //
+  // 12 is the sharpest zoom the data actually supports.
+  static const double _defaultZoom = 12.0;
   static const int _animationDurationMs = 1000;
   static const String _terrain3DKey = 'terrain_3d_enabled';
   // The map camera is deliberately not persisted. It opens on the user's
@@ -305,6 +318,47 @@ class MapControlsService {
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error getting location', e);
       return null;
+    }
+  }
+
+  /// Show the user's position on the map: a dot, with a ring when the fix is
+  /// vague.
+  ///
+  /// **Mapbox's own location component, not a custom layer.** It draws the
+  /// accuracy ring from the radius the device itself reports, in real metres,
+  /// so the ring shrinks and grows correctly as the user zooms and needs no
+  /// code of ours to keep it honest. A precise fix is a small dot; a poor one
+  /// is visibly a circle, which is the whole point — the map stops implying a
+  /// precision it does not have.
+  ///
+  /// Every one of these settings defaults to FALSE, which is why the map
+  /// showed nothing at all before: it flew to the user's position and then
+  /// gave no indication of where that was, leaving the centre of the screen as
+  /// the only clue.
+  ///
+  /// Failure is logged and swallowed. A map without a blue dot is worth far
+  /// more than no map, and this runs after the style loads where a throw would
+  /// take the page down.
+  Future<void> enableLocationPuck() async {
+    if (_mapboxMap == null) {
+      AppLogger.error('MapControlsService', 'Map not initialized');
+      return;
+    }
+    try {
+      await _mapboxMap!.location.updateSettings(
+        LocationComponentSettings(
+          enabled: true,
+          // The ring is the feature. Without it a vague fix looks exactly
+          // like a precise one.
+          showAccuracyRing: true,
+          // No pulsing: it draws the eye to the user's position, and the
+          // subject of this map is the rivers around them.
+          pulsingEnabled: false,
+        ),
+      );
+      AppLogger.info('MapControlsService', 'Location puck enabled');
+    } catch (e) {
+      AppLogger.error('MapControlsService', 'Could not enable location puck', e);
     }
   }
 
