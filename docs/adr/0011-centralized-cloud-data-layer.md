@@ -1328,7 +1328,14 @@ languages. A client holding LONGER than the server would keep showing water the
 server had already given up on, silently, which is this scenario again.
 
 **Found by the fourth review and deliberately NOT fixed here: the GEOGLOWS
-LIVE path warns truthfully for about six hours a day.** `GeoglowsDataSource`
+LIVE path warns truthfully for about six hours a day.** Device testing on
+2026-08-30 narrowed who this reaches: with the store read switch ON, favourites
+are served entirely from the store (zero upstream calls observed), so the live
+path — and this warning — is reached only by non-favourite rivers browsed on
+the map, or by everyone if the Phase 5 kill switch is ever flipped OFF. That
+last case is the reason it is written down rather than forgotten: flipping the
+switch is something done during an incident, and it would add a six-hour daily
+warning to whatever else was going wrong. `GeoglowsDataSource`
 sets `validUntil` to next UTC midnight + 15 min, but GEOGLOWS actually
 publishes at 10:15-10:30 UTC. So a device on the live path holds the previous
 day's 00Z run in-window until midnight, reaching ~48 h of run age against a
@@ -1515,7 +1522,25 @@ notifications a person would actually want rather than twelve identical ones.
 ## Phase 7 — The trust model
 
 **Status: complete 2026-08-30** (decisions 21 and 22), after four independent
-reviews. The first pass reported itself complete with three guards unmet; each
+reviews **and verified on a physical iPhone**.
+
+Device verification, 2026-08-30, iPhone 26.6, debug build off `development`:
+
+| Check | Result |
+|---|---|
+| Favourites render no timestamp, no freshness tick | **clean** — nothing on any card |
+| Airplane mode raises the strip on favourites | **shows** |
+| Airplane mode raises it on the reach forecast page | **shows** — the screen that had no connectivity indicator of any kind before this phase |
+| Reconnecting clears it, with no "back online" toast | **gone** |
+| Live upstream calls during the session | **ZERO** — every favourite served from the store, Phase 5 guard 1 holding on real hardware |
+
+That last row was not one of Phase 7's guards and is the most reassuring line
+in the table: the device log shows no NOAA or GEOGLOWS fetch at all, so the
+store covered every favourite while the indicator stayed correctly silent.
+
+This mattered more than a fifth review would have. Five live defects were found
+on a device earlier in this project while 1182 tests were green, one of them a
+guard already signed off. The first pass reported itself complete with three guards unmet; each
 round found real blockers and each was fixed, and the fourth found no code
 defects. See "Phase 7 — where it actually stands" below the decisions, which
 records what each round caught rather than only the outcome.
