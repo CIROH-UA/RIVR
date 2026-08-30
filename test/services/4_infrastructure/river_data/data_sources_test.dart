@@ -530,19 +530,34 @@ void main() {
       expect(skew, lessThan(const Duration(seconds: 5)),
           reason: 'expected roughly $expected, got ${result.validUntil}');
 
-      // And the property that actually matters, stated as a DURATION rather
-      // than a wall-clock boundary.
+      // And the property that actually matters, asserted with NO CLOCK IN IT.
       //
-      // The first attempt compared against the next midnight, which made this
-      // fail deterministically between 23:30 and 24:00 UTC — the late-retry
-      // branch returns `now + 30 min`, which crosses midnight in that window.
-      // That is a narrower version of the very flake this test was rewritten
-      // to remove, and round 4 of the Phase 8 review caught it. A bound with
-      // no boundary in it cannot be wrong at a particular hour.
-      expect(result.validUntil!.difference(before),
-          lessThan(const Duration(hours: 1)),
-          reason: 'a run this old must be re-checked shortly, not held until '
-              'the next midnight — which is the bug this fixed');
+      // Two previous attempts both smuggled the wall clock into this
+      // assertion and both were wrong at a different hour of the day:
+      //
+      //   1. compared against the next midnight  -> failed 23:30-24:00 UTC,
+      //      because the late-retry branch returns `now + 30 min`.
+      //   2. bounded the gap to under an hour    -> failed 00:00-10:45 UTC,
+      //      because BEFORE the publication time the branch returns a fixed
+      //      instant (today's 10:45) rather than `now + 30 min`, so the gap
+      //      is up to ten hours and legitimately so.
+      //
+      // Measured, not reasoned: gap is 615 min at 00:30Z, 285 min at 06:00Z,
+      // 1 min at 10:44Z, then 30 min from 10:46Z onward. Attempt 2 was
+      // WORSE than attempt 1 — half an hour of daily breakage became eleven.
+      //
+      // So the assertion is now against `windowFor` itself at a FIXED instant,
+      // which is what the test is really about: `fetch` must ask the same
+      // question `windowFor` answers, for the run it actually received.
+      const fixedNow = '2026-07-11T15:00:00Z';
+      expect(
+        GeoglowsDataSource.windowFor(
+            DateTime.parse(fixedNow), DateTime.utc(2026, 7, 10)),
+        DateTime.parse(fixedNow).add(const Duration(minutes: 30)),
+        reason: 'a run from a previous day, checked after publication time, '
+            'must be re-checked shortly — not held until the next midnight, '
+            'which is the bug this fixed',
+      );
     });
 
     test('a fallback run stamp yields the schedule-only window', () async {
