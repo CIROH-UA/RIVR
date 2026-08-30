@@ -50,7 +50,7 @@ class NwmDataSource implements IRiverDataSource {
 
   @override
   Set<ForecastProduct> get supportedProducts => const {
-    ForecastProduct.analysisAssimilation,
+    ForecastProduct.currentFlow,
     ForecastProduct.reachMetadata,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
@@ -65,16 +65,25 @@ class NwmDataSource implements IRiverDataSource {
     required String reachId,
   }) {
     switch (product) {
-      case ForecastProduct.analysisAssimilation:
-        // Hourly in EVERY domain — `analysis_assim_hawaii` and
-        // `analysis_assim_alaska` both published t00z..t14z on 2026-08-30,
-        // same as CONUS. Analysis is what the model just did, not what it
-        // forecasts, so it does not inherit short range's slower island
-        // cycle. Kept as a separate case from `shortRange` for that reason:
-        // they used to share a branch, and that shared branch is what carried
-        // the CONUS assumption onto the islands.
-        return PublishSchedule.nextTopOfHour(now).add(_skew);
+      case ForecastProduct.currentFlow:
       case ForecastProduct.shortRange:
+        // **`currentFlow` shares this branch because it IS short range.** Its
+        // handler calls `fetchCurrentFlowOnly`, which is
+        // `fetchForecast(reachId, 'short_range')`; its run id is read out of
+        // the payload's `shortRange` section; and the server maps it to
+        // `"short_range"` too. So its publish schedule is short range's, in
+        // every domain.
+        //
+        // These two were split apart earlier on 2026-08-30, while this
+        // product was still called `analysisAssimilation`, on a confident
+        // comment arguing that analysis assimilation publishes hourly
+        // everywhere. That is TRUE of NOAA's real analysis-assimilation
+        // series (`analysis_assim_hawaii` ran t00z..t14z that day) and it is
+        // not what this product fetches. The split put island documents back
+        // on the CONUS hour — the exact defect the same change had just
+        // removed, reintroduced under a misleading name within the hour.
+        // Renaming the product is why this cannot happen a fourth time.
+        //
         // Hourly for CONUS; 6-hourly for Hawaii and Puerto Rico. See
         // [NwmDomain] for the measurements and for why one number covers both
         // islands.
@@ -161,7 +170,7 @@ class NwmDataSource implements IRiverDataSource {
           // recorded only to satisfy the entry contract.
           unit: unit,
         );
-      case ForecastProduct.analysisAssimilation:
+      case ForecastProduct.currentFlow:
         final aaPayload = await _api.fetchCurrentFlowOnly(key.reachId);
         return SourceFetchResult(
           payload: aaPayload,

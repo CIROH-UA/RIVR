@@ -260,12 +260,31 @@ describe("island reaches keep their own short-range cycle", () => {
       "tests exist for");
   });
 
-  test("analysis assimilation stays hourly in BOTH domains", () => {
+  test("currentFlow follows SHORT RANGE, because it is", () => {
+    // This asserted the opposite first time round, and was wrong for a reason
+    // worth keeping. `store-upstream` maps `currentFlow` to the
+    // `"short_range"` series and the client's handler calls
+    // `fetchForecast(reachId, 'short_range')` — the name is a misnomer.
+    //
+    // Real analysis assimilation IS hourly in every domain
+    // (`analysis_assim_hawaii` ran t00z..t14z on 2026-08-30), which is what
+    // the earlier version asserted: a correct argument about a product
+    // neither side fetches, which put island documents back on the CONUS hour
+    // within an hour of that hour being removed.
     const at = new Date("2026-07-10T12:30:00.000Z");
+    assert.equal(
+      validUntil("nwm", "currentFlow", at, ISLAND).toISOString(),
+      "2026-07-10T18:05:00.000Z",
+      "a misleading name is not a reason to give a product the wrong " +
+      "publish schedule");
+
+    // The property that would have caught the original split, in both
+    // domains: two products fetching one series cannot expire differently.
     for (const reach of [ISLAND, CONUS]) {
       assert.equal(
-        validUntil("nwm", "analysisAssimilation", at, reach).toISOString(),
-        "2026-07-10T13:05:00.000Z", `reach ${reach}`);
+        validUntil("nwm", "currentFlow", at, reach).getTime(),
+        validUntil("nwm", "shortRange", at, reach).getTime(),
+        `reach ${reach}`);
     }
   });
 

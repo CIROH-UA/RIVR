@@ -678,7 +678,7 @@ class FavoritesProvider with ChangeNotifier {
             );
         final entries = await Future.wait([
           _repository.read(keyFor(ForecastProduct.reachMetadata)),
-          _repository.read(keyFor(ForecastProduct.analysisAssimilation)),
+          _repository.read(keyFor(ForecastProduct.currentFlow)),
           _repository.read(keyFor(ForecastProduct.returnPeriods)),
         ]);
         if (_refreshGenerations[reachId] != gen) return;

@@ -40,7 +40,7 @@ export type ForecastSourceId = typeof FORECAST_SOURCES[number];
  * pattern-matching the source. Count before trusting.
  */
 export const FORECAST_PRODUCTS = [
-  "analysisAssimilation",
+  "currentFlow",
   "reachSummary",
   "reachMetadata",
   "shortRange",
@@ -67,16 +67,20 @@ export const STORE_COLLECTION = "river_data";
  * Which NOAA response section each product's data and run identity live in.
  *
  * Shared, because two copies of this map disagreed and cost a whole product.
- * `analysisAssimilation` maps to `shortRange` — the client derives current
- * flow from the short-range series (NwmDataSource.fetchCurrentFlowOnly), so
- * that is where both the payload and the run identity come from. A second copy
- * in store-payload.ts still said `analysisAssimilation`, and because NOAA
- * returns ALL five section keys in every response (unrequested ones as `{}`),
- * the trim silently kept the empty one and threw the real data away. Round 3,
- * B2 — the same defect as round 2's F2, moved one file downstream.
+ * `currentFlow` maps to `shortRange` — the client derives current flow from
+ * the short-range series (NwmDataSource.fetchCurrentFlowOnly), so that is
+ * where both the payload and the run identity come from.
+ *
+ * This product was called `analysisAssimilation` until Phase 9, which is how
+ * the defect below happened: a second copy of this map in store-payload.ts
+ * pointed it at the section of the SAME name, and because NOAA returns ALL
+ * five section keys in every response (unrequested ones as `{}`), the trim
+ * silently kept the empty one and threw the real data away. Round 3, B2 — the
+ * same defect as round 2's F2, moved one file downstream. Renaming the
+ * product is what makes that mistake impossible to write again.
  */
 export const SECTION_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
-  analysisAssimilation: "shortRange",
+  currentFlow: "shortRange",
   shortRange: "shortRange",
   mediumRange: "mediumRange",
   longRange: "longRange",

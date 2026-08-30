@@ -188,7 +188,7 @@ void main() {
     test('an NWM reach watches all six stored products', () {
       final ids = StoreSubscriptionService.documentIdsFor([_key('1')]);
       expect(ids, {
-        'nwm__1__analysisAssimilation',
+        'nwm__1__currentFlow',
         'nwm__1__shortRange',
         'nwm__1__mediumRange',
         'nwm__1__longRange',
@@ -205,7 +205,7 @@ void main() {
       // Mirrors functions/src/store-upstream.ts CAN_FETCH.nwm. Kept as a
       // literal so drift shows up here rather than on a device.
       const serverWrites = {
-        'analysisAssimilation',
+        'currentFlow',
         'shortRange',
         'mediumRange',
         'longRange',

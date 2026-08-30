@@ -338,13 +338,17 @@ export function validUntil(
   }
 
   switch (product) {
-  case "analysisAssimilation":
-    // Hourly in EVERY NWM domain. `analysis_assim_hawaii` published t00z..t14z
-    // on 2026-08-30, the same as CONUS — analysis is what the model just did,
-    // not what it forecasts, so it does not take short range's slower island
-    // cycle. Split from `shortRange` deliberately: they shared this branch,
-    // and the shared branch is what carried the CONUS hour onto the islands.
-    return new Date(nextTopOfHour(now).getTime() + NWM_SKEW_MS);
+  // `currentFlow` shares short range's branch because it IS short range:
+  // `store-upstream` maps it to the `"short_range"` series and the client's
+  // handler calls `fetchForecast(reachId, 'short_range')`.
+  //
+  // The two were split apart earlier on 2026-08-30, while this product was
+  // still called `analysisAssimilation`, on a comment arguing that analysis
+  // assimilation publishes hourly in every domain. True of NOAA's real
+  // analysis-assimilation series and not of the product either side fetches.
+  // The split put island documents back on the CONUS hour. Phase 9 renamed
+  // the product so the argument cannot be made a fourth time.
+  case "currentFlow":
   case "shortRange":
     // Hourly for CONUS; every six hours for Hawaii and Puerto Rico. Measured
     // 2026-08-30 from NOAA's production listing — `short_range` published

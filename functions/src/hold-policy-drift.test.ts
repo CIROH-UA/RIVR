@@ -26,15 +26,21 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
+import {ForecastProductId} from "./store-keys.js";
+import {SERIES_BY_PRODUCT} from "./store-upstream.js";
 import {
   MAX_HOLD_MS,
   DEFAULT_MAX_HOLD_MS,
   ISLAND_MAX_HOLD_MS,
   ISLAND_MAX_RUN_AGE_MS,
   MAX_RUN_AGE_MS,
+  maxHoldMs,
+  maxRunAgeMs,
 } from "./store-window.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";
+const CONUS = "23021904";
+const ISLAND = "800000010";
 const DART = REPO +
   "lib/services/4_infrastructure/river_data/hold_policy.dart";
 
@@ -286,6 +292,38 @@ describe("guard 4 — the island caps are shared too", () => {
           `${product} is a GEOGLOWS product with an NWM island cap. The ` +
           "island band is an NHDPlus COMID range and says nothing about a " +
           "GEOGLOWS river id that happens to fall inside it.");
+      }
+    }
+  });
+
+  test("products fetching the SAME series have the same caps", () => {
+    // The defect this pins, introduced and found on 2026-08-30.
+    // `currentFlow` does not fetch analysis assimilation:
+    // `store-upstream.ts` maps it to `"short_range"`. It was nonetheless given
+    // its own publish schedule and left out of the island cap tables, on a
+    // correct argument about the product its NAME describes.
+    //
+    // Derived from the fetch map rather than hardcoded, so the day someone
+    // renames the product or repoints it at a different series, this follows.
+    const bySeries = new Map<string, ForecastProductId[]>();
+    for (const [product, series] of Object.entries(SERIES_BY_PRODUCT)) {
+      if (!series) continue;
+      bySeries.set(series,
+        [...(bySeries.get(series) ?? []), product as ForecastProductId]);
+    }
+    for (const [series, products] of bySeries) {
+      if (products.length < 2) continue;
+      const [first, ...rest] = products;
+      for (const other of rest) {
+        assert.equal(maxHoldMs(other, CONUS), maxHoldMs(first, CONUS),
+          `${first} and ${other} both fetch "${series}" but hold differently`);
+        assert.equal(maxHoldMs(other, ISLAND), maxHoldMs(first, ISLAND),
+          `${first} and ${other} both fetch "${series}" but hold differently ` +
+          "on island reaches — the exact hole the misnamed product fell " +
+          "through");
+        assert.equal(maxRunAgeMs(other, ISLAND), maxRunAgeMs(first, ISLAND),
+          `${first} and ${other} both fetch "${series}" but judge run age ` +
+          "differently on island reaches");
       }
     }
   });

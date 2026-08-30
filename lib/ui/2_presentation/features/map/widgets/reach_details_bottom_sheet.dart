@@ -604,8 +604,8 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     // joined with the thresholds read: gating the headline number on a separate
     // call means a slow threshold fetch hides a flow value that is ready.
     unawaited(
-        repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
-      logTiming('analysisAssimilation', entry != null);
+        repo.read(keyFor(ForecastProduct.currentFlow)).then((entry) {
+      logTiming('currentFlow', entry != null);
       if (!mounted || entry == null) return;
       final flow = CurrentFlowPayload.decode(entry, unitService);
       if (flow == null) {
@@ -622,7 +622,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       });
       recomputeCategory();
     }, onError: (Object e) {
-      logTiming('analysisAssimilation', false);
+      logTiming('currentFlow', false);
       _failedProducts.add('current flow');
       AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
     }).whenComplete(markSettled));

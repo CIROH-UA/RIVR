@@ -32,12 +32,15 @@ export interface ProbeRuns {
 /**
  * Which probe key actually describes each product's stored run.
  *
- * These are not always the same name. The store's `analysisAssimilation`
- * document holds a SHORT RANGE body with a shortRange run, because that is
- * what the client derives current flow from. The probe's
- * `analysisAssimilation` key, however, comes from NOAA's
- * `?series=analysis_assimilation` endpoint — a genuinely different series,
- * measured ~3 hours behind short range.
+ * These are not always the same name. The store's `currentFlow` document
+ * holds a SHORT RANGE body with a shortRange run, because that is what the
+ * client derives current flow from. The probe's `analysisAssimilation` key,
+ * however, is NOAA's OWN section name for its genuine analysis-assimilation
+ * series — a different series, measured ~3 hours behind short range.
+ *
+ * Until Phase 9 the store product was ALSO called `analysisAssimilation`, so
+ * the two collided by name while meaning different things. That collision is
+ * what produced the bug below, and renaming the product removed it.
  *
  * Comparing them directly made the product stop triggering after its first
  * write: `isRunNewer(AA 20:00Z, stored SR 23:00Z)` is false, so it read
@@ -46,7 +49,7 @@ export interface ProbeRuns {
  */
 export const PROBE_KEY_BY_PRODUCT: Partial<Record<ForecastProductId, string>> =
   {
-    analysisAssimilation: "shortRange",
+    currentFlow: "shortRange",
   };
 
 /** The probe run to compare a product's stored run against. */
@@ -424,7 +427,7 @@ export function assessRunCurrency(
  * there is ONE cause however many documents it touches.
  */
 const CAUSE_GROUP: Readonly<Record<string, string>> = {
-  analysisAssimilation: "nwm-short-series",
+  currentFlow: "nwm-short-series",
   shortRange: "nwm-short-series",
 };
 
@@ -513,7 +516,7 @@ export function assessStoreHealth(
   // Status is counted by CAUSE, not by problem line, and the difference is
   // not cosmetic.
   //
-  // `analysisAssimilation` and `shortRange` are not independent: both are
+  // `currentFlow` and `shortRange` are not independent: both are
   // fetched from NOAA's `short_range` series, both read their run from the
   // same section, both trigger off the same probe key, and both are written
   // by the same run at the same instant. They stall together, always. With

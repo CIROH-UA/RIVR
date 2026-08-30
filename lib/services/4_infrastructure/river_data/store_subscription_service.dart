@@ -58,7 +58,7 @@ const String kStoreCollection = 'river_data';
 /// writes costs a listener that can never fire.
 const Map<ForecastSource, List<ForecastProduct>> kStoredProducts = {
   ForecastSource.nwm: [
-    ForecastProduct.analysisAssimilation,
+    ForecastProduct.currentFlow,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
     ForecastProduct.longRange,

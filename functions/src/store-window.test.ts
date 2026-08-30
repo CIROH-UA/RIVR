@@ -85,7 +85,7 @@ describe("the write-time floor closes the gap that was measured", () => {
 
   test("every managed NWM product is covered past the next refresher", () => {
     const products = [
-      "analysisAssimilation", "shortRange", "mediumRange", "longRange",
+      "currentFlow", "shortRange", "mediumRange", "longRange",
     ] as const;
     // Walk a full day at five-minute steps: there must be no instant at which
     // a freshly written document expires before the next run can replace it.
@@ -167,7 +167,7 @@ describe("the write-time floor closes the gap that was measured", () => {
 
   test("the floor never SHORTENS a window", () => {
     const products = [
-      "analysisAssimilation", "shortRange", "mediumRange", "longRange",
+      "currentFlow", "shortRange", "mediumRange", "longRange",
       "returnPeriods", "reachMetadata",
     ] as const;
     for (const product of products) {
@@ -249,7 +249,7 @@ describe("re-verifying a document upstream has not replaced", () => {
     });
 
   test("a hold cap exists for every managed product", () => {
-    for (const p of ["analysisAssimilation", "shortRange", "mediumRange",
+    for (const p of ["currentFlow", "shortRange", "mediumRange",
       "longRange", "geoglowsForecast"] as const) {
       assert.ok(MAX_HOLD_MS[p] > 0, `${p} has no hold cap`);
       assert.equal(maxHoldMs(p, "23021904"), MAX_HOLD_MS[p]);

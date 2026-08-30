@@ -78,14 +78,30 @@ const PROBE_TIMEOUT_MS = 120_000;
  * response every key is read from the one body.
  */
 export const ENDPOINTS = [
-  {name: "analysis_assimilation", series: "analysis_assimilation", key: "analysisAssimilation"},
+  // `key` is NOAA'S OWN section name, not one of ours. NOAA returns
+  // `analysisAssimilation` as a top-level key in every streamflow response,
+  // and this probe measures that REAL series — which is a different thing
+  // from the store product formerly sharing the name (renamed `currentFlow`
+  // in Phase 9 because it fetches short range instead). Phase 9's blanket
+  // rename changed this line too, which would have made the probe look for a
+  // section NOAA never sends and silently record nothing for it.
+  {name: "analysis_assimilation",
+    series: "analysis_assimilation",
+    key: "analysisAssimilation"},
   {name: "short_range", series: "short_range", key: "shortRange"},
   {name: "medium_range", series: "medium_range", key: "mediumRange"},
   {name: "long_range", series: "long_range", key: "longRange"},
   {name: "unfiltered", series: null, key: null},
 ] as const;
 
-/** Series read out of the unfiltered response, for the cross-check. */
+/**
+ * Series read out of the unfiltered response, for the cross-check.
+ *
+ * NOAA's section names, verified against a live response on 2026-08-30:
+ * `reach`, `analysisAssimilation`, `shortRange`, `mediumRange`, `longRange`,
+ * `mediumRangeBlend`. Not our product ids — `analysisAssimilation` here is
+ * NOAA's genuine analysis-assimilation series.
+ */
 export const SERIES = [
   "analysisAssimilation",
   "shortRange",

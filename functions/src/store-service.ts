@@ -59,7 +59,7 @@ import {
 
 /** Products the store keeps fresh on the hourly cycle. */
 export const MANAGED_PRODUCTS: readonly ForecastProductId[] = [
-  "analysisAssimilation",
+  "currentFlow",
   "shortRange",
   "mediumRange",
   "longRange",

@@ -826,7 +826,7 @@ void main() {
   group('sheet -> forecast page is a cache hit', () {
     const products = [
       ForecastProduct.reachMetadata,
-      ForecastProduct.analysisAssimilation,
+      ForecastProduct.currentFlow,
       ForecastProduct.returnPeriods,
     ];
 
@@ -856,9 +856,9 @@ void main() {
 
     test('the two surfaces receive the identical entry, not equal copies',
         () async {
-      final fromSheet = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+      final fromSheet = await repo.read(keyFor(ForecastProduct.currentFlow));
       source.nextValue = 999.0; // would differ if the page refetched
-      final fromPage = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+      final fromPage = await repo.read(keyFor(ForecastProduct.currentFlow));
 
       expect(fromPage!.payload['value'], fromSheet!.payload['value'],
           reason: 'one cache entry per value is what stops the gauge and the '

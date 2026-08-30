@@ -273,19 +273,37 @@ void main() {
         );
       });
 
-      test('analysis assimilation stays hourly EVERYWHERE', () {
-        // `analysis_assim_hawaii` published t00z..t14z on 2026-08-30, exactly
-        // like CONUS. Analysis is what the model just did, not what it
-        // forecasts, so it does not take short range's slower island cycle.
-        // Pinned because the two products used to share one branch, and that
-        // shared branch is what carried the CONUS assumption to the islands —
-        // widening it to cover both would be the obvious wrong fix.
+      test('analysisAssimilation follows SHORT RANGE, because it is', () {
+        // This test used to assert the opposite, and was wrong for a reason
+        // worth keeping. `analysisAssimilation` does not fetch analysis
+        // assimilation: its handler calls `fetchCurrentFlowOnly`, which is
+        // `fetchForecast(reachId, 'short_range')`, and the server maps it to
+        // `"short_range"` as well.
+        //
+        // Real analysis assimilation IS hourly in every domain
+        // (`analysis_assim_hawaii` ran t00z..t14z on 2026-08-30), which is
+        // what the earlier version asserted. The argument was correct about a
+        // product this code does not fetch, and it put island documents back
+        // on the CONUS hour within an hour of that hour being removed.
         final at = DateTime.utc(2026, 7, 10, 12, 30);
         expect(
-          nwm.validUntil(ForecastProduct.analysisAssimilation, at,
+          nwm.validUntil(ForecastProduct.currentFlow, at,
               reachId: islandReach),
-          DateTime.utc(2026, 7, 10, 13, 5),
+          DateTime.utc(2026, 7, 10, 18, 5),
+          reason: 'a misleading NAME is not a reason to give a product the '
+              'wrong publish schedule',
         );
+        // And it still matches the product it actually fetches, in both
+        // domains — the property that would have caught the original split.
+        for (final reach in [islandReach, conusReach]) {
+          expect(
+            nwm.validUntil(ForecastProduct.currentFlow, at,
+                reachId: reach),
+            nwm.validUntil(ForecastProduct.shortRange, at, reachId: reach),
+            reason: 'both call fetchForecast(short_range); their windows '
+                'cannot legitimately differ',
+          );
+        }
       });
 
       test('the static products are unaffected by domain', () {
@@ -329,7 +347,7 @@ void main() {
     test('the narrow products never reach the medium-range endpoint', () async {
       for (final p in [
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       ]) {
         api.calls.clear();
@@ -375,7 +393,7 @@ void main() {
     test('no product on the tap path geocodes', () async {
       for (final p in [
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       ]) {
         await nwm.fetch(RiverDataKey(
@@ -413,7 +431,7 @@ void main() {
       await nwm.fetch(const RiverDataKey(
         source: ForecastSource.nwm,
         reachId: '23021904',
-        product: ForecastProduct.analysisAssimilation,
+        product: ForecastProduct.currentFlow,
       ));
       expect(api.calls, contains('current:23021904'));
 
@@ -683,7 +701,7 @@ void runIdTests() {
       // analysisAssimilation is the most-read runId in the app — the sheet's
       // and forecast page's current flow. Its data IS the short_range series
       // (fetchCurrentFlowOnly delegates there), so it records that run.
-      final aa = await src.fetch(k(ForecastProduct.analysisAssimilation));
+      final aa = await src.fetch(k(ForecastProduct.currentFlow));
       expect(aa.runId, '2026-08-23T12:00:00',
           reason: 'unguarded, round 7 nulled it with the suite green');
       expect(medium.runId, '2026-08-23T06:00:00',

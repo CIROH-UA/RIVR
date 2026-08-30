@@ -23,9 +23,12 @@ import {
   buildSample,
   referenceTimeOf,
   ENDPOINTS,
+  SERIES,
   PROBE_SCHEMA_VERSION,
   EndpointResult,
 } from "./publish-cadence-probe.js";
+import {FORECAST_PRODUCTS} from "./store-keys.js";
+import {PROBE_KEY_BY_PRODUCT} from "./store-trigger.js";
 
 function filteredBody(series: string, ref: string): string {
   return JSON.stringify({[series]: {series: {referenceTime: ref}}});
@@ -33,7 +36,7 @@ function filteredBody(series: string, ref: string): string {
 
 function unfilteredBody(): string {
   return JSON.stringify({
-    analysisAssimilation: {series: {referenceTime: "2026-08-22T14:00:00Z"}},
+    currentFlow: {series: {referenceTime: "2026-08-22T14:00:00Z"}},
     shortRange: {series: {referenceTime: "2026-08-22T13:00:00Z"}},
     mediumRange: {mean: {referenceTime: "2026-08-22T12:00:00Z"}},
     longRange: {mean: {referenceTime: "2026-08-22T06:00:00Z"}},
@@ -125,8 +128,8 @@ describe("buildSample — REGRESSION: freshness survives an unfiltered failure",
   // freshness signal entirely.
   test("referenceTimes come from the filtered calls, not from unfiltered", () => {
     const endpoints: Record<string, EndpointResult> = {
-      analysis_assimilation: ok("analysisAssimilation",
-        filteredBody("analysisAssimilation", "2026-08-22T14:00:00Z")),
+      analysis_assimilation: ok("currentFlow",
+        filteredBody("currentFlow", "2026-08-22T14:00:00Z")),
       short_range: ok("shortRange", filteredBody("shortRange", "2026-08-22T13:00:00Z")),
       medium_range: ok("mediumRange", filteredBody("mediumRange", "2026-08-22T12:00:00Z")),
       long_range: ok("longRange", filteredBody("longRange", "2026-08-22T06:00:00Z")),
@@ -169,8 +172,8 @@ describe("buildSample — REGRESSION: freshness survives an unfiltered failure",
 describe("buildSample — the unfiltered cross-check", () => {
   test("agreement is reported when both sources match", () => {
     const endpoints: Record<string, EndpointResult> = {
-      analysis_assimilation: ok("analysisAssimilation",
-        filteredBody("analysisAssimilation", "2026-08-22T14:00:00Z")),
+      analysis_assimilation: ok("currentFlow",
+        filteredBody("currentFlow", "2026-08-22T14:00:00Z")),
       short_range: ok("shortRange", filteredBody("shortRange", "2026-08-22T13:00:00Z")),
       medium_range: ok("mediumRange", filteredBody("mediumRange", "2026-08-22T12:00:00Z")),
       long_range: ok("longRange", filteredBody("longRange", "2026-08-22T06:00:00Z")),
@@ -183,8 +186,8 @@ describe("buildSample — the unfiltered cross-check", () => {
   // about upstream, and must be visible rather than averaged away.
   test("disagreement is reported, not hidden", () => {
     const endpoints: Record<string, EndpointResult> = {
-      analysis_assimilation: ok("analysisAssimilation",
-        filteredBody("analysisAssimilation", "2026-08-22T14:00:00Z")),
+      analysis_assimilation: ok("currentFlow",
+        filteredBody("currentFlow", "2026-08-22T14:00:00Z")),
       short_range: ok("shortRange",
         filteredBody("shortRange", "2026-08-22T99:00:00Z")), // differs
       medium_range: ok("mediumRange", filteredBody("mediumRange", "2026-08-22T12:00:00Z")),
@@ -219,5 +222,63 @@ describe("probe samples carry their own expiry", () => {
   test("retention comfortably clears the seven days guard 1 needs", () => {
     assert.ok(PROBE_RETENTION_MS > 7 * 24 * 3600_000);
     assert.equal(PROBE_RETENTION_MS, 90 * 24 * 3600_000);
+  });
+});
+
+describe("NOAA's section names are not our product ids", () => {
+  // Phase 9 renamed the store product `analysisAssimilation` to `currentFlow`,
+  // because it fetches the short-range series and the old name had caused
+  // three separate defects. The rename was done with a blanket
+  // search-and-replace across `functions/src`, which also rewrote THIS file —
+  // where `analysisAssimilation` is NOAA'S OWN section name, verified against
+  // a live response on 2026-08-30:
+  //
+  //   ["reach", "analysisAssimilation", "shortRange", "mediumRange",
+  //    "longRange", "mediumRangeBlend"]
+  //
+  // The probe would then have looked for a section NOAA never sends and
+  // recorded nothing for that endpoint, silently, in the very component whose
+  // job is measuring publication cadence. Caught by reading the diff.
+  //
+  // These assertions exist so the next rename cannot do it quietly.
+  test("the probe reads NOAA's analysisAssimilation section", () => {
+    const aa = ENDPOINTS.find((e) => e.series === "analysis_assimilation");
+    assert.notEqual(aa, undefined);
+    assert.equal(aa!.key, "analysisAssimilation",
+      "this is NOAA's section name for its REAL analysis-assimilation " +
+      "series, not our product id. Renaming it makes the probe look for a " +
+      "key that is never sent.");
+    assert.ok((SERIES as readonly string[]).includes("analysisAssimilation"),
+      "the unfiltered cross-check reads the same NOAA section names");
+  });
+
+  test("no product id is called analysisAssimilation any more", () => {
+    // The other half: if the product name ever comes back, the collision that
+    // caused rounds 2 and 3 and the 2026-08-30 island regression comes back
+    // with it.
+    //
+    // **Honest note: this assertion is belt-and-braces, not load-bearing.**
+    // Mutation-checked by renaming the union member back, which produces 24
+    // TypeScript errors — the type system refuses it before any test runs. A
+    // mutation that does not compile proves nothing about the test, so a
+    // later reader should not treat this as the thing holding the line. It is
+    // kept because it states the INTENT, which the compiler cannot.
+    assert.ok(!(FORECAST_PRODUCTS as readonly string[])
+      .includes("analysisAssimilation"),
+    "the store product was renamed to `currentFlow` because it fetches the " +
+      "short-range series while NOAA uses this name for a genuinely " +
+      "different one");
+    assert.ok((FORECAST_PRODUCTS as readonly string[]).includes("currentFlow"));
+  });
+
+  test("the probe key and the product id are deliberately different", () => {
+    // `probeRunFor` falls back to using the product id AS the probe key when
+    // no mapping exists. That fallback is why the two names have to stay
+    // distinguishable: with the old shared name, a missing mapping silently
+    // compared a short-range document against an analysis-assimilation run —
+    // round 3, B3, where the product stopped triggering after its first write.
+    assert.equal(PROBE_KEY_BY_PRODUCT.currentFlow, "shortRange",
+      "currentFlow holds a short-range body, so it must be compared against " +
+      "the short-range probe run");
   });
 });

@@ -6,7 +6,7 @@
 // selector, and range-swappable detail widgets.
 //
 // STEP 4: sticky range selector + stat card (Peak / Time to peak / Return
-// period). The gauge reads the narrow NWM products (reachMetadata + analysisAssimilation + returnPeriods) or geoglowsForecast (GEOGLOWS);
+// period). The gauge reads the narrow NWM products (reachMetadata + currentFlow + returnPeriods) or geoglowsForecast (GEOGLOWS);
 // peaks come from the range forecast series. Outlook + detail widgets + the
 // interactive chart land in later steps.
 
@@ -314,7 +314,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     }, onError: (Object e) => onFailed('name', e)).whenComplete(markSettled));
 
     unawaited(
-        repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
+        repo.read(keyFor(ForecastProduct.currentFlow)).then((entry) {
       if (entry == null) return;
       flow = CurrentFlowPayload.decode(entry, unitService);
       if (flow == null) {

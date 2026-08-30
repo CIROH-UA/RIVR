@@ -46,7 +46,7 @@ import {isIslandReach, storeValidUntil} from "./store-document.js";
  * documents that are simply waiting, which is the bug this file exists to fix.
  */
 export const MAX_HOLD_MS: Readonly<Record<string, number>> = {
-  analysisAssimilation: 6 * 3600_000,
+  currentFlow: 6 * 3600_000,
   shortRange: 6 * 3600_000,
   mediumRange: 18 * 3600_000,
   longRange: 36 * 3600_000,
@@ -89,6 +89,11 @@ export const DEFAULT_MAX_HOLD_MS = 6 * 3600_000;
  */
 export const ISLAND_MAX_HOLD_MS: Readonly<Record<string, number>> = {
   shortRange: 24 * 3600_000,
+  // `currentFlow` is a misnomer: `store-upstream` maps it to the
+  // `"short_range"` series, so it publishes on short range's cadence and needs
+  // short range's cap. Omitting it left island current-flow documents on the
+  // 6-hour CONUS cap while carrying 12-hourly Hawaii data.
+  currentFlow: 24 * 3600_000,
 };
 
 /**
@@ -103,6 +108,8 @@ export const ISLAND_MAX_HOLD_MS: Readonly<Record<string, number>> = {
  */
 export const ISLAND_MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
   shortRange: 28 * 3600_000,
+  // Same reason as ISLAND_MAX_HOLD_MS: this product carries short-range water.
+  currentFlow: 28 * 3600_000,
 };
 
 /** One stored document, reduced to what the window decision needs. */
@@ -163,7 +170,7 @@ export interface StoredWindowSample {
  *   forgot that run age = publish lag + stall: NOAA's `referenceTime` is
  *   already ~3 h behind the wall clock on an ordinary day. Replaying 163
  *   samples from `publish_cadence_log`, an 8 h cap would have fired on
- *   **29 of them (17.8%)** for `analysisAssimilation` and 7 (4.3%) for
+ *   **29 of them (17.8%)** for `currentFlow` and 7 (4.3%) for
  *   `shortRange`, with a maximum observed age of 11.0 h. 16 h clears the
  *   worst observed sample, the documented five-hour stall on top of the
  *   baseline lag, and one missed refresh interval.
@@ -184,7 +191,7 @@ export interface StoredWindowSample {
  *   reach 49.5 h before replacement.
  */
 export const MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
-  analysisAssimilation: 16 * 3600_000,
+  currentFlow: 16 * 3600_000,
   shortRange: 16 * 3600_000,
   mediumRange: 24 * 3600_000,
   longRange: 36 * 3600_000,

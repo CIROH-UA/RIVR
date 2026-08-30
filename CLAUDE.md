@@ -630,6 +630,16 @@ TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
 delete every sample the moment it was written. `river_data` never needed this;
 it is overwritten in place and swept by `storeGcDaily`.
 
+**`analysisAssimilation` is now `currentFlow`, and the distinction matters.**
+The store product by that name never fetched analysis assimilation — it calls
+`fetchForecast(reachId, 'short_range')` — while **NOAA returns a REAL
+`analysisAssimilation` section** in the same payload, which the app also
+consumes as `ReachData.analysisAssimilation`. One name, two meanings, three
+defects (review rounds 2 and 3, then an island-schedule regression in Phase 9
+itself). Renamed 2026-08-30. `publish-cadence-probe.ts` still says
+`analysisAssimilation` **on purpose** — there it is NOAA's section name, and a
+blanket rename across it would make the probe read a key that is never sent.
+
 **The NWM is four models on four schedules, and the store now knows it.**
 Short range publishes hourly for CONUS, every 6 hours for Puerto Rico, every 12
 for Hawaii and every 3 for Alaska — measured 2026-08-30 by counting the `tNNz`

@@ -46,7 +46,7 @@ export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
   // short/medium/long range, so an analysis_assimilation body stored under
   // this key decodes to a null flow on every surface that reads it — the
   // store present and delivering nothing. Round 2, F2.
-  analysisAssimilation: "short_range",
+  currentFlow: "short_range",
   shortRange: "short_range",
   mediumRange: "medium_range",
   longRange: "long_range",
@@ -89,7 +89,7 @@ export const SERIES_BY_PRODUCT: Partial<Record<ForecastProductId, string>> = {
 export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
   = {
     nwm: [
-      "analysisAssimilation",
+      "currentFlow",
       "shortRange",
       "mediumRange",
       "longRange",

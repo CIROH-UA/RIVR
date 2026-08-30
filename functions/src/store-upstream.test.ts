@@ -1,7 +1,7 @@
 // functions/src/store-upstream.test.ts
 //
 // Round 2 found this module untested, and F2 in it: the server fetched NOAA's
-// `analysis_assimilation` series and stored it under the analysisAssimilation
+// `analysis_assimilation` series and stored it under the currentFlow
 // key, while the CLIENT stores a `short_range` body under that same key and
 // reads it with ForecastValues.currentFlow — which only ever looks at
 // short/medium/long range. Every stored AA document would have decoded to a
@@ -125,7 +125,7 @@ describe("only fetchable work is advertised as fetchable", () => {
 
   test("the four hourly NWM products are fetchable", () => {
     for (const p of
-      ["analysisAssimilation", "shortRange", "mediumRange", "longRange"] as
+      ["currentFlow", "shortRange", "mediumRange", "longRange"] as
       const) {
       assert.equal(canFetch("nwm", p), true);
     }
@@ -138,12 +138,12 @@ describe("the Dart contract has not drifted", () => {
   // "analysis_assimilation" passed every test — the mutation survived when
   // this file was first written, which is exactly the fake-guard shape the
   // review gate hunts.
-  test("analysisAssimilation is fetched as short_range, like the client", () => {
-    assert.equal(SERIES_BY_PRODUCT.analysisAssimilation, "short_range",
+  test("currentFlow is fetched as short_range, like the client", () => {
+    assert.equal(SERIES_BY_PRODUCT.currentFlow, "short_range",
       "the client stores a short_range body under this key; fetching " +
       "analysis_assimilation stores something ForecastValues.currentFlow " +
       "never reads, so every surface shows no flow");
-    assert.equal(SECTION_BY_PRODUCT.analysisAssimilation, "shortRange",
+    assert.equal(SECTION_BY_PRODUCT.currentFlow, "shortRange",
       "the run identity must come from the shortRange section, as " +
       "NwmDataSource does");
   });
@@ -160,14 +160,14 @@ describe("the Dart contract has not drifted", () => {
   // F2, pinned. If the client ever stops deriving current flow from the short
   // range series, this file's mapping becomes wrong again — and the symptom is
   // a null flow on screen, with nothing wrong server-side.
-  test("the client still derives analysisAssimilation from short_range", () => {
+  test("the client still derives currentFlow from short_range", () => {
     const src = readFileSync(
       REPO + "lib/services/4_infrastructure/river_data/nwm_data_source.dart",
       "utf8");
     // lastIndexOf, not indexOf: the FIRST occurrence is in validUntil's
     // switch, which says nothing about which series is fetched. Getting this
     // wrong made the test read the wrong branch entirely.
-    const idx = src.lastIndexOf("case ForecastProduct.analysisAssimilation:");
+    const idx = src.lastIndexOf("case ForecastProduct.currentFlow:");
     assert.notEqual(idx, -1, "the AA branch is gone from NwmDataSource");
     const branch = src.slice(idx, idx + 700);
 

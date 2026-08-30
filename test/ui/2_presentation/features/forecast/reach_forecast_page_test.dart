@@ -289,7 +289,7 @@ Map<ForecastProduct, Map<String, dynamic>> _narrowPayloads() => {
         'latitude': 40.0,
         'longitude': -111.0,
       },
-      ForecastProduct.analysisAssimilation: {
+      ForecastProduct.currentFlow: {
         'reach': {
           'reachId': '123',
           'name': 'Test River',
@@ -470,7 +470,7 @@ void main() {
           'latitude': 40.0,
           'longitude': -111.0,
         },
-        ForecastProduct.analysisAssimilation: {
+        ForecastProduct.currentFlow: {
           'reach': {
             'reachId': '123',
             'name': 'Test River',
@@ -513,7 +513,7 @@ void main() {
             'it, and splits current flow across two cache entries');
     expect(repo.requested, containsAll([
       ForecastProduct.reachMetadata,
-      ForecastProduct.analysisAssimilation,
+      ForecastProduct.currentFlow,
       ForecastProduct.returnPeriods,
     ]));
 
@@ -998,7 +998,7 @@ void main() {
       byProduct: _narrowPayloads(),
       delays: const {
         ForecastProduct.reachMetadata: Duration(milliseconds: 10),
-        ForecastProduct.analysisAssimilation: Duration(milliseconds: 10),
+        ForecastProduct.currentFlow: Duration(milliseconds: 10),
         ForecastProduct.returnPeriods: Duration(seconds: 5),
       },
     );
@@ -1087,7 +1087,7 @@ void main() {
       byProduct: _narrowPayloads(),
       delays: const {
         ForecastProduct.reachMetadata: Duration(milliseconds: 10),
-        ForecastProduct.analysisAssimilation: Duration(seconds: 5),
+        ForecastProduct.currentFlow: Duration(seconds: 5),
         ForecastProduct.returnPeriods: Duration(seconds: 5),
       },
     );
@@ -1126,7 +1126,7 @@ void main() {
       failAll: true,
       delays: const {
         ForecastProduct.reachMetadata: Duration(seconds: 5),
-        ForecastProduct.analysisAssimilation: Duration(seconds: 5),
+        ForecastProduct.currentFlow: Duration(seconds: 5),
         ForecastProduct.returnPeriods: Duration(seconds: 5),
       },
     );
@@ -1197,7 +1197,7 @@ void main() {
       delays: const {
         ForecastProduct.returnPeriods: Duration(milliseconds: 10),
         ForecastProduct.reachMetadata: Duration(seconds: 5),
-        ForecastProduct.analysisAssimilation: Duration(seconds: 5),
+        ForecastProduct.currentFlow: Duration(seconds: 5),
       },
     );
 
@@ -1237,7 +1237,7 @@ void main() {
       ),
       byProduct: _narrowPayloads(),
       failProducts: {
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       },
     );
@@ -1276,7 +1276,7 @@ void main() {
       ),
       byProduct: _narrowPayloads(),
       failProducts: {
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       },
     );
@@ -1317,7 +1317,7 @@ void main() {
         // An entry whose body the codec cannot read: CurrentFlowPayload.decode
         // catches internally and yields null — a 200 with nothing usable,
         // distinct from a thrown read failure.
-        ForecastProduct.analysisAssimilation: <String, dynamic>{},
+        ForecastProduct.currentFlow: <String, dynamic>{},
       },
       failProducts: {
         ForecastProduct.reachMetadata,
@@ -1755,7 +1755,7 @@ void _r2_7Tests() {
         byProduct: _narrowPayloads(),
         // Metadata lands immediately; the flow takes its time, as it does.
         delays: const {
-          ForecastProduct.analysisAssimilation: Duration(seconds: 3),
+          ForecastProduct.currentFlow: Duration(seconds: 3),
         },
       );
 
@@ -1783,7 +1783,7 @@ void _r2_7Tests() {
       _registerRepo(
         nwmEntry(),
         byProduct: _narrowPayloads(),
-        failProducts: const {ForecastProduct.analysisAssimilation},
+        failProducts: const {ForecastProduct.currentFlow},
       );
 
       await tester.pumpWidget(_wrap(const ReachForecastPage(

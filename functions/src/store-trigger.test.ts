@@ -35,7 +35,7 @@ import {
 import {MANAGED_PRODUCTS, GEOGLOWS_PRODUCTS} from "./store-service.js";
 
 const MANAGED: ForecastProductId[] =
-  ["analysisAssimilation", "shortRange", "mediumRange", "longRange"];
+  ["currentFlow", "shortRange", "mediumRange", "longRange"];
 
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 
@@ -92,13 +92,13 @@ describe("guard 1 — trigger only on a real advance", () => {
   test("products are decided independently of each other", () => {
     const d = decideTriggers(
       probe({
-        analysisAssimilation: "2026-08-24T12:00:00Z",
+        currentFlow: "2026-08-24T12:00:00Z",
         shortRange: "2026-08-24T12:00:00Z",
         mediumRange: "2026-08-24T06:00:00Z",
         longRange: null,
       }),
       {
-        analysisAssimilation: "2026-08-24T11:00:00Z",
+        currentFlow: "2026-08-24T11:00:00Z",
         shortRange: "2026-08-24T12:00:00Z",
         mediumRange: "2026-08-24T00:00:00Z",
         longRange: "2026-08-24T00:00:00Z",
@@ -106,7 +106,7 @@ describe("guard 1 — trigger only on a real advance", () => {
       MANAGED);
 
     assert.deepEqual(d.triggered.sort(),
-      ["analysisAssimilation", "mediumRange"]);
+      ["currentFlow", "mediumRange"]);
   });
 
   test("every candidate gets a recorded reason, triggered or not", () => {
@@ -472,7 +472,7 @@ describe("run currency — the failure write recency cannot see", () => {
       new Date(NOW.getTime() - 600_000),
       new Date(NOW.getTime() - 600_000),
       NOW,
-      [held("shortRange", 5), held("analysisAssimilation", 5)] as never);
+      [held("shortRange", 5), held("currentFlow", 5)] as never);
     assert.equal(h.status, "healthy", h.problems.join("; "));
   });
 
@@ -592,7 +592,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
   }
 
   // THE false alarm this grouping exists to stop, found by review before
-  // deploying. `analysisAssimilation` and `shortRange` both come from NOAA's
+  // deploying. `currentFlow` and `shortRange` both come from NOAA's
   // `short_range` series — same fetch, same section, same probe key, same
   // write — so they always stall together. With write recency AND run
   // currency both reporting per product, ONE pause produced four problem
@@ -607,7 +607,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
       new Date(NOW.getTime() - 7 * 3600_000),
       new Date(NOW.getTime() - 600_000),
       NOW,
-      [stalled("analysisAssimilation", 7), stalled("shortRange", 7)] as never);
+      [stalled("currentFlow", 7), stalled("shortRange", 7)] as never);
 
     assert.notEqual(h.status, "down",
       "one upstream series pausing must never read as a full outage: " +
@@ -653,7 +653,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
         new Date(NOW.getTime() - 600_000),
         NOW,
         [
-          stalled("analysisAssimilation", 11),
+          stalled("currentFlow", 11),
           stalled("shortRange", 11),
         ] as never);
 
@@ -690,9 +690,9 @@ describe("guard 11 — usage against the documented free tier", () => {
 });
 
 describe("the probe key is not always the product name", () => {
-  // Round 3, B3. The store's analysisAssimilation document holds a SHORT RANGE
+  // Round 3, B3. The store's currentFlow document holds a SHORT RANGE
   // body with a shortRange run, because that is what the client derives
-  // current flow from. The probe's analysisAssimilation key comes from NOAA's
+  // current flow from. The probe's currentFlow key comes from NOAA's
   // ?series=analysis_assimilation endpoint — a genuinely different series,
   // measured ~3 hours BEHIND short range.
   //
@@ -700,13 +700,13 @@ describe("the probe key is not always the product name", () => {
   // the product read "unchanged" and never triggered again — while its own
   // validUntil expired every hour.
   const probeSample = probe({
-    analysisAssimilation: "2026-08-24T20:00:00Z",
+    currentFlow: "2026-08-24T20:00:00Z",
     shortRange: "2026-08-24T23:00:00Z",
   });
 
-  test("analysisAssimilation is compared against the shortRange probe key",
+  test("currentFlow is compared against the shortRange probe key",
     () => {
-      assert.equal(probeRunFor(probeSample, "analysisAssimilation"),
+      assert.equal(probeRunFor(probeSample, "currentFlow"),
         "2026-08-24T23:00:00Z",
         "the AA document carries a shortRange run, so it must be compared " +
         "against the shortRange probe key");
@@ -714,18 +714,18 @@ describe("the probe key is not always the product name", () => {
 
   test("a stored shortRange run does NOT read as unchanged", () => {
     const d = decideTriggers(probeSample,
-      {analysisAssimilation: "2026-08-24T22:00:00Z"},
-      ["analysisAssimilation"]);
+      {currentFlow: "2026-08-24T22:00:00Z"},
+      ["currentFlow"]);
 
-    assert.deepEqual(d.triggered, ["analysisAssimilation"],
+    assert.deepEqual(d.triggered, ["currentFlow"],
       "comparing against the AA series made this product stop triggering " +
       "after its first write");
   });
 
   test("it still does not trigger when genuinely level", () => {
     const d = decideTriggers(probeSample,
-      {analysisAssimilation: "2026-08-24T23:00:00Z"},
-      ["analysisAssimilation"]);
+      {currentFlow: "2026-08-24T23:00:00Z"},
+      ["currentFlow"]);
     assert.deepEqual(d.triggered, []);
   });
 

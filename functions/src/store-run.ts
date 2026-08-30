@@ -184,7 +184,7 @@ export const PRODUCTS_BY_SOURCE: Record<
   readonly ForecastProductId[]
 > = {
   nwm: [
-    "analysisAssimilation",
+    "currentFlow",
     "shortRange",
     "mediumRange",
     "longRange",

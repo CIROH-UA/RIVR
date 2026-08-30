@@ -2102,8 +2102,62 @@ Affordable because every working version is on `main`.
 **Code.** Remove the Phase 5 kill switch and its Remote Config parameter once the
 store has run clean through Phase 8. Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
-`reach_data_provider` and was wrong). Rename `analysisAssimilation`, which
-fetches short range.
+`reach_data_provider` and was wrong).
+
+### `analysisAssimilation` -> `currentFlow` — DONE 2026-08-30
+
+**One identifier meant two different things in one codebase, and it had cost
+three defects before anyone renamed it.**
+
+- `ForecastProduct.analysisAssimilation` — our store product. It does NOT
+  fetch analysis assimilation: the handler calls `fetchCurrentFlowOnly`, which
+  is `fetchForecast(reachId, 'short_range')`; its run id is read from the
+  payload's `shortRange` section; and `store-upstream.ts` maps it to
+  `"short_range"`.
+- `analysisAssimilation` — **NOAA's own section name**, returned in every
+  streamflow response alongside `shortRange`, `mediumRange`, `longRange` and
+  `mediumRangeBlend` (verified live 2026-08-30). Genuine analysis-assimilation
+  data, hourly in every domain, which this app also consumes as
+  `ReachData.analysisAssimilation`.
+
+**The three defects, all the same mistake:**
+
+1. **Review round 2 (F2)** — a payload trim matched the product name against
+   NOAA's section of the same name.
+2. **Review round 3 (B2)** — the identical defect, one file downstream: NOAA
+   returns all five section keys in every response, unrequested ones as `{}`,
+   so the trim kept the EMPTY analysis-assimilation section and threw the real
+   short-range data away.
+3. **2026-08-30, in Phase 9 itself** — the product was given its own publish
+   schedule on the entirely correct observation that analysis assimilation is
+   hourly in every NWM domain. True of NOAA's series; false of this product.
+   It put island documents back on the CONUS hour *within the hour* that the
+   same change had removed it. Round 3, B3 is a fourth instance in the same
+   family: comparing the store's short-range run against the probe's
+   analysis-assimilation run made the product stop triggering after its first
+   write.
+
+Three (four) defects from one misnomer is the case for renaming rather than
+documenting it again. The rename covers the enum, the wire id, the document
+ids and both languages.
+
+**The rename itself nearly caused a fifth.** It was done as a blanket
+search-and-replace across `functions/src`, which also rewrote
+`publish-cadence-probe.ts` — where `analysisAssimilation` is NOAA's section
+name, not ours. The probe would then have looked for a key NOAA never sends
+and silently recorded nothing, in the one component whose job is measuring
+publication cadence. Caught by reading the diff, and now pinned by a test
+asserting the probe reads NOAA's name while no product id uses it.
+
+**What it costs in production.** Document ids change from
+`nwm__<reach>__analysisAssimilation` to `nwm__<reach>__currentFlow`, so about
+36 documents are orphaned — 19% of the collection, under `assertGcSane`'s 50%
+ceiling, swept by `storeGcDaily` after its 7-day grace. Devices re-fetch that
+product once per favourite. **The TestFlight build already installed
+(2026.2.0+719) will miss on this product and fall through to the live path**
+for current flow until a new build ships: one upstream call per favourite
+rather than zero. Degraded, not broken, and stated here rather than
+discovered.
 
 ### `validUntil`'s CONUS assumption — DONE 2026-08-30
 

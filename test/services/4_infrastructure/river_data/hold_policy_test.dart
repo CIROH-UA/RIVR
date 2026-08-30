@@ -24,7 +24,7 @@ void main() {
   group('maxHoldFor', () {
     test('every product the store writes has a cap', () {
       for (final p in [
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.shortRange,
         ForecastProduct.mediumRange,
         ForecastProduct.longRange,
@@ -311,12 +311,31 @@ void main() {
       );
     });
 
-    test('only short range differs; the other products are unchanged', () {
+    test('the misnamed current-flow product takes short range\'s caps', () {
+      // `analysisAssimilation` fetches `short_range`. Giving it the CONUS cap
+      // because of its name left island current-flow documents expiring
+      // between runs while carrying 12-hourly Hawaii data.
+      for (final reach in [islandReach, conusReach]) {
+        expect(
+          maxHoldFor(ForecastProduct.currentFlow, reachId: reach),
+          maxHoldFor(ForecastProduct.shortRange, reachId: reach),
+          reason: 'both carry the same series; their caps cannot differ',
+        );
+        expect(
+          maxRunAgeFor(ForecastProduct.currentFlow, reachId: reach),
+          maxRunAgeFor(ForecastProduct.shortRange, reachId: reach),
+        );
+      }
+    });
+
+    test('the forecast products are unchanged by domain', () {
       // Analysis assimilation publishes hourly in every domain, and the
       // islands have no medium or long range at all. Widening the whole table
       // would be the obvious wrong fix.
       for (final p in [
-        ForecastProduct.analysisAssimilation,
+        // analysisAssimilation is deliberately NOT here: it fetches the short
+        // range series, so it takes short range's island caps. Listing it as
+        // "unchanged" is the mistake this file made first time round.
         ForecastProduct.mediumRange,
         ForecastProduct.longRange,
         ForecastProduct.reachMetadata,

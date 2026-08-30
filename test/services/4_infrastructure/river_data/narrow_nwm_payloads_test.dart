@@ -85,7 +85,7 @@ RiverDataEntry _flowEntry(String storedUnit) => RiverDataEntry(
       key: const RiverDataKey(
         source: ForecastSource.nwm,
         reachId: '9962444',
-        product: ForecastProduct.analysisAssimilation,
+        product: ForecastProduct.currentFlow,
       ),
       window: FreshnessWindow(
         fetchedAt: DateTime.utc(2026, 8, 22, 12),

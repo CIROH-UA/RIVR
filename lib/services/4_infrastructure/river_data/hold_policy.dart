@@ -55,7 +55,7 @@ import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 /// MUST equal `MAX_HOLD_MS` in `functions/src/store-window.ts`. Pinned by a
 /// drift test that reads this file; changing one side alone fails CI.
 const Map<ForecastProduct, Duration> maxHold = {
-  ForecastProduct.analysisAssimilation: Duration(hours: 6),
+  ForecastProduct.currentFlow: Duration(hours: 6),
   ForecastProduct.shortRange: Duration(hours: 6),
   ForecastProduct.mediumRange: Duration(hours: 18),
   ForecastProduct.longRange: Duration(hours: 36),
@@ -97,6 +97,14 @@ const Duration defaultMaxHold = Duration(hours: 6);
 /// islands have no medium or long range at all.
 const Map<ForecastProduct, Duration> islandMaxHold = {
   ForecastProduct.shortRange: Duration(hours: 24),
+  // `currentFlow` fetches the SHORT RANGE series
+  // (`fetchCurrentFlowOnly` -> `fetchForecast(reachId, 'short_range')`, and
+  // the server maps it to `"short_range"` too), so it publishes on short
+  // range's cadence and needs short range's cap. It was omitted here while it
+  // was still called `analysisAssimilation`, which left island current-flow
+  // documents on the 6-hour CONUS cap while carrying 12-hourly Hawaii data —
+  // expiring them between runs, the failure these tables exist to prevent.
+  ForecastProduct.currentFlow: Duration(hours: 24),
 };
 
 /// How long [product] at [reachId] may be held without upstream confirming a
@@ -128,7 +136,7 @@ Duration maxHoldFor(ForecastProduct product, {required String reachId}) {
 /// products carry no run identity, and defaulting them is how the hold cap
 /// reported a healthy store as down within a minute of reaching production.
 const Map<ForecastProduct, Duration> maxRunAge = {
-  ForecastProduct.analysisAssimilation: Duration(hours: 16),
+  ForecastProduct.currentFlow: Duration(hours: 16),
   ForecastProduct.shortRange: Duration(hours: 16),
   ForecastProduct.mediumRange: Duration(hours: 24),
   ForecastProduct.longRange: Duration(hours: 36),
@@ -147,6 +155,8 @@ const Map<ForecastProduct, Duration> maxRunAge = {
 /// hours and trips well before that.
 const Map<ForecastProduct, Duration> islandMaxRunAge = {
   ForecastProduct.shortRange: Duration(hours: 28),
+  // Same reason as [islandMaxHold]: this product carries short-range water.
+  ForecastProduct.currentFlow: Duration(hours: 28),
 };
 
 /// How old [product]'s run at [reachId] may be, or null when it is not judged.
