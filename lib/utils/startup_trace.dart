@@ -59,12 +59,22 @@ class StartupTrace {
     final line =
         'favourites rendered in ${ms}ms with $favouriteCount favourites';
     developer.log(line, name: 'STARTUP_TRACE');
-    // AND on stdout, deliberately. `dart:developer` is not forwarded by
-    // `flutter run`, so reading it needs a VM-service tap — and a tap cannot
+
+    // AND on stdout — but NOT in release.
+    //
+    // The stdout copy exists because `dart:developer` is not forwarded by
+    // `flutter run`, so reading it needs a VM-service tap, and a tap cannot
     // connect until after the app has started, which is after this fires. The
-    // measurement would be lost to that race on every cold start, which is
-    // the only kind of start worth measuring.
-    debugPrint('STARTUP_TRACE: $line');
+    // measurement would be lost to that race on every cold start.
+    //
+    // That justification is a development one: `flutter run` never applies to
+    // a release build. `debugPrint` is NOT stripped in release — Flutter's own
+    // docs say it "logs to console even in release mode", and `strings` on the
+    // shipped IPA confirms the literal is there — so without this guard every
+    // user's device console gets a line on every launch. Harmless in content,
+    // wrong by default, and inconsistent with `AppLogger`, which gates its
+    // debug and info levels the same way. Phase 8 re-review, 2026-08-30.
+    if (!kReleaseMode) debugPrint('STARTUP_TRACE: $line');
   }
 
   /// The figure this phase reports: ms from launch to the first favourites

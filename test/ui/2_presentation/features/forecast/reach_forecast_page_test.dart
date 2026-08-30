@@ -1735,4 +1735,68 @@ void _r2_7Tests() {
     });
   });
 
+  // ── Phase 8 re-review: the page must not announce a failure mid-load ──────
+  //
+  // `_load()` fires three independent reads and `publish()` clears `_loading`
+  // from whichever lands FIRST — normally reachMetadata, the cheapest. The
+  // "current flow data is not available" strip was gated on `!_loading`, so
+  // for the entire gap between a sub-second metadata read and a flow call that
+  // guard 1 measures at 3.9 s average, the page told the user definitively
+  // that the flow was unavailable and offered a Retry. Pressing it replaced
+  // the already-rendered name and flood risk with a skeleton.
+  group('the unavailable strip waits for the flow read', () {
+    const unavailable =
+        'Current flow data is not available for this reach right now.';
+
+    testWidgets('is ABSENT while the flow read is still in flight',
+        (tester) async {
+      _registerRepo(
+        nwmEntry(),
+        byProduct: _narrowPayloads(),
+        // Metadata lands immediately; the flow takes its time, as it does.
+        delays: const {
+          ForecastProduct.analysisAssimilation: Duration(seconds: 3),
+        },
+      );
+
+      await tester.pumpWidget(_wrap(const ReachForecastPage(
+        reachId: '23021904',
+        source: ForecastSource.nwm,
+      )));
+      await tester.pump(); // metadata resolves
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.text(unavailable), findsNothing,
+          reason: 'the flow is still loading; saying it is unavailable is a '
+              'definitive statement about an unfinished read');
+
+      // Let the delayed flow read finish so no timer outlives the test.
+      // NOT pumpAndSettle: the loading state has a looping shimmer that never
+      // settles, which is why this file has `_pumpLoaded`.
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump(const Duration(milliseconds: 50));
+    });
+
+    testWidgets('IS shown once the flow read has settled with nothing',
+        (tester) async {
+      // The 2026-08-22 outage shape: /reaches answers, /streamflow does not.
+      _registerRepo(
+        nwmEntry(),
+        byProduct: _narrowPayloads(),
+        failProducts: const {ForecastProduct.analysisAssimilation},
+      );
+
+      await tester.pumpWidget(_wrap(const ReachForecastPage(
+        reachId: '23021904',
+        source: ForecastSource.nwm,
+      )));
+      await _pumpLoaded(tester);
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.text(unavailable), findsOneWidget,
+          reason: 'the read is done and produced nothing — now the page owes '
+              'the user a plain statement');
+    });
+  });
+
 }

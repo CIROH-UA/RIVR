@@ -99,6 +99,21 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
   static const Color _neutralTint = Color(0xFFEFF3F7);
 
   bool _loading = true;
+
+  /// Whether the CURRENT FLOW read specifically has finished, either way.
+  ///
+  /// `_loading` is not the same question and using it for the flow was a real
+  /// defect. `_load()` fires three independent reads and `publish()` clears
+  /// `_loading` from whichever lands first — normally `reachMetadata`, the
+  /// cheapest of the three. Guard 1's retaken table puts the flow call at 3.9 s
+  /// average against a metadata read of well under a second, so for most of a
+  /// normal load the page had `_loading == false` and `currentFlow == null`
+  /// and told the user, definitively, that the flow "is not available" while
+  /// it was still in flight. Pressing the Retry it offered then replaced the
+  /// already-rendered name and flood risk with a skeleton.
+  ///
+  /// Found by the Phase 8 re-review, 2026-08-30.
+  bool _flowSettled = false;
   String? _error;
   ReachDetailsData? _details;
   Map<int, double>? _returnPeriods; // in the user's display unit
@@ -161,6 +176,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
     setState(() {
       _error = null;
       _loading = true;
+      _flowSettled = false;
     });
     _load();
   }
@@ -310,7 +326,12 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       anySucceeded = true;
       publish();
     }, onError: (Object e) => onFailed('current flow', e))
-            .whenComplete(markSettled));
+            .whenComplete(() {
+      markSettled();
+      // The flow read is done, whatever the outcome. Only now may the page
+      // say the flow is unavailable.
+      if (mounted) setState(() => _flowSettled = true);
+    }));
 
     unawaited(repo.read(keyFor(ForecastProduct.returnPeriods)).then((entry) {
       if (entry == null) return;
@@ -714,7 +735,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
         // /reaches answers while every /streamflow series 504s). Without this
         // the gauge shows '—' and every stat shows '—', with no statement of
         // what is wrong — the sheet says it plainly, and this surface did not.
-        if (!_loading && _error == null && _details?.currentFlow == null)
+        if (_flowSettled && _error == null && _details?.currentFlow == null)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),

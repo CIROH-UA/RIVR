@@ -1653,9 +1653,14 @@ quotes it.
 | 6 | 0 refetches, 480 log lines | debug at `7cf587c` — app code identical to `4217077` |
 | 7 | 2603 / 2473 / 2285 ms, Android | profile at `62ef301` — app code identical to `4217077` |
 | 3 | 13966 CFS on both devices | iPhone debug `7cf587c`, Android profile `62ef301` |
+| 5 | 3 notifications, `alertsSent: 3` | TestFlight build of `2026.2.0+719` |
 
-**This guard immediately caught its own violation, which is the argument for
-having it.** Guards 2 and 4 were first written down as "profile build off
+**This guard caught its own violation twice, which is the argument for having
+it.** The first was immediate; the second was found by the Phase 8 re-review —
+guard 5's figures had no row at all, in the guard whose entire point is that
+every number carries its build.
+
+ Guards 2 and 4 were first written down as "profile build off
 `fc2bb4f`". They were not: `fc2bb4f` created the instrument with only a
 `dart:developer` call, the `debugPrint` that made the measurement readable was
 added afterwards, and the runs happened on that working tree — which became
@@ -1785,9 +1790,21 @@ River (18471070) added fresh. Same units on both.
 
 The store holds exactly one document for that reach —
 `nwm__18471070__analysisAssimilation`, run `2026-08-29T23:00:00Z`, unit CFS,
-fetched `2026-08-30T02:20:16Z` — read out of Firestore directly. That is the
-mechanism the guard is really testing: not that two clients computed the same
-answer, but that they read one shared value.
+fetched `2026-08-30T02:20:16Z` — read out of Firestore directly.
+
+**What that does and does not establish.** It proves the store HOLDS 13966; it
+does not prove either device READ it from there. `analysisAssimilation` is one
+observed value per model run, so two devices on the live path would have seen
+13966 as well — the experiment cannot tell the two apart, and the iPhone's
+convergence came from a pull-to-refresh that a live fetch would have satisfied
+identically. The agreement is real and worth having; the stated mechanism is an
+inference from it.
+
+The instrument that WOULD discriminate already exists and was not used:
+`servedFromStore` / `servedFromUpstream` on `StoreBackedDataSource`, the same
+counters that produced guard 6's zero-upstream evidence. Reading them on both
+devices during the comparison would settle it. Recorded as unproven rather than
+restated more carefully.
 
 **They disagreed at first, and the reason is worth keeping.** Android showed
 13966 while the iPhone showed 13744.1 — same units, same category, different
@@ -1836,7 +1853,17 @@ with content. Firebase init, auth restore, provider construction, the cache
 read and layout are all inside it. Only what the OS did before Dart started is
 outside.
 
-**Two things it does NOT measure, stated so nobody reads more into it.** The
+**The non-favourite half of this guard was NOT measured, and the first version
+of this section did not say so.** The guard reads "Favourites render under 3 s
+cold; non-favourites show a titled sheet under 500 ms and fill progressively."
+Only the favourites half has a number. Nothing in the repo can produce the
+other one: the only `Stopwatch` in `lib/` is `StartupTrace`, which times
+`main()` to the first favourites paint and is called from exactly one place.
+Measuring sheet-open needs its own instrument. This was a declared
+carry-forward from Phase 1 that arrived and was quietly dropped — recorded
+here as outstanding rather than left to look complete.
+
+**Two further things it does NOT measure, stated so nobody reads more into it.** The
 app's on-disk cache was warm — this is "app not in memory", the ordinary cold
 start, not a first-ever install with an empty cache, which is a different and
 slower case that remains unmeasured. And the device was online; the offline

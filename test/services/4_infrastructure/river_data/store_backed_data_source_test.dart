@@ -57,10 +57,21 @@ class _CountingSource implements IRiverDataSource {
 }
 
 class _Switch implements StoreReadSwitch {
-  _Switch(this.enabled);
+  _Switch(this.enabled, {this.flipOffAfterFirstRead = false});
   bool enabled;
+
+  /// Simulates the operator flipping the switch WHILE a read is in flight:
+  /// the first check passes, the check after the await does not.
+  final bool flipOffAfterFirstRead;
+  int reads = 0;
+
   @override
-  bool get isStoreReadEnabled => enabled;
+  bool get isStoreReadEnabled {
+    final v = enabled;
+    reads++;
+    if (flipOffAfterFirstRead) enabled = false;
+    return v;
+  }
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
@@ -89,6 +100,54 @@ Map<String, dynamic> _storeDoc({
 }
 
 void main() {
+  // ── Phase 8 re-review: the kill switch must win a race it started ────────
+  //
+  // `fetch` checked the switch, awaited Firestore, then returned the store's
+  // answer without checking again. `RiverDataRepository._doFetch` caches
+  // whatever it is handed WITH THE SERVER'S WINDOW — 30 days for
+  // reachMetadata and returnPeriods — and the coordinator's reclaim has
+  // already run by then, so nothing evicts it a second time.
+  //
+  // Flipping the switch off is an incident action. It must not leave a
+  // month-long copy of the very data being disowned, seeded by a read that
+  // began a moment earlier. The coordinator makes this same re-read after its
+  // own await, for the same reason.
+  group('a switch flipped off mid-fetch discards the store answer', () {
+    test('falls through to the live path instead of serving store data',
+        () async {
+      final db = FakeFirebaseFirestore();
+      final key = _key();
+      await db.collection(kStoreCollection).doc(key.storageKey).set(
+            RiverDataEntry(
+              key: key,
+              window: FreshnessWindow(
+                fetchedAt: DateTime.now().toUtc(),
+                validUntil:
+                    DateTime.now().toUtc().add(const Duration(days: 30)),
+              ),
+              unit: 'CMS',
+              runId: 'store-run',
+              payload: const {'from': 'store'},
+            ).toJson(),
+          );
+
+      final live = _CountingSource();
+      final s = StoreBackedDataSource(
+        inner: live,
+        readSwitch: _Switch(true, flipOffAfterFirstRead: true),
+        firestore: db,
+      );
+
+      final r = await s.fetch(key);
+
+      expect(r.payload['from'], isNot('store'),
+          reason: 'the switch was off by the time this returned; serving it '
+              'plants a 30-day copy the reclaim has already gone past');
+      expect(s.servedFromStore, 0);
+      expect(s.servedFromUpstream, 1);
+    });
+  });
+
   late FakeFirebaseFirestore db;
   late _CountingSource upstream;
 

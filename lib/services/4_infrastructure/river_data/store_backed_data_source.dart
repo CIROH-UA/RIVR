@@ -133,7 +133,31 @@ class StoreBackedDataSource implements IRiverDataSource {
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     if (_switch.isStoreReadEnabled) {
       final fromStore = await _readStore(key);
-      if (fromStore != null) {
+
+      // Re-read the switch AFTER the await, before letting a store value out.
+      //
+      // Found by the Phase 8 re-review. The kill switch's job is to get store
+      // data off devices immediately; the coordinator detaches its listeners
+      // and evicts every favourite's cached entries. But a fetch already in
+      // flight when the switch flipped would return anyway, and
+      // `RiverDataRepository._doFetch` caches whatever it is handed — with the
+      // SERVER's window, which for `reachMetadata` and `returnPeriods` is 30
+      // days. The reclaim had already run, so nothing evicts it again.
+      //
+      // Flipping the switch off is an incident action. It must not leave a
+      // month-long copy of the thing being disowned, seeded by a read that
+      // started a moment earlier.
+      //
+      // The coordinator makes exactly this re-read for exactly this reason
+      // (`store_read_coordinator.dart`, "Re-read AFTER the await"); this is
+      // the same argument on the fetch path.
+      if (!_switch.isStoreReadEnabled) {
+        AppLogger.info(
+          _tag,
+          'switch flipped off mid-fetch; discarding the store answer for '
+          '${key.storageKey}',
+        );
+      } else if (fromStore != null) {
         servedFromStore++;
         return fromStore;
       }

@@ -46,22 +46,28 @@ const CLEANUP_SOURCES = ["notification-service.ts", "weekly-digest.ts"]
 describe("stale FCM tokens are actually removed", () => {
   for (const {file, src} of CLEANUP_SOURCES) {
     test(`${file}: arrayRemove is called with SPREAD varargs`, () => {
-      const call = /arrayRemove\(([^)]*)\)/.exec(src);
-      assert.notEqual(call, null,
+      const calls = [...src.matchAll(/arrayRemove\(([^)]*)\)/g)];
+      assert.notEqual(calls.length, 0,
         `arrayRemove is gone from ${file} — if stale-token cleanup moved, ` +
         "this test must follow it");
 
-      assert.match(call![1], /^\.\.\./,
-        "arrayRemove takes varargs. Passing the array itself throws " +
-        "'Nested arrays are not supported', which is what made stale-token " +
-        "pruning fail loudly on every run and prune nothing.");
+      // EVERY call, not just the first: a second, broken one appended to an
+      // already-guarded file used to sail through.
+      for (const call of calls) {
+        assert.match(call[1], /^\.\.\./,
+          "arrayRemove takes varargs. Passing the array itself throws " +
+          "'Nested arrays are not supported', which is what made stale-token " +
+          "pruning fail loudly on every run and prune nothing.");
+      }
     });
 
     test(`${file}: the argument is the stale token list`, () => {
-      const call = /arrayRemove\(([^)]*)\)/.exec(src);
-      assert.match(call![1], /staleTokens/,
-        "spreading the wrong variable would compile and remove the wrong " +
-        "tokens, which is worse than removing none");
+      const calls = [...src.matchAll(/arrayRemove\(([^)]*)\)/g)];
+      for (const call of calls) {
+        assert.match(call[1], /staleTokens/,
+          "spreading the wrong variable would compile and remove the wrong " +
+          "tokens, which is worse than removing none");
+      }
     });
   }
 
@@ -70,7 +76,17 @@ describe("stale FCM tokens are actually removed", () => {
   test("no OTHER source file prunes tokens unguarded", () => {
     const dir = resolve(__dirname, "..", "src");
     const guarded = new Set(CLEANUP_SOURCES.map((c) => c.file));
-    const offenders = readdirSync(dir)
+    // RECURSIVE, and matching EVERY call rather than the first.
+    //
+    // The Phase 8 re-review defeated this assertion two ways: a pruner in a
+    // subdirectory was invisible to a flat `readdirSync`, and a second broken
+    // `arrayRemove` appended to an already-guarded file was invisible to
+    // `.exec()`, which returns only the first match. `functions/src/` is flat
+    // today with one call per file, so neither was live — but the comment
+    // above claimed a third copy would be "covered on the day it appears",
+    // and it would not have been.
+    const offenders = readdirSync(dir, {recursive: true})
+      .map(String)
       .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
       .filter((f) => !guarded.has(f))
       .filter((f) => readFileSync(resolve(dir, f), "utf8").includes(
