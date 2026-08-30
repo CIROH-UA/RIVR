@@ -108,6 +108,36 @@ A guard that matches a definition instead of an invocation proves the method
 exists, which nobody doubted. Fixed to match the call with its argument, and
 re-verified.
 
+### The field version had two defects a source guard could not catch
+
+Asked "did you write the tests", the audit found the fix itself was wrong in
+two ways — both invisible to the guards written for it, because both depended
+on statement ORDER inside one method:
+
+- **`recenterToDeviceLocation` falls back to `_lastKnownLocation`.** So a
+  failed FRESH fix — `noFix`, usually the 10-second limit elapsing indoors —
+  recorded a denial while the cached position still moved the camera. The map
+  recentred correctly AND the user got "Can't Find Your Location" on top of it.
+- **The not-ready early return skips `initializeLocation` entirely**, so a
+  denial from a previous attempt was still sitting in the field and the page
+  showed a permissions dialog for a map that had merely not finished loading.
+
+**Two source guards were written for these and both passed the mutation that
+reintroduced the bug.** Comment stripping shortens the source, so
+distance-bounded patterns matched a different `_lastDenial = null;` than the
+one intended. That is the third time in two days a guard matched the wrong
+thing.
+
+**So the shape changed instead.** `recenterToDeviceLocation` now RETURNS the
+denial: one answer per outcome, no ordering to get wrong, and the field is
+private with no accessor. The guards now pin the signature and the call site —
+structure rather than distance — and the mutations that make the method `void`
+again, or make the page read a field, both fail.
+
+**The lesson, stated for the next time:** when a guard cannot see a defect, the
+answer is usually to change the code's shape so the defect is not expressible,
+not to write a more elaborate pattern.
+
 ## Unverified
 
 **How far off an iOS approximate fix actually is.** Stated from memory as
