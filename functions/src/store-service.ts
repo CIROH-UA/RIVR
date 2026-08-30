@@ -216,17 +216,25 @@ async function buildWorkList(usage: FirestoreUsage): Promise<WorkList> {
  */
 async function extendWindowCoverage(
   products: readonly ForecastProductId[],
-  usage: FirestoreUsage
+  usage: FirestoreUsage,
+  liveDocumentIds: ReadonlySet<string>
 ): Promise<void> {
   if (products.length === 0) return;
   try {
     const samples = await sampleStoredWindows(products, usage);
-    const plan = planWindowExtensions(samples, new Date());
+
+    // Orphans are excluded INSIDE the planner, which is where the rule is
+    // testable; see WindowPlan.orphaned for what it cost to conflate them.
+    const plan = planWindowExtensions(
+      liveDocumentIds, samples, new Date());
     const updated = await applyWindowExtensions(plan.extend, usage);
 
     logger.info("🕰️ store refresh: window coverage", {
       products,
       sampled: samples.length,
+      // Reported, not alarmed: visible if someone asks why the collection is
+      // bigger than the work list, silent otherwise.
+      orphansSkipped: plan.orphaned,
       extended: updated,
       alreadyCovered: plan.covered,
       abandoned: plan.abandoned.length,
@@ -234,9 +242,12 @@ async function extendWindowCoverage(
     });
 
     // Abandoned means upstream has been quiet past what "nothing changed" can
-    // explain. Devices fall back to live and users still see numbers, so this
-    // is not an outage — but it is the signal that upstream stopped, and it
-    // must not be silent. CLAUDE.md: these pipelines fail quietly.
+    // explain, for a document someone actually follows. Devices fall back to
+    // live and users still see numbers, so this is not an outage — but it is
+    // the signal that upstream stopped, and it must not be silent. CLAUDE.md:
+    // these pipelines fail quietly.
+    //
+    // Orphans are excluded above, so this line now means what it says.
     if (plan.abandoned.length > 0) {
       logger.error("store windows past their hold cap; letting them expire", {
         count: plan.abandoned.length,
@@ -301,7 +312,7 @@ export async function runStoreRefresh(
   if (decision.triggered.length === 0) {
     // Nothing advanced, so nothing is rewritten — but "nothing advanced" is
     // exactly the case where windows keep ending under correct documents.
-    await extendWindowCoverage(candidates, usage);
+    await extendWindowCoverage(candidates, usage, liveDocumentIds);
     return {
       ran: false,
       reason: "nothing advanced upstream",
@@ -330,7 +341,7 @@ export async function runStoreRefresh(
   // existed. Triggered-but-failed leaves a window ending just as surely as
   // never-triggered does. Documents this run rewrote are already covered, so
   // sweeping them costs a read and no write.
-  await extendWindowCoverage(candidates, usage);
+  await extendWindowCoverage(candidates, usage, liveDocumentIds);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 store refresh: Firestore usage vs documented free tier", {
@@ -472,7 +483,7 @@ export async function runGeoglowsRefresh(
       reachId: probeReach.reachId,
       error: error instanceof Error ? error.message : String(error),
     });
-    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage, liveIds);
     return {ran: false, reason: "probe failed", report: null, usage};
   }
 
@@ -484,7 +495,7 @@ export async function runGeoglowsRefresh(
     // The common case, most hours of the day. The stored run is still the
     // newest that exists, so the windows get re-verified and nothing else is
     // fetched.
-    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+    await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage, liveIds);
     return {
       ran: false,
       reason: `unchanged at ${held}`,
@@ -495,7 +506,7 @@ export async function runGeoglowsRefresh(
 
   const report = await runStoreUpdate(
     workList, GEOGLOWS_PRODUCTS, firestoreDeps(io, usage));
-  await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage);
+  await extendWindowCoverage(GEOGLOWS_PRODUCTS, usage, liveIds);
 
   const quota = quotaUsage(usage.reads, usage.writes);
   logger.info("📊 GEOGLOWS refresh: Firestore usage vs free tier", {

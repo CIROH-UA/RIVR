@@ -2099,6 +2099,39 @@ under 3 seconds, and you have the numbers rather than the impression.
 
 Affordable because every working version is on `main`.
 
+### The store had NOT "run clean" — 83 errors in seven days (2026-08-30)
+
+**The precondition for removing the kill switch was checked and found false.**
+`storeRefreshHourly` logged 83 ERROR entries in seven days. Every hold-cap one
+was the same four reaches — `1352774`, `229757`, `23735719`, `9962444` — which
+**nobody favourites any more**.
+
+The store was working perfectly. A reach that leaves the work list keeps its
+documents for the GC's seven-day grace, and no run ever rewrites an orphan, so
+every hour it sat further past its hold cap and `extendWindowCoverage` reported
+"upstream has gone quiet" — at ERROR, indistinguishable from the store actually
+breaking. 22 of 189 documents were orphans; 14 of them had caps short enough to
+trip hourly.
+
+**This is the failure mode CLAUDE.md names: over-warning trains dismissal.** A
+real outage would have looked exactly like the noise that had been arriving
+every hour for a week. It is also why "the store has run clean through Phase 8"
+could be asserted and believed — nobody read the logs, and the one person who
+did (today) had to be looking for something else.
+
+**The fix puts the distinction in the pure planner**, where it is testable:
+`planWindowExtensions` now takes the work list's document ids and counts
+orphans separately from abandoned. Mutation-checked in both directions —
+ignoring the live set restores the false alarm, and skipping every sample
+silences the real one. The second mutation matters more: this must not become
+a way to stop hearing about genuine upstream stalls.
+
+**Also observed, and left alone because it is correct behaviour:** at 16:00
+UTC NOAA returned HTTP 504 on all five probe endpoints, so the probe recorded
+null runs and the 16:20 refresh triggered nothing. "No new run means zero
+fetches" working as designed, on a real outage, twenty minutes after a deploy —
+which is exactly when it would have been easiest to blame the deploy.
+
 **Code.** Remove the Phase 5 kill switch and its Remote Config parameter once the
 store has run clean through Phase 8. Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named

@@ -29,6 +29,22 @@ import {
   planWindowExtensions,
 } from "./store-window.js";
 
+
+/**
+ * Treat every supplied sample as live.
+ *
+ * The planner takes the work list's document ids so it can tell an ORPHAN — a
+ * reach nobody favourites, which no run will ever rewrite — from a document
+ * upstream has stopped feeding. Every case below predates that distinction and
+ * is about the second thing, so they all opt in as live.
+ *
+ * @param {readonly StoredWindowSample[]} samples - Samples under test.
+ * @return {Set<string>} Their document ids.
+ */
+function liveOf(samples: readonly StoredWindowSample[]): Set<string> {
+  return new Set(samples.map((s) => s.documentId));
+}
+
 describe("refresh schedule arithmetic", () => {
   test("the next hourly refresh is the next :20, strictly after now", () => {
     assert.equal(
@@ -198,7 +214,7 @@ describe("re-verifying a document upstream has not replaced", () => {
   }
 
   test("a document expiring before the next run is extended past it", () => {
-    const plan = planWindowExtensions([sample()], NOW);
+    const plan = planWindowExtensions(liveOf([sample()]), [sample()], NOW);
     assert.equal(plan.extend.length, 1);
     assert.equal(plan.extend[0].documentId, "nwm__10376596__shortRange");
     assert.equal(plan.extend[0].validUntil, "2026-08-28T17:30:00.000Z");
@@ -206,7 +222,7 @@ describe("re-verifying a document upstream has not replaced", () => {
   });
 
   test("a document already covered is left alone", () => {
-    const plan = planWindowExtensions(
+    const plan = planWindowExtensions(liveOf([sample({validUntil: "2026-08-29T00:00:00.000Z"})]), 
       [sample({validUntil: "2026-08-29T00:00:00.000Z"})], NOW);
     assert.equal(plan.extend.length, 0);
     assert.equal(plan.covered, 1);
@@ -215,7 +231,10 @@ describe("re-verifying a document upstream has not replaced", () => {
   test("the extension is computed from NOW, so it always clears the cap", () => {
     // A document written moments ago and one written 50 minutes ago land on
     // the same new expiry: coverage is a property of the clock, not of age.
-    const plan = planWindowExtensions([
+    const plan = planWindowExtensions(liveOf([
+      sample({documentId: "a", fetchedAt: "2026-08-28T16:19:00.000Z"}),
+      sample({documentId: "b", fetchedAt: "2026-08-28T15:30:00.000Z"}),
+    ]), [
       sample({documentId: "a", fetchedAt: "2026-08-28T16:19:00.000Z"}),
       sample({documentId: "b", fetchedAt: "2026-08-28T15:30:00.000Z"}),
     ], NOW);
@@ -226,7 +245,7 @@ describe("re-verifying a document upstream has not replaced", () => {
 
   test("past its hold cap a document is abandoned, not extended", () => {
     // Seven hours old, cap for an hourly product is six.
-    const plan = planWindowExtensions(
+    const plan = planWindowExtensions(liveOf([sample({fetchedAt: "2026-08-28T09:20:00.000Z"})]), 
       [sample({fetchedAt: "2026-08-28T09:20:00.000Z"})], NOW);
     assert.equal(plan.extend.length, 0);
     assert.deepEqual(plan.abandoned, ["nwm__10376596__shortRange"]);
@@ -243,7 +262,7 @@ describe("re-verifying a document upstream has not replaced", () => {
         fetchedAt: "2026-08-28T07:20:00.000Z",
         validUntil: "2026-08-28T12:05:00.000Z",
       });
-      const plan = planWindowExtensions([nineHoursOld], NOW);
+      const plan = planWindowExtensions(liveOf([nineHoursOld]), [nineHoursOld], NOW);
       assert.equal(plan.abandoned.length, 0);
       assert.equal(plan.extend.length, 1);
     });
@@ -270,7 +289,10 @@ describe("re-verifying a document upstream has not replaced", () => {
   });
 
   test("an unreadable window is named and left exactly as it is", () => {
-    const plan = planWindowExtensions([
+    const plan = planWindowExtensions(liveOf([
+      sample({documentId: "bad-fetched", fetchedAt: "not-a-date"}),
+      sample({documentId: "bad-until", validUntil: ""}),
+    ]), [
       sample({documentId: "bad-fetched", fetchedAt: "not-a-date"}),
       sample({documentId: "bad-until", validUntil: ""}),
     ], NOW);
@@ -290,7 +312,7 @@ describe("re-verifying a document upstream has not replaced", () => {
 
     for (let h = 10; h <= 20; h++) {
       const at = new Date(Date.UTC(2026, 7, 28, h, 20));
-      const plan = planWindowExtensions(
+      const plan = planWindowExtensions(liveOf([sample({fetchedAt, validUntil: validUntilNow})]), 
         [sample({fetchedAt, validUntil: validUntilNow})], at);
 
       if (plan.abandoned.length > 0) {
@@ -319,9 +341,93 @@ describe("re-verifying a document upstream has not replaced", () => {
   });
 
   test("an empty sample set is a no-op, not an error", () => {
-    const plan = planWindowExtensions([], NOW);
+    const plan = planWindowExtensions(liveOf([]), [], NOW);
     assert.deepEqual(plan.extend, []);
     assert.deepEqual(plan.abandoned, []);
+    assert.equal(plan.covered, 0);
+  });
+});
+
+describe("an orphan is not an outage", () => {
+  // The live defect this fixes, measured 2026-08-30. Four reaches that nobody
+  // favourites any more kept their documents for the GC's seven-day grace. No
+  // run rewrites an orphan, so every hour they sat further past their hold cap
+  // and `extendWindowCoverage` reported "store windows past their hold cap" at
+  // ERROR — 83 store errors in seven days, on a store that was working
+  // perfectly.
+  //
+  // CLAUDE.md's rule is that over-warning trains dismissal, and this is how:
+  // a real outage would have looked exactly like the noise everyone had
+  // already learned to skip. It also falsified the stated precondition for
+  // removing the Phase 5 kill switch — "once the store has run clean".
+  const NOW = new Date("2026-08-30T16:20:00.000Z");
+
+  /**
+   * A document 31 hours stale — well past every hourly cap.
+   * @param {string} reachId - Which reach.
+   * @return {StoredWindowSample} The sample.
+   */
+  function stale(reachId: string): StoredWindowSample {
+    return {
+      documentId: `nwm__${reachId}__shortRange`,
+      source: "nwm",
+      reachId,
+      product: "shortRange",
+      fetchedAt: "2026-08-29T09:20:00.000Z",
+      validUntil: "2026-08-29T10:30:00.000Z",
+    };
+  }
+
+  test("an unfollowed reach is counted as orphaned, never abandoned", () => {
+    const orphan = stale("1352774");
+    const plan = planWindowExtensions(new Set(), [orphan], NOW);
+
+    assert.equal(plan.orphaned, 1);
+    assert.deepEqual(plan.abandoned, [],
+      "an orphan reported as abandoned is an hourly ERROR about a store " +
+      "that is behaving correctly");
+  });
+
+  test("a FOLLOWED reach past its cap is still abandoned, and loudly", () => {
+    // The other direction, which matters more: silencing orphans must not
+    // silence the real signal. Mutation-checked by making the planner skip
+    // every sample, which turns this red.
+    const real = stale("23021904");
+    const plan = planWindowExtensions(
+      new Set([real.documentId]), [real], NOW);
+
+    assert.deepEqual(plan.abandoned, [real.documentId]);
+    assert.equal(plan.orphaned, 0);
+  });
+
+  test("a mixed sweep separates the two", () => {
+    const orphan = stale("1352774");
+    const real = stale("23021904");
+    const plan = planWindowExtensions(
+      new Set([real.documentId]), [orphan, real], NOW);
+
+    assert.equal(plan.orphaned, 1);
+    assert.deepEqual(plan.abandoned, [real.documentId],
+      "the four orphans measured in production were drowning exactly this " +
+      "signal");
+  });
+
+  test("an orphan is not extended either — it is simply left alone", () => {
+    // A fresh orphan must not have its window re-stamped: writing to a
+    // document no run will ever refresh again is a write per hour for seven
+    // days, for a reach nobody is looking at.
+    const fresh: StoredWindowSample = {
+      documentId: "nwm__1352774__shortRange",
+      source: "nwm",
+      reachId: "1352774",
+      product: "shortRange",
+      fetchedAt: "2026-08-30T16:00:00.000Z",
+      validUntil: "2026-08-30T16:25:00.000Z",
+    };
+    const plan = planWindowExtensions(new Set(), [fresh], NOW);
+
+    assert.deepEqual(plan.extend, []);
+    assert.equal(plan.orphaned, 1);
     assert.equal(plan.covered, 0);
   });
 });

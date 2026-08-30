@@ -238,6 +238,18 @@ export interface WindowPlan {
   abandoned: string[];
   /** Documents already covered past the next refresh; nothing to do. */
   covered: number;
+  /**
+   * Documents outside the work list — reaches nobody favourites any more,
+   * still inside the GC's seven-day grace.
+   *
+   * Counted SEPARATELY from [abandoned], and that separation is the whole
+   * point. No run will ever rewrite an orphan, so every hour it sits further
+   * past its hold cap; folding it into `abandoned` reported "upstream has
+   * gone quiet" at ERROR, hourly, for a store that was working perfectly.
+   * Measured 2026-08-30: 83 store errors in seven days, every hold-cap one of
+   * them four unfavourited reaches.
+   */
+  orphaned: number;
   /** Documents whose window could not be read as dates. */
   malformed: string[];
 }
@@ -270,14 +282,24 @@ export function maxHoldMs(
  * @return {WindowPlan} What to extend, what to abandon, what needs nothing.
  */
 export function planWindowExtensions(
+  liveDocumentIds: ReadonlySet<string>,
   samples: readonly StoredWindowSample[],
   now: Date
 ): WindowPlan {
   const plan: WindowPlan = {
-    extend: [], abandoned: [], covered: 0, malformed: [],
+    extend: [], abandoned: [], covered: 0, orphaned: 0, malformed: [],
   };
 
   for (const s of samples) {
+    // Orphans first, before any judgement about staleness. A document for a
+    // reach nobody follows is not stale — it is unmaintained on purpose, and
+    // no run will ever rewrite it. Judging it by a hold cap says "upstream
+    // has gone quiet" about a store that is working exactly as designed.
+    if (!liveDocumentIds.has(s.documentId)) {
+      plan.orphaned++;
+      continue;
+    }
+
     const fetchedAt = Date.parse(s.fetchedAt);
     const currentUntil = Date.parse(s.validUntil);
     if (Number.isNaN(fetchedAt) || Number.isNaN(currentUntil)) {
