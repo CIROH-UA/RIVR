@@ -58,5 +58,24 @@ void main() {
           reason: 'marking during build measures the frame that has not '
               'painted yet, which is not what "rendered" means');
     });
+
+    // The stdout copy must NOT ship. `debugPrint` is not stripped in release —
+    // Flutter's own docs say it "logs to console even in release mode", and
+    // `strings` on the built IPA confirmed the literal was present in
+    // 2026.2.0+719. Its whole justification is that `flutter run` does not
+    // forward `dart:developer`, and `flutter run` never applies to a release
+    // build.
+    //
+    // Source-level, and deliberately so: `kReleaseMode` is a compile-time
+    // constant that is false under `flutter test`, so no test can exercise the
+    // release branch. This is a tripwire against the guard being dropped, not
+    // coverage of it.
+    test('the stdout trace is guarded against release builds', () {
+      final src = _read('lib/utils/startup_trace.dart');
+      expect(src.contains('if (!kReleaseMode) debugPrint('), isTrue,
+          reason: 'without this every user gets a console line per launch — '
+              'harmless in content, wrong by default, and inconsistent with '
+              'AppLogger, which gates its debug and info levels the same way');
+    });
   });
 }

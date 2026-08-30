@@ -1873,6 +1873,48 @@ For contrast, guard 1's retaken table says a single `analysis_assimilation`
 call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
 screen now paints in a quarter of one such call, because it makes none.
 
+### Decision 23 — eviction waits for a decision, not a default (2026-08-30)
+
+The Phase 5 kill switch reclaims by evicting every favourite's stored entries,
+so the live path takes over instead of the device serving values the store may
+have poisoned. Two rounds of Phase 8 review found that mechanism broken in both
+directions, and the second break was caused by the fix for the first.
+
+**`isStoreReadEnabled` is `getBool`, which returns false for two different
+facts**: "the operator turned this off" and "Remote Config has not answered
+yet". That was harmless while the off-branch only declined to subscribe — the
+post-fetch announce corrected it moments later.
+
+1. **The reclaim never fired.** `_attach` runs at startup while Remote Config
+   is still resolving, so the off-branch is taken on an ordinary launch, when
+   `FavoritesProvider` has not loaded and there is nothing to evict. It evicted
+   nothing and cleared the persisted flag anyway, so it could never fire again
+   for that install. Flip the switch off, force-quit, relaunch, and
+   store-written names and thresholds survived their full 30-day window — the
+   exact failure the persistence exists to prevent.
+2. **Then it fired when it must not.** Keeping the flag when nothing was
+   evicted fixed (1), and made the ambiguity destructive: a device where the
+   store is ENABLED could reach the off-branch with favourites loaded and wipe
+   every one of their entries on an ordinary launch.
+
+**So eviction now waits for the operator's actual decision.**
+`StoreReadSwitch.isResolved` is true once a fetch completes in either
+direction — a FAILED fetch still resolves, because Remote Config then serves
+the last activated value and that IS the decision. Until then the coordinator
+defers and keeps its flag.
+
+Both directions are tested, because deferring must not become never: an
+unresolved switch evicts nothing even with favourites in hand, and a
+resolved-off switch still reclaims.
+
+**The same argument applies on the fetch path**, and was missing there too.
+`StoreBackedDataSource.fetch` checked the switch, awaited Firestore, and
+returned the store's answer without checking again — and the repository caches
+what it is handed with the SERVER's window, 30 days for the near-static
+products, after the reclaim has already run. Flipping the switch off is an
+incident action; it must not leave a month-long copy of the data being
+disowned, seeded by a read that began a moment earlier.
+
 ### Phase 8 — where it actually stands (2026-08-30)
 
 Two independent reviews. Neither passed on first reading, which by now is the

@@ -546,6 +546,16 @@ next publication and takes the run received into account, retrying in 30
 minutes when publication is late. The old next-midnight window let a device
 hold yesterday's forecast a full extra day.
 
+**The kill switch's reclaim waits for Remote Config to RESOLVE.**
+`isStoreReadEnabled` reads false both for "off" and for "not fetched yet", and
+eviction is destructive, so the coordinator defers while `isResolved` is false
+and keeps its persisted flag. A failed fetch still counts as resolved — Remote
+Config then serves the last activated value, which is the operator's decision.
+`StoreBackedDataSource.fetch` re-checks the switch after its await for the same
+reason: otherwise an in-flight read plants a fresh 30-day copy after the
+reclaim has already run. Both were found broken by the Phase 8 reviews (ADR
+0011 decision 23).
+
 **Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
 published by the flood builder. It **exists and is `true`** — created by hand
 in the Firebase console 2026-08-28. Absent, `getBool` returns false, which is
