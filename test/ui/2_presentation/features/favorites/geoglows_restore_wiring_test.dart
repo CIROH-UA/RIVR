@@ -65,18 +65,29 @@ void main() {
             'GEOGLOWS reaches never have — the original defect');
   });
 
-  test('the restore button is not gated on riverName ALONE', () {
-    // The precise shape of the bug: `favorite.riverName != null &&
-    // favorite.riverName!.isNotEmpty` as the whole condition. Pinned as a
-    // string because it is the exact expression that shipped.
+  test('the page DELEGATES the decision rather than inlining it', () {
+    // Strengthened 2026-08-30 after a second defect shipped past the earlier
+    // version of this test. That version only checked the page had stopped
+    // using the old riverName-only expression — which was true, and useless:
+    // the replacement still never compared the custom name to the target, so
+    // "Restore to Pitumarca, Peru" appeared on a river already called
+    // Pitumarca, Peru. A grep cannot see a missing comparison.
+    //
+    // The decision now lives in `restoreTargetFor`, which has real tests
+    // (`favorite_rename_test.dart`). What this pins is that the page still
+    // asks it, because an inlined re-implementation is how the comparison
+    // went missing the first time.
     final src = _code(page);
 
+    expect(src.contains('restoreTargetFor('), isTrue,
+        reason: 'the page is deciding for itself again; that is where both '
+            'restore-button defects came from');
     expect(
       src.contains("favorite.riverName != null &&\n"
           "        favorite.riverName!.isNotEmpty"),
       isFalse,
-      reason: 'this is the original gate; GEOGLOWS reaches publish no river '
-          'name, so it is false for every one of them',
+      reason: 'the original riverName-only gate is back; GEOGLOWS reaches '
+          'publish no river name, so it is false for every one of them',
     );
   });
 }

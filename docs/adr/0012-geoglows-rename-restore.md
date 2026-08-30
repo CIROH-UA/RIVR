@@ -91,6 +91,35 @@ keys and the new source-prefixed ones are present, exactly as this ADR's
 sibling documented — old keys are not migrated, and the next rename writes the
 new one.
 
+### A second defect, found by Jerson minutes later (2026-08-30)
+
+**The button stayed after restoring.** With the river already called
+"Pitumarca, Peru", the dialog still offered *"Restore to "Pitumarca,
+Peru""* — a control that does nothing, presented as though it did.
+
+**It was never GEOGLOWS-specific.** The gate asked only "is there a default?"
+and "is there a custom name?", never "are they different". An NWM reach
+renamed to its own river name showed the same dead button, from the same
+expression, long before any of this work.
+
+**It shipped past three source-level guards, and that is the lesson.** They
+checked the page had stopped using the old `riverName`-only expression, and
+that it called the right things. All true. **No grep can see a missing
+comparison.** The decision is now `restoreTargetFor` in
+`lib/models/1_domain/shared/favorite_rename.dart` — pure, and covered by
+thirteen real tests instead of guessed at through source matching. Three
+mutations verified failing: dropping the equality check (this defect),
+gating on `riverName` alone (the first defect), and comparing
+case-insensitively (which would suppress a genuine difference).
+
+The remaining source guard was rewritten to pin DELEGATION rather than the
+absence of one expression, because an inlined re-implementation is exactly how
+the comparison went missing.
+
+**Re-verified on the simulator**, both directions: with the name equal to the
+default, no button; after renaming to something different, the button returns
+offering the correct target.
+
 **Still not verified:** the same journey on physical hardware. The simulator
 shares the app binary and the real Firestore backend, so what remains untested
 is the device-specific layer only.
