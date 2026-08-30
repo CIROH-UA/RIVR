@@ -110,8 +110,17 @@ describe("an APNs credential failure is not a stale token", () => {
   // Source-level guards, and they say so: exercising the real behaviour needs
   // the FCM SDK, which this suite does not run. What they pin is the branch
   // structure, which is what would actually be got wrong.
+  // COMMENTS STRIPPED. `digest-window-drift.test.ts` was hardened the same
+  // day for exactly this reason — a guard that a comment can satisfy is not a
+  // guard — and these assertions were left matching raw source, which made
+  // them the inconsistent one of the two new source-level guards. Found by
+  // the Phase 9 review. No comment currently contains the literals, so this
+  // was latent rather than a live hole; fixed so it stays that way.
   const src = readFileSync(
-    resolve(__dirname, "..", "src", "notification-service.ts"), "utf8");
+    resolve(__dirname, "..", "src", "notification-service.ts"), "utf8")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+    .join("\n");
 
   test("it is NEVER added to the prune list", () => {
     // The dangerous "fix" for the noise. This error means our credential does

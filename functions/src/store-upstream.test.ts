@@ -71,12 +71,12 @@ describe("only fetchable work is advertised as fetchable", () => {
   // place. GEOGLOWS is fetched by store-geoglows.ts on its own daily schedule.
   test("GEOGLOWS is fetchable, on its own daily path", () => {
     assert.deepEqual(CAN_FETCH.geoglows, ["geoglowsForecast"]);
-    assert.equal(canFetch("geoglows", "geoglowsForecast"), true);
+    assert.equal(canFetch("geoglows", "geoglowsForecast", "23021904"), true);
   });
 
   test("the NWM fetcher refuses GEOGLOWS rather than half-serving it", () => {
     // Routing is fetchForStore's job; store-upstream must not quietly try.
-    assert.equal(canFetch("nwm", "geoglowsForecast"), false);
+    assert.equal(canFetch("nwm", "geoglowsForecast", "23021904"), false);
   });
 
   // This test previously asserted these two were NOT fetchable at all, which
@@ -87,8 +87,8 @@ describe("only fetchable work is advertised as fetchable", () => {
   // fetchable. What must stay true is the part the old test's NAME described:
   // they do not belong on the HOURLY cycle.
   test("the near-static products are fetchable", () => {
-    assert.equal(canFetch("nwm", "returnPeriods"), true);
-    assert.equal(canFetch("nwm", "reachMetadata"), true);
+    assert.equal(canFetch("nwm", "returnPeriods", "23021904"), true);
+    assert.equal(canFetch("nwm", "reachMetadata", "23021904"), true);
   });
 
   test("the near-static products are NOT on the hourly cycle", () => {
@@ -123,12 +123,51 @@ describe("only fetchable work is advertised as fetchable", () => {
       "the app watches a different NWM product set than the server writes");
   });
 
-  test("the four hourly NWM products are fetchable", () => {
+  test("the four hourly NWM products are fetchable for a CONUS reach", () => {
     for (const p of
       ["currentFlow", "shortRange", "mediumRange", "longRange"] as
       const) {
-      assert.equal(canFetch("nwm", p), true);
+      assert.equal(canFetch("nwm", p, "23021904"), true);
     }
+  });
+
+  // Phase 9 review, finding 6. The phase MEASURED that NWPS reports only
+  // `["analysis_assimilation", "short_range"]` for Oahu reach 800000010, and
+  // that NOMADS has no medium_range_hawaii or long_range_puertorico directory
+  // at all — then acted on it only by omitting island entries from the
+  // hold-cap tables. Every other part of the system still believed these
+  // products exist everywhere.
+  //
+  // Untreated, the first Honolulu or San Juan favourite puts two products per
+  // reach into permanent per-cycle fetch failure: `reachesToRetry` never
+  // empties, and the app offers forecast ranges NOAA cannot serve. Round 2's
+  // F3 was this same defect for a whole source — planning work that cannot be
+  // served guarantees a failure per reach per run.
+  test("islands have NO medium or long range", () => {
+    for (const p of ["mediumRange", "longRange"] as const) {
+      assert.equal(canFetch("nwm", p, "800000010"), false,
+        `${p} does not exist for Hawaii or Puerto Rico; planning it is a ` +
+        "guaranteed failure every cycle, forever");
+    }
+  });
+
+  test("islands DO have current flow, short range and the static pair", () => {
+    // The other direction, and the one that would break a real user: an
+    // over-broad exclusion leaves an island favourite with nothing at all.
+    for (const p of
+      ["currentFlow", "shortRange", "returnPeriods", "reachMetadata"] as
+      const) {
+      assert.equal(canFetch("nwm", p, "800000010"), true, `${p}`);
+    }
+  });
+
+  test("the exclusion is by DOMAIN, not by product", () => {
+    // Stated as a difference so a blanket removal of mediumRange cannot pass.
+    assert.notEqual(
+      canFetch("nwm", "mediumRange", "23021904"),
+      canFetch("nwm", "mediumRange", "800000010"),
+      "medium range exists for CONUS and not for the islands; one answer " +
+      "for both is wrong whichever answer it is");
   });
 });
 

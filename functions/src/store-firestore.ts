@@ -271,19 +271,42 @@ export async function sampleStoredWindows(
       .get();
     usage.reads += snap.size;
     for (const d of snap.docs) {
-      const data = d.data();
-      samples.push({
-        documentId: d.id,
-        source: data.source as ForecastSourceId,
-        reachId: (data.reachId as string) ?? "",
-        product: data.product as ForecastProductId,
-        fetchedAt: (data.window?.fetchedAt as string) ?? "",
-        validUntil: (data.window?.validUntil as string) ?? "",
-        runId: data.runId as string | undefined,
-      });
+      samples.push(windowSampleFrom(d.id, d.data()));
     }
   }
   return samples;
+}
+
+/**
+ * One stored document, as the window planner needs to see it.
+ *
+ * **Extracted so the mapping is testable at all.** It used to be inline in the
+ * Firestore loop, which needs an emulator this suite does not run — so
+ * dropping `reachId` here passed all 442 tests while making every island
+ * document fall back to CONUS caps. Found by the Phase 9 review, which
+ * mutated exactly this line.
+ *
+ * The fields are not interchangeable: `reachId` decides which hold and
+ * run-age cap the document is judged by, and an empty one is silently CONUS.
+ *
+ * @param {string} documentId - The Firestore document id.
+ * @param {Record<string, unknown>} data - Its selected fields.
+ * @return {StoredWindowSample} The sample.
+ */
+export function windowSampleFrom(
+  documentId: string,
+  data: Record<string, unknown>
+): StoredWindowSample {
+  const window = (data.window ?? {}) as Record<string, unknown>;
+  return {
+    documentId,
+    source: data.source as ForecastSourceId,
+    reachId: (data.reachId as string) ?? "",
+    product: data.product as ForecastProductId,
+    fetchedAt: (window.fetchedAt as string) ?? "",
+    validUntil: (window.validUntil as string) ?? "",
+    runId: data.runId as string | undefined,
+  };
 }
 
 /**

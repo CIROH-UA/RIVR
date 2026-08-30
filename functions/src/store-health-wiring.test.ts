@@ -27,6 +27,7 @@ import {test, describe} from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
+import {windowSampleFrom} from "./store-firestore.js";
 
 const SOURCE = readFileSync(
   resolve(__dirname, "..", "src", "store-service.ts"), "utf8");
@@ -110,8 +111,37 @@ describe("Phase 7 — the samples actually carry a run identity", () => {
       "documents with no run, and run-currency checking silently becomes a " +
       "no-op that reports every store healthy");
 
-    assert.match(body, /runId:\s*data\.runId/,
-      "the selected runId must be carried onto the sample. Reading it from " +
-      "Firestore and then dropping it is the same no-op with an extra step.");
+    // The mapping itself is no longer greppable here, and that is an
+    // improvement rather than a loss: Phase 9's review found that dropping
+    // `reachId` in this same inline block passed all 442 tests, because the
+    // block needed a Firestore emulator to exercise. It was extracted to
+    // `windowSampleFrom`, which is pure — so the "is it carried onto the
+    // sample?" half is now a real behavioural test below instead of a regex.
+    //
+    // The `.select()` half stays source-level, because a Firestore projection
+    // genuinely cannot be checked any other way without an emulator.
+  });
+
+  test("the mapping carries runId AND reachId onto the sample", () => {
+    // Replaces a regex with the behaviour it was approximating. Both fields
+    // are silent when lost: no runId makes run-currency checking a no-op that
+    // reports every store healthy, and no reachId makes every island document
+    // fall back to CONUS caps and expire between runs.
+    const sample = windowSampleFrom("nwm__800000010__shortRange", {
+      source: "nwm",
+      reachId: "800000010",
+      product: "shortRange",
+      window: {
+        fetchedAt: "2026-08-30T04:20:00.000Z",
+        validUntil: "2026-08-30T16:30:00.000Z",
+      },
+      runId: "2026-08-30T00:00:00Z",
+    });
+
+    assert.equal(sample.runId, "2026-08-30T00:00:00Z",
+      "reading runId from Firestore and then dropping it is a monitor that " +
+      "is silent because it was fed nothing");
+    assert.equal(sample.reachId, "800000010",
+      "and an empty reachId is silently CONUS");
   });
 });

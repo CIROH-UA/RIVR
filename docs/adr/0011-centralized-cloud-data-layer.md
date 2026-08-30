@@ -647,6 +647,73 @@ came from so supersession is decidable offline, and carry a schema version.
    refetches.**
 7. Independent agent review passes.
 
+### Guard 7 — the review ran, and PASSED on the claims (2026-08-30)
+
+**Verdict: all seven Phase 9 claims true; nothing shipped could reach a user
+with wrong data.** Seven findings, all missing guards rather than live
+defects. Unlike Phase 8's guard 9, this is a pass rather than an acceptance —
+and the difference is that the reviewer verified the claims independently
+(re-running mutations, checking deletions against the parent commit rather
+than the current tree, proving the alert windowing cannot drop a future point)
+instead of only failing to find new problems.
+
+**What it found that I had not, and the first two are the ones that matter:**
+
+1. **`test/docs/` was not in CI.** The workflow ran an ALLOW-LIST of five
+   directories; `test/docs/` was new in this range and sat outside all of
+   them. So the guard written specifically so CLAUDE.md's path-rot "no longer
+   needs a human" was itself enforced only by a human remembering to run bare
+   `flutter test`. **Second time CI's coverage was narrower than everyone
+   believed** — the functions suite was the first. Now enumerated by
+   exclusion, so a new directory is covered by default.
+2. **The island cap wiring was untested on the SERVER**, the exact mirror of
+   the Dart fakes fixed earlier the same day. Two mutations passed 446/446:
+   the sampler dropping `reachId`, and the planner ignoring it. Line 312 is
+   the ABANDONMENT decision — a healthy 12-hour-old Hawaii document judged by
+   the CONUS six-hour cap is abandoned every cycle, never extended, and every
+   device holding that favourite drops to the live path for half of each
+   cycle. Guard 1's exact failure, plus the hourly error this phase spent the
+   day removing. Fixed on one side of a language boundary is not fixed.
+3. **The client's freshness wiring was unpinned too** — `heldTooLong` and
+   `runTooOld` took a CONUS constant and 1343 tests passed. An island
+   favourite would carry a permanent "may be out of date" over current data.
+   The ADR claimed this wiring was "pinned and mutation-checked", which was
+   true of `validUntil` and read as covering both.
+4. **I repeated a count derived from the wrong place, in this document.** "36
+   reaches in the store", three times here and once in a test — 36 is the
+   favourite-ROW count; distinct reaches are 29, and 27 NWM. The orphan figure
+   was wrong the same way. **The identical error this phase congratulates
+   itself for catching, one level up.** No conclusion changed, which is why it
+   survived: a number that is roughly right and never load-bearing is
+   invisible.
+5. **One of the two new source-level guards did not strip comments**, while
+   the other was hardened for exactly that reason the same day.
+6. **Islands have no medium or long range, and only the cap tables knew it.**
+   The phase measured that NWPS serves two products for Oahu, then acted on it
+   solely by omitting entries from the hold tables. `canFetch`,
+   `MANAGED_PRODUCTS` and `supportedProducts` still offered five to every
+   reach. The first island favourite would put two products into permanent
+   per-cycle failure. `canFetch` now takes a `reachId`.
+7. **Expect all-clears on the first alert run after the windowing deploy** —
+   a river whose only threshold-exceeding point is in the past now correctly
+   drops to Normal and emits "back to Normal". Real notifications, correct
+   behaviour, and not previously written down.
+
+**All seven addressed. Every fix mutation-checked in both directions**, the
+second direction being the one that matters: silencing a false alarm must not
+silence the real one, and excluding island products must not leave an island
+favourite with nothing.
+
+**What I feared and the review did NOT check** — recorded because the missing
+half of a review is as informative as the findings. I sealed a list before it
+ran. It confirmed my worry about untested island wiring (going further than I
+had), and it cleared two I was wrong about (the `.gitignore` rework, and
+orphans loosening the health aggregate — both verified correct). It did not
+examine whether `storeGcDaily` actually deletes the orphaned documents, which
+remains asserted rather than observed, and did not check CLAUDE.md's prose
+claim that "nothing calls NOAA or GEOGLOWS directly any more". **Both are
+still open.**
+
 **You are done when** browsing hundreds of streams leaves the cache bounded,
 favourites survive eviction unconditionally, and a stream you looked at earlier
 still draws instantly with the network off.
@@ -2284,7 +2351,8 @@ asserting the probe reads NOAA's name while no product id uses it.
 
 **What it costs in production.** Document ids change from
 `nwm__<reach>__analysisAssimilation` to `nwm__<reach>__currentFlow`, so about
-36 documents are orphaned — 19% of the collection, under `assertGcSane`'s 50%
+31 documents are orphaned (27 superseded plus 4 for reaches nobody
+favourites) — 16% of the collection, under `assertGcSane`'s 50%
 ceiling, swept by `storeGcDaily` after its 7-day grace. Devices re-fetch that
 product once per favourite. **The TestFlight build already installed
 (2026.2.0+719) will miss on this product and fall through to the live path**
@@ -2322,8 +2390,9 @@ handed the identical run. That is the Phase 5 dead-air bug — a value marked
 stale while still being the newest that exists anywhere — except per-domain,
 and far larger: 15 minutes an hour became 11 hours out of 12.
 
-**Not live, and said plainly.** All 36 reaches in the store on 2026-08-30 are
-CONUS, so no user has hit this. It was latent, and would have arrived with the
+**Not live, and said plainly.** All 32 reaches in the store on 2026-08-30 are
+CONUS — 27 favourited NWM reaches, 5 GEOGLOWS, plus 4 NWM reaches nobody
+favourites any more whose documents are awaiting the GC, so no user has hit this. It was latent, and would have arrived with the
 first person in San Juan or Honolulu who favourited a river.
 
 **The fix is in three places, because the assumption was.**
@@ -2370,7 +2439,7 @@ consulting them. Both mutations verified failing.
 **A near-miss found while verifying the deploy, not by review.** GEOGLOWS
 river ids are also 9 digits, and nothing stops one landing inside the NWM
 island COMID band — the band check reads the number, not the network. None of
-the 36 reaches in the store collide today, but that is luck. What actually
+the reaches in the store collide today, but that is luck. What actually
 makes it safe is that the island tables name only `shortRange`, which GEOGLOWS
 does not have. That is an implicit coupling, and implicit couplings in this
 ADR have a record of being broken by an edit that looked obviously correct, so
@@ -2404,6 +2473,18 @@ counted rather than inferred from a "done" message:
 3. **The APNs failures now read as what they are** — `📵 APNs credential does
    not cover this token's environment (user …) — expected for a debug build`,
    at WARN, and the run completed alerts normally and sent notifications.
+
+**And then I made the same mistake again, in this document.** The Phase 9
+review found "36 reaches in the store" repeated three times here and once in
+`hold-policy-drift.test.ts`. 36 is the FAVOURITE-ROW count from the scale line
+near the top of this ADR; the distinct-reach count is 29 there and 27 NWM
+today. The orphan figure was wrong the same way — "36 documents, 19%" against
+an actual 31 and 16%.
+
+No conclusion changed, which is exactly why it survived: a number that is
+roughly right and never load-bearing is invisible. It is the identical error
+the paragraph below congratulates itself for catching, one level up, in a
+document that feeds a research presentation. Corrected 2026-08-30.
 
 **My expected count was wrong, and that is worth recording.** I predicted 31
 `currentFlow` documents from the 31 old `analysisAssimilation` ones. The right

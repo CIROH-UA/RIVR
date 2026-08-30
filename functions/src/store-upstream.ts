@@ -20,6 +20,7 @@ import {
   SECTION_BY_PRODUCT,
 } from "./store-keys.js";
 import {fetchGeoglowsForStore} from "./store-geoglows.js";
+import {isIslandReach} from "./store-document.js";
 
 /**
  * The unit the store records for products whose values are NOT flow, and for
@@ -99,12 +100,48 @@ export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
     geoglows: ["geoglowsForecast"],
   };
 
-/** Whether a (source, product) pair can be fetched at all. */
+/**
+ * Products NOAA does not serve for Hawaii or Puerto Rico.
+ *
+ * **Measured, not assumed:** NWPS reach `800000010` (Oahu) reports
+ * `streamflow: ["analysis_assimilation", "short_range"]` where a CONUS reach
+ * reports five, and NOMADS has no `medium_range_hawaii` or
+ * `long_range_puertorico` directory at all. There is no 5-day or 30-day
+ * product for the islands to fetch.
+ *
+ * Phase 9 measured this and then acted on it only by OMITTING island entries
+ * from the hold-cap tables, which left every other part of the system
+ * believing these products exist everywhere. Found by the Phase 9 review.
+ */
+const ISLAND_UNAVAILABLE: readonly ForecastProductId[] =
+  ["mediumRange", "longRange"];
+
+/**
+ * Whether a (source, product, reach) triple can be fetched at all.
+ *
+ * **`reachId` is required, and that is the point.** Planning work that cannot
+ * be served guarantees a failure per reach per run — round 2's F3 was exactly
+ * this for a whole source. The island case is the same defect one level down:
+ * without the reach, the first Honolulu or San Juan favourite puts two
+ * products into permanent per-cycle fetch failure, `reachesToRetry` never
+ * empties, and the app offers forecast ranges NOAA cannot serve.
+ *
+ * @param {ForecastSourceId} source - Which network.
+ * @param {ForecastProductId} product - Which product.
+ * @param {string} reachId - Which reach; decides the NWM domain.
+ * @return {boolean} Whether it can be fetched.
+ */
 export function canFetch(
   source: ForecastSourceId,
-  product: ForecastProductId
+  product: ForecastProductId,
+  reachId: string
 ): boolean {
-  return CAN_FETCH[source].includes(product);
+  if (!CAN_FETCH[source].includes(product)) return false;
+  if (source === "nwm" && isIslandReach(reachId) &&
+      ISLAND_UNAVAILABLE.includes(product)) {
+    return false;
+  }
+  return true;
 }
 
 /**
