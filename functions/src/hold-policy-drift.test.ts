@@ -27,7 +27,7 @@ import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
 import {ForecastProductId} from "./store-keys.js";
-import {SERIES_BY_PRODUCT} from "./store-upstream.js";
+import {ISLAND_UNAVAILABLE, SERIES_BY_PRODUCT} from "./store-upstream.js";
 import {
   MAX_HOLD_MS,
   DEFAULT_MAX_HOLD_MS,
@@ -344,5 +344,46 @@ describe("guard 4 — the island caps are shared too", () => {
       if (conus === undefined) continue;
       assert.ok(ms > conus, `${product}: same argument for run age`);
     }
+  });
+});
+
+describe("the island product exclusion is shared, not duplicated", () => {
+  // Phase 9 measured that NWPS serves only two products for Oahu and then
+  // fixed the SERVER — `canFetch` — while the client kept offering all six to
+  // every reach. Found a day later by the standing "did you write the tests"
+  // question, not by review, and in the same change whose commit message says
+  // "fixed on one side of a language boundary is not fixed".
+  //
+  // Both sides now name the same two products. This fails if either moves.
+  test("ISLAND_UNAVAILABLE matches islandUnavailable in Dart", () => {
+    const dart = readFileSync(
+      REPO + "lib/models/1_domain/shared/river_data/nwm_domain.dart", "utf8")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const block =
+      /const Set<ForecastProduct> islandUnavailable = \{([\s\S]*?)\};/
+        .exec(dart);
+    assert.notEqual(block, null,
+      "islandUnavailable is gone from nwm_domain.dart; if it moved, this " +
+      "test must follow it");
+
+    const dartProducts = [...block![1].matchAll(/ForecastProduct\.(\w+)/g)]
+      .map((m) => m[1]).sort();
+
+    assert.deepEqual(dartProducts, [...ISLAND_UNAVAILABLE].sort(),
+      "the client and the store must agree on which products an island reach " +
+      "has. A client that asks for one the server never writes subscribes to " +
+      "a document that can never exist; a client that omits one the server " +
+      "does write silently loses a forecast range.");
+  });
+
+  test("the exclusion is not empty and not everything", () => {
+    // Both degenerate ends are silent failures: empty restores the original
+    // defect, and everything leaves an island favourite with no forecast at
+    // all while every equality assertion above still passes.
+    assert.ok(ISLAND_UNAVAILABLE.length > 0);
+    assert.ok(!ISLAND_UNAVAILABLE.includes("currentFlow"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("shortRange"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("reachMetadata"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("returnPeriods"));
   });
 });

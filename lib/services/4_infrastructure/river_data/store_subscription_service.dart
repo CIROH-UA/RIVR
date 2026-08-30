@@ -40,6 +40,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_entry.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_repository.dart';
@@ -188,6 +189,19 @@ class StoreSubscriptionService {
     final ids = <String>{};
     for (final r in reaches) {
       for (final p in kStoredProducts[r.source] ?? const <ForecastProduct>[]) {
+        // Per REACH, because since Phase 9 which products exist depends on the
+        // NWM domain. Hawaii and Puerto Rico have no medium or long range at
+        // all, so subscribing to them costs exactly what the comment on
+        // `kStoredProducts` above warns about: a listener that can never fire,
+        // two per island favourite, for the life of the app.
+        //
+        // The server learned this first (`canFetch` in store-upstream.ts) and
+        // the client did not, in the same change — the language-boundary
+        // half-fix this ADR has now made twice in one day.
+        if (r.source == ForecastSource.nwm &&
+            !nwmProductExistsFor(p, r.reachId)) {
+          continue;
+        }
         ids.add(
           RiverDataKey(source: r.source, reachId: r.reachId, product: p)
               .storageKey,

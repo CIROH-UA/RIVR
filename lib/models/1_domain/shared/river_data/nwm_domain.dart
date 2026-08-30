@@ -44,6 +44,8 @@
 // verified. If Alaska is ever tiled, this is the file to change, and 3 hours
 // is the number.
 
+import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+
 /// Which National Water Model domain a reach belongs to.
 ///
 /// Only the distinction that changes a publish schedule is modelled. Hawaii
@@ -92,3 +94,31 @@ NwmDomain nwmDomainOf(String reachId) {
       ? NwmDomain.island
       : NwmDomain.conus;
 }
+
+/// NWM products NOAA does not serve for Hawaii or Puerto Rico.
+///
+/// **Measured, not assumed:** NWPS reach `800000010` (Oahu) reports
+/// `streamflow: ["analysis_assimilation", "short_range"]` where a CONUS reach
+/// reports five, and NOMADS has no `medium_range_hawaii` or
+/// `long_range_puertorico` directory at all.
+///
+/// Mirrors `ISLAND_UNAVAILABLE` in `functions/src/store-upstream.ts`.
+const Set<ForecastProduct> islandUnavailable = {
+  ForecastProduct.mediumRange,
+  ForecastProduct.longRange,
+};
+
+/// Whether [product] exists at all for [reachId].
+///
+/// Phase 9 measured that the islands have no medium or long range and then
+/// acted on it only on the SERVER — `canFetch` there, and the hold-cap tables.
+/// The client kept offering all five products to every reach, so an island
+/// favourite would subscribe to two store documents that can never exist:
+/// listeners that can never fire, which `kStoredProducts` exists to avoid.
+///
+/// "Fixed on one side of a language boundary is not fixed" was written into a
+/// commit message on 2026-08-30 and then done again, the same day, in the
+/// same change. This is the other side.
+bool nwmProductExistsFor(ForecastProduct product, String reachId) =>
+    !(nwmDomainOf(reachId) == NwmDomain.island &&
+        islandUnavailable.contains(product));
