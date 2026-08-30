@@ -412,6 +412,46 @@ void main() {
     // write-only and all 1162 tests passed.
     setUp(() => SharedPreferences.setMockInitialValues({}));
 
+    // THE gap that test missed: it populates `favourites` BEFORE constructing
+    // the coordinator. Production does the opposite. `_attach` runs at startup
+    // while Remote Config is still resolving — the comment above `_attach`
+    // says the switch "reads false here almost every time" — and at that
+    // instant FavoritesProvider has not loaded, so `_favourites()` is empty.
+    //
+    // The reclaim therefore evicted nothing and then cleared the persisted
+    // flag anyway, so it could never fire again for that install. Flip the
+    // switch OFF, force-quit, relaunch, and store-written names and thresholds
+    // survive their full 30-day window — verbatim the failure the persistence
+    // exists to prevent.
+    test('favourites arriving LATE still get reclaimed', () async {
+      SharedPreferences.setMockInitialValues(
+          {'adr0011_store_was_active': true});
+      final cache = _NoopCache();
+      final late = _FakeFavourites(const []); // empty, as at real startup
+
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: _FakeSwitch(false),
+        cache: cache,
+        favouritesListenable: late,
+        favourites: () => late.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isEmpty,
+          reason: 'nothing to evict yet — there were no favourites');
+
+      // FavoritesProvider finishes loading and notifies, exactly as it does a
+      // few hundred ms into a real launch.
+      late.set(favourites.reaches);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isNotEmpty,
+          reason: 'the persisted flag must survive an empty first pass, or '
+              'the cross-launch reclaim is a no-op on every real device');
+      c.dispose();
+    });
+
     test('a flag left true by a previous session evicts on the next launch',
         () async {
       SharedPreferences.setMockInitialValues(

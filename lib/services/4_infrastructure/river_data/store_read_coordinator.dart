@@ -165,8 +165,38 @@ class StoreReadCoordinator {
       // doing it constantly on the default configuration.
       if (await _wasActive()) {
         AppLogger.info(_tag, 'kill switch off; detaching and reclaiming');
-        await _evictStoreEntries();
-        await _setActive(false);
+        final evicted = await _evictStoreEntries();
+
+        // Consume the flag ONLY if we actually reclaimed something.
+        //
+        // Round 5 (Phase 8 review): this used to clear it unconditionally, and
+        // that made the cross-launch reclaim a no-op on nearly every install.
+        // `_attach` runs at startup while Remote Config is still resolving —
+        // the comment above `_attach` says the switch "reads false here almost
+        // every time" — so this branch is taken on an ordinary launch. At that
+        // instant `FavoritesProvider` has not loaded, `_favourites()` is empty,
+        // `_evictStoreEntries` returns having evicted nothing, and clearing the
+        // flag here meant the reclaim could never fire again for that install.
+        //
+        // The consequence is the exact failure the persistence exists to
+        // prevent: flip the switch OFF, force-quit, relaunch, and
+        // store-written `reachMetadata` and `returnPeriods` survive their full
+        // 30-day window instead of being reclaimed.
+        //
+        // Leaving the flag set costs one extra attempt on the next sync —
+        // which `_onChanged` fires as soon as favourites arrive — and that
+        // attempt has the favourites it needs.
+        if (evicted > 0) {
+          await _setActive(false);
+          _storeWasActive = false;
+        } else {
+          AppLogger.info(
+            _tag,
+            'nothing to reclaim yet (favourites not loaded); keeping the '
+            'flag so the next sync retries',
+          );
+        }
+        return;
       }
       _storeWasActive = false;
       return;
@@ -241,7 +271,12 @@ class StoreReadCoordinator {
     }
   }
 
-  Future<void> _evictStoreEntries() async {
+  /// Evict every entry the store could have written for a favourite.
+  ///
+  /// Returns how many keys were evicted, so the caller can tell "there was
+  /// nothing to do" from "we have not loaded the favourites yet" — a
+  /// distinction that decided whether the kill switch's reclaim worked at all.
+  Future<int> _evictStoreEntries() async {
     final keys = <RiverDataKey>[];
     for (final f in _favourites()) {
       for (final p in kStoredProducts[f.source] ?? const <ForecastProduct>[]) {
@@ -250,7 +285,7 @@ class StoreReadCoordinator {
         );
       }
     }
-    if (keys.isEmpty) return;
+    if (keys.isEmpty) return 0;
     for (final k in keys) {
       try {
         await _cache.evict(k);
@@ -263,6 +298,7 @@ class StoreReadCoordinator {
       'kill switch off; evicted ${keys.length} favourite entries so the live '
       'path takes over immediately',
     );
+    return keys.length;
   }
 
   /// Release every listener but stay usable.

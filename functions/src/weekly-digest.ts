@@ -361,7 +361,17 @@ async function sendDigest(
   if (staleTokens.length > 0) {
     try {
       const update: Record<string, unknown> = {
-        fcmTokens: admin.firestore.FieldValue.arrayRemove(staleTokens),
+        // SPREAD — see notification-service.ts. `arrayRemove` takes varargs;
+        // handing it the array throws "Element at index 0 is not a valid
+        // array element. Nested arrays are not supported."
+        //
+        // The alert path's copy of this was fixed on 2026-08-30 after being
+        // caught firing live, and the ADR was then updated to say both ADR
+        // 0008 defects were closed. This second copy was missed, and the
+        // guard test only read notification-service.ts, so nothing objected.
+        // The weekly digest therefore kept failing to prune dead tokens every
+        // Friday.
+        fcmTokens: admin.firestore.FieldValue.arrayRemove(...staleTokens),
       };
       // If every token is dead, turn the digest off so we stop trying.
       if (staleTokens.length === user.fcmTokens.length) {

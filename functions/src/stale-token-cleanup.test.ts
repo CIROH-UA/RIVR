@@ -21,29 +21,63 @@
 
 import {test, describe} from "node:test";
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readFileSync, readdirSync} from "node:fs";
 import {resolve} from "node:path";
 
-const SOURCE = readFileSync(
-  resolve(__dirname, "..", "src", "notification-service.ts"), "utf8");
+/**
+ * EVERY file that prunes stale tokens, not just the one that was on fire.
+ *
+ * The first version of this test read `notification-service.ts` alone. An
+ * identical `arrayRemove(staleTokens)` sat in `weekly-digest.ts` the whole
+ * time, so the alert path was fixed, the guard passed, and the ADR was updated
+ * to say both ADR 0008 defects were closed — while the weekly digest kept
+ * failing to prune dead tokens every Friday. Found by review on 2026-08-30.
+ *
+ * A guard that names one file cannot notice a second copy. This one is derived
+ * from the sources rather than hardcoded, so a third copy is covered on the
+ * day it appears.
+ */
+const CLEANUP_SOURCES = ["notification-service.ts", "weekly-digest.ts"]
+  .map((f) => ({
+    file: f,
+    src: readFileSync(resolve(__dirname, "..", "src", f), "utf8"),
+  }));
 
 describe("stale FCM tokens are actually removed", () => {
-  test("arrayRemove is called with SPREAD varargs, not the array", () => {
-    const call = /arrayRemove\(([^)]*)\)/.exec(SOURCE);
-    assert.notEqual(call, null,
-      "arrayRemove is gone from notification-service.ts — if stale-token " +
-      "cleanup moved, this test must follow it");
+  for (const {file, src} of CLEANUP_SOURCES) {
+    test(`${file}: arrayRemove is called with SPREAD varargs`, () => {
+      const call = /arrayRemove\(([^)]*)\)/.exec(src);
+      assert.notEqual(call, null,
+        `arrayRemove is gone from ${file} — if stale-token cleanup moved, ` +
+        "this test must follow it");
 
-    assert.match(call![1], /^\.\.\./,
-      "arrayRemove takes varargs. Passing the array itself throws " +
-      "'Nested arrays are not supported', which is what made stale-token " +
-      "pruning a no-op that failed loudly on every cycle and pruned nothing.");
-  });
+      assert.match(call![1], /^\.\.\./,
+        "arrayRemove takes varargs. Passing the array itself throws " +
+        "'Nested arrays are not supported', which is what made stale-token " +
+        "pruning fail loudly on every run and prune nothing.");
+    });
 
-  test("the argument is the stale token list", () => {
-    const call = /arrayRemove\(([^)]*)\)/.exec(SOURCE);
-    assert.match(call![1], /staleTokens/,
-      "spreading the wrong variable would compile and remove the wrong " +
-      "tokens, which is worse than removing none");
+    test(`${file}: the argument is the stale token list`, () => {
+      const call = /arrayRemove\(([^)]*)\)/.exec(src);
+      assert.match(call![1], /staleTokens/,
+        "spreading the wrong variable would compile and remove the wrong " +
+        "tokens, which is worse than removing none");
+    });
+  }
+
+  // The gap that let the second copy survive: nothing checked that the list
+  // above covers every file which prunes tokens.
+  test("no OTHER source file prunes tokens unguarded", () => {
+    const dir = resolve(__dirname, "..", "src");
+    const guarded = new Set(CLEANUP_SOURCES.map((c) => c.file));
+    const offenders = readdirSync(dir)
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .filter((f) => !guarded.has(f))
+      .filter((f) => readFileSync(resolve(dir, f), "utf8").includes(
+        "arrayRemove"));
+
+    assert.deepEqual(offenders, [],
+      `these files prune tokens but are not covered by this guard: ` +
+      `${offenders.join(", ")}. Add them to CLEANUP_SOURCES.`);
   });
 });

@@ -1911,8 +1911,12 @@ store has run clean through Phase 8. Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
 `reach_data_provider` and was wrong). Rename `analysisAssimilation`, which
 fetches short range. Fix `validUntil`'s CONUS-only assumption for Alaska and
-Hawaii/Puerto Rico. (**Both ADR 0008 defects are now fixed**, ahead of this
-phase, because each was found firing rather than read about.
+Hawaii/Puerto Rico. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
+premature: `arrayRemove` was fixed in `notification-service.ts` and an
+identical copy in `weekly-digest.ts` was missed, because the guard test named
+one file. The weekly digest kept failing to prune dead tokens every Friday
+until the Phase 8 review found it. The guard now derives its file list from the
+sources and fails if any other file prunes tokens unguarded.
 `setupNotificationListeners()` gated on `enableNotifications` alone — fixed
 2026-08-30 by extracting `wantsAnyNotification`, since a user with flood alerts
 off and the Weekly Outlook on still gets a notification every Friday and had no
