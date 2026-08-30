@@ -58,6 +58,22 @@ class MapPageState extends State<MapPage> {
   /// helpful, and the alternative is a stored flag that makes the app behave
   /// differently on day two for reasons the user cannot see.
   static bool _hasCenteredOnUser = false;
+
+  /// Where the camera was when the map was last closed, this app run.
+  ///
+  /// **Static, for the same reason [_hasCenteredOnUser] is.** The map page is
+  /// pushed fresh by `Navigator.pushNamed` every time, so an instance field
+  /// would be gone before it could be read.
+  ///
+  /// Stored as plain numbers rather than a `CameraOptions`, so nothing holds
+  /// a reference to a disposed platform object.
+  ///
+  /// **Not persisted across launches, deliberately.** Restoring a camera from
+  /// a week ago drops someone onto a river they looked at once; restoring one
+  /// from ten minutes ago returns them to what they were doing. The first is
+  /// the reason the camera was un-persisted on 2026-08-20, and the second is
+  /// why session memory is worth having.
+  static ({double lat, double lon, double zoom})? _rememberedCamera;
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
@@ -229,14 +245,19 @@ class MapPageState extends State<MapPage> {
     // cameraOptions is only read at widget creation, long before a location
     // fix arrives.
     return MapWidget(
+      // Where the user left it, or the configured default on a first open.
+      //
+      // On the FIRST open the remembered camera is null and the location
+      // handler flies to the user a moment later; on every open after that
+      // this is the whole behaviour, because that handler no longer recentres.
       cameraOptions: CameraOptions(
         center: Point(
           coordinates: Position(
-            AppConfig.defaultLongitude,
-            AppConfig.defaultLatitude,
+            _rememberedCamera?.lon ?? AppConfig.defaultLongitude,
+            _rememberedCamera?.lat ?? AppConfig.defaultLatitude,
           ),
         ),
-        zoom: AppConfig.defaultZoom,
+        zoom: _rememberedCamera?.zoom ?? AppConfig.defaultZoom,
       ),
       styleUri: AppConstants.defaultMapboxStyleUrl,
       textureView: true,
@@ -247,9 +268,32 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Nothing to do when the map settles. The camera is deliberately not
-  /// persisted — see [_buildMap].
-  void _onMapIdle(MapIdleEventData data) {}
+  /// Remember where the user left the camera, so reopening the map returns
+  /// them to it rather than to Provo.
+  ///
+  /// Idle is the right moment: it fires once the gesture has settled, so this
+  /// records a resting position rather than every frame of a pan.
+  ///
+  /// **This used to do nothing**, back when the map recentred on the user on
+  /// EVERY open — there was genuinely nothing to restore. Making that
+  /// first-open-only (Jerson, 2026-08-30) removed the thing that made
+  /// discarding the camera safe: reopening then landed on the configured
+  /// default, which is useful for exactly one person, the one in Provo.
+  void _onMapIdle(MapIdleEventData data) {
+    final map = _mapboxMap;
+    if (map == null) return;
+    map.getCameraState().then((camera) {
+      _rememberedCamera = (
+        lat: camera.center.coordinates.lat.toDouble(),
+        lon: camera.center.coordinates.lng.toDouble(),
+        zoom: camera.zoom,
+      );
+    }).catchError((Object e) {
+      // A camera we cannot read is simply not remembered; the next open falls
+      // back to the default, which is where it went before this existed.
+      AppLogger.debug('MapPage', 'Could not read camera state: $e');
+    });
+  }
 
 
   Widget _buildLoadingOverlay() {

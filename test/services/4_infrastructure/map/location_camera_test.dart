@@ -87,6 +87,60 @@ void main() {
     });
   });
 
+  group('first open recentres, then the map remembers', () {
+    // Jerson, 2026-08-30: "First open recentres, then remember."
+    //
+    // The middle state was worse than either end. Making centring
+    // first-open-only removed the thing that made discarding the camera safe:
+    // the code comment justifying it said "it opens on the user's location
+    // when one is available, so there is nothing to restore", and that stopped
+    // being true the moment it only did so once. Reopening then landed on the
+    // configured default — useful for exactly one person, the one in Provo.
+
+    test('the camera is remembered on idle', () {
+      final src = _code(page);
+
+      expect(src.contains('_rememberedCamera = ('), isTrue,
+          reason: 'without this, reopening the map loses where the user was');
+      final onIdle = RegExp(
+        r'_onMapIdle\(MapIdleEventData data\) \{[\s\S]{0,700}?'
+        r'_rememberedCamera = \(',
+      );
+      expect(onIdle.hasMatch(src), isTrue,
+          reason: 'idle is the resting position; recording on every frame of '
+              'a pan would be both wasteful and wrong');
+    });
+
+    test('the remembered camera is used when the map opens', () {
+      final src = _code(page);
+
+      expect(src.contains('_rememberedCamera?.lat ?? AppConfig.defaultLatitude'),
+          isTrue,
+          reason: 'remembering it and not using it is the same as not '
+              'remembering it');
+      expect(src.contains('_rememberedCamera?.zoom ?? AppConfig.defaultZoom'),
+          isTrue);
+    });
+
+    test('the memory is STATIC, or it dies with the page', () {
+      // Navigator.pushNamed builds a fresh page every time, so an instance
+      // field would be gone before it could be read — the same trap as the
+      // first-open flag beside it.
+      final src = _code(page);
+      expect(src.contains('static ({double lat, double lon, double zoom})? '
+          '_rememberedCamera'), isTrue);
+    });
+
+    test('it is NOT persisted across launches', () {
+      // A camera from last week drops someone onto a river they looked at
+      // once — the reason the camera was un-persisted on 2026-08-20. Session
+      // memory keeps the benefit without the staleness.
+      final src = _code(page);
+      expect(src.contains('SharedPreferences'), isFalse,
+          reason: 'session-only is the decision; a stored camera goes stale');
+    });
+  });
+
   group('the camera moves on the first open only', () {
     test('centring is gated on a flag', () {
       final src = _code(page);
