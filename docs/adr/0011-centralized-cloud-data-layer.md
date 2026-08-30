@@ -1862,10 +1862,13 @@ store has run clean through Phase 8. Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
 `reach_data_provider` and was wrong). Rename `analysisAssimilation`, which
 fetches short range. Fix `validUntil`'s CONUS-only assumption for Alaska and
-Hawaii/Puerto Rico. Resolve the two ADR 0008 server defects: `arrayRemove`
-receiving an array instead of varargs, so stale-token pruning is a silent no-op;
-and `setupNotificationListeners()` gated on `enableNotifications` alone, so a
-weekly-only user never gets tap routing.
+Hawaii/Puerto Rico. Resolve the remaining ADR 0008 server defect:
+`setupNotificationListeners()` gated on `enableNotifications` alone, so a
+weekly-only user never gets tap routing. (**The `arrayRemove` defect was fixed
+2026-08-30**, out of order — it was caught firing live during Phase 8 guard 5,
+and it was not a *silent* no-op as described here: it threw on every cycle that
+found a stale token. Nothing was pruned and every alert run retried the same
+dead devices.)
 
 **Docs.** Rewrite CLAUDE.md's architecture and data-flow sections. Settle ADR
 0001 Step 7, ADR 0002 Stage 2b, ADR 0003's back-off flaw, and confirm ADR 0010's

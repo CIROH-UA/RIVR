@@ -480,6 +480,24 @@ surface that renders a favourite reads the river's NAME and its THRESHOLDS —
 without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
 
+**Alerts CANNOT be tested from a locally-built iOS app.** Firebase has a
+Production APNs auth key (`P663R3US8S`, team `2UL5XK6YRM`) and **no development
+key**. A build installed from Xcode registers against Apple's sandbox push
+environment, so every send fails with
+`messaging/third-party-auth-error: "Invalid APNs credential"` — 12 of them in
+one cycle on 2026-08-30. TestFlight and App Store builds use production and
+work normally. To test alerts on a debug build, upload the same `.p8` to the
+empty *development* slot in Project Settings → Cloud Messaging; otherwise use
+TestFlight. This costs an hour if you do not know it.
+
+**Phase 8 (prove it on device) is 8 of 9 guards**, measured 2026-08-30 and
+recorded in ADR 0011 with the build each number came from: favourites paint in
+**969 ms** cold on iPhone and **2473 ms** on an Android emulator (bar: 3 s),
+two accounts on two platforms show identical values, airplane mode renders,
+and a unit switch repaints every card with **zero** refetches. Retaking Phase
+0's latency table over 189 samples showed the originals were optimistic — the
+light NOAA endpoints are 94% at ~4 s, not 10/10 at ~2 s.
+
 **Phase 7 removed every freshness timestamp from the value surfaces, so
 SILENCE NOW MEANS CURRENT.** The favourites card no longer shows "3h ago" or a
 green tick — the tick mattered most, because a per-card claim of "current"
