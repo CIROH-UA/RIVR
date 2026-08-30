@@ -76,7 +76,8 @@ class _Source implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => ForecastProduct.values.toSet();
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
+  DateTime validUntil(ForecastProduct product, DateTime now,
+          {required String reachId}) =>
       now.add(const Duration(hours: 1));
 
   @override

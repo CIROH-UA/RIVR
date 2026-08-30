@@ -106,9 +106,21 @@ class _ControllableSource implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => ForecastProduct.values.toSet();
 
+  /// Every reachId `validUntil` was asked about.
+  ///
+  /// The repository has to hand its KEY's reach to the source. A fake that
+  /// ignores the argument cannot tell a correct implementation from one that
+  /// passes a constant, and since Phase 9 the answer depends on which reach it
+  /// is — an island document computed as CONUS expires eleven times before new
+  /// data can exist.
+  final List<String> validUntilReaches = [];
+
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
-      now.toUtc().add(validFor);
+  DateTime validUntil(ForecastProduct product, DateTime now,
+      {required String reachId}) {
+    validUntilReaches.add(reachId);
+    return now.toUtc().add(validFor);
+  }
 
   /// The model run the next fetch reports, when set.
   String? nextRunId;
@@ -276,6 +288,71 @@ void main() {
     // age check. After a cache wipe — sign-out, or the kill switch flipping
     // ON to OFF — a failing fetch leaves yesterday's number on screen with
     // nothing to say so, now that the "1d ago" label is gone.
+    // Phase 9 wiring. Not "does the window come out right" — the fake returns
+    // a constant, so that would pass with any reach at all — but "is the key's
+    // OWN reach what the source was asked about".
+    test('the repository asks the source about the KEY\'s reach', () async {
+      const island = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '800000010',
+        product: ForecastProduct.shortRange,
+      );
+      source.validUntilReaches.clear();
+
+      await repo.read(island);
+
+      expect(source.validUntilReaches, contains('800000010'),
+          reason: 'a hardcoded or defaulted reach here puts every island '
+              'document back on the CONUS hour, invisibly');
+      expect(source.validUntilReaches, isNot(contains(key.reachId)));
+    });
+
+    // Phase 9 review, finding 3. The `validUntil` half of this wiring was
+    // pinned; the FRESHNESS half was not, and replacing `key.reachId` with a
+    // CONUS constant at river_data_repository.dart:106/:112 passed all 1343
+    // tests. The ADR said the wiring was "pinned and mutation-checked", which
+    // was true of one call and read as covering both.
+    //
+    // What it costs an island favourite: `heldTooLong` and `runTooOld` judge
+    // it by CONUS caps, so a healthy Oahu reach — measured at 15.3 h of run
+    // age against a CONUS cap of 16 h and a 6 h hold cap — trips both
+    // routinely, and SyncStatusBanner shows a permanent "may be out of date"
+    // over completely current data. Exactly the false alarm this phase spent
+    // the day removing, moved to the client.
+    test('freshness judges an island reach by ISLAND caps', () async {
+      const island = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '800000010',
+        product: ForecastProduct.shortRange,
+      );
+
+      // A run 20 h old and a fetch 12 h ago: fine for a 12-hourly island
+      // product (24 h hold / 28 h run-age), stale for CONUS (6 h / 16 h).
+      source.nextRunId = now.subtract(const Duration(hours: 20))
+          .toIso8601String();
+      source.nextFetchedAt = now.subtract(const Duration(hours: 12));
+
+      await repo.read(island);
+
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'judged as CONUS, a perfectly current island value puts a '
+              'permanent staleness warning over the whole app');
+    });
+
+    test('the SAME values on a CONUS reach do raise the warning', () async {
+      // The other direction, and the one that matters more: island caps must
+      // not be applied to CONUS reaches, or the warning stops working at all.
+      source.nextRunId = now.subtract(const Duration(hours: 20))
+          .toIso8601String();
+      source.nextFetchedAt = now.subtract(const Duration(hours: 12));
+
+      await repo.read(key);
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'a CONUS reach silent for 12 h with a 20 h-old run really '
+              'is unvouchable');
+    });
+
     test('a failed fetch on a cache MISS raises it', () async {
       source.offline = true;
       await expectLater(repo.read(key), throwsA(anything));
@@ -795,7 +872,7 @@ void main() {
   group('sheet -> forecast page is a cache hit', () {
     const products = [
       ForecastProduct.reachMetadata,
-      ForecastProduct.analysisAssimilation,
+      ForecastProduct.currentFlow,
       ForecastProduct.returnPeriods,
     ];
 
@@ -825,9 +902,9 @@ void main() {
 
     test('the two surfaces receive the identical entry, not equal copies',
         () async {
-      final fromSheet = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+      final fromSheet = await repo.read(keyFor(ForecastProduct.currentFlow));
       source.nextValue = 999.0; // would differ if the page refetched
-      final fromPage = await repo.read(keyFor(ForecastProduct.analysisAssimilation));
+      final fromPage = await repo.read(keyFor(ForecastProduct.currentFlow));
 
       expect(fromPage!.payload['value'], fromSheet!.payload['value'],
           reason: 'one cache entry per value is what stops the gauge and the '

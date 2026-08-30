@@ -324,6 +324,88 @@ describe("timeToPeak", () => {
   });
 });
 
+describe("an alert never announces a crest that already happened", () => {
+  // The defect, carried forward from ADR 0011 Phase 8 and closed 2026-08-30.
+  // `getMaxForecastFlow` took the maximum over the WHOLE series, past points
+  // included — the same shape as the weekly digest bug found the same week,
+  // and worse here, because this peak drives BOTH the flood category the
+  // alert claims AND its "in ~14 hours" line.
+  //
+  // Concretely: a river that crested overnight and is now falling could wake
+  // someone at the old crest's severity, describing a time already past.
+  const NOW = new Date("2026-08-30T12:00:00Z");
+
+  /**
+   * A point n hours from NOW.
+   * @param {number} h - Offset in hours, negative for the past.
+   * @param {number} v - Flow value.
+   * @return {object} A forecast point.
+   */
+  function p(h: number, v: number) {
+    return {
+      value: v,
+      validTime: new Date(NOW.getTime() + h * 3600_000).toISOString(),
+    };
+  }
+
+  /**
+   * Reach data with one short-range series.
+   * @param {Array<{value: number, validTime: string}>} values - The series.
+   * @return {ReachData} The reach.
+   */
+  function reach(values: Array<{value: number; validTime: string}>): ReachData {
+    return {
+      forecast: {shortRange: {values}, mediumRange: null},
+      returnPeriods: RETURN_PERIODS,
+      riverName: "Test River",
+    };
+  }
+
+  test("a crest 8 hours ago does not set the alert's flow", () => {
+    // Crested at 9000 overnight, now receding through 1200.
+    const alert = evaluateAlert(
+      "123", reach([p(-8, 9000), p(-2, 3000), p(1, 1200), p(6, 1100)]),
+      "cfs", NOW);
+
+    assert.notEqual(alert?.forecastFlow, 9000,
+      "the 9000 crest is in the past; alerting on it wakes someone about " +
+      "water that has already gone by");
+  });
+
+  test("a crest still AHEAD is exactly what it should alert on", () => {
+    // The other direction, which matters more: windowing must not swallow
+    // the real signal. This is the whole purpose of the alert.
+    const alert = evaluateAlert(
+      "123", reach([p(-2, 1000), p(1, 1100), p(9, 9000)]), "cfs", NOW);
+
+    assert.equal(alert?.forecastFlow, 9000);
+    assert.equal(alert?.peakAt, p(9, 9000).validTime);
+  });
+
+  test("the anchor keeps the current reading, it is not a t >= now filter", () => {
+    // Ported behaviour, and the distinction the third Phase 8 review caught
+    // in the digest. The anchor is the point NEAREST now — normally the most
+    // recent past reading, i.e. the current value. A `t >= now` filter drops
+    // it, and with a 3-hourly series that is enough to change which crest is
+    // reported.
+    const alert = evaluateAlert(
+      "123", reach([p(-1, 9000), p(2, 1000)]), "cfs", NOW);
+
+    assert.equal(alert?.forecastFlow, 9000,
+      "the reading one hour ago is the CURRENT value, not the past");
+  });
+
+  test("a wholly lapsed forecast still classifies rather than going Unknown", () => {
+    // `upcomingFrom`'s fallback. A reach whose forecast has entirely expired
+    // must still produce an assessment — silently returning Unknown would
+    // stop an all-clear from ever being sent.
+    const alert = evaluateAlert(
+      "123", reach([p(-30, 9000), p(-26, 8000)]), "cfs", NOW);
+
+    assert.notEqual(alert, undefined);
+  });
+});
+
 describe("evaluateAlert — the peak's time survives to the alert", () => {
   test("the alert carries the validTime of the PEAK point", () => {
     const data: ReachData = {
@@ -340,7 +422,13 @@ describe("evaluateAlert — the peak's time survives to the alert", () => {
       returnPeriods: RETURN_PERIODS,
       riverName: "Test River",
     };
-    const alert = evaluateAlert("123", data, "cfs");
+    // A FIXED `now`, not the wall clock. The peak is windowed to what is
+    // still ahead, so without a seam this fixture's answer changes with the
+    // date the suite happens to run — the exact failure that cost three
+    // review rounds in Phase 8, three times in a row, each fix removing one
+    // clock dependency and introducing another.
+    const now = new Date("2026-08-29T10:00:00Z");
+    const alert = evaluateAlert("123", data, "cfs", now);
     assert.equal(alert?.peakAt, "2026-08-30T02:00:00Z",
       "the time carried must belong to the highest point, not the first");
     assert.equal(alert?.forecastFlow, 4500);

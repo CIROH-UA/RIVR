@@ -15,6 +15,7 @@
 // genuinely presentational: peak-anchored trend and newsworthiness ranking.
 
 import * as admin from "firebase-admin";
+import {upcomingFrom} from "./forecast-window.js";
 import * as logger from "firebase-functions/logger";
 import {
   labelFor,
@@ -188,7 +189,7 @@ function sourceFor(user: DigestUser, reachId: string): ReachSource {
 }
 
 /** Summarize each of a user's favorites, most-newsworthy first. */
-function buildRows(
+export function buildRows(
   user: DigestUser,
   reachDataMap: Map<string, ReachData>,
   now: Date
@@ -199,8 +200,24 @@ function buildRows(
     const reach = reachDataMap.get(reachKey(source, reachId));
     if (!reach) continue;
 
-    const series = seriesFor(reach);
-    if (series.length === 0) continue;
+    const all = seriesFor(reach);
+    if (all.length === 0) continue;
+
+    // Window from the CURRENT reading onward before deriving anything, the
+    // same way `WeeklyOutlookService._assemble` does via
+    // `ForecastPeak.upcomingPoints`.
+    //
+    // Both sides ran the identical peak-anchored trend rule — the comment on
+    // `trendOf` says so, and it is true of the arithmetic. It was false of the
+    // INPUTS: the client drops past points first, the server did not. Measured
+    // on 2026-08-30 across all seven of a real user's favourites, exactly one
+    // disagreed — White River (18471070), rising to the server and falling to
+    // the client — which is precisely why the notification said "6 rising"
+    // while the page it opens said "5 rising".
+    //
+    // The peak had the same flaw and it is the worse half: computed over the
+    // whole series, the digest can announce a crest that has already happened.
+    const series = upcomingFrom(all, now);
 
     let peak = series[0];
     for (const p of series) if (p.value > peak.value) peak = p;
@@ -237,6 +254,7 @@ function seriesFor(reach: ReachData): Array<{value: number; validTime: string}> 
   const series = medium.length > 0 ? medium : short;
   return series.filter((p) => typeof p.value === "number" && p.value > -9000);
 }
+
 
 /** Peak-anchored trend, identical rule to the client's computeFlowTrend. */
 function trendOf(
@@ -361,7 +379,17 @@ async function sendDigest(
   if (staleTokens.length > 0) {
     try {
       const update: Record<string, unknown> = {
-        fcmTokens: admin.firestore.FieldValue.arrayRemove(staleTokens),
+        // SPREAD — see notification-service.ts. `arrayRemove` takes varargs;
+        // handing it the array throws "Element at index 0 is not a valid
+        // array element. Nested arrays are not supported."
+        //
+        // The alert path's copy of this was fixed on 2026-08-30 after being
+        // caught firing live, and the ADR was then updated to say both ADR
+        // 0008 defects were closed. This second copy was missed, and the
+        // guard test only read notification-service.ts, so nothing objected.
+        // The weekly digest therefore kept failing to prune dead tokens every
+        // Friday.
+        fcmTokens: admin.firestore.FieldValue.arrayRemove(...staleTokens),
       };
       // If every token is dead, turn the digest off so we stop trying.
       if (staleTokens.length === user.fcmTokens.length) {
@@ -382,3 +410,8 @@ async function sendDigest(
   }
   return anySent;
 }
+
+// Re-exported: `digest-trend-parity.test.ts` and any existing caller import
+// it from here. The implementation lives in forecast-window.ts, which the
+// alert path imports too.
+export {upcomingFrom};

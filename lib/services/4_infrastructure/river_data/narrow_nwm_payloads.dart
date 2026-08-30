@@ -22,7 +22,7 @@ import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 class CurrentFlowPayload {
   const CurrentFlowPayload._();
 
-  /// Current flow from an `analysisAssimilation` entry, converted from the unit
+  /// Current flow from a `currentFlow` entry, converted from the unit
   /// it was stored in to the user's current preference.
   static double? decode(
     RiverDataEntry entry,

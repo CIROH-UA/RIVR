@@ -21,7 +21,11 @@ import {resolve} from "node:path";
 
 import {
   GEOGLOWS_SKEW_MS,
+  ISLAND_COMID_MAX,
+  ISLAND_COMID_MIN,
+  ISLAND_SHORT_RANGE_CYCLE_HOURS,
   NWM_SKEW_MS,
+  isIslandReach,
   STORE_SCHEMA_VERSION,
   StoreDocument,
   buildStoreDocument,
@@ -113,13 +117,13 @@ describe("the publish schedule mirrors the client's", () => {
   // constant the implementation uses is tautological — it holds for any value,
   // which is how a wrong GEOGLOWS skew passed review-free until round 1.
   test("hourly products round up to the next hour, plus the NWM skew", () => {
-    assert.equal(validUntil("nwm", "shortRange", AT).toISOString(),
+    assert.equal(validUntil("nwm", "shortRange", AT, "23021904").toISOString(),
       "2026-08-24T14:05:00.000Z");
   });
 
   test("6-hourly products round up to 00/06/12/18Z, plus the NWM skew", () => {
     // 13:10 -> 18:00.
-    assert.equal(validUntil("nwm", "mediumRange", AT).toISOString(),
+    assert.equal(validUntil("nwm", "mediumRange", AT, "23021904").toISOString(),
       "2026-08-24T18:05:00.000Z");
   });
 
@@ -129,7 +133,7 @@ describe("the publish schedule mirrors the client's", () => {
   // upstream on every read and the store did nothing.
   test("GEOGLOWS rounds up to the next UTC midnight, plus the GEOGLOWS skew",
     () => {
-      assert.equal(validUntil("geoglows", "geoglowsForecast", AT).toISOString(),
+      assert.equal(validUntil("geoglows", "geoglowsForecast", AT, "23021904").toISOString(),
         "2026-08-25T00:15:00.000Z");
     });
 
@@ -154,14 +158,14 @@ describe("the publish schedule mirrors the client's", () => {
   test("static products get a long window, not a publish boundary", () => {
     for (const p of ["returnPeriods", "reachMetadata"] as const) {
       const days =
-        (validUntil("nwm", p, AT).getTime() - AT.getTime()) / 86400_000;
+        (validUntil("nwm", p, AT, "23021904").getTime() - AT.getTime()) / 86400_000;
       assert.equal(days, 30);
     }
   });
 
   test("a product a source does not serve throws", () => {
-    assert.throws(() => validUntil("nwm", "geoglowsForecast", AT));
-    assert.throws(() => validUntil("geoglows", "shortRange", AT));
+    assert.throws(() => validUntil("nwm", "geoglowsForecast", AT, "23021904"));
+    assert.throws(() => validUntil("geoglows", "shortRange", AT, "23021904"));
   });
 
   test("nextCycle refuses a cycle that does not divide 24", () => {
@@ -230,6 +234,79 @@ describe("supersession — overlapping runs cannot write backwards", () => {
     });
 });
 
+describe("island reaches keep their own short-range cycle", () => {
+  // Measured 2026-08-30 from NOAA's production directory listing:
+  // `short_range` hourly, `short_range_puertorico` t00z/t06z/t12z,
+  // `short_range_hawaii` t00z/t12z. The NWPS reach 800000010 (Oahu) reported
+  // a short-range referenceTime of 00:00Z at 15:16Z the same day.
+  const ISLAND = "800000010";
+  const CONUS = "23021904";
+
+  test("short range expires on the 6-hour cycle, not the next hour", () => {
+    const at = new Date("2026-07-10T12:30:00.000Z");
+    assert.equal(
+      validUntil("nwm", "shortRange", at, ISLAND).toISOString(),
+      "2026-07-10T18:05:00.000Z");
+  });
+
+  test("the two domains genuinely disagree", () => {
+    // Stated as a difference so a shared constant edited in one place cannot
+    // make this pass by accident.
+    const at = new Date("2026-07-10T12:30:00.000Z");
+    assert.notEqual(
+      validUntil("nwm", "shortRange", at, ISLAND).getTime(),
+      validUntil("nwm", "shortRange", at, CONUS).getTime(),
+      "an island short-range window computed as CONUS is the defect these " +
+      "tests exist for");
+  });
+
+  test("currentFlow follows SHORT RANGE, because it is", () => {
+    // This asserted the opposite first time round, and was wrong for a reason
+    // worth keeping. `store-upstream` maps `currentFlow` to the
+    // `"short_range"` series and the client's handler calls
+    // `fetchForecast(reachId, 'short_range')` — the name is a misnomer.
+    //
+    // Real analysis assimilation IS hourly in every domain
+    // (`analysis_assim_hawaii` ran t00z..t14z on 2026-08-30), which is what
+    // the earlier version asserted: a correct argument about a product
+    // neither side fetches, which put island documents back on the CONUS hour
+    // within an hour of that hour being removed.
+    const at = new Date("2026-07-10T12:30:00.000Z");
+    assert.equal(
+      validUntil("nwm", "currentFlow", at, ISLAND).toISOString(),
+      "2026-07-10T18:05:00.000Z",
+      "a misleading name is not a reason to give a product the wrong " +
+      "publish schedule");
+
+    // The property that would have caught the original split, in both
+    // domains: two products fetching one series cannot expire differently.
+    for (const reach of [ISLAND, CONUS]) {
+      assert.equal(
+        validUntil("nwm", "currentFlow", at, reach).getTime(),
+        validUntil("nwm", "shortRange", at, reach).getTime(),
+        `reach ${reach}`);
+    }
+  });
+
+  test("isIslandReach: both band edges are inclusive", () => {
+    assert.equal(isIslandReach(String(ISLAND_COMID_MIN)), true);
+    assert.equal(isIslandReach(String(ISLAND_COMID_MAX)), true);
+    assert.equal(isIslandReach(String(ISLAND_COMID_MIN - 1)), false);
+    assert.equal(isIslandReach(String(ISLAND_COMID_MAX + 1)), false);
+  });
+
+  test("a non-numeric reach id is CONUS, the safe direction", () => {
+    // CONUS has the shorter windows, so a misclassification costs a refetch
+    // rather than serving a value past its run. `Number("")` is 0 and
+    // `Number(" 800000010 ")` is 800000010, so this needs the regex guard and
+    // not a bare cast — mutation-checked by replacing the test with
+    // `Number.isFinite`, which lets both through.
+    for (const id of ["", "abc", "12.5", " 800000010 "]) {
+      assert.equal(isIslandReach(id), false, `id "${id}"`);
+    }
+  });
+});
+
 describe("the Dart contract has not drifted", () => {
   test("STORE_SCHEMA_VERSION matches RiverDataEntry.schemaVersion", () => {
     const src = readFileSync(
@@ -261,6 +338,43 @@ describe("the Dart contract has not drifted", () => {
         "both constants are PROVISIONAL and must be re-derived from probe " +
         "data in all THREE places");
     }
+  });
+
+  // The gap this closes, found by exercising it on 2026-08-30: the block above
+  // pins the SKEW constants and the envelope field names, and nothing pinned
+  // the SCHEDULE. Phase 9 changed the client's island short-range cycle and the
+  // whole 406-test server suite stayed green while the two sides would have
+  // expired the same document six hours apart. A drift guard that compares
+  // only the constants both sides happen to share is not a drift guard.
+  test("the island band and cycle match the Dart source exactly", () => {
+    const src = readFileSync(
+      REPO + "lib/models/1_domain/shared/river_data/nwm_domain.dart", "utf8")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const num = (name: string): number => {
+      const m = new RegExp(`const int ${name} = (\\d+);`).exec(src);
+      assert.notEqual(m, null, `${name} not found in nwm_domain.dart`);
+      return Number(m![1]);
+    };
+    assert.equal(num("islandComidMin"), ISLAND_COMID_MIN);
+    assert.equal(num("islandComidMax"), ISLAND_COMID_MAX);
+    assert.equal(num("islandShortRangeCycleHours"),
+      ISLAND_SHORT_RANGE_CYCLE_HOURS,
+      "the client and the store would expire the same island document at " +
+      "different instants");
+  });
+
+  test("the client still routes short range through the domain", () => {
+    // Pins the WIRING, not just the numbers. The constants can agree while the
+    // client stops consulting them — which is the state this whole change
+    // started from, and which no numeric comparison can see.
+    const src = readFileSync(
+      REPO + "lib/services/4_infrastructure/river_data/nwm_data_source.dart",
+      "utf8").replace(/^\s*\/\/.*$/gm, "");
+    assert.match(src, /nwmDomainOf\(reachId\)/,
+      "nwm_data_source.dart no longer resolves the NWM domain, so every " +
+      "island document is back on the CONUS hour");
+    assert.match(src, /islandShortRangeCycleHours/,
+      "the island cycle constant is no longer used by the client");
   });
 
   test("the client still names the envelope fields this file writes", () => {

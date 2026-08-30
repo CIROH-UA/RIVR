@@ -66,8 +66,30 @@ android/key.properties
 # Developer onboarding secrets zip
 rivr-secrets.zip
 
-# Claude Code local configuration
-.claude/
+# Claude Code local configuration.
+#
+# `.claude/*` rather than `.claude/`, because git does not descend into an
+# excluded DIRECTORY — with a trailing slash, no `!` rule underneath can ever
+# re-include anything. The two-step dance below is the only way to publish one
+# subdirectory out of an otherwise-ignored tree.
+#
+# settings.local.json stays ignored: it is per-machine configuration.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+
+# Tracked ON PURPOSE: git-guard is the workflow every contributor is supposed
+# to run before committing, and a rule that lives only on one laptop is not a
+# rule. It has to sit here rather than in docs/ — Claude Code only discovers
+# skills under `.claude/skills/`, so moving the file would stop it being
+# invokable, which is the whole point of it.
+#
+# The other three skills — plan-week, work-week, feature-research — stay
+# LOCAL, permanently. Jerson's call, 2026-08-30: git-guard is a discipline any
+# developer on this repo should follow, and the rest encode his personal
+# working style, which does not belong in a shared repository. Do not propose
+# tracking them.
+!.claude/skills/git-guard/
 
 # Internal team docs (local-only, never commit)
 docs/internal/

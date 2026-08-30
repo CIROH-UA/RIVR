@@ -17,7 +17,11 @@
 // is testable without touching Firestore and the destructive step stays in one
 // obvious place at the call site.
 
-import {ParsedStorageKey, parseStorageKey} from "./store-keys.js";
+import {
+  ForecastProductId,
+  ParsedStorageKey,
+  classifyStorageKey,
+} from "./store-keys.js";
 import {WorkList} from "./store-work-list.js";
 
 /**
@@ -91,14 +95,57 @@ export function selectGarbage(
   };
 
   for (const doc of stored) {
-    const key = parseStorageKey(doc.documentId);
-    if (!key) {
+    const shape = classifyStorageKey(doc.documentId);
+
+    if (shape.kind === "malformed") {
       decision.retained.push({
         documentId: doc.documentId, reason: "unparseable-id",
       });
       continue;
     }
 
+    // A RETIRED product: correct shape, real reach, a product name this
+    // codebase no longer has. Nothing will ever write it or read it again, so
+    // it is garbage even though its reach is still followed — and that is the
+    // whole point, because the follow check below would otherwise keep it
+    // forever. Still subject to the grace window.
+    //
+    // Phase 9 renamed `analysisAssimilation` to `currentFlow` and left 31
+    // documents that no rule could ever collect: they failed `parseStorageKey`
+    // (unknown product), so they were retained as unparseable, and their
+    // reaches are all favourited, so the follow rule would have kept them too.
+    // The ADR claimed the GC would sweep them. Found by actually running
+    // `selectGarbage` against production data instead of asserting it.
+    if (shape.kind === "retired-product") {
+      const fetchedAt = Date.parse(doc.fetchedAt);
+      if (Number.isNaN(fetchedAt)) {
+        decision.retained.push({
+          documentId: doc.documentId, reason: "unreadable-timestamp",
+        });
+        continue;
+      }
+      const ageMs = now.getTime() - fetchedAt;
+      if (ageMs < GC_GRACE_MS) {
+        decision.retained.push({
+          documentId: doc.documentId, reason: "within-grace",
+        });
+        continue;
+      }
+      decision.toDelete.push({
+        documentId: doc.documentId,
+        key: {
+          source: shape.source,
+          reachId: shape.reachId,
+          // The product no longer exists as a type. Recorded as-is so the
+          // deletion log names what was actually removed.
+          product: shape.product as ForecastProductId,
+        },
+        ageMs,
+      });
+      continue;
+    }
+
+    const key = shape.key;
     if (followed.has(`${key.source}:${key.reachId}`)) {
       decision.retained.push({
         documentId: doc.documentId, reason: "still-followed",

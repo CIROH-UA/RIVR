@@ -40,9 +40,20 @@ class _CountingSource implements IRiverDataSource {
         ForecastProduct.reachMetadata,
       };
 
+  /// Every reachId `validUntil` was asked about.
+  ///
+  /// Recorded rather than ignored because the wrapper's whole job here is to
+  /// pass it through unchanged, and a fake that swallows the argument makes
+  /// that untestable — which is how the store and the live path would come to
+  /// expire the same document at different instants without a test noticing.
+  final List<String> validUntilReaches = [];
+
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
-      now.add(const Duration(hours: 1));
+  DateTime validUntil(ForecastProduct product, DateTime now,
+      {required String reachId}) {
+    validUntilReaches.add(reachId);
+    return now.add(const Duration(hours: 1));
+  }
 
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
@@ -57,10 +68,21 @@ class _CountingSource implements IRiverDataSource {
 }
 
 class _Switch implements StoreReadSwitch {
-  _Switch(this.enabled);
+  _Switch(this.enabled, {this.flipOffAfterFirstRead = false});
   bool enabled;
+
+  /// Simulates the operator flipping the switch WHILE a read is in flight:
+  /// the first check passes, the check after the await does not.
+  final bool flipOffAfterFirstRead;
+  int reads = 0;
+
   @override
-  bool get isStoreReadEnabled => enabled;
+  bool get isStoreReadEnabled {
+    final v = enabled;
+    reads++;
+    if (flipOffAfterFirstRead) enabled = false;
+    return v;
+  }
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
@@ -89,6 +111,54 @@ Map<String, dynamic> _storeDoc({
 }
 
 void main() {
+  // ── Phase 8 re-review: the kill switch must win a race it started ────────
+  //
+  // `fetch` checked the switch, awaited Firestore, then returned the store's
+  // answer without checking again. `RiverDataRepository._doFetch` caches
+  // whatever it is handed WITH THE SERVER'S WINDOW — 30 days for
+  // reachMetadata and returnPeriods — and the coordinator's reclaim has
+  // already run by then, so nothing evicts it a second time.
+  //
+  // Flipping the switch off is an incident action. It must not leave a
+  // month-long copy of the very data being disowned, seeded by a read that
+  // began a moment earlier. The coordinator makes this same re-read after its
+  // own await, for the same reason.
+  group('a switch flipped off mid-fetch discards the store answer', () {
+    test('falls through to the live path instead of serving store data',
+        () async {
+      final db = FakeFirebaseFirestore();
+      final key = _key();
+      await db.collection(kStoreCollection).doc(key.storageKey).set(
+            RiverDataEntry(
+              key: key,
+              window: FreshnessWindow(
+                fetchedAt: DateTime.now().toUtc(),
+                validUntil:
+                    DateTime.now().toUtc().add(const Duration(days: 30)),
+              ),
+              unit: 'CMS',
+              runId: 'store-run',
+              payload: const {'from': 'store'},
+            ).toJson(),
+          );
+
+      final live = _CountingSource();
+      final s = StoreBackedDataSource(
+        inner: live,
+        readSwitch: _Switch(true, flipOffAfterFirstRead: true),
+        firestore: db,
+      );
+
+      final r = await s.fetch(key);
+
+      expect(r.payload['from'], isNot('store'),
+          reason: 'the switch was off by the time this returned; serving it '
+              'plants a 30-day copy the reclaim has already gone past');
+      expect(s.servedFromStore, 0);
+      expect(s.servedFromUpstream, 1);
+    });
+  });
+
   late FakeFirebaseFirestore db;
   late _CountingSource upstream;
 
@@ -318,11 +388,28 @@ void main() {
       expect(s.source, upstream.source);
       expect(s.supportedProducts, upstream.supportedProducts);
       expect(
-        s.validUntil(ForecastProduct.shortRange, now),
-        upstream.validUntil(ForecastProduct.shortRange, now),
+        s.validUntil(ForecastProduct.shortRange, now, reachId: '23021904'),
+        upstream.validUntil(ForecastProduct.shortRange, now,
+            reachId: '23021904'),
         reason: 'a different freshness window on the two paths would make '
             'store entries expire early and refetch upstream',
       );
+    });
+
+    test('the reachId reaches the inner source UNCHANGED', () {
+      // The wiring, not the logic. Both sides above compute the same answer
+      // even if the wrapper substitutes a different reach, because the fake
+      // returns a constant — so equality alone cannot see a dropped or
+      // rewritten id. Since Phase 9 the window depends on WHICH reach it is,
+      // and a wrapper that quietly passed its own id would put island reaches
+      // back on the CONUS hour with every test still green.
+      final s = build(_Switch(true));
+      upstream.validUntilReaches.clear();
+
+      s.validUntil(ForecastProduct.shortRange, DateTime.utc(2026, 8, 25, 12),
+          reachId: '800000010');
+
+      expect(upstream.validUntilReaches, ['800000010']);
     });
   });
 

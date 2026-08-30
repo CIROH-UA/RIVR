@@ -109,6 +109,26 @@ FCM data push ("new publish" / "threshold crossed on reach X, flow=Y")
 > spinner for 3–5 minutes on device. See **ADR 0010**. The parked-because-
 > low-value reasoning above still holds for detail pages; it no longer holds for
 > this one.
+>
+> **Update 2026-08-30 — that cost is gone, and Step 7 goes back to parked.**
+> ADR 0011 Phase 3 rewired the Weekly Outlook's NWM rows onto repository reads
+> and deleted `loadCompleteReachData` entirely; Phase 9 added
+> `one_forecast_path_test.dart`, which fails if anything in `lib/` calls it
+> again. ADR 0010 is closed.
+>
+> **So the forcing function disappeared before the work was done, and Step 7
+> is now genuinely optional.** What remains is the original scope: the NWM
+> forecast *detail* pages still read `ForecastResponse` while GEOGLOWS reads
+> `GeoglowsForecast`. That fork costs a reader some duplication and costs users
+> nothing — the detail pages are already fast and already correct.
+>
+> **Deliberately NOT scheduled**, and this is a decision rather than a backlog
+> entry. It is sequenced when a new data source actually carries forecast
+> detail (see ADR 0002 Stage 2b, which subsumes it): that is the point at which
+> not having the unified model would force a third fork, which is the only
+> version of this work with a concrete payoff. Doing it speculatively means
+> designing a source-agnostic model against exactly two sources, which is how
+> you get an abstraction shaped like whichever one you wrote first.
 
 ## Development plan (logical, dependency‑ordered)
 

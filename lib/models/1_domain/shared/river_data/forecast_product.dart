@@ -13,8 +13,32 @@
 /// (see ADR 0001, decision D7 / Step 7) collapses the NWM/GEOGLOWS fork. Adding
 /// a new source adds its products here; nothing else in the key changes.
 enum ForecastProduct {
-  /// NWM analysis-assimilation — current conditions, hourly.
-  analysisAssimilation,
+  /// The single current-flow value, from NOAA's SHORT RANGE series.
+  ///
+  /// **Renamed from `analysisAssimilation` in Phase 9, because that name was
+  /// false and had caused three separate defects.** It does not fetch analysis
+  /// assimilation: the handler calls `fetchCurrentFlowOnly`, which is
+  /// `fetchForecast(reachId, 'short_range')`, its run id is read from the
+  /// payload's `shortRange` section, and the server maps it to
+  /// `"short_range"` too.
+  ///
+  /// The name was actively dangerous rather than merely untidy, because
+  /// **NOAA returns a REAL `analysisAssimilation` section** in the same
+  /// payload — genuine analysis-assimilation data, which this app also
+  /// consumes as [ReachData.analysisAssimilation]. One identifier meant two
+  /// different things in one codebase. What it cost:
+  ///
+  /// - Review round 2 (F2) and round 3 (B2): a payload trim kept NOAA's EMPTY
+  ///   `analysisAssimilation` section and threw the real short-range data
+  ///   away, because the product name matched the wrong section key.
+  /// - 2026-08-30: given its own publish schedule on the correct argument
+  ///   that real analysis assimilation is hourly in every NWM domain, which
+  ///   put island documents back on the CONUS hour — the exact bug the same
+  ///   change had just removed.
+  ///
+  /// Three defects from one misnomer is the case for renaming it rather than
+  /// documenting it again.
+  currentFlow,
 
   /// NWM map/preview summary: current flow + reach name + flood category, as
   /// shown in the map bottom sheet and favorites cards. Assembled by

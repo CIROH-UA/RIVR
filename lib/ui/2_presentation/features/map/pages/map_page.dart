@@ -30,6 +30,8 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_bottom
 import 'package:rivr/services/4_infrastructure/map/flood_tileset_service.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/condition_legend.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_offline_notice.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:rivr/models/1_domain/shared/location_denial.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -43,6 +45,56 @@ class MapPageState extends State<MapPage> {
   late final MapReachSelectionService _reachSelectionService;
   late final MapMarkerService _markerService;
   late final MapControlsService _controlsService;
+
+  /// Whether the camera has already been moved to the user, this app run.
+  ///
+  /// **Static on purpose.** `_MapPageState` is recreated every time the map
+  /// tab is opened, so an instance field would be false again on the second
+  /// open and the camera would jump — exactly the behaviour being removed.
+  /// Static makes "first open" mean first open of the app run, which is what
+  /// a person means by it.
+  ///
+  /// Not persisted across launches: a fresh launch centring on you once is
+  /// helpful, and the alternative is a stored flag that makes the app behave
+  /// differently on day two for reasons the user cannot see.
+  static bool _hasCenteredOnUser = false;
+
+  /// Where the camera was when the map was last closed, this app run.
+  ///
+  /// **Static, for the same reason [_hasCenteredOnUser] is.** The map page is
+  /// pushed fresh by `Navigator.pushNamed` every time, so an instance field
+  /// would be gone before it could be read.
+  ///
+  /// Stored as plain numbers rather than a `CameraOptions`, so nothing holds
+  /// a reference to a disposed platform object.
+  ///
+  /// **Not persisted across launches, deliberately.** Restoring a camera from
+  /// a week ago drops someone onto a river they looked at once; restoring one
+  /// from ten minutes ago returns them to what they were doing. The first is
+  /// the reason the camera was un-persisted on 2026-08-20, and the second is
+  /// why session memory is worth having.
+  static ({double lat, double lon, double zoom})? _rememberedCamera;
+
+  /// Forget both pieces of map state.
+  ///
+  /// **Called on sign-out, and the reason is an account boundary.** Both
+  /// fields are static so they survive a page being pushed fresh — which is
+  /// the point — but static also means they survive a change of USER, and
+  /// that is not the point:
+  ///
+  /// - `_rememberedCamera` would open the next person's map on the previous
+  ///   person's river. Where someone was looking is their business.
+  /// - `_hasCenteredOnUser` would already be true, so the next person would
+  ///   NOT be centred on themselves on their first open — they would land on
+  ///   the previous user's camera instead. The two defects compound.
+  ///
+  /// Found by auditing after "did you write the tests", not by a test. Sign-out
+  /// already clears the biometric cache, user settings, the FCM token cache
+  /// and the river-data cache; this belongs in exactly that list.
+  static void forgetMapState() {
+    _hasCenteredOnUser = false;
+    _rememberedCamera = null;
+  }
   bool _isLoading = true;
   String? _errorMessage;
   MapboxMap? _mapboxMap;
@@ -214,14 +266,19 @@ class MapPageState extends State<MapPage> {
     // cameraOptions is only read at widget creation, long before a location
     // fix arrives.
     return MapWidget(
+      // Where the user left it, or the configured default on a first open.
+      //
+      // On the FIRST open the remembered camera is null and the location
+      // handler flies to the user a moment later; on every open after that
+      // this is the whole behaviour, because that handler no longer recentres.
       cameraOptions: CameraOptions(
         center: Point(
           coordinates: Position(
-            AppConfig.defaultLongitude,
-            AppConfig.defaultLatitude,
+            _rememberedCamera?.lon ?? AppConfig.defaultLongitude,
+            _rememberedCamera?.lat ?? AppConfig.defaultLatitude,
           ),
         ),
-        zoom: AppConfig.defaultZoom,
+        zoom: _rememberedCamera?.zoom ?? AppConfig.defaultZoom,
       ),
       styleUri: AppConstants.defaultMapboxStyleUrl,
       textureView: true,
@@ -232,9 +289,32 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  /// Nothing to do when the map settles. The camera is deliberately not
-  /// persisted — see [_buildMap].
-  void _onMapIdle(MapIdleEventData data) {}
+  /// Remember where the user left the camera, so reopening the map returns
+  /// them to it rather than to Provo.
+  ///
+  /// Idle is the right moment: it fires once the gesture has settled, so this
+  /// records a resting position rather than every frame of a pan.
+  ///
+  /// **This used to do nothing**, back when the map recentred on the user on
+  /// EVERY open — there was genuinely nothing to restore. Making that
+  /// first-open-only (Jerson, 2026-08-30) removed the thing that made
+  /// discarding the camera safe: reopening then landed on the configured
+  /// default, which is useful for exactly one person, the one in Provo.
+  void _onMapIdle(MapIdleEventData data) {
+    final map = _mapboxMap;
+    if (map == null) return;
+    map.getCameraState().then((camera) {
+      _rememberedCamera = (
+        lat: camera.center.coordinates.lat.toDouble(),
+        lon: camera.center.coordinates.lng.toDouble(),
+        zoom: camera.zoom,
+      );
+    }).catchError((Object e) {
+      // A camera we cannot read is simply not remembered; the next open falls
+      // back to the default, which is where it went before this existed.
+      AppLogger.debug('MapPage', 'Could not read camera state: $e');
+    });
+  }
 
 
   Widget _buildLoadingOverlay() {
@@ -310,14 +390,32 @@ class MapPageState extends State<MapPage> {
 
       AppLogger.debug('MapPage', 'Services initialized, waiting for style to load...');
 
-      // Start location initialization (does not depend on style being loaded)
-      // Centre on the user whenever a location is available, on every open —
-      // not just the first. Without a fix (permission refused, or no signal)
-      // the map simply stays on the configured default.
+      // Start location initialization (does not depend on style being loaded).
+      //
+      // **Centre on the FIRST open only.** This used to recentre on every
+      // open, which was reasonable while the map showed no location marker at
+      // all — the jump was the only way to know where you were. Now that the
+      // puck draws the user's position, recentring on every open just takes
+      // them away from wherever they had panned to, and the puck tells them
+      // where they are without moving the camera. Jerson's call, 2026-08-30.
+      //
+      // After the first open, the recentre button is the way back.
+      //
+      // The location is still REQUESTED every time: the puck needs a fix to
+      // draw, and `initializeLocation` is what prompts for permission. Only
+      // the camera move is first-open-only.
       _controlsService.initializeLocation().then((position) {
         if (position != null && mounted) {
-          _controlsService.recenterToDeviceLocation();
-          AppLogger.info('MapPage', 'Centered on device location');
+          if (!_hasCenteredOnUser) {
+            _hasCenteredOnUser = true;
+            _controlsService.recenterToDeviceLocation();
+            AppLogger.info('MapPage', 'Centered on device location (first open)');
+          } else {
+            AppLogger.info(
+              'MapPage',
+              'Location available; camera left where the user put it',
+            );
+          }
         } else {
           AppLogger.info(
             'MapPage',
@@ -352,6 +450,14 @@ class MapPageState extends State<MapPage> {
 
       // Apply lightPreset for Standard style (handles initial load + basemap changes)
       await _controlsService.applyLightPreset();
+
+      // The blue dot, and the accuracy ring around it.
+      //
+      // Re-applied on EVERY style load, not just the first: changing the
+      // basemap rebuilds the style and takes the location component with it,
+      // so a puck enabled once would silently vanish the first time someone
+      // switched to satellite.
+      await _controlsService.enableLocationPuck();
 
       // Reset vector tiles state (safe for both initial and subsequent loads).
       // Same race as the marker init below — bail rather than force-unwrap.
@@ -553,9 +659,55 @@ class MapPageState extends State<MapPage> {
     );
   }
 
-  // NEW: Recenter to device location
+  /// Recentre on the device, and SAY SOMETHING when that is not possible.
+  ///
+  /// This used to be a silent dead end: with location refused, the tap
+  /// produced no message, no prompt and no route to Settings — the service
+  /// logged an error and returned. The streams button beside it has shown a
+  /// dialog for its own empty case since long before. Found by Jerson asking
+  /// what happens when location is not granted, not by a test.
   void _recenterToLocation() async {
-    await _controlsService.recenterToDeviceLocation();
+    // The RETURN value, not a field read afterwards. Reading a field meant
+    // the answer depended on statement order inside the service, and two
+    // orderings were wrong: a cached position could move the camera AND
+    // raise "Can't Find Your Location", and a not-ready map could show a
+    // permissions dialog left over from a previous attempt.
+    final denial = await _controlsService.recenterToDeviceLocation();
+    if (!mounted || denial == null) return;
+
+    _showLocationDenialDialog(denial);
+  }
+
+  /// Explain why the map could not centre, and offer Settings when Settings
+  /// is actually the fix.
+  void _showLocationDenialDialog(LocationDenial denial) {
+    final message = locationDenialMessage(denial);
+
+    showCupertinoDialog(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(message.title),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(message.body),
+        ),
+        actions: [
+          if (message.openSettings)
+            CupertinoDialogAction(
+              onPressed: () {
+                Navigator.pop(context);
+                openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.pop(context),
+            child: Text(message.openSettings ? 'Not Now' : 'OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _onMapTap(MapContentGestureContext context) async {

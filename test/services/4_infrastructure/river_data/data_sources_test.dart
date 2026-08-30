@@ -163,6 +163,13 @@ class _FakeUnit implements IFlowUnitPreferenceService {
 }
 
 void main() {
+  // Two reach ids, because the NWM publish schedule now depends on which
+  // domain a reach is in (Phase 9). `conusReach` is the White River reach used
+  // throughout ADR 0011's device testing; `islandReach` is the Oahu reach whose
+  // NWPS response was measured on 2026-08-30.
+  const conusReach = '23021904';
+  const islandReach = '800000010';
+
   runIdTests();
   group('NwmDataSource', () {
     late _FakeNoaa api;
@@ -196,8 +203,7 @@ void main() {
       expect(
         nwm.validUntil(
           ForecastProduct.shortRange,
-          DateTime.utc(2026, 7, 10, 12, 30),
-        ),
+          DateTime.utc(2026, 7, 10, 12, 30), reachId: conusReach),
         DateTime.utc(2026, 7, 10, 13, 5),
       );
     });
@@ -206,8 +212,7 @@ void main() {
       expect(
         nwm.validUntil(
           ForecastProduct.mediumRange,
-          DateTime.utc(2026, 7, 10, 13, 10),
-        ),
+          DateTime.utc(2026, 7, 10, 13, 10), reachId: conusReach),
         DateTime.utc(2026, 7, 10, 18, 5),
       );
     });
@@ -215,7 +220,7 @@ void main() {
     test('validUntil: return periods are effectively static (~30 days)', () {
       final now = DateTime.utc(2026, 7, 10, 12, 0);
       expect(
-        nwm.validUntil(ForecastProduct.returnPeriods, now),
+        nwm.validUntil(ForecastProduct.returnPeriods, now, reachId: conusReach),
         now.add(const Duration(days: 30)),
       );
     });
@@ -225,9 +230,95 @@ void main() {
       // defended only by a comment.
       final now = DateTime.utc(2026, 7, 10, 12, 0);
       expect(
-        nwm.validUntil(ForecastProduct.reachMetadata, now),
+        nwm.validUntil(ForecastProduct.reachMetadata, now, reachId: conusReach),
         now.add(const Duration(days: 30)),
       );
+    });
+
+    // ── Phase 9: the publish schedule is not CONUS's ────────────────────
+    //
+    // Measured 2026-08-30 from NOAA's production directory listing:
+    // `short_range` published every hour, `short_range_puertorico` at
+    // t00z/t06z/t12z and `short_range_hawaii` at t00z/t12z only. The Oahu
+    // reach below reported a `referenceTime` of 00:00Z at 15:16Z the same
+    // day — fifteen hours old and still current.
+    group('island reaches do not inherit the CONUS short-range hour', () {
+      test('short range expires on the 6-hour cycle, not the next hour', () {
+        // 12:30 on a CONUS reach expires at 13:05. The same instant on an
+        // island reach must wait for 18:00, because nothing new can exist
+        // before then and expiring early sends the device upstream to be
+        // handed back the identical run.
+        expect(
+          nwm.validUntil(
+            ForecastProduct.shortRange,
+            DateTime.utc(2026, 7, 10, 12, 30),
+            reachId: islandReach,
+          ),
+          DateTime.utc(2026, 7, 10, 18, 5),
+        );
+      });
+
+      test('the two domains genuinely disagree', () {
+        // The assertion that would have failed before this change, stated as
+        // a difference rather than as two numbers — a shared constant edited
+        // in one place cannot make this pass by accident.
+        final at = DateTime.utc(2026, 7, 10, 12, 30);
+        expect(
+          nwm.validUntil(ForecastProduct.shortRange, at,
+              reachId: islandReach),
+          isNot(nwm.validUntil(ForecastProduct.shortRange, at,
+              reachId: conusReach)),
+          reason: 'an island short-range window computed as CONUS is the '
+              'defect this test exists for',
+        );
+      });
+
+      test('analysisAssimilation follows SHORT RANGE, because it is', () {
+        // This test used to assert the opposite, and was wrong for a reason
+        // worth keeping. `analysisAssimilation` does not fetch analysis
+        // assimilation: its handler calls `fetchCurrentFlowOnly`, which is
+        // `fetchForecast(reachId, 'short_range')`, and the server maps it to
+        // `"short_range"` as well.
+        //
+        // Real analysis assimilation IS hourly in every domain
+        // (`analysis_assim_hawaii` ran t00z..t14z on 2026-08-30), which is
+        // what the earlier version asserted. The argument was correct about a
+        // product this code does not fetch, and it put island documents back
+        // on the CONUS hour within an hour of that hour being removed.
+        final at = DateTime.utc(2026, 7, 10, 12, 30);
+        expect(
+          nwm.validUntil(ForecastProduct.currentFlow, at,
+              reachId: islandReach),
+          DateTime.utc(2026, 7, 10, 18, 5),
+          reason: 'a misleading NAME is not a reason to give a product the '
+              'wrong publish schedule',
+        );
+        // And it still matches the product it actually fetches, in both
+        // domains — the property that would have caught the original split.
+        for (final reach in [islandReach, conusReach]) {
+          expect(
+            nwm.validUntil(ForecastProduct.currentFlow, at,
+                reachId: reach),
+            nwm.validUntil(ForecastProduct.shortRange, at, reachId: reach),
+            reason: 'both call fetchForecast(short_range); their windows '
+                'cannot legitimately differ',
+          );
+        }
+      });
+
+      test('the static products are unaffected by domain', () {
+        final now = DateTime.utc(2026, 7, 10, 12, 0);
+        for (final p in [
+          ForecastProduct.returnPeriods,
+          ForecastProduct.reachMetadata,
+        ]) {
+          expect(
+            nwm.validUntil(p, now, reachId: islandReach),
+            nwm.validUntil(p, now, reachId: conusReach),
+            reason: '$p does not publish on a model cycle at all',
+          );
+        }
+      });
     });
 
     test('reachMetadata is advertised as supported', () {
@@ -256,7 +347,7 @@ void main() {
     test('the narrow products never reach the medium-range endpoint', () async {
       for (final p in [
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       ]) {
         api.calls.clear();
@@ -302,7 +393,7 @@ void main() {
     test('no product on the tap path geocodes', () async {
       for (final p in [
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       ]) {
         await nwm.fetch(RiverDataKey(
@@ -316,7 +407,11 @@ void main() {
 
     test('validUntil throws for unsupported products', () {
       expect(
-        () => nwm.validUntil(ForecastProduct.geoglowsForecast, DateTime.now()),
+        () => nwm.validUntil(
+          ForecastProduct.geoglowsForecast,
+          DateTime.now(),
+          reachId: conusReach,
+        ),
         throwsArgumentError,
       );
     });
@@ -336,7 +431,7 @@ void main() {
       await nwm.fetch(const RiverDataKey(
         source: ForecastSource.nwm,
         reachId: '23021904',
-        product: ForecastProduct.analysisAssimilation,
+        product: ForecastProduct.currentFlow,
       ));
       expect(api.calls, contains('current:23021904'));
 
@@ -399,8 +494,7 @@ void main() {
         expect(
           geoglows.validUntil(
             ForecastProduct.geoglowsForecast,
-            DateTime.utc(2026, 7, 10, 15, 20),
-          ),
+            DateTime.utc(2026, 7, 10, 15, 20), reachId: '760337'),
           DateTime.utc(2026, 7, 11, 10, 45),
         );
       });
@@ -411,8 +505,7 @@ void main() {
         expect(
           geoglows.validUntil(
             ForecastProduct.geoglowsForecast,
-            DateTime.utc(2026, 7, 10, 0, 20),
-          ),
+            DateTime.utc(2026, 7, 10, 0, 20), reachId: '760337'),
           DateTime.utc(2026, 7, 10, 10, 45),
         );
       });
@@ -511,11 +604,54 @@ void main() {
           reason: 'without this the repository falls back to the '
               'schedule-only window and loses the run-awareness entirely');
 
-      // The fake reports the 2026-07-10 00Z run.
+      // The fake reports the 2026-07-10 00Z run, which is far in the past, so
+      // `windowFor` takes its late-publication branch and returns
+      // `now + 30 minutes` — a MOVING target. Comparing against a second call
+      // to `windowFor(DateTime.now(), ...)` therefore compares two instants a
+      // few milliseconds apart.
+      //
+      // That is a real flake and CI caught it: run before 10:45 UTC the branch
+      // returns a FIXED instant (today's publication) and the two agree, so it
+      // passed locally at 05:00 and failed on CI at 14:20. Asserted with a
+      // tolerance instead of exact equality, and the tolerance is the point of
+      // the test — the value must track `now`, not the next midnight.
+      final before = DateTime.now().toUtc();
+      final expected =
+          GeoglowsDataSource.windowFor(before, DateTime.utc(2026, 7, 10));
+      final skew = result.validUntil!.difference(expected).abs();
+
+      expect(skew, lessThan(const Duration(seconds: 5)),
+          reason: 'expected roughly $expected, got ${result.validUntil}');
+
+      // And the property that actually matters, asserted with NO CLOCK IN IT.
+      //
+      // Two previous attempts both smuggled the wall clock into this
+      // assertion and both were wrong at a different hour of the day:
+      //
+      //   1. compared against the next midnight  -> failed 23:30-24:00 UTC,
+      //      because the late-retry branch returns `now + 30 min`.
+      //   2. bounded the gap to under an hour    -> failed 00:00-09:45 UTC,
+      //      because BEFORE the publication time the branch returns a fixed
+      //      instant (today's 10:45) rather than `now + 30 min`, so the gap
+      //      is up to ten hours and legitimately so.
+      //
+      // Measured, not reasoned, and the boundary is 09:45 rather than the
+      // 10:45 first written here — the gap reaches exactly 60 min at 09:45
+      // and passes from 09:46. Gaps: 615 min at 00:30Z, 285 at 06:00Z, 61 at
+      // 09:44Z, 59 at 09:46Z, 30 from 10:46Z onward. Attempt 2 was WORSE than
+      // attempt 1 — half an hour of daily breakage became nearly ten.
+      //
+      // So the assertion is now against `windowFor` itself at a FIXED instant,
+      // which is what the test is really about: `fetch` must ask the same
+      // question `windowFor` answers, for the run it actually received.
+      const fixedNow = '2026-07-11T15:00:00Z';
       expect(
-        result.validUntil,
         GeoglowsDataSource.windowFor(
-          DateTime.now().toUtc(), DateTime.utc(2026, 7, 10)),
+            DateTime.parse(fixedNow), DateTime.utc(2026, 7, 10)),
+        DateTime.parse(fixedNow).add(const Duration(minutes: 30)),
+        reason: 'a run from a previous day, checked after publication time, '
+            'must be re-checked shortly — not held until the next midnight, '
+            'which is the bug this fixed',
       );
     });
 
@@ -565,7 +701,7 @@ void runIdTests() {
       // analysisAssimilation is the most-read runId in the app — the sheet's
       // and forecast page's current flow. Its data IS the short_range series
       // (fetchCurrentFlowOnly delegates there), so it records that run.
-      final aa = await src.fetch(k(ForecastProduct.analysisAssimilation));
+      final aa = await src.fetch(k(ForecastProduct.currentFlow));
       expect(aa.runId, '2026-08-23T12:00:00',
           reason: 'unguarded, round 7 nulled it with the suite green');
       expect(medium.runId, '2026-08-23T06:00:00',

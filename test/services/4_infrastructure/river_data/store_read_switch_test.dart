@@ -235,4 +235,53 @@ void main() {
       await rc.close();
     });
   });
+  // ── isResolved: the coordinator's licence to EVICT ───────────────────────
+  //
+  // `isStoreReadEnabled` reads false both for "the operator turned this off"
+  // and for "we have not fetched yet", and the coordinator now refuses to
+  // reclaim until `isResolved` says the value is a decision. Two mutations
+  // showed this was entirely unpinned in production code: deleting the
+  // `_resolved = true` from the failed-fetch branch, and hardcoding
+  // `isResolved => false`, both left every coordinator test green. The second
+  // means the kill switch's reclaim never fires on any device, which is the
+  // exact failure Decision 23 exists to prevent.
+  //
+  // Every coordinator test uses a fake that overrides `isResolved`, so only
+  // these can reach the real getter.
+  group('isResolved', () {
+    test('is false before initialize', () async {
+      final rc = _FakeRc();
+      final s = StoreReadSwitch(remoteConfig: rc);
+      expect(s.isResolved, isFalse,
+          reason: 'nothing has been fetched; a false switch here is an '
+              'absence of information, not a decision');
+      await s.dispose();
+      await rc.close();
+    });
+
+    test('is true after a successful fetch', () async {
+      final rc = _FakeRc();
+      final s = StoreReadSwitch(remoteConfig: rc);
+      await s.initialize();
+      expect(s.isResolved, isTrue);
+      await s.dispose();
+      await rc.close();
+    });
+
+    // A failed fetch STILL resolves: Remote Config then serves the last
+    // activated value, and that is the operator's decision. Without this the
+    // reclaim would be permanently disabled on any device that happened to be
+    // offline at launch.
+    test('is true even when the fetch throws', () async {
+      final rc = _FakeRc()..fetchThrows = true;
+      final s = StoreReadSwitch(remoteConfig: rc);
+      await s.initialize();
+      expect(s.isResolved, isTrue,
+          reason: 'an offline launch must not disable the kill switch for the '
+              'rest of the session');
+      await s.dispose();
+      await rc.close();
+    });
+  });
+
 }

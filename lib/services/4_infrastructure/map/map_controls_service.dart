@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:rivr/services/4_infrastructure/map/map_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/map_base_layer.dart';
+import 'package:rivr/models/1_domain/shared/location_denial.dart';
 
 class MapControlsService {
   MapboxMap? _mapboxMap;
@@ -15,9 +16,38 @@ class MapControlsService {
   bool _isToggling3D = false;
   String _currentLightPreset = 'day';
 
-  // Default camera settings (you can adjust these based on your app's needs)
-  static const double _defaultZoom = 14.0;
+  // Zoom used when the camera moves to the device's location.
+  //
+  // **Twelve, not fourteen, and the tileset is why.**
+  // `byu-hydroinformatics.nwm-channels-v3` is tiled z0-12 (confirmed from its
+  // Mapbox metadata). Above 12 there is no more stream data — Mapbox stretches
+  // the z12 tile, so the lines get thicker and no new stream ever appears.
+  //
+  // What the user lost for that: at zoom 14 a Pro Max shows about 1.6 km of
+  // ground, at 12 about 6.4 km. So 14 threw away three quarters of the visible
+  // area and bought nothing, and on a screen that narrow a small stream often
+  // simply is not in frame. Reported by Jerson 2026-08-30: "streams are not
+  // visible at that level usually."
+  //
+  // 12 is the sharpest zoom the data actually supports.
+  static const double _defaultZoom = 12.0;
   static const int _animationDurationMs = 1000;
+
+  /// Why the last `initializeLocation` produced nothing, or null if it
+  /// succeeded.
+  ///
+  /// `initializeLocation` returns `Position?`, which collapses four different
+  /// situations into one null — services off, refused, refused permanently,
+  /// and simply no fix. Without telling them apart the recentre button was a
+  /// silent dead end.
+  ///
+  /// PRIVATE. Read exactly once, immediately after the call that sets it, and
+  /// handed out as a return value — see [recenterToDeviceLocation].
+  LocationDenial? _lastDenial;
+
+  // No public accessor on purpose. `recenterToDeviceLocation` RETURNS the
+  // denial instead: a field read after the call made the answer depend on
+  // statement order inside that method, and both orderings shipped a defect.
   static const String _terrain3DKey = 'terrain_3d_enabled';
   // The map camera is deliberately not persisted. It opens on the user's
   // location when one is available and on the configured default otherwise,
@@ -272,6 +302,7 @@ class MapControlsService {
       bool serviceEnabled = await geo.Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         AppLogger.error('MapControlsService', 'Location services are disabled');
+        _lastDenial = LocationDenial.serviceDisabled;
         return null;
       }
 
@@ -282,12 +313,14 @@ class MapControlsService {
         permission = await geo.Geolocator.requestPermission();
         if (permission == geo.LocationPermission.denied) {
           AppLogger.error('MapControlsService', 'Location permissions are denied');
+          _lastDenial = LocationDenial.denied;
           return null;
         }
       }
 
       if (permission == geo.LocationPermission.deniedForever) {
         AppLogger.error('MapControlsService', 'Location permissions are permanently denied');
+        _lastDenial = LocationDenial.deniedForever;
         return null;
       }
 
@@ -300,29 +333,98 @@ class MapControlsService {
       );
 
       _lastKnownLocation = position;
-      AppLogger.debug('MapControlsService', 'Current location: ${position.latitude}, ${position.longitude}');
+      _lastDenial = null;
+      // Accuracy is logged because the puck's ring is drawn from it: when a
+      // ring looks wrong on a device, this is the number that explains it.
+      AppLogger.debug('MapControlsService',
+          'Current location: ${position.latitude}, ${position.longitude} '
+          '(accuracy ${position.accuracy.toStringAsFixed(0)} m)');
       return position;
     } catch (e) {
+      // Permission is fine; the device simply could not produce a fix — most
+      // often the 10-second limit elapsing indoors.
       AppLogger.error('MapControlsService', 'Error getting location', e);
+      _lastDenial = LocationDenial.noFix;
       return null;
     }
   }
 
-  /// Recenter map to device location
-  Future<void> recenterToDeviceLocation() async {
+  /// Show the user's position on the map: a dot, with a ring when the fix is
+  /// vague.
+  ///
+  /// **Mapbox's own location component, not a custom layer.** It draws the
+  /// accuracy ring from the radius the device itself reports, in real metres,
+  /// so the ring shrinks and grows correctly as the user zooms and needs no
+  /// code of ours to keep it honest. A precise fix is a small dot; a poor one
+  /// is visibly a circle, which is the whole point — the map stops implying a
+  /// precision it does not have.
+  ///
+  /// Every one of these settings defaults to FALSE, which is why the map
+  /// showed nothing at all before: it flew to the user's position and then
+  /// gave no indication of where that was, leaving the centre of the screen as
+  /// the only clue.
+  ///
+  /// Failure is logged and swallowed. A map without a blue dot is worth far
+  /// more than no map, and this runs after the style loads where a throw would
+  /// take the page down.
+  Future<void> enableLocationPuck() async {
     if (_mapboxMap == null) {
       AppLogger.error('MapControlsService', 'Map not initialized');
       return;
+    }
+    try {
+      await _mapboxMap!.location.updateSettings(
+        LocationComponentSettings(
+          enabled: true,
+          // The ring is the feature. Without it a vague fix looks exactly
+          // like a precise one.
+          showAccuracyRing: true,
+          // No pulsing: it draws the eye to the user's position, and the
+          // subject of this map is the rivers around them.
+          pulsingEnabled: false,
+        ),
+      );
+      AppLogger.info('MapControlsService', 'Location puck enabled');
+    } catch (e) {
+      AppLogger.error('MapControlsService', 'Could not enable location puck', e);
+    }
+  }
+
+  /// Recenter map to device location
+  /// Move the camera to the device, and report what to TELL the user.
+  ///
+  /// **Returns the denial instead of leaving it in a field**, and that is the
+  /// fix for two defects rather than a style preference. While the caller read
+  /// a mutable `lastDenial` after the fact, the answer depended on statement
+  /// ORDER inside this method, and both orderings were wrong in a way no
+  /// source guard could see:
+  ///
+  /// - The fallback to `_lastKnownLocation` means a FAILED fresh fix can still
+  ///   move the camera. The recorded denial then survived, so the map
+  ///   recentred correctly AND the user got "Can't Find Your Location" on top
+  ///   of it.
+  /// - The not-ready early return skips `initializeLocation` entirely, so a
+  ///   denial from a previous attempt was still sitting there and the page
+  ///   showed a permissions dialog for a map that had not finished loading.
+  ///
+  /// One return value per outcome removes both. Null means "say nothing":
+  /// either the camera moved, or nothing happened that the user can act on.
+  Future<LocationDenial?> recenterToDeviceLocation() async {
+    if (_mapboxMap == null) {
+      AppLogger.error('MapControlsService', 'Map not initialized');
+      // Not a location problem. Transient, and it resolves itself.
+      return null;
     }
 
     try {
       // Try to get fresh location, but fall back to last known
       geo.Position? position = await initializeLocation();
+      final denial = _lastDenial;
       position ??= _lastKnownLocation;
 
       if (position == null) {
         AppLogger.error('MapControlsService', 'No location available for recentering');
-        return;
+        return denial ?? LocationDenial.noFix;
       }
 
       // Create camera options for the new position
@@ -341,8 +443,12 @@ class MapControlsService {
       );
 
       AppLogger.info('MapControlsService', 'Map recentered to device location');
+      // The camera moved. Whatever the fresh fix reported, there is nothing
+      // to tell the user.
+      return null;
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error recentering map', e);
+      return LocationDenial.noFix;
     }
   }
 

@@ -1,6 +1,6 @@
 # ADR 0003 — Weekly Outlook digest and independent notification types
 
-- **Status:** Accepted — phases 1–4 delivered (settings + data model, Digest-List page, server cron, deep-link + engagement back-off) 2026-07-19/20. **The deep link was never actually verified end to end until 2026-08-21**, when it turned out taps had never reached Dart on iOS (ADR 0008) and the page then rendered its empty state during the launch race. Both fixed in 2026.1.2+555 / 2026.1.3+561; the page's 3–5 minute load is open in ADR 0010. The engagement back-off has a design flaw worth reading before changing it — see below.
+- **Status:** Accepted — phases 1–4 delivered (settings + data model, Digest-List page, server cron, deep-link + engagement back-off) 2026-07-19/20. **The deep link was never actually verified end to end until 2026-08-21**, when it turned out taps had never reached Dart on iOS (ADR 0008) and the page then rendered its empty state during the launch race. Both fixed in 2026.1.2+555 / 2026.1.3+561; the page's 3–5 minute load is **closed** (ADR 0010, closed 2026-08-30 by ADR 0011 Phases 3 and 5). The engagement back-off had a design flaw that could throttle a user for engaging; **fixed 2026-08-30**, see below.
 - **Date:** 2026-07-20
 - **Deciders:** Jerson Garcia (lead)
 - **Relates to:** ADR 0002 (`0002-canonical-derived-value-layer.md`), `project_push_notifications_audit` (memory)
@@ -81,3 +81,29 @@ Worth considering when this is next touched: reset on *tap* (the notification
 carries the intent) rather than on successful render, or reset optimistically on
 page mount and treat the row build as decoration. The current placement measures
 whether the app worked, not whether the person cared.
+
+### FIXED 2026-08-30 (ADR 0011 Phase 9)
+
+Reset moved to `initState`, the second option above: the row build is now
+decoration, and opening the page is the engagement.
+
+**Fixed rather than re-documented, even though all three original links were
+already repaired** — iOS taps reach Dart (ADR 0008), the empty state no longer
+returns early, and the 3-5 minute load is closed (ADR 0010). That is precisely
+the argument FOR moving it: with the symptoms gone, the flaw would have sat
+there measuring app health instead of user intent until the next unrelated
+break silently throttled someone again. A latent trap that has already fired
+once is not less dangerous for having been patched downstream.
+
+**Guarded by a test that the previous one could not express.** There was
+already a case for "an outage still resets the counter", but it settles the
+page fully, so it passes with the reset anywhere in the chain. The new case
+pumps a single frame against a 30-second load and asserts the counter is
+already reset — a load that has neither succeeded nor failed, standing in for
+every way the chain can stall. Mutation-checked by putting the call back where
+it was.
+
+**Still open here, and unchanged:** the counter uses a global week index, so
+its off-weeks are shared across users rather than per-user anniversaries (D8),
+and digest send time is MT for everyone until per-user timezones land (D6).
+Neither is affected by this fix.

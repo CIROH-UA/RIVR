@@ -57,7 +57,11 @@ class GeoglowsDataSource implements IRiverDataSource {
   static DateTime windowFor(DateTime now, DateTime? run) {
     final utc = now.toUtc();
     final todayPublish = DateTime.utc(
-      utc.year, utc.month, utc.day, _publishHourUtc, _publishMinuteUtc,
+      utc.year,
+      utc.month,
+      utc.day,
+      _publishHourUtc,
+      _publishMinuteUtc,
     ).add(_skew);
     final tomorrowPublish = todayPublish.add(const Duration(days: 1));
 
@@ -86,7 +90,15 @@ class GeoglowsDataSource implements IRiverDataSource {
   };
 
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) {
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    // Accepted and ignored. GEOGLOWS runs ONE global model on one daily
+    // schedule, so unlike NWM its window does not vary by reach. Named and
+    // explained rather than silently dropped, so the next reader does not have
+    // to check whether it was an oversight.
+    required String reachId,
+  }) {
     switch (product) {
       case ForecastProduct.geoglowsForecast:
       case ForecastProduct.geoglowsEnsemble:

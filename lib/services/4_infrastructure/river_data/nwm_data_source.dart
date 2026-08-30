@@ -2,6 +2,7 @@
 
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 import 'package:rivr/models/1_domain/shared/river_data/publish_schedule.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -49,7 +50,7 @@ class NwmDataSource implements IRiverDataSource {
 
   @override
   Set<ForecastProduct> get supportedProducts => const {
-    ForecastProduct.analysisAssimilation,
+    ForecastProduct.currentFlow,
     ForecastProduct.reachMetadata,
     ForecastProduct.shortRange,
     ForecastProduct.mediumRange,
@@ -58,12 +59,41 @@ class NwmDataSource implements IRiverDataSource {
   };
 
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) {
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    required String reachId,
+  }) {
     switch (product) {
-      case ForecastProduct.analysisAssimilation:
+      case ForecastProduct.currentFlow:
       case ForecastProduct.shortRange:
-        // Hourly (driven by current flow).
-        return PublishSchedule.nextTopOfHour(now).add(_skew);
+        // **`currentFlow` shares this branch because it IS short range.** Its
+        // handler calls `fetchCurrentFlowOnly`, which is
+        // `fetchForecast(reachId, 'short_range')`; its run id is read out of
+        // the payload's `shortRange` section; and the server maps it to
+        // `"short_range"` too. So its publish schedule is short range's, in
+        // every domain.
+        //
+        // These two were split apart earlier on 2026-08-30, while this
+        // product was still called `analysisAssimilation`, on a confident
+        // comment arguing that analysis assimilation publishes hourly
+        // everywhere. That is TRUE of NOAA's real analysis-assimilation
+        // series (`analysis_assim_hawaii` ran t00z..t14z that day) and it is
+        // not what this product fetches. The split put island documents back
+        // on the CONUS hour — the exact defect the same change had just
+        // removed, reintroduced under a misleading name within the hour.
+        // Renaming the product is why this cannot happen a fourth time.
+        //
+        // Hourly for CONUS; 6-hourly for Hawaii and Puerto Rico. See
+        // [NwmDomain] for the measurements and for why one number covers both
+        // islands.
+        return switch (nwmDomainOf(reachId)) {
+          NwmDomain.conus => PublishSchedule.nextTopOfHour(now).add(_skew),
+          NwmDomain.island => PublishSchedule.nextCycle(
+            now,
+            everyHours: islandShortRangeCycleHours,
+          ).add(_skew),
+        };
       case ForecastProduct.mediumRange:
       case ForecastProduct.longRange:
         // Every 6 hours (00/06/12/18Z).
@@ -140,7 +170,7 @@ class NwmDataSource implements IRiverDataSource {
           // recorded only to satisfy the entry contract.
           unit: unit,
         );
-      case ForecastProduct.analysisAssimilation:
+      case ForecastProduct.currentFlow:
         final aaPayload = await _api.fetchCurrentFlowOnly(key.reachId);
         return SourceFetchResult(
           payload: aaPayload,
@@ -151,14 +181,20 @@ class NwmDataSource implements IRiverDataSource {
           runId: _runIdOf(aaPayload, 'shortRange'),
         );
       case ForecastProduct.shortRange:
-        final shortPayload = await _api.fetchForecast(key.reachId, 'short_range');
+        final shortPayload = await _api.fetchForecast(
+          key.reachId,
+          'short_range',
+        );
         return SourceFetchResult(
           payload: shortPayload,
           unit: unit,
           runId: _runIdOf(shortPayload, 'shortRange'),
         );
       case ForecastProduct.mediumRange:
-        final mediumPayload = await _api.fetchForecast(key.reachId, 'medium_range');
+        final mediumPayload = await _api.fetchForecast(
+          key.reachId,
+          'medium_range',
+        );
         return SourceFetchResult(
           payload: mediumPayload,
           unit: unit,
@@ -173,7 +209,9 @@ class NwmDataSource implements IRiverDataSource {
         );
       case ForecastProduct.returnPeriods:
         return SourceFetchResult(
-          payload: {'returnPeriods': await _api.fetchReturnPeriods(key.reachId)},
+          payload: {
+            'returnPeriods': await _api.fetchReturnPeriods(key.reachId),
+          },
           unit: unit,
         );
       case ForecastProduct.mediumRangeBlend:

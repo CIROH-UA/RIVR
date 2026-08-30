@@ -105,17 +105,72 @@ describe("a followed reach is never deleted", () => {
 });
 
 describe("what it refuses to touch", () => {
-  test("an unrecognised document ID is retained, never deleted", () => {
+  test("a document ID from somewhere else is retained, never deleted", () => {
+    // The original of this test bundled two cases and asserted the same
+    // answer for both. They deserve opposite answers, and conflating them is
+    // what left 31 documents uncollectable after Phase 9's rename.
+    //
+    // THIS case is a genuinely foreign id: not our shape at all. Keep it. A
+    // GC that deletes what it cannot parse is data loss waiting for the first
+    // unrelated document to land in the scan.
     const d = selectGarbage(nobodyFollows, [
       {documentId: "some-other-collection-doc", fetchedAt: agedDays(400)},
-      {documentId: "nwm__1__notAProduct", fetchedAt: agedDays(400)},
+      {documentId: "notasource__1__shortRange", fetchedAt: agedDays(400)},
+      {documentId: "nwm____shortRange", fetchedAt: agedDays(400)},
     ], NOW);
 
-    assert.deepEqual(d.toDelete, [],
-      "a GC that deletes what it cannot parse is data loss waiting for the " +
-      "first unrelated document");
+    assert.deepEqual(d.toDelete, []);
     assert.deepEqual(d.retained.map((r) => r.reason),
-      ["unparseable-id", "unparseable-id"]);
+      ["unparseable-id", "unparseable-id", "unparseable-id"]);
+  });
+
+  test("a RETIRED product's documents are collected, even when followed", () => {
+    // The other case, and the live defect. Phase 9 renamed the product
+    // `analysisAssimilation` to `currentFlow`. The 31 existing documents then
+    // failed `parseStorageKey` — unknown product — so the GC retained them as
+    // unparseable; and their reaches are all still favourited, so the
+    // still-followed rule would have kept them too. Nothing could ever
+    // collect them. The ADR and the deploy log both claimed they would be
+    // swept after the grace window.
+    //
+    // Found by running `selectGarbage` against real production data rather
+    // than asserting what it would do.
+    //
+    // A well-formed key naming a product this codebase no longer has can only
+    // be something we used to write. Nothing will read it or rewrite it, so
+    // being followed is irrelevant.
+    const d = selectGarbage(followed, [
+      {documentId: "nwm__1__analysisAssimilation", fetchedAt: agedDays(400)},
+    ], NOW);
+
+    assert.deepEqual(d.toDelete.map((c) => c.documentId),
+      ["nwm__1__analysisAssimilation"],
+      "reach 1 IS followed — that is exactly why the follow rule cannot be " +
+      "what decides this");
+  });
+
+  test("a retired product still respects the grace window", () => {
+    // Not a licence to delete on sight. A rename plus a rollback inside a
+    // week must not lose data.
+    const d = selectGarbage(followed, [
+      {documentId: "nwm__1__analysisAssimilation", fetchedAt: agedDays(2)},
+    ], NOW);
+
+    assert.deepEqual(d.toDelete, []);
+    assert.deepEqual(d.retained.map((r) => r.reason), ["within-grace"]);
+  });
+
+  test("a CURRENT product of a followed reach is still kept", () => {
+    // The direction that would be catastrophic to get wrong: the retired
+    // branch must not swallow live documents.
+    const d = selectGarbage(followed, [
+      {documentId: "nwm__1__currentFlow", fetchedAt: agedDays(400)},
+      {documentId: "nwm__1__shortRange", fetchedAt: agedDays(400)},
+    ], NOW);
+
+    assert.deepEqual(d.toDelete, []);
+    assert.deepEqual(d.retained.map((r) => r.reason),
+      ["still-followed", "still-followed"]);
   });
 
   test("an unreadable timestamp is retained", () => {

@@ -81,10 +81,10 @@ class StoreBackedDataSource implements IRiverDataSource {
     required StoreReadSwitch readSwitch,
     FirebaseFirestore? firestore,
     Set<String> Function()? storeBackedIds,
-  })  : _inner = inner,
-        _switch = readSwitch,
-        _injectedDb = firestore,
-        _storeBackedIds = storeBackedIds;
+  }) : _inner = inner,
+       _switch = readSwitch,
+       _injectedDb = firestore,
+       _storeBackedIds = storeBackedIds;
 
   static const String _tag = 'STORE_SOURCE';
 
@@ -126,14 +126,46 @@ class StoreBackedDataSource implements IRiverDataSource {
   /// disagree about when the value expires and the store's entries would be
   /// refetched early — the exact defeat this class exists to prevent.
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
-      _inner.validUntil(product, now);
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    required String reachId,
+  }) => _inner.validUntil(product, now, reachId: reachId);
 
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     if (_switch.isStoreReadEnabled) {
       final fromStore = await _readStore(key);
-      if (fromStore != null) {
+
+      // Re-read the switch AFTER the await, before letting a store value out.
+      //
+      // Found by the Phase 8 re-review. The kill switch's job is to get store
+      // data off devices immediately; the coordinator detaches its listeners
+      // and evicts every favourite's cached entries. But a fetch already in
+      // flight when the switch flipped would return anyway, and
+      // `RiverDataRepository._doFetch` caches whatever it is handed — with the
+      // SERVER's window, which for `reachMetadata` and `returnPeriods` is 30
+      // days. The reclaim had already run, so nothing evicts it again.
+      //
+      // Flipping the switch off is an incident action. It must not leave a
+      // month-long copy of the thing being disowned, seeded by a read that
+      // started a moment earlier.
+      //
+      // The coordinator makes exactly this re-read for exactly this reason
+      // (`store_read_coordinator.dart`, "Re-read AFTER the await"); this is
+      // the same argument on the fetch path.
+      if (!_switch.isStoreReadEnabled) {
+        // Only claim to have discarded something when there WAS something —
+        // during an incident this log is read as evidence the store answered.
+        AppLogger.info(
+          _tag,
+          fromStore != null
+              ? 'switch flipped off mid-fetch; discarding the store answer '
+                    'for ${key.storageKey}'
+              : 'switch flipped off mid-fetch; the store had nothing for '
+                    '${key.storageKey} anyway',
+        );
+      } else if (fromStore != null) {
         servedFromStore++;
         return fromStore;
       }

@@ -74,8 +74,22 @@ abstract class IRiverDataSource {
   Set<ForecastProduct> get supportedProducts;
 
   /// When the upstream could next possibly have published new data for
-  /// [product], given [now]. Drives `FreshnessWindow.validUntil`.
-  DateTime validUntil(ForecastProduct product, DateTime now);
+  /// [product] at [reachId], given [now]. Drives `FreshnessWindow.validUntil`.
+  ///
+  /// [reachId] is REQUIRED, and that is the whole point of Phase 9's change
+  /// here. The publish schedule is not a property of the product alone: NWM
+  /// short range publishes hourly for CONUS, every six hours for Puerto Rico
+  /// and every twelve for Hawaii. Without the reach, every island document
+  /// expired eleven times before new data could exist and sent the device
+  /// upstream to be handed the identical run. Made required rather than
+  /// optional so a caller cannot quietly reintroduce the CONUS assumption by
+  /// omitting it — there are only two call sites, and the compiler now names
+  /// them both.
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    required String reachId,
+  });
 
   /// Fetch [key]'s current data. Throws if the product is unsupported.
   Future<SourceFetchResult> fetch(RiverDataKey key);

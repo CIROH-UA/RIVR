@@ -1,6 +1,53 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phases 0–7 complete. Phase 0 still collecting (it is the instrument, not a step). Phases 1–3 merged 2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 completed and deployed 2026-08-29/30, Phase 7 verified on device. **Phase 8 (prove it on device) is in progress; Phase 9 (sweep) not started.**
+**Status: COMPLETE — all ten phases (0–9), closed 2026-08-30.**
+
+Phase 0 keeps collecting; it is the instrument, not a step. Phases 1–3 merged
+2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 deployed 2026-08-29/30 with
+Phase 7 verified on device; Phase 8 complete 2026-08-30 with guard 9 **accepted
+rather than passed** after five reviews; Phase 9 complete 2026-08-30 with guard
+7 **passed** by an independent review that verified the claims rather than
+merely failing to disprove them.
+
+### What "complete" means here, and what it does not
+
+**Delivered and measured.** Favourites paint in 969 ms cold on iPhone and
+2473 ms on an Android emulator against a 3 s bar; two accounts on two platforms
+show identical values; airplane mode renders; a unit switch repaints every card
+with zero refetches; and a full publish cycle was watched from a NOAA run
+through to three notifications on a real lock screen.
+
+**Four things remain true but UNVERIFIED, and closing this ADR does not make
+them verified.** They are carried, not resolved:
+
+1. **No island reach has ever been in the store.** Everything Phase 9 built for
+   Hawaii and Puerto Rico — the 6-hour window, the 24/28-hour caps, the
+   medium/long-range exclusion — is tested only against unit tests written from
+   a NOMADS directory listing read once. **One real favourited island river
+   would exercise the whole path in production within an hour**, and it is the
+   largest untested area in this document.
+2. **The alert peak windowing has not fired a real alert.** 452 server tests
+   cover it; nothing in the logs proves a windowed peak until an elevated river
+   produces one. Expect an all-clear on the first run for any river whose only
+   threshold-exceeding point is now in the past — correct behaviour, and it
+   will look like a change.
+3. **Guard 2's non-favourite sheet timing was never measured** — no instrument
+   exists for it.
+4. **Guard 3's store provenance is inferred, not instrumented.**
+   `servedFromStore`/`servedFromUpstream` counters would prove it.
+
+**And one claim in CLAUDE.md is unchecked:** "nothing calls NOAA or GEOGLOWS
+directly any more". Believed, not verified. It was on the list the Phase 9
+review did not examine, and the other item on that list — "the GC sweeps the
+renamed documents" — turned out to be false.
+
+**The pattern worth carrying out of this ADR**, across nine phases and roughly
+twenty reviews: **not one defect was in an algorithm.** Every single one was in
+a connection between two components, or in a claim that was true when it was
+written. The habits that caught them — mutation-check in both directions,
+derive expected counts from the right baseline, never let a comment satisfy a
+guard, and run the function instead of asserting what it does — are worth more
+than the architecture they were used to build.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
@@ -644,6 +691,117 @@ came from so supersession is decidable offline, and carry a schema version.
 6. **A unit-preference change re-renders from the same cached entry with zero
    refetches.**
 7. Independent agent review passes.
+
+### Guard 7 — the review ran, and PASSED on the claims (2026-08-30)
+
+**Verdict: all seven Phase 9 claims true; nothing shipped could reach a user
+with wrong data.** Seven findings, all missing guards rather than live
+defects. Unlike Phase 8's guard 9, this is a pass rather than an acceptance —
+and the difference is that the reviewer verified the claims independently
+(re-running mutations, checking deletions against the parent commit rather
+than the current tree, proving the alert windowing cannot drop a future point)
+instead of only failing to find new problems.
+
+**What it found that I had not, and the first two are the ones that matter:**
+
+1. **`test/docs/` was not in CI.** The workflow ran an ALLOW-LIST of five
+   directories; `test/docs/` was new in this range and sat outside all of
+   them. So the guard written specifically so CLAUDE.md's path-rot "no longer
+   needs a human" was itself enforced only by a human remembering to run bare
+   `flutter test`. **Second time CI's coverage was narrower than everyone
+   believed** — the functions suite was the first. Now enumerated by
+   exclusion, so a new directory is covered by default.
+2. **The island cap wiring was untested on the SERVER**, the exact mirror of
+   the Dart fakes fixed earlier the same day. Two mutations passed 446/446:
+   the sampler dropping `reachId`, and the planner ignoring it. Line 312 is
+   the ABANDONMENT decision — a healthy 12-hour-old Hawaii document judged by
+   the CONUS six-hour cap is abandoned every cycle, never extended, and every
+   device holding that favourite drops to the live path for half of each
+   cycle. Guard 1's exact failure, plus the hourly error this phase spent the
+   day removing. Fixed on one side of a language boundary is not fixed.
+3. **The client's freshness wiring was unpinned too** — `heldTooLong` and
+   `runTooOld` took a CONUS constant and 1343 tests passed. An island
+   favourite would carry a permanent "may be out of date" over current data.
+   The ADR claimed this wiring was "pinned and mutation-checked", which was
+   true of `validUntil` and read as covering both.
+4. **I repeated a count derived from the wrong place, in this document.** "36
+   reaches in the store", three times here and once in a test — 36 is the
+   favourite-ROW count; distinct reaches are 29, and 27 NWM. The orphan figure
+   was wrong the same way. **The identical error this phase congratulates
+   itself for catching, one level up.** No conclusion changed, which is why it
+   survived: a number that is roughly right and never load-bearing is
+   invisible.
+5. **One of the two new source-level guards did not strip comments**, while
+   the other was hardened for exactly that reason the same day.
+6. **Islands have no medium or long range, and only the cap tables knew it.**
+   The phase measured that NWPS serves two products for Oahu, then acted on it
+   solely by omitting entries from the hold tables. `canFetch`,
+   `MANAGED_PRODUCTS` and `supportedProducts` still offered five to every
+   reach. The first island favourite would put two products into permanent
+   per-cycle failure. `canFetch` now takes a `reachId`.
+7. **Expect all-clears on the first alert run after the windowing deploy** —
+   a river whose only threshold-exceeding point is in the past now correctly
+   drops to Normal and emits "back to Normal". Real notifications, correct
+   behaviour, and not previously written down.
+
+**All seven addressed. Every fix mutation-checked in both directions**, the
+second direction being the one that matters: silencing a false alarm must not
+silence the real one, and excluding island products must not leave an island
+favourite with nothing.
+
+**What I feared and the review did NOT check** — recorded because the missing
+half of a review is as informative as the findings. I sealed a list before it
+ran. It confirmed my worry about untested island wiring (going further than I
+had), and it cleared two I was wrong about (the `.gitignore` rework, and
+orphans loosening the health aggregate — both verified correct). It did not
+examine whether `storeGcDaily` actually deletes the orphaned documents, and
+did not check CLAUDE.md's prose claim that "nothing calls NOAA or GEOGLOWS
+directly any more". The first was then checked here and **found false** — see
+below. The second remains open.
+
+### The GC could never have collected the renamed documents (2026-08-30)
+
+**Checked because the review did not, and the claim was FALSE.** Both this ADR
+and `notifications_history.md` said the 31 old-name documents would be "swept
+by `storeGcDaily` after its 7-day grace". Running the real `selectGarbage`
+against real production data, with `now` pushed eight days forward, returned:
+
+```
+scanned: 216   would delete: 18
+retained: {"still-followed": 167, "unparseable-id": 31}
+old-name documents: 31, of which GC would delete: 0
+```
+
+**Two independent rules each kept them, which is why it was invisible.** The
+rename removed `analysisAssimilation` from `FORECAST_PRODUCTS`, so
+`parseStorageKey` returned null and every one was retained as
+`unparseable-id` — by the deliberate rule that an id we cannot read must never
+be treated as garbage. And their reaches are all still favourited, so the
+`still-followed` rule would have kept them too. Nothing could ever collect
+them: 31 documents, and the same again on every future rename.
+
+**The fix distinguishes a RETIRED product from a MALFORMED key**, which had
+been the same case. A well-formed id — right shape, known source, real reach —
+naming a product this codebase no longer has can only be something we used to
+write; nothing will read or rewrite it, so being followed is irrelevant. A
+genuinely foreign id is still kept, because deleting what you cannot parse is
+data loss waiting for the first unrelated document. The grace window still
+applies, so a rename plus a rollback inside a week loses nothing.
+
+**Structural, not a list of retired names.** A list is a promise that someone
+will remember to update it, and this repository was bitten twice by exactly
+that in one day — CI's test-directory allow-list, and this.
+
+Re-run against production after the fix: **31 of 31 swept, `assertGcSane`
+passes** (49 of 216 is 23%, under the 50% ceiling), and the 167 live documents
+are still retained as `still-followed`. Mutation-checked in both directions
+with mutations that COMPILE — the first attempts did not, and a mutation that
+does not compile proves nothing.
+
+**The lesson is the one this ADR keeps relearning.** "Swept after the grace
+window" was written twice, in two documents, and was never true. It took
+running the function to find out, and an independent review that passed
+everything else did not look here.
 
 **You are done when** browsing hundreds of streams leaves the cache bounded,
 favourites survive eviction unconditionally, and a stream you looked at earlier
@@ -1596,7 +1754,7 @@ number isn't current the app says so before they have to wonder.
 
 ---
 
-## Phase 8 — Prove it on device ▶ IN PROGRESS
+## Phase 8 — Prove it on device ▶ COMPLETE (guard 9 accepted, not passed)
 
 ### Guard 7 — Android (2026-08-30)
 
@@ -1653,9 +1811,14 @@ quotes it.
 | 6 | 0 refetches, 480 log lines | debug at `7cf587c` — app code identical to `4217077` |
 | 7 | 2603 / 2473 / 2285 ms, Android | profile at `62ef301` — app code identical to `4217077` |
 | 3 | 13966 CFS on both devices | iPhone debug `7cf587c`, Android profile `62ef301` |
+| 5 | 3 notifications, `alertsSent: 3` | TestFlight build of `2026.2.0+719` |
 
-**This guard immediately caught its own violation, which is the argument for
-having it.** Guards 2 and 4 were first written down as "profile build off
+**This guard caught its own violation twice, which is the argument for having
+it.** The first was immediate; the second was found by the Phase 8 re-review —
+guard 5's figures had no row at all, in the guard whose entire point is that
+every number carries its build.
+
+ Guards 2 and 4 were first written down as "profile build off
 `fc2bb4f`". They were not: `fc2bb4f` created the instrument with only a
 `dart:developer` call, the `debugPrint` that made the measurement readable was
 added afterwards, and the runs happened on that working tree — which became
@@ -1686,7 +1849,56 @@ to get the evidence, because a spinner is something a person notices and a fast
 background fetch is not — and that is exactly the class of defect that got
 through repeatedly this week.
 
-### Guard 5 — a full publish cycle, observed (2026-08-30) ▶ PARTIAL
+### Guard 5 — a full publish cycle, observed (2026-08-30) ▶ MET
+
+**Completed at 04:20 UTC on the TestFlight build of 2026.2.0+719.** Three
+notifications arrived on the lock screen, `alertsSent: 3, errors: 0`:
+
+    Diamond Creek — Extreme Event
+    Peaking at 220 CFS.
+
+    Stream 640469625 — Major Event
+    Peaking in ~3 days at 29,294 CFS.
+
+    Test river name — still Action Event
+    Now peaking in ~41 hours at 982 CFS.
+
+Every link, measured rather than inferred: the probe detected a new NWM run,
+the store wrote it, alert evaluation ran in the same invocation over 12 reaches
+and 3 users, all three were classified against their own return periods
+(Extreme at the 100-year, Major at the 10-year, Action at the 2-year), and the
+pushes reached a real device.
+
+**The trigger model is visible in the copy.** Diamond Creek and 640469625 both
+fired as `entry` — first time above the threshold. The third fired as
+`persistence` and says "**still** Action Event" with "**Now** peaking in ~41
+hours", because that user had already been told and the water had not gone
+away. That distinction is decision 19 working in production.
+
+**Diamond Creek's line carries no time, and that is correct.** Its peak is
+behind it — current flow was above the forecast peak when it was favourited —
+so `timeToPeak` had nothing to offer and the copy degrades to "Peaking at 220
+CFS" rather than inventing a horizon.
+
+**One thing to look at, not a defect: the notification says Extreme while the
+card says MAJOR.** They answer different questions — the alert reports the
+forecast PEAK (220 CFS, Extreme), the card reports what the river is doing NOW
+(107 CFS, Major, having receded from 155). Both are right and a user may still
+find the pair confusing. This is the same tension the reach detail sheet's peak
+strip exists for, and it belongs with that redesign rather than here.
+
+**The stale-token fix is verified by the same run.** The account carried 7 FCM
+tokens before it deployed; the 04:20 cycle logged 9 stale-token prunes with no
+cleanup errors, and the document now holds **4**. That is the deploy confirmed
+by its effect rather than by its exit status — and it is why `deviceCount` read
+4 rather than 7.
+
+**Earlier that hour the same cycle failed to deliver**, which is what sent us
+to TestFlight: three of the four registered devices are dead sandbox tokens
+from local builds and still fail with `Invalid APNs credential`. The fourth is
+the TestFlight build, and each alert succeeded after those three failed.
+
+
 
 **Four of the five links verified in one cycle; the fifth is blocked by a
 local-build gap, not a defect.** A NOAA river was deliberately favourited from
@@ -1736,9 +1948,21 @@ River (18471070) added fresh. Same units on both.
 
 The store holds exactly one document for that reach —
 `nwm__18471070__analysisAssimilation`, run `2026-08-29T23:00:00Z`, unit CFS,
-fetched `2026-08-30T02:20:16Z` — read out of Firestore directly. That is the
-mechanism the guard is really testing: not that two clients computed the same
-answer, but that they read one shared value.
+fetched `2026-08-30T02:20:16Z` — read out of Firestore directly.
+
+**What that does and does not establish.** It proves the store HOLDS 13966; it
+does not prove either device READ it from there. `analysisAssimilation` is one
+observed value per model run, so two devices on the live path would have seen
+13966 as well — the experiment cannot tell the two apart, and the iPhone's
+convergence came from a pull-to-refresh that a live fetch would have satisfied
+identically. The agreement is real and worth having; the stated mechanism is an
+inference from it.
+
+The instrument that WOULD discriminate already exists and was not used:
+`servedFromStore` / `servedFromUpstream` on `StoreBackedDataSource`, the same
+counters that produced guard 6's zero-upstream evidence. Reading them on both
+devices during the comparison would settle it. Recorded as unproven rather than
+restated more carefully.
 
 **They disagreed at first, and the reason is worth keeping.** Android showed
 13966 while the iPhone showed 13744.1 — same units, same category, different
@@ -1787,7 +2011,17 @@ with content. Firebase init, auth restore, provider construction, the cache
 read and layout are all inside it. Only what the OS did before Dart started is
 outside.
 
-**Two things it does NOT measure, stated so nobody reads more into it.** The
+**The non-favourite half of this guard was NOT measured, and the first version
+of this section did not say so.** The guard reads "Favourites render under 3 s
+cold; non-favourites show a titled sheet under 500 ms and fill progressively."
+Only the favourites half has a number. Nothing in the repo can produce the
+other one: the only `Stopwatch` in `lib/` is `StartupTrace`, which times
+`main()` to the first favourites paint and is called from exactly one place.
+Measuring sheet-open needs its own instrument. This was a declared
+carry-forward from Phase 1 that arrived and was quietly dropped — recorded
+here as outstanding rather than left to look complete.
+
+**Two further things it does NOT measure, stated so nobody reads more into it.** The
 app's on-disk cache was warm — this is "app not in memory", the ordinary cold
 start, not a first-ever install with an empty cache, which is a different and
 slower case that remains unmeasured. And the device was online; the offline
@@ -1796,6 +2030,196 @@ case is guard 4.
 For contrast, guard 1's retaken table says a single `analysis_assimilation`
 call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
 screen now paints in a quarter of one such call, because it makes none.
+
+### The alert peak is not windowed — CARRIED to Phase 9, FIXED there 2026-08-30
+
+Found by the fourth Phase 8 review while checking the digest's window, and
+**not fixed there** because it is Phase 6 code that predates that phase.
+
+**Fixed in Phase 9.** `upcomingFrom` moved out of `weekly-digest.ts` into
+`forecast-window.ts`, and `getMaxForecastFlow` now windows both series through
+it before taking the maximum. The move is the point: **a windowing rule owned
+by one consumer is a rule the other keeps forgetting.** The digest was fixed on
+2026-08-30 and the alert path was not, because the function lived in the
+digest's file and nothing connected them.
+
+Three things came out of doing it:
+
+- **`assessReach` and `evaluateAlert` now take an injectable `now`.** Windowing
+  makes them clock-dependent, and an existing test — "the alert carries the
+  validTime of the PEAK point" — went red for exactly that reason: its fixture
+  dates had drifted into the past, so the answer depended on the day the suite
+  ran. That is the trap that cost three review rounds in Phase 8, each fix
+  removing one wall-clock dependency and adding another. The seam is the fix;
+  the number is not.
+- **The drift guard passed on a COMMENT.** Its first version asserted
+  `/upcomingFrom/` against raw source, and both files explain the rule in prose
+  that contains the name — so deleting the call and its import compiled cleanly
+  and left the guard green. It now strips comments and matches a CALL. Same
+  lesson as Phase 9's `loadCompleteReachData` guard, learned twice in one day.
+- **Mutation-checked in both directions**, and the second matters more:
+  over-filtering with `t >= now` instead of anchoring drops the most recent
+  past reading — the current value — and fails four tests. Silencing a stale
+  crest must not silence the real one.
+
+`getMaxForecastFlow` in `functions/src/notification-service.ts` takes the
+maximum over the WHOLE forecast series, exactly as the digest did before
+`b1cf108`. `timeToPeak` already returns null for a peak in the past, so no
+false timing is printed — that is why Diamond Creek's notification read
+"Peaking at 220 CFS" with no horizon. But the FLOW and the CATEGORY can still
+come from a crest that has already passed, which is how an alert can announce
+Extreme for water that has receded.
+
+That is visible in tonight's own evidence: the notification said Extreme at
+220 CFS while the card said Major at 107 CFS. Decision 22's account of that
+pair — "the alert reports the forecast peak, the card reports now" — is
+correct as far as it goes, and incomplete: the alert's peak is not windowed to
+what is ahead, so part of that gap is this defect rather than the intended
+distinction.
+
+The fix is the same shape as the digest's: window with the equivalent of
+`ForecastPeak.upcomingPoints` before taking the maximum. Deferred to Phase 9
+rather than changed under a phase gate that is already four reviews deep.
+
+### Decision 24 — one island number, and it is the faster one (2026-08-30)
+
+NWM short range publishes every 6 hours for Puerto Rico and every 12 for
+Hawaii. Both networks use NHDPlus COMIDs in the same band
+(800000000–921999999), so **a reach id cannot tell the two apart**, and the
+app has no coordinates at the point where a freshness window is computed. One
+number has to cover both.
+
+**Twelve is the efficient choice and the wrong one.** It would hold a Puerto
+Rico forecast for up to six hours after a newer run existed — showing someone
+water that has been superseded, which is the failure this entire ADR is
+against. Six costs Hawaii one redundant refetch per run and can never serve a
+stale value.
+
+**The rule, stated so it survives the next optimisation:** when the options
+are "waste a fetch" and "show the wrong number", the wasted fetch wins. Anyone
+later tempted to raise this to 12 for efficiency is trading correctness for
+bandwidth, and should change the reasoning here first.
+
+The same choice runs the other way for the HOLD caps, and that is not a
+contradiction: the hold cap decides when we stop *vouching* for a value we are
+already showing, so it must be generous enough not to disown data that is
+genuinely current — 24 hours, two missed Hawaii cycles. Expiry asks "may
+something newer exist?"; the hold cap asks "is this still defensible?". Erring
+short on the first and long on the second is the same instinct, not opposite
+ones.
+
+**Rejected: resolve the island from coordinates.** It would separate Hawaii
+from Puerto Rico exactly, and it needs a lat/lon that `validUntil` does not
+have and would have to be threaded through the store, the envelope and both
+data sources — a large cross-language contract change to save Hawaii four
+fetches a day.
+
+### Decision 23 — eviction waits for a decision, not a default (2026-08-30)
+
+The Phase 5 kill switch reclaims by evicting every favourite's stored entries,
+so the live path takes over instead of the device serving values the store may
+have poisoned. Two rounds of Phase 8 review found that mechanism broken in both
+directions, and the second break was caused by the fix for the first.
+
+**`isStoreReadEnabled` is `getBool`, which returns false for two different
+facts**: "the operator turned this off" and "Remote Config has not answered
+yet". That was harmless while the off-branch only declined to subscribe — the
+post-fetch announce corrected it moments later.
+
+1. **The reclaim never fired.** `_attach` runs at startup while Remote Config
+   is still resolving, so the off-branch is taken on an ordinary launch, when
+   `FavoritesProvider` has not loaded and there is nothing to evict. It evicted
+   nothing and cleared the persisted flag anyway, so it could never fire again
+   for that install. Flip the switch off, force-quit, relaunch, and
+   store-written names and thresholds survived their full 30-day window — the
+   exact failure the persistence exists to prevent.
+2. **Then it fired when it must not.** Keeping the flag when nothing was
+   evicted fixed (1), and made the ambiguity destructive: a device where the
+   store is ENABLED could reach the off-branch with favourites loaded and wipe
+   every one of their entries on an ordinary launch.
+
+**So eviction now waits for the operator's actual decision.**
+`StoreReadSwitch.isResolved` is true once a fetch completes in either
+direction — a FAILED fetch still resolves, because Remote Config then serves
+the last activated value and that IS the decision. Until then the coordinator
+defers and keeps its flag.
+
+Both directions are tested, because deferring must not become never: an
+unresolved switch evicts nothing even with favourites in hand, and a
+resolved-off switch still reclaims.
+
+**The same argument applies on the fetch path**, and was missing there too.
+`StoreBackedDataSource.fetch` checked the switch, awaited Firestore, and
+returned the store's answer without checking again — and the repository caches
+what it is handed with the SERVER's window, 30 days for the near-static
+products, after the reclaim has already run. Flipping the switch off is an
+incident action; it must not leave a month-long copy of the data being
+disowned, seeded by a read that began a moment earlier.
+
+### Phase 8 — where it actually stands (2026-08-30)
+
+Two independent reviews. Neither passed on first reading, which by now is the
+expected outcome rather than a surprise.
+
+| Guard | Status |
+|---|---|
+| 1 — Phase 0's timings retaken | **met** — 189 samples over 7.7 days; the originals were optimistic and the correction strengthens the case for the store |
+| 2 — favourites < 3 s cold; non-favourite sheet < 500 ms | **partly met** — favourites measured at 969 ms median; **the sheet half was never measured and no instrument exists for it** |
+| 3 — two accounts, two devices, one river | **met on the observation, not on the mechanism** — both showed 13966 CFS; that they READ it from the store is inferred, and the counters that would prove it were not used |
+| 4 — airplane mode | **met** |
+| 5 — a full publish cycle observed | **met** — probe to lock screen, three notifications, on TestFlight |
+| 6 — unit switching, no refetch | **met** — 480 log lines, zero fetches |
+| 7 — Android shares the path | **met with caveat** — 2473 ms median on an emulator, not hardware |
+| 8 — every number carries its build | **met** — after catching two of its own violations |
+| 9 — independent review passes | **ACCEPTED, not passed — a deliberate call, 2026-08-30.** Five ran. Round 2 found four blockers in shipped behaviour; 3, 4 and 5 each found a defect introduced by the previous round's FIX, in the same test, from the same cause — a wall-clock-dependent value asserted against a wall-clock-dependent bound. All fixed; severity fell each round (user-facing → 13 h/day CI break → 30 min/day → 9¾ h/day, all test-only after round 3). Round 5's blocker was found and fixed independently before its report landed |
+
+**Guard 9 was accepted rather than passed, and the distinction is the point.**
+No round returned clean on first reading. The decision to stop was made on
+evidence rather than fatigue:
+
+- **Nothing user-facing has been found since round 2.** Rounds 3, 4 and 5
+  produced one CI-breaking test, one narrower version of it, one wider version
+  of it, and three guards that were weaker than they claimed. None could reach
+  a person using the app.
+- **The severity fell monotonically**, and the last round's only code finding
+  was that a test sliced a file to the wrong boundary.
+- **Round 5 found the blocker independently, after it had already been fixed
+  here** — two routes to the same defect, which says more about the check than
+  another clean round would have.
+- **The cost is real.** Five rounds took most of a night, and the marginal
+  finding is now about the tests rather than the software.
+
+What this does NOT mean: that the phase is defect-free. It means the remaining
+risk is concentrated in this repository's test scaffolding rather than in what
+ships, and that a sixth round would most likely find a sixth version of the
+same test problem. Recorded so nobody later reads "Phase 8 complete" and
+assumes a clean review.
+
+**What the reviews found, because the list is more useful than the verdict.**
+Round 1: the `arrayRemove` fix had been applied to one of two files while the
+ADR claimed both were done, and the kill switch's cross-launch reclaim evicted
+nothing on essentially every device. Round 2: the fix for that reclaim
+introduced a worse bug — it could evict a healthy device's cache on an ordinary
+launch — plus a store fetch that could resurrect an evicted entry with a 30-day
+window, a forecast page announcing "current flow is not available" during a
+healthy load, and two guards claiming more than was measured. Round 3: a test
+that broke CI for 13 hours a day, and a digest window that still did not match
+the app's after being fixed and declared matching. Round 4: that fix's
+replacement broke CI for 30 minutes a day, and three guards passed against the
+regressions they existed to catch. Round 5: the replacement for THAT broke CI
+for nearly ten hours a day — three attempts at one assertion, each wrong at a
+different hour.
+
+**The same assertion produced rounds 3, 4 and 5.** Each fix removed one
+wall-clock dependency and introduced another, because the value under test
+(`windowFor`) changes shape at 10:45 UTC and every bound written against it
+inherited that boundary. It was finally settled by removing the clock from the
+assertion entirely rather than by choosing a better bound. Worth remembering as
+a shape: when a fix keeps failing in a new place, the framing is wrong, not the
+number.
+
+**Every one of those was in something already declared finished.** That is the
+pattern worth carrying into Phase 9, more than any individual defect.
 
 ### Guard 1 — Phase 0's timings retaken (2026-08-30)
 
@@ -1857,13 +2281,328 @@ under 3 seconds, and you have the numbers rather than the impression.
 
 Affordable because every working version is on `main`.
 
-**Code.** Remove the Phase 5 kill switch and its Remote Config parameter once the
-store has run clean through Phase 8. Delete everything with no callers — **the
+### The store had NOT "run clean" — 83 errors in seven days (2026-08-30)
+
+**The precondition for removing the kill switch was checked and found false.**
+`storeRefreshHourly` logged 83 ERROR entries in seven days. Every hold-cap one
+was the same four reaches — `1352774`, `229757`, `23735719`, `9962444` — which
+**nobody favourites any more**.
+
+The store was working perfectly. A reach that leaves the work list keeps its
+documents for the GC's seven-day grace, and no run ever rewrites an orphan, so
+every hour it sat further past its hold cap and `extendWindowCoverage` reported
+"upstream has gone quiet" — at ERROR, indistinguishable from the store actually
+breaking. 22 of 189 documents were orphans; 14 of them had caps short enough to
+trip hourly.
+
+**This is the failure mode CLAUDE.md names: over-warning trains dismissal.** A
+real outage would have looked exactly like the noise that had been arriving
+every hour for a week. It is also why "the store has run clean through Phase 8"
+could be asserted and believed — nobody read the logs, and the one person who
+did (today) had to be looking for something else.
+
+**The fix puts the distinction in the pure planner**, where it is testable:
+`planWindowExtensions` now takes the work list's document ids and counts
+orphans separately from abandoned. Mutation-checked in both directions —
+ignoring the live set restores the false alarm, and skipping every sample
+silences the real one. The second mutation matters more: this must not become
+a way to stop hearing about genuine upstream stalls.
+
+**The other half of the noise: 103 push failures, one user, one cause.**
+Every `❌ Failed to send to token` in seven days was
+`messaging/third-party-auth-error` — "Invalid APNs credential" — for a single
+user. That is a build installed from Xcode: it registers against Apple's
+SANDBOX push environment, and this project has a Production APNs key and no
+development one, so every send to it fails forever. This repo already
+documents that; nothing connected it to the error log.
+
+**It must never be pruned, and that is the interesting part.** The obvious fix
+is to add the code to the stale-token cleanup. It reports OUR credential not
+covering the token's environment, not the token being dead — so if the
+PRODUCTION key were ever misconfigured, the same code fires for every user at
+once and the "cleanup" would erase every push token in the system in one run.
+An auto-remediation that can delete all user state on a config mistake is
+worse than the noise.
+
+So the per-send line is a WARN naming the real cause, and a per-run count
+raises ERROR once **two different users** fail the same way — one is a debug
+build, two is the production key being broken, which silently kills every
+notification the app sends. The accumulator is cleared at the top of each run
+because warm Cloud Functions instances reuse module state, and without that
+one debug build becomes a fake outage on the second invocation.
+
+Together with the orphan alarm, **essentially the project's entire ERROR
+volume for the week was two known-benign conditions.** That is the mechanism by
+which a real outage would have been missed.
+
+**Also observed, and left alone because it is correct behaviour:** at 16:00
+UTC NOAA returned HTTP 504 on all five probe endpoints, so the probe recorded
+null runs and the 16:20 refresh triggered nothing. "No new run means zero
+fetches" working as designed, on a real outage, twenty minutes after a deploy —
+which is exactly when it would have been easiest to blame the deploy.
+
+### Decision 25 — the kill switch STAYS (2026-08-30)
+
+Phase 9 was written to remove the Phase 5 kill switch and its Remote Config
+parameter "once the store has run clean through Phase 8". **That precondition
+was checked today and is false**, and even if it had been true the removal
+would still be wrong right now.
+
+**The evidence against "run clean".** 83 store ERROR entries in seven days,
+plus 103 push failures, and every one of them a benign condition nobody had
+looked at — see the section above. A store whose alarm channel was full of
+noise for a week has not demonstrated that it can be trusted without a way to
+switch it off; it has demonstrated the opposite, that a genuine failure would
+have gone unnoticed.
+
+**The order is also wrong.** The switch is the only way to stop devices reading
+the store WITHOUT an app release. RIVR has never shipped to either store, and
+launch is a coordinated dual-store release — so the first moment this really
+matters is still ahead, not behind. Deleting the emergency stop immediately
+before the first public launch inverts the reason it was built: an App Review
+turnaround is days, and a store serving poisoned values for days is exactly the
+scenario decision 23 and Phase 7's whole trust model exist to bound.
+
+**Against keeping it**, honestly: it is 534 lines plus eviction machinery, it
+broke in both directions during Phase 8 review (decision 23), and dead code is
+what Phase 9 exists to remove. That is a real cost. It is outweighed by the
+switch being *fixed, tested and verified on a device* since those breaks, and
+by the fact that the thing it protects against is unbounded.
+
+**Jerson's call, 2026-08-30, and it is the deciding one:** keep it, because
+"it does not harm having it there at all — we should keep it to give us more
+flexibility as developers."
+
+That is a stronger position than the one argued above, and it is worth stating
+plainly rather than folding into it. The reasoning here was "remove it later,
+once conditions X and Y hold". His is that the switch has ongoing value as an
+operational lever regardless of those conditions — being able to move every
+device off the store within minutes is useful during development and during an
+incident, not only as insurance for a launch.
+
+**So this is no longer scheduled for removal.** Do not re-propose it as
+cleanup. If it is ever removed it will be because it has become misleading or
+costly, not because the store has been well-behaved for long enough.
+
+The Remote Config parameter `store_read_enabled` therefore stays too, and
+stays `true`.
+
+**Code.** ~~Remove the Phase 5 kill switch and its Remote Config parameter once
+the store has run clean through Phase 8.~~ **Superseded by decision 25 — it
+stays.** Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
-`reach_data_provider` and was wrong). Rename `analysisAssimilation`, which
-fetches short range. Fix `validUntil`'s CONUS-only assumption for Alaska and
-Hawaii/Puerto Rico. (**Both ADR 0008 defects are now fixed**, ahead of this
-phase, because each was found firing rather than read about.
+`reach_data_provider` and was wrong).
+
+### `analysisAssimilation` -> `currentFlow` — DONE 2026-08-30
+
+**One identifier meant two different things in one codebase, and it had cost
+three defects before anyone renamed it.**
+
+- `ForecastProduct.analysisAssimilation` — our store product. It does NOT
+  fetch analysis assimilation: the handler calls `fetchCurrentFlowOnly`, which
+  is `fetchForecast(reachId, 'short_range')`; its run id is read from the
+  payload's `shortRange` section; and `store-upstream.ts` maps it to
+  `"short_range"`.
+- `analysisAssimilation` — **NOAA's own section name**, returned in every
+  streamflow response alongside `shortRange`, `mediumRange`, `longRange` and
+  `mediumRangeBlend` (verified live 2026-08-30). Genuine analysis-assimilation
+  data, hourly in every domain, which this app also consumes as
+  `ReachData.analysisAssimilation`.
+
+**The three defects, all the same mistake:**
+
+1. **Review round 2 (F2)** — a payload trim matched the product name against
+   NOAA's section of the same name.
+2. **Review round 3 (B2)** — the identical defect, one file downstream: NOAA
+   returns all five section keys in every response, unrequested ones as `{}`,
+   so the trim kept the EMPTY analysis-assimilation section and threw the real
+   short-range data away.
+3. **2026-08-30, in Phase 9 itself** — the product was given its own publish
+   schedule on the entirely correct observation that analysis assimilation is
+   hourly in every NWM domain. True of NOAA's series; false of this product.
+   It put island documents back on the CONUS hour *within the hour* that the
+   same change had removed it. Round 3, B3 is a fourth instance in the same
+   family: comparing the store's short-range run against the probe's
+   analysis-assimilation run made the product stop triggering after its first
+   write.
+
+Three (four) defects from one misnomer is the case for renaming rather than
+documenting it again. The rename covers the enum, the wire id, the document
+ids and both languages.
+
+**The rename itself nearly caused a fifth.** It was done as a blanket
+search-and-replace across `functions/src`, which also rewrote
+`publish-cadence-probe.ts` — where `analysisAssimilation` is NOAA's section
+name, not ours. The probe would then have looked for a key NOAA never sends
+and silently recorded nothing, in the one component whose job is measuring
+publication cadence. Caught by reading the diff, and now pinned by a test
+asserting the probe reads NOAA's name while no product id uses it.
+
+**What it costs in production.** Document ids change from
+`nwm__<reach>__analysisAssimilation` to `nwm__<reach>__currentFlow`, so about
+31 documents are orphaned (27 superseded plus 4 for reaches nobody
+favourites) — 16% of the collection, under `assertGcSane`'s 50%
+ceiling, swept by `storeGcDaily` after its 7-day grace. Devices re-fetch that
+product once per favourite. **The TestFlight build already installed
+(2026.2.0+719) will miss on this product and fall through to the live path**
+for current flow until a new build ships: one upstream call per favourite
+rather than zero. Degraded, not broken, and stated here rather than
+discovered.
+
+### `validUntil`'s CONUS assumption — DONE 2026-08-30
+
+**The National Water Model is not one model on one schedule, and every
+freshness window in this app was written as though it were.** `validUntil`
+stamped `shortRange` as expiring at the next top of the hour, because that is
+what CONUS does.
+
+**Measured, not looked up.** From NOAA's own production directory listing
+(`nomads.ncep.noaa.gov/.../nwm.<date>/<product>/`, counting the distinct `tNNz`
+run hours present on 2026-08-30):
+
+| Domain | short range | analysis assimilation | medium / long |
+|---|---|---|---|
+| CONUS | hourly | hourly | 6-hourly |
+| Puerto Rico | **6-hourly** (t00/t06/t12z) | hourly | **none** |
+| Hawaii | **12-hourly** (t00/t12z) | hourly | **none** |
+| Alaska | 3-hourly (t00/03/06/09/12z) | hourly | blend only, 6-hourly |
+
+Corroborated at the API the app actually calls: NWPS reach `800000010` (Oahu)
+reported its short-range `referenceTime` as `00:00Z` at 15:16Z the same day —
+fifteen hours old and still current, which rules out hourly on its own. That
+reach also exposes only `["analysis_assimilation", "short_range"]`, where a
+CONUS reach exposes five products.
+
+**What it cost.** An island short-range document expired eleven times before
+any new data could exist, and each expiry sent the device back upstream to be
+handed the identical run. That is the Phase 5 dead-air bug — a value marked
+stale while still being the newest that exists anywhere — except per-domain,
+and far larger: 15 minutes an hour became 11 hours out of 12.
+
+**Not live, and said plainly.** All 32 reaches in the store on 2026-08-30 are
+CONUS — 27 favourited NWM reaches, 5 GEOGLOWS, plus 4 NWM reaches nobody
+favourites any more whose documents are awaiting the GC, so no user has hit this. It was latent, and would have arrived with the
+first person in San Juan or Honolulu who favourited a river.
+
+**The fix is in three places, because the assumption was.**
+
+1. `validUntil` takes a `reachId` — REQUIRED, not optional, so the CONUS
+   assumption cannot be reintroduced by omission. There were only two call
+   sites and the compiler named both.
+2. **The hold caps too**, which is the half that would have been missed.
+   `MAX_HOLD_MS.shortRange` is 6 hours; a healthy Hawaii document is 12 hours
+   old, so it would have been left to expire between runs and every device
+   holding that favourite would drop to the live path for half of every cycle
+   — breaking guard 1's "renders with ZERO upstream calls" for anyone with a
+   Hawaii river. Island tables: 24 h hold (two missed Hawaii cycles), 28 h run
+   age. **The CONUS run-age cap of 16 h would have false-alarmed on the day
+   this was written**, on a river that was completely healthy.
+3. The health aggregates take the **strictest** cap present, not the cap of
+   whichever document happens to be newest — otherwise one fresh island write
+   would buy the writer 24 hours of silence while every CONUS reach rotted.
+
+**One number covers both islands, and the choice is the interesting part.**
+Hawaii is 12-hourly, Puerto Rico 6-hourly, and they share one COMID band
+(800000000–921999999), so a reach id cannot tell them apart. Twelve is the
+efficient choice and the wrong one: it would hold a Puerto Rico forecast six
+hours after a newer run existed, which is showing stale water. Six costs
+Hawaii one redundant refetch per run. **When the options are "waste a fetch"
+and "show the wrong number", the wasted fetch wins.**
+
+**Alaska is deliberately NOT handled, and that is a finding rather than a
+gap.** `byu-hydroinformatics.nwm-channels-v3` returns 404 for Fairbanks,
+Juneau, Kenai and Anchorage at both z5 and z7 — there is no Alaska line on the
+map to tap. An Alaska branch would be untestable code for a case that cannot
+occur, and would read to a later maintainer as though it had been verified.
+The measured cadence is recorded above for the day the tileset changes.
+
+**The drift guard did not catch this, and now does.** The client's island
+cycle was changed with the server left alone, and all 406 server tests stayed
+green: `store-document.test.ts` pinned the SKEW constants and the envelope
+field NAMES, and nothing pinned the SCHEDULE. Two sides can agree on a
+five-minute skew while expiring the same document six hours apart. The guard
+now pins the island band, the cycle, and — separately — that the client still
+*calls* `nwmDomainOf`, because constants can agree while the code stops
+consulting them. Both mutations verified failing.
+
+**A near-miss found while verifying the deploy, not by review.** GEOGLOWS
+river ids are also 9 digits, and nothing stops one landing inside the NWM
+island COMID band — the band check reads the number, not the network. None of
+the reaches in the store collide today, but that is luck. What actually
+makes it safe is that the island tables name only `shortRange`, which GEOGLOWS
+does not have. That is an implicit coupling, and implicit couplings in this
+ADR have a record of being broken by an edit that looked obviously correct, so
+it is now pinned in both languages and mutation-checked.
+
+**Two more gaps, both found by auditing this change rather than by review.**
+
+- **The wiring was untested.** Every fake source accepted `reachId` and threw
+  it away, so nothing could tell a correct implementation from one passing a
+  constant — the window came out identical either way. The repository handing
+  its key's reach to the source, and `StoreBackedDataSource` forwarding it
+  unchanged, are now both pinned and both mutation-checked. This is the same
+  shape as every other defect in this ADR: the function is green and the
+  connection between two components is not tested.
+- **`nwm_domain.dart` claimed the reach-detail sheet already shared the island
+  band. It did not** — the sheet carried its own copy of
+  `800000000`/`921999999`, and the claim was false from the moment it was
+  written. The sheet now calls `nwmDomainOf`; a test derived from the tree
+  fails if any file in `lib/` reintroduces the literals; and the horizon logic,
+  which had **no test at all** (the two tests mentioning a forecast horizon
+  passed the finished string in as a parameter), is now a public function with
+  its own cases.
+
+**VERIFIED IN PRODUCTION at the 17:20 UTC run, 2026-08-30.** Three things,
+counted rather than inferred from a "done" message:
+
+1. **The rename landed: 27 `currentFlow` documents, against a work list of
+   exactly 27 favourited NWM reaches.** Every one matched — no reach missing.
+2. **The store's hourly ERROR is gone.** Zero store errors in that run, against
+   one every hour for the preceding week.
+3. **The APNs failures now read as what they are** — `📵 APNs credential does
+   not cover this token's environment (user …) — expected for a debug build`,
+   at WARN, and the run completed alerts normally and sent notifications.
+
+**And then I made the same mistake again, in this document.** The Phase 9
+review found "36 reaches in the store" repeated three times here and once in
+`hold-policy-drift.test.ts`. 36 is the FAVOURITE-ROW count from the scale line
+near the top of this ADR; the distinct-reach count is 29 there and 27 NWM
+today. The orphan figure was wrong the same way — "36 documents, 19%" against
+an actual 31 and 16%.
+
+No conclusion changed, which is exactly why it survived: a number that is
+roughly right and never load-bearing is invisible. It is the identical error
+the paragraph below congratulates itself for catching, one level up, in a
+document that feeds a research presentation. Corrected 2026-08-30.
+
+**My expected count was wrong, and that is worth recording.** I predicted 31
+`currentFlow` documents from the 31 old `analysisAssimilation` ones. The right
+answer is 27: the old 31 included the four ORPHANED reaches nobody favourites,
+which no run rewrites. Checking against the work list rather than against the
+previous count is what turned "4 documents missing, investigate" into "exact
+match". A count is only a verification if you derived the expected number from
+the right thing.
+
+The 4 old-name documents for those orphans, plus the 27 superseded ones, are
+swept by `storeGcDaily` after its 7-day grace.
+
+**Two upstream outages happened during this, and the store handled both
+correctly.** At 16:00 UTC NOAA returned HTTP 504 on all five probe endpoints,
+so the probe recorded null runs and the 16:20 refresh triggered nothing —
+"no new run means zero fetches", on a real outage, twenty minutes after a
+deploy, which is exactly when it is easiest to blame the deploy. At 17:00 four
+of five endpoints recovered and the run proceeded.
+
+**Deployed and verified by composition, 2026-08-30 15:39 UTC:** seven store
+functions present (counted, not inferred from the deploy's exit status),
+`storeHealth` 200 `{"status":"healthy"}`, and `reachId` confirmed to be a real
+selectable top-level field on the documents — without which every sample would
+have carried an empty id and the island caps could never have fired, silently. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
+premature: `arrayRemove` was fixed in `notification-service.ts` and an
+identical copy in `weekly-digest.ts` was missed, because the guard test named
+one file. The weekly digest kept failing to prune dead tokens every Friday
+until the Phase 8 review found it. The guard now derives its file list from the
+sources and fails if any other file prunes tokens unguarded.
 `setupNotificationListeners()` gated on `enableNotifications` alone — fixed
 2026-08-30 by extracting `wantsAnyNotification`, since a user with flood alerts
 off and the Weekly Outlook on still gets a notification every Friday and had no
@@ -1873,13 +2612,47 @@ and it was not a *silent* no-op as described here: it threw on every cycle that
 found a stale token. Nothing was pruned and every alert run retried the same
 dead devices.)
 
-**Docs.** Rewrite CLAUDE.md's architecture and data-flow sections. Settle ADR
-0001 Step 7, ADR 0002 Stage 2b, ADR 0003's back-off flaw, and confirm ADR 0010's
-disposition. Entries in `app_releases.md` / `notifications_history.md` per phase.
+**Docs.** Rewrite CLAUDE.md's architecture and data-flow sections. Entries in
+`app_releases.md` / `notifications_history.md` per phase.
+
+### The four ADRs are settled — 2026-08-30
+
+Guard 4 asks that each is "updated or explicitly confirmed accurate, with a
+date". All four were re-read rather than rubber-stamped, and they did not all
+end the same way.
+
+| ADR | Disposition |
+|---|---|
+| **0010** — Weekly Outlook latency | **CLOSED.** Both causes verified gone in code: rows now run through `Future.wait`, and NWM rows read `mediumRange`/`returnPeriods`/`reachMetadata` from the repository. Its own Phases 1-2 (per-row rendering, bounded wait) were insurance against a slow load and are **not scheduled**. NOT claimed: the page has not been re-timed on device. |
+| **0001 Step 7** — retire the `ForecastResponse`/`GeoglowsForecast` fork | **Back to parked, deliberately.** It briefly had a user-visible cost (ADR 0010); that cost turned out to be fixable without it. Doing it speculatively means designing a source-agnostic model against exactly two sources, which produces an abstraction shaped like whichever one was written first. |
+| **0002 Stage 2b** — the unified `RiverForecast` model | **Confirmed still parked.** The gate — a third source carrying forecast *detail* — has not been reached. Subsumes 0001 Step 7. |
+| **0003** — engagement back-off | **FIXED, not deferred.** See below. |
+
+**0003 is the one worth reading.** Its back-off counter reset at the END of
+tap → route → page → favourites → `buildOutlook` → record, so any break in that
+chain was indistinguishable from a user ignoring the digest. Three links broke
+at once in production and drove a real counter to the biweekly threshold; a
+send was dropped as `📬 0/1 due this week`. **A user tapping every digest was
+throttled for engaging.**
+
+All three links were already repaired by other work, and that is exactly the
+argument for fixing the position rather than closing the ticket: with the
+symptoms gone, the flaw would have sat there measuring app health instead of
+user intent until the next unrelated break did it again. The reset now happens
+on mount. A latent trap that has already fired once is not less dangerous for
+having been patched downstream.
+
+**Also corrected while checking:** three other ADRs still described ADR 0010's
+stall as open (0001, 0003, 0009). Confirming a disposition means fixing what
+points at it, or the next reader finds two documents disagreeing.
 
 **Guards.**
 1. `grep -rn "loadCompleteReachData" lib/` returns nothing.
-2. No Remote Config fallback parameter remains, and no code reads one.
+2. ~~No Remote Config fallback parameter remains, and no code reads one.~~
+   **Withdrawn by decision 25.** `store_read_enabled` stays, and so does the
+   code that reads it. A guard that contradicts a decision made later is worse
+   than no guard: it invites someone to satisfy the checklist by undoing the
+   decision.
 3. `flutter analyze` reports zero unused-element warnings across touched files.
 4. Every ADR listed is updated or explicitly confirmed accurate, with a date.
 5. **CLAUDE.md read as if new would build the current architecture.** Every
@@ -1942,7 +2715,8 @@ larger correctness win and a prerequisite.
   `ConnectivityService._canReachInternet` reaches
   `clients3.google.com/generate_204` via the integration harness. Pre-existing;
   named here rather than left inside a sweeping "no network" claim. The statics remain only for surfaces not yet on
-  the DI graph — `favorite_river_card` and `map_search_service` — which Phase 3
+  the DI graph — `map_search_service`; `favorite_river_card` moved onto it
+  2026-08-30 (see below) — which Phase 3
   and Phase 9 own. `weekly_outlook_service` took the interface in Phase 1 and no
   longer calls them.
 - **A silently-failing store is the most dangerous outcome in this document**,

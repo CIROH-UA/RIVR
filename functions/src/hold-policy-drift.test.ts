@@ -26,13 +26,21 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
+import {ForecastProductId} from "./store-keys.js";
+import {ISLAND_UNAVAILABLE, SERIES_BY_PRODUCT} from "./store-upstream.js";
 import {
   MAX_HOLD_MS,
   DEFAULT_MAX_HOLD_MS,
+  ISLAND_MAX_HOLD_MS,
+  ISLAND_MAX_RUN_AGE_MS,
   MAX_RUN_AGE_MS,
+  maxHoldMs,
+  maxRunAgeMs,
 } from "./store-window.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";
+const CONUS = "23021904";
+const ISLAND = "800000010";
 const DART = REPO +
   "lib/services/4_infrastructure/river_data/hold_policy.dart";
 
@@ -111,6 +119,16 @@ function dartHolds(): Record<string, number> {
 /** The client's run-age caps. */
 function dartRunAges(): Record<string, number> {
   return dartMap("maxRunAge");
+}
+
+/** The client's island hold caps. */
+function dartIslandHolds(): Record<string, number> {
+  return dartMap("islandMaxHold");
+}
+
+/** The client's island run-age caps. */
+function dartIslandRunAges(): Record<string, number> {
+  return dartMap("islandMaxRunAge");
 }
 
 describe("guard 4 — the client and the server hold for the same time", () => {
@@ -216,3 +234,156 @@ describe("guard 4 — the client judges RUN AGE by the server's numbers too",
       }
     });
   });
+
+describe("guard 4 — the island caps are shared too", () => {
+  // Phase 9 added a SECOND pair of tables, for Hawaii and Puerto Rico, whose
+  // short range publishes 6- or 12-hourly against CONUS's hourly. Everything
+  // the block above argues applies to them identically: a client that holds
+  // longer than the server keeps showing water the server has given up on.
+  //
+  // Written at the same time as the tables themselves rather than after,
+  // because the pattern this ADR keeps rediscovering is that the cross-
+  // language claim is made in a comment first and pinned much later, if ever.
+  test("every server island hold cap has an identical client cap", () => {
+    const dart = dartIslandHolds();
+    for (const [product, ms] of Object.entries(ISLAND_MAX_HOLD_MS)) {
+      assert.equal(dart[product], ms,
+        `${product}: island hold caps disagree — server ${ms / 3600_000}h, ` +
+        `client ${(dart[product] ?? NaN) / 3600_000}h`);
+    }
+  });
+
+  test("every server island run-age cap has an identical client cap", () => {
+    const dart = dartIslandRunAges();
+    for (const [product, ms] of Object.entries(ISLAND_MAX_RUN_AGE_MS)) {
+      assert.equal(dart[product], ms,
+        `${product}: island run-age caps disagree — server ` +
+        `${ms / 3600_000}h, client ${(dart[product] ?? NaN) / 3600_000}h`);
+    }
+  });
+
+  test("the client adds no island cap the server does not know", () => {
+    for (const product of Object.keys(dartIslandHolds())) {
+      assert.ok(product in ISLAND_MAX_HOLD_MS,
+        `${product} has a client island hold cap with no server counterpart`);
+    }
+    for (const product of Object.keys(dartIslandRunAges())) {
+      assert.ok(product in ISLAND_MAX_RUN_AGE_MS,
+        `${product} has a client island run-age cap with no counterpart`);
+    }
+  });
+
+  test("the island tables cannot reach a GEOGLOWS document", () => {
+    // A near-miss found while verifying the deploy on 2026-08-30. GEOGLOWS
+    // river ids are also 9 digits, and nothing stops one landing inside the
+    // NWM island COMID band — `isIslandReach` reads the number, not the
+    // network. None of the reaches in the store today collide, but that is
+    // luck, not design.
+    //
+    // What actually makes it safe is that the island tables name ONLY
+    // `shortRange`, which GEOGLOWS does not have. That is an implicit
+    // coupling, and implicit couplings in this ADR have a record of being
+    // broken by an edit that looked obviously correct. Adding
+    // `geoglowsForecast` to either table would silently give an island-band
+    // GEOGLOWS reach the wrong cap; this fails first.
+    for (const table of [ISLAND_MAX_HOLD_MS, ISLAND_MAX_RUN_AGE_MS]) {
+      for (const product of Object.keys(table)) {
+        assert.ok(!product.startsWith("geoglows"),
+          `${product} is a GEOGLOWS product with an NWM island cap. The ` +
+          "island band is an NHDPlus COMID range and says nothing about a " +
+          "GEOGLOWS river id that happens to fall inside it.");
+      }
+    }
+  });
+
+  test("products fetching the SAME series have the same caps", () => {
+    // The defect this pins, introduced and found on 2026-08-30.
+    // `currentFlow` does not fetch analysis assimilation:
+    // `store-upstream.ts` maps it to `"short_range"`. It was nonetheless given
+    // its own publish schedule and left out of the island cap tables, on a
+    // correct argument about the product its NAME describes.
+    //
+    // Derived from the fetch map rather than hardcoded, so the day someone
+    // renames the product or repoints it at a different series, this follows.
+    const bySeries = new Map<string, ForecastProductId[]>();
+    for (const [product, series] of Object.entries(SERIES_BY_PRODUCT)) {
+      if (!series) continue;
+      bySeries.set(series,
+        [...(bySeries.get(series) ?? []), product as ForecastProductId]);
+    }
+    for (const [series, products] of bySeries) {
+      if (products.length < 2) continue;
+      const [first, ...rest] = products;
+      for (const other of rest) {
+        assert.equal(maxHoldMs(other, CONUS), maxHoldMs(first, CONUS),
+          `${first} and ${other} both fetch "${series}" but hold differently`);
+        assert.equal(maxHoldMs(other, ISLAND), maxHoldMs(first, ISLAND),
+          `${first} and ${other} both fetch "${series}" but hold differently ` +
+          "on island reaches — the exact hole the misnamed product fell " +
+          "through");
+        assert.equal(maxRunAgeMs(other, ISLAND), maxRunAgeMs(first, ISLAND),
+          `${first} and ${other} both fetch "${series}" but judge run age ` +
+          "differently on island reaches");
+      }
+    }
+  });
+
+  test("an island override is never STRICTER than the CONUS cap", () => {
+    // The direction check, not just equality. An island override tighter than
+    // the shared cap would be pointless at best and, for the run-age table,
+    // would alarm on data that is normal for the domain — which is the exact
+    // failure that motivated these tables. Stated as a property so a future
+    // edit that flips one number is caught for the right reason.
+    for (const [product, ms] of Object.entries(ISLAND_MAX_HOLD_MS)) {
+      assert.ok(ms > (MAX_HOLD_MS[product] ?? DEFAULT_MAX_HOLD_MS),
+        `${product}: island reaches publish more SLOWLY than CONUS, so a ` +
+        "tighter island cap cannot be right");
+    }
+    for (const [product, ms] of Object.entries(ISLAND_MAX_RUN_AGE_MS)) {
+      const conus = MAX_RUN_AGE_MS[product];
+      if (conus === undefined) continue;
+      assert.ok(ms > conus, `${product}: same argument for run age`);
+    }
+  });
+});
+
+describe("the island product exclusion is shared, not duplicated", () => {
+  // Phase 9 measured that NWPS serves only two products for Oahu and then
+  // fixed the SERVER — `canFetch` — while the client kept offering all six to
+  // every reach. Found a day later by the standing "did you write the tests"
+  // question, not by review, and in the same change whose commit message says
+  // "fixed on one side of a language boundary is not fixed".
+  //
+  // Both sides now name the same two products. This fails if either moves.
+  test("ISLAND_UNAVAILABLE matches islandUnavailable in Dart", () => {
+    const dart = readFileSync(
+      REPO + "lib/models/1_domain/shared/river_data/nwm_domain.dart", "utf8")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const block =
+      /const Set<ForecastProduct> islandUnavailable = \{([\s\S]*?)\};/
+        .exec(dart);
+    assert.notEqual(block, null,
+      "islandUnavailable is gone from nwm_domain.dart; if it moved, this " +
+      "test must follow it");
+
+    const dartProducts = [...block![1].matchAll(/ForecastProduct\.(\w+)/g)]
+      .map((m) => m[1]).sort();
+
+    assert.deepEqual(dartProducts, [...ISLAND_UNAVAILABLE].sort(),
+      "the client and the store must agree on which products an island reach " +
+      "has. A client that asks for one the server never writes subscribes to " +
+      "a document that can never exist; a client that omits one the server " +
+      "does write silently loses a forecast range.");
+  });
+
+  test("the exclusion is not empty and not everything", () => {
+    // Both degenerate ends are silent failures: empty restores the original
+    // defect, and everything leaves an island favourite with no forecast at
+    // all while every equality assertion above still passes.
+    assert.ok(ISLAND_UNAVAILABLE.length > 0);
+    assert.ok(!ISLAND_UNAVAILABLE.includes("currentFlow"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("shortRange"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("reachMetadata"));
+    assert.ok(!ISLAND_UNAVAILABLE.includes("returnPeriods"));
+  });
+});

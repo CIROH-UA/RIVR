@@ -42,6 +42,7 @@ interface UserSettings {
 
 import {FloodCategory, categoryFor} from "./flow-classification.js";
 import {readAlertDataFromStore} from "./store-alert-source.js";
+import {upcomingFrom} from "./forecast-window.js";
 import {
   AlertFrequency,
   AlertTrigger,
@@ -176,10 +177,39 @@ export interface ReachData {
  * @param {number} timeSlot - Time slot number (1-4)
  * @return {Promise<AlertCheckResult>} Summary of alert check results
  */
+
+/**
+ * Users whose push tokens the APNs credential could not cover, this run.
+ *
+ * Module-scoped because `sendAlert` is per-user and the decision that matters
+ * is per-RUN: one user is a debug build against Apple's sandbox, which is
+ * normal and documented; several users at once means the PRODUCTION APNs key
+ * is broken, which is an outage that silences every notification the app
+ * sends.
+ *
+ * **Cleared at the top of every evaluation.** A Cloud Functions instance is
+ * reused across invocations, so module state survives between runs — leaving
+ * this to accumulate would turn one debug build into a fake outage on the
+ * second warm invocation.
+ */
+const apnsCredentialFailures = new Set<string>();
+
+/**
+ * How many distinct users must fail on the APNs credential before it is an
+ * outage rather than a development artefact.
+ *
+ * One is expected: the project has a Production APNs key and no development
+ * one, so any build installed from Xcode fails every send. Two different
+ * users failing the same way is not a coincidence.
+ */
+const APNS_OUTAGE_THRESHOLD = 2;
+
 export async function runAlertEvaluation(
   reason: string
 ): Promise<AlertCheckResult> {
   logger.info("🔍 Starting alert evaluation", {reason});
+  // See the declaration: warm instances reuse module state.
+  apnsCredentialFailures.clear();
 
   const result: AlertCheckResult = {
     usersChecked: 0,
@@ -255,7 +285,25 @@ export async function runAlertEvaluation(
       uniqueReaches: uniqueReaches.size,
       reachesWithForecast: reachesWithData,
       reachesWithReturnPeriods: reachesWithThresholds,
+      apnsCredentialFailures: apnsCredentialFailures.size,
     });
+
+    // The signal that actually distinguishes a debug build from an outage.
+    //
+    // Per-send these are WARNs, because one of them is expected and firing
+    // 103 times a week. Several DIFFERENT users failing on the credential is
+    // the production APNs key being wrong, which silences every notification
+    // the app sends and would otherwise look exactly like the noise.
+    if (apnsCredentialFailures.size >= APNS_OUTAGE_THRESHOLD) {
+      logger.error(
+        "🚨 APNs credential failing for MULTIPLE users — this is the " +
+        "production key, not a debug build. Every push is silently failing.",
+        {
+          affectedUsers: apnsCredentialFailures.size,
+          sample: Array.from(apnsCredentialFailures).slice(0, 5),
+        }
+      );
+    }
 
     return result;
   } catch (error) {
@@ -475,9 +523,10 @@ async function checkUserRivers(
 export function evaluateAlert(
   reachId: string,
   reachData: ReachData,
-  userFlowUnit: "cfs" | "cms"
+  userFlowUnit: "cfs" | "cms",
+  now: Date = new Date()
 ): AlertData | null {
-  return assessReach(reachId, reachData, userFlowUnit).alert;
+  return assessReach(reachId, reachData, userFlowUnit, now).alert;
 }
 
 /** A reach's category, and the alert to send if it is elevated. */
@@ -504,14 +553,20 @@ export interface ReachAssessment {
 export function assessReach(
   reachId: string,
   reachData: ReachData,
-  userFlowUnit: "cfs" | "cms"
+  userFlowUnit: "cfs" | "cms",
+  // Injectable, and defaulted so no caller changes. The peak is windowed to
+  // what is still ahead, which makes this function clock-dependent — and a
+  // clock-dependent assertion with no seam is what cost three review rounds in
+  // ADR 0011 Phase 8, each fix removing one wall-clock dependency and adding
+  // another. The seam is the fix; the number is not.
+  now: Date = new Date()
 ): ReachAssessment {
   if (!reachData.forecast) {
     logger.warn(`⚠️ No forecast data for reach ${reachId}`);
     return {category: "Unknown", alert: null};
   }
 
-  const peak = getMaxForecastFlow(reachData.forecast);
+  const peak = getMaxForecastFlow(reachData.forecast, now);
   if (peak === null) {
     logger.warn(`⚠️ No valid forecast values for reach ${reachId}`);
     return {category: "Unknown", alert: null};
@@ -742,6 +797,37 @@ async function sendAlert(
           {userId: user.userId, errorCode}
         );
         staleTokens.push(token);
+      } else if (errorCode === "messaging/third-party-auth-error") {
+        // **APNs credential, not a bad token — and NEVER prune on this.**
+        //
+        // Firebase has a Production APNs key and no development one, so a
+        // build installed from Xcode registers against Apple's SANDBOX push
+        // environment and every send to it fails this way forever. The token
+        // is perfectly valid; our credential does not cover its environment.
+        //
+        // Deleting tokens on this code would be a catastrophic
+        // auto-remediation: if the PRODUCTION key were ever misconfigured,
+        // this same error fires for every user at once and the "cleanup"
+        // would erase every push token in the system. So it is warned about
+        // and kept.
+        //
+        // WARN rather than ERROR because per-send it is not actionable and is
+        // a documented development condition. Measured 2026-08-30: 103 of
+        // these in seven days, all from ONE user's debug build — together
+        // with the store's orphan alarm, essentially the project's entire
+        // ERROR volume for the week was two known-benign conditions. That is
+        // how a real outage gets missed.
+        //
+        // The genuinely alarming version of this — the production key broken
+        // for everyone — is caught by the per-run count below, which is the
+        // signal that actually distinguishes the two.
+        apnsCredentialFailures.add(user.userId);
+        logger.warn(
+          "📵 APNs credential does not cover this token's environment " +
+          `(user ${user.userId}) — expected for a debug build, since the ` +
+          "project has a Production APNs key and no development one",
+          {userId: user.userId, errorCode, reachId}
+        );
       } else {
         const errorMessage = error instanceof Error ?
           error.message : String(error);
@@ -943,11 +1029,28 @@ export interface ForecastPeak {
 function getMaxForecastFlow(forecastData: {
   shortRange: ForecastData | null;
   mediumRange: ForecastData | null;
-}): ForecastPeak | null {
+}, now: Date = new Date()): ForecastPeak | null {
   let peak: ForecastPeak | null = null;
 
   for (const series of [forecastData.shortRange, forecastData.mediumRange]) {
-    for (const point of series?.values ?? []) {
+    // **Only the part of the series that is still ahead.**
+    //
+    // This used to take the maximum over the WHOLE series, past points
+    // included, which is the same defect the weekly digest had until
+    // 2026-08-30 — and worse here, because this peak drives two things a
+    // person sees: the flood CATEGORY the alert claims, and the "in ~14 hours"
+    // line. A river that crested overnight and is now falling could wake
+    // someone at the old crest's severity, and describe a time that has
+    // already passed.
+    //
+    // `upcomingFrom` anchors on the point nearest `now` rather than filtering
+    // `t >= now`, matching the client's `ForecastPeak.upcomingPoints`. The
+    // anchor is normally the most recent PAST reading — the current value —
+    // and dropping it was the mistake the third Phase 8 review caught in the
+    // digest. Its `upcoming.isNotEmpty ? upcoming : points` fallback matters
+    // too: a reach whose forecast has entirely lapsed still classifies rather
+    // than silently going Unknown.
+    for (const point of upcomingFrom(series?.values ?? [], now)) {
       // -9999 is NOAA's no-data sentinel; keeping the guard as it was.
       if (point.value <= -9000) continue;
       if (peak === null || point.value > peak.value) {

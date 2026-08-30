@@ -186,7 +186,7 @@ describe("a REAL NOAA body, with its empty sibling sections", () => {
   function realNoaaShortRangeBody() {
     return {
       reach: {reachId: "10376596", name: "Test River"},
-      analysisAssimilation: {},
+      currentFlow: {},
       shortRange: {
         series: {
           referenceTime: "2026-08-24T23:00:00Z",
@@ -200,9 +200,9 @@ describe("a REAL NOAA body, with its empty sibling sections", () => {
     };
   }
 
-  test("analysisAssimilation keeps the shortRange series, not the empty one",
+  test("currentFlow keeps the shortRange series, not the empty one",
     () => {
-      const out = trimPayload("analysisAssimilation",
+      const out = trimPayload("currentFlow",
         realNoaaShortRangeBody());
 
       assert.ok("shortRange" in out,
@@ -210,7 +210,7 @@ describe("a REAL NOAA body, with its empty sibling sections", () => {
         "section the document has a valid runId and NO flow data at all");
       const sr = out.shortRange as Record<string, unknown>;
       assert.ok("series" in sr);
-      assert.equal("analysisAssimilation" in out, false,
+      assert.equal("currentFlow" in out, false,
         "the empty sibling section must not be stored as the payload");
     });
 
@@ -227,7 +227,7 @@ describe("a REAL NOAA body, with its empty sibling sections", () => {
   // so asserting over every product would flag correct behaviour.
   test("a product with real data is never trimmed to an empty section", () => {
     const body = realNoaaShortRangeBody();
-    for (const p of ["analysisAssimilation", "shortRange"] as const) {
+    for (const p of ["currentFlow", "shortRange"] as const) {
       const out = trimPayload(p, body);
       const dataKeys = Object.keys(out).filter((k) => k !== "reach");
       assert.ok(dataKeys.length > 0, `${p} kept no data section at all`);

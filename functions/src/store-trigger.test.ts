@@ -27,11 +27,15 @@ import {
   quotaUsage,
 } from "./store-trigger.js";
 import {ForecastProductId} from "./store-keys.js";
-import {maxHoldMs, maxRunAgeMs} from "./store-window.js";
+import {
+  StoredWindowSample,
+  maxHoldMs,
+  maxRunAgeMs,
+} from "./store-window.js";
 import {MANAGED_PRODUCTS, GEOGLOWS_PRODUCTS} from "./store-service.js";
 
 const MANAGED: ForecastProductId[] =
-  ["analysisAssimilation", "shortRange", "mediumRange", "longRange"];
+  ["currentFlow", "shortRange", "mediumRange", "longRange"];
 
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 
@@ -88,13 +92,13 @@ describe("guard 1 — trigger only on a real advance", () => {
   test("products are decided independently of each other", () => {
     const d = decideTriggers(
       probe({
-        analysisAssimilation: "2026-08-24T12:00:00Z",
+        currentFlow: "2026-08-24T12:00:00Z",
         shortRange: "2026-08-24T12:00:00Z",
         mediumRange: "2026-08-24T06:00:00Z",
         longRange: null,
       }),
       {
-        analysisAssimilation: "2026-08-24T11:00:00Z",
+        currentFlow: "2026-08-24T11:00:00Z",
         shortRange: "2026-08-24T12:00:00Z",
         mediumRange: "2026-08-24T00:00:00Z",
         longRange: "2026-08-24T00:00:00Z",
@@ -102,7 +106,7 @@ describe("guard 1 — trigger only on a real advance", () => {
       MANAGED);
 
     assert.deepEqual(d.triggered.sort(),
-      ["analysisAssimilation", "mediumRange"]);
+      ["currentFlow", "mediumRange"]);
   });
 
   test("every candidate gets a recorded reason, triggered or not", () => {
@@ -167,10 +171,13 @@ describe("per-product freshness — the hole the heartbeat had", () => {
    * @param {string} id - Document id.
    * @return {object} A StoredWindowSample.
    */
-  function sample(product: string, ageHours: number, id = "d") {
+  function sample(
+    product: string, ageHours: number, id = "d", reachId = "23021904"
+  ) {
     return {
       documentId: `${product}__${id}`,
       source: "nwm",
+      reachId,
       product,
       fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
       validUntil: NOW.toISOString(),
@@ -300,6 +307,59 @@ describe("per-product freshness — the hole the heartbeat had", () => {
   });
 });
 
+describe("a mixed-domain store is judged by the STRICTEST cap", () => {
+  // Phase 9. Hawaii and Puerto Rico short range may be held 24 hours because
+  // they publish 6- or 12-hourly; CONUS may be held 6. These aggregates take
+  // the NEWEST document per product, so without care a single fresh island
+  // write would buy the writer 24 hours of silence while every CONUS reach in
+  // the store went stale — the writer-liveness check quietly disabled by one
+  // river in Honolulu.
+  const NOW = new Date("2026-08-30T12:00:00.000Z");
+  const ISLAND = "800000010";
+  const CONUS = "23021904";
+
+  /**
+   * One stored document.
+   * @param {number} ageHours - How long ago it was fetched.
+   * @param {string} reachId - Which reach.
+   * @return {object} A StoredWindowSample.
+   */
+  function doc(ageHours: number, reachId: string) {
+    return {
+      documentId: `nwm__${reachId}__shortRange`,
+      source: "nwm",
+      reachId,
+      product: "shortRange",
+      fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
+      validUntil: NOW.toISOString(),
+    } as StoredWindowSample;
+  }
+
+  test("one fresh island write cannot mask a stale CONUS store", () => {
+    // Newest document is 1 h old (island). Without the strictest-cap rule the
+    // cap would be 24 h and this would read healthy.
+    const rows = assessProductFreshness(
+      [doc(1, ISLAND), doc(20, CONUS)], NOW);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].capMs, 6 * 3600_000,
+      "a store holding any CONUS reach must be judged at the CONUS cap");
+  });
+
+  test("an island-only store is NOT alarmed on healthy data", () => {
+    // 12 hours is one whole Hawaii cycle and perfectly normal. Judging it at
+    // the CONUS cap would alarm every cycle, forever, on a working store.
+    const rows = assessProductFreshness([doc(12, ISLAND)], NOW);
+    assert.equal(rows[0].capMs, 24 * 3600_000);
+    assert.equal(rows[0].stale, false);
+  });
+
+  test("an island-only store still alarms when it really is stuck", () => {
+    const rows = assessProductFreshness([doc(30, ISLAND)], NOW);
+    assert.equal(rows[0].stale, true,
+      "24 hours is two missed Hawaii cycles — not 'hold forever'");
+  });
+});
+
 describe("run currency — the failure write recency cannot see", () => {
   /**
    * A stored document written NOW but carrying a run from `runAgeHours` ago.
@@ -313,11 +373,13 @@ describe("run currency — the failure write recency cannot see", () => {
     product: string,
     runAgeHours: number,
     fetchedAgeHours = 0.5,
-    id = "d"
+    id = "d",
+    reachId = "23021904"
   ) {
     return {
       documentId: `${product}__${id}`,
       source: product.startsWith("geoglows") ? "geoglows" : "nwm",
+      reachId,
       product,
       fetchedAt:
         new Date(NOW.getTime() - fetchedAgeHours * 3600_000).toISOString(),
@@ -410,7 +472,7 @@ describe("run currency — the failure write recency cannot see", () => {
       new Date(NOW.getTime() - 600_000),
       new Date(NOW.getTime() - 600_000),
       NOW,
-      [held("shortRange", 5), held("analysisAssimilation", 5)] as never);
+      [held("shortRange", 5), held("currentFlow", 5)] as never);
     assert.equal(h.status, "healthy", h.problems.join("; "));
   });
 
@@ -497,7 +559,7 @@ describe("every managed product is actually judged", () => {
   // line saying so. Same mutation class as store-health-wiring.test.ts.
   test("MANAGED_PRODUCTS and GEOGLOWS_PRODUCTS all have a run-age cap", () => {
     for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
-      assert.notEqual(maxRunAgeMs(p), null,
+      assert.notEqual(maxRunAgeMs(p, "23021904"), null,
         `${p} is on the refresh cycle but has no MAX_RUN_AGE_MS entry, so it ` +
         "is silently exempt from run-currency checking");
     }
@@ -505,7 +567,7 @@ describe("every managed product is actually judged", () => {
 
   test("and a hold cap, so write recency judges them too", () => {
     for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
-      assert.ok(maxHoldMs(p) > 0, `${p} has no hold cap`);
+      assert.ok(maxHoldMs(p, "23021904") > 0, `${p} has no hold cap`);
     }
   });
 });
@@ -530,7 +592,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
   }
 
   // THE false alarm this grouping exists to stop, found by review before
-  // deploying. `analysisAssimilation` and `shortRange` both come from NOAA's
+  // deploying. `currentFlow` and `shortRange` both come from NOAA's
   // `short_range` series — same fetch, same section, same probe key, same
   // write — so they always stall together. With write recency AND run
   // currency both reporting per product, ONE pause produced four problem
@@ -545,7 +607,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
       new Date(NOW.getTime() - 7 * 3600_000),
       new Date(NOW.getTime() - 600_000),
       NOW,
-      [stalled("analysisAssimilation", 7), stalled("shortRange", 7)] as never);
+      [stalled("currentFlow", 7), stalled("shortRange", 7)] as never);
 
     assert.notEqual(h.status, "down",
       "one upstream series pausing must never read as a full outage: " +
@@ -591,7 +653,7 @@ describe("the alarm must not call a documented-normal day an outage", () => {
         new Date(NOW.getTime() - 600_000),
         NOW,
         [
-          stalled("analysisAssimilation", 11),
+          stalled("currentFlow", 11),
           stalled("shortRange", 11),
         ] as never);
 
@@ -628,9 +690,9 @@ describe("guard 11 — usage against the documented free tier", () => {
 });
 
 describe("the probe key is not always the product name", () => {
-  // Round 3, B3. The store's analysisAssimilation document holds a SHORT RANGE
+  // Round 3, B3. The store's currentFlow document holds a SHORT RANGE
   // body with a shortRange run, because that is what the client derives
-  // current flow from. The probe's analysisAssimilation key comes from NOAA's
+  // current flow from. The probe's currentFlow key comes from NOAA's
   // ?series=analysis_assimilation endpoint — a genuinely different series,
   // measured ~3 hours BEHIND short range.
   //
@@ -638,13 +700,13 @@ describe("the probe key is not always the product name", () => {
   // the product read "unchanged" and never triggered again — while its own
   // validUntil expired every hour.
   const probeSample = probe({
-    analysisAssimilation: "2026-08-24T20:00:00Z",
+    currentFlow: "2026-08-24T20:00:00Z",
     shortRange: "2026-08-24T23:00:00Z",
   });
 
-  test("analysisAssimilation is compared against the shortRange probe key",
+  test("currentFlow is compared against the shortRange probe key",
     () => {
-      assert.equal(probeRunFor(probeSample, "analysisAssimilation"),
+      assert.equal(probeRunFor(probeSample, "currentFlow"),
         "2026-08-24T23:00:00Z",
         "the AA document carries a shortRange run, so it must be compared " +
         "against the shortRange probe key");
@@ -652,18 +714,18 @@ describe("the probe key is not always the product name", () => {
 
   test("a stored shortRange run does NOT read as unchanged", () => {
     const d = decideTriggers(probeSample,
-      {analysisAssimilation: "2026-08-24T22:00:00Z"},
-      ["analysisAssimilation"]);
+      {currentFlow: "2026-08-24T22:00:00Z"},
+      ["currentFlow"]);
 
-    assert.deepEqual(d.triggered, ["analysisAssimilation"],
+    assert.deepEqual(d.triggered, ["currentFlow"],
       "comparing against the AA series made this product stop triggering " +
       "after its first write");
   });
 
   test("it still does not trigger when genuinely level", () => {
     const d = decideTriggers(probeSample,
-      {analysisAssimilation: "2026-08-24T23:00:00Z"},
-      ["analysisAssimilation"]);
+      {currentFlow: "2026-08-24T23:00:00Z"},
+      ["currentFlow"]);
     assert.deepEqual(d.triggered, []);
   });
 

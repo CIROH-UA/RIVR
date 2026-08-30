@@ -236,7 +236,7 @@ export function liveDocumentIdsFor(
   for (const entry of workList.entries) {
     for (const product of products) {
       // A product this source cannot serve has no document to sample.
-      if (!canFetch(entry.source, product)) continue;
+      if (!canFetch(entry.source, product, entry.reachId)) continue;
       ids.add(storageKey(entry.source, entry.reachId, product));
     }
   }

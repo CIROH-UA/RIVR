@@ -20,6 +20,7 @@ import 'package:rivr/models/2_usecases/features/auth/sign_in_with_biometrics_use
 import 'package:rivr/models/2_usecases/features/auth/delete_account_usecase.dart';
 import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_login_usecase.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/ui/2_presentation/features/map/pages/map_page.dart';
 
 /// Simple authentication state management for RIVR
 /// Whether this user can receive ANY notification, and therefore needs the
@@ -358,6 +359,12 @@ class AuthProvider with ChangeNotifier {
       _currentUserSettings = null;
       _fcmService.clearCache();
       _clearRiverDataCache();
+      // Where the previous user was looking, and whether they had been
+      // centred yet. Both are static so they outlive the map page — which is
+      // deliberate — and would otherwise outlive the ACCOUNT too, opening the
+      // next person's map on the previous person's river and skipping their
+      // own first centring.
+      MapPageState.forgetMapState();
       _setSuccess('Signed out successfully');
     } else {
       _setError(result.errorMessage ?? 'Sign out failed');

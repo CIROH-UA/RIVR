@@ -7,6 +7,7 @@ import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
+import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_flow_tiles.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/reach_details_disclosure.dart';
@@ -41,6 +42,38 @@ import 'package:rivr/ui/2_presentation/features/map/widgets/components/reach_act
 /// three-line text banner that explained the map's colour in prose; the
 /// decision of what the second tile says now lives in [peakOutlookFor].
 class ReachDetailsBottomSheet extends StatefulWidget {
+  /// How far ahead the flood colour for a reach looks.
+  ///
+  /// One tileset, three horizons — GEOGLOWS publishes 15 days outside the US,
+  /// NOAA 5 days across CONUS and Alaska, and only 48 hours for Hawaii and
+  /// Puerto Rico. The legend stays deliberately vague ("in the days ahead")
+  /// because no single number is true everywhere; the exact window belongs
+  /// here, where someone has asked about one specific river (ADR 0005).
+  ///
+  /// **Public and static so it can be tested at all.** It was a private getter
+  /// on the State, so the only tests touching a forecast horizon passed the
+  /// finished string IN as a parameter — the widget that displays it was
+  /// covered and the logic that chooses it never was. Found by auditing Phase
+  /// 9's own change rather than by review.
+  ///
+  /// Uses the shared band from [NwmDomain] rather than its own literals.
+  /// Phase 9 wrote a comment in `nwm_domain.dart` claiming this file already
+  /// shared that definition — it did not, it carried its own copy of
+  /// 800000000/921999999, and that claim was false from the moment it was
+  /// written. Two independent copies of "is this an island reach" is exactly
+  /// the drift the comment warned about.
+  static String forecastHorizonFor({
+    required ForecastSource source,
+    required String reachId,
+  }) {
+    if (source.isGeoglows) return 'Next 15 days';
+    // NOAA's Hawaii and Puerto Rico products are 48-hour only; there is no
+    // 5-day variant for them.
+    return nwmDomainOf(reachId) == NwmDomain.island
+        ? 'Next 48 hours'
+        : 'Next 5 days';
+  }
+
   final SelectedReach selectedReach;
   final VoidCallback? onViewForecast;
 
@@ -571,8 +604,8 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
     // joined with the thresholds read: gating the headline number on a separate
     // call means a slow threshold fetch hides a flow value that is ready.
     unawaited(
-        repo.read(keyFor(ForecastProduct.analysisAssimilation)).then((entry) {
-      logTiming('analysisAssimilation', entry != null);
+        repo.read(keyFor(ForecastProduct.currentFlow)).then((entry) {
+      logTiming('currentFlow', entry != null);
       if (!mounted || entry == null) return;
       final flow = CurrentFlowPayload.decode(entry, unitService);
       if (flow == null) {
@@ -589,7 +622,7 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
       });
       recomputeCategory();
     }, onError: (Object e) {
-      logTiming('analysisAssimilation', false);
+      logTiming('currentFlow', false);
       _failedProducts.add('current flow');
       AppLogger.warning('ReachDetailsSheet', 'Current flow failed: $e');
     }).whenComplete(markSettled));
@@ -721,17 +754,9 @@ class _ReachDetailsBottomSheetState extends State<ReachDetailsBottomSheet> {
   /// Puerto Rico. The legend stays deliberately vague ("in the days ahead")
   /// because no single number is true everywhere; the exact window belongs
   /// here, where someone has asked about one specific river (ADR 0005).
-  String get _forecastHorizon {
-    if (widget.selectedReach.source.isGeoglows) return 'Next 15 days';
-
-    // NOAA's Hawaii and Puerto Rico products are 48-hour only; there is no
-    // 5-day variant for them. Both use NHDPlus COMIDs in the 800M-921M band,
-    // which is how a US reach is identified as an island one.
-    final id = int.tryParse(widget.selectedReach.reachId);
-    if (id != null && id >= 800000000 && id <= 921999999) {
-      return 'Next 48 hours';
-    }
-    return 'Next 5 days';
-  }
+  String get _forecastHorizon => ReachDetailsBottomSheet.forecastHorizonFor(
+        source: widget.selectedReach.source,
+        reachId: widget.selectedReach.reachId,
+      );
 
 }

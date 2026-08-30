@@ -48,13 +48,14 @@
 // pinned across the two languages.
 
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 
 /// How long a product's value may be held on re-verification alone.
 ///
 /// MUST equal `MAX_HOLD_MS` in `functions/src/store-window.ts`. Pinned by a
 /// drift test that reads this file; changing one side alone fails CI.
 const Map<ForecastProduct, Duration> maxHold = {
-  ForecastProduct.analysisAssimilation: Duration(hours: 6),
+  ForecastProduct.currentFlow: Duration(hours: 6),
   ForecastProduct.shortRange: Duration(hours: 6),
   ForecastProduct.mediumRange: Duration(hours: 18),
   ForecastProduct.longRange: Duration(hours: 36),
@@ -75,9 +76,46 @@ const Map<ForecastProduct, Duration> maxHold = {
 /// "check again", never towards "hold forever".
 const Duration defaultMaxHold = Duration(hours: 6);
 
-/// How long [product] may be held without upstream confirming a new run.
-Duration maxHoldFor(ForecastProduct product) =>
-    maxHold[product] ?? defaultMaxHold;
+/// Hold caps that REPLACE [maxHold] for Hawaii and Puerto Rico reaches.
+///
+/// **Why a second table rather than a bigger number in the first one.** The
+/// cap means "how long can upstream plausibly go quiet before silence stops
+/// meaning nothing changed". That is a function of the publish cadence, and
+/// island short range publishes every 6 hours (Puerto Rico) or 12 (Hawaii)
+/// where CONUS publishes hourly — measured 2026-08-30 from NOAA's production
+/// listing. Raising the shared cap to 24 hours would make a genuinely stuck
+/// CONUS document look healthy for a day.
+///
+/// 24 hours is two missed Hawaii cycles, the same shape as the CONUS entries
+/// (long range: 6-hour cycle, 36-hour cap). Below it, a perfectly healthy
+/// Hawaii document expires BETWEEN runs and every device falls to the live
+/// path for half of every cycle — which would break guard 1's "a favourite
+/// renders with zero upstream calls" for anyone with a Hawaii river.
+///
+/// Only `shortRange` differs. Analysis assimilation publishes hourly in every
+/// domain (`analysis_assim_hawaii` ran t00z..t14z on 2026-08-30), and the
+/// islands have no medium or long range at all.
+const Map<ForecastProduct, Duration> islandMaxHold = {
+  ForecastProduct.shortRange: Duration(hours: 24),
+  // `currentFlow` fetches the SHORT RANGE series
+  // (`fetchCurrentFlowOnly` -> `fetchForecast(reachId, 'short_range')`, and
+  // the server maps it to `"short_range"` too), so it publishes on short
+  // range's cadence and needs short range's cap. It was omitted here while it
+  // was still called `analysisAssimilation`, which left island current-flow
+  // documents on the 6-hour CONUS cap while carrying 12-hourly Hawaii data —
+  // expiring them between runs, the failure these tables exist to prevent.
+  ForecastProduct.currentFlow: Duration(hours: 24),
+};
+
+/// How long [product] at [reachId] may be held without upstream confirming a
+/// new run.
+Duration maxHoldFor(ForecastProduct product, {required String reachId}) {
+  if (nwmDomainOf(reachId) == NwmDomain.island) {
+    final island = islandMaxHold[product];
+    if (island != null) return island;
+  }
+  return maxHold[product] ?? defaultMaxHold;
+}
 
 /// How old the RUN ITSELF may be, per product.
 ///
@@ -98,15 +136,37 @@ Duration maxHoldFor(ForecastProduct product) =>
 /// products carry no run identity, and defaulting them is how the hold cap
 /// reported a healthy store as down within a minute of reaching production.
 const Map<ForecastProduct, Duration> maxRunAge = {
-  ForecastProduct.analysisAssimilation: Duration(hours: 16),
+  ForecastProduct.currentFlow: Duration(hours: 16),
   ForecastProduct.shortRange: Duration(hours: 16),
   ForecastProduct.mediumRange: Duration(hours: 24),
   ForecastProduct.longRange: Duration(hours: 36),
   ForecastProduct.geoglowsForecast: Duration(hours: 42),
 };
 
-/// How old [product]'s run may be, or null when it is not judged.
-Duration? maxRunAgeFor(ForecastProduct product) => maxRunAge[product];
+/// Run-age caps that REPLACE [maxRunAge] for Hawaii and Puerto Rico reaches.
+///
+/// **16 hours would have false-alarmed on the day this was written.** NWPS
+/// reach 800000010 (Oahu) reported its short-range run as `00:00Z` at 15:16Z
+/// on 2026-08-30 — 15.3 hours old, still the newest that existed, and one
+/// missed publication away from tripping the CONUS cap on a healthy river.
+///
+/// 28 hours is one full Hawaii cycle plus the observed publication lag plus
+/// margin, and still catches a genuinely stuck run: two missed cycles is 36
+/// hours and trips well before that.
+const Map<ForecastProduct, Duration> islandMaxRunAge = {
+  ForecastProduct.shortRange: Duration(hours: 28),
+  // Same reason as [islandMaxHold]: this product carries short-range water.
+  ForecastProduct.currentFlow: Duration(hours: 28),
+};
+
+/// How old [product]'s run at [reachId] may be, or null when it is not judged.
+Duration? maxRunAgeFor(ForecastProduct product, {required String reachId}) {
+  if (nwmDomainOf(reachId) == NwmDomain.island) {
+    final island = islandMaxRunAge[product];
+    if (island != null) return island;
+  }
+  return maxRunAge[product];
+}
 
 /// The instant a run identity refers to, or null when it carries none.
 ///
@@ -133,8 +193,9 @@ bool runTooOld({
   required ForecastProduct product,
   required String? runId,
   required DateTime now,
+  required String reachId,
 }) {
-  final cap = maxRunAgeFor(product);
+  final cap = maxRunAgeFor(product, reachId: reachId);
   if (cap == null) return false;
   final at = runInstant(runId);
   if (at == null) return false;
@@ -152,5 +213,7 @@ bool heldTooLong({
   required ForecastProduct product,
   required DateTime fetchedAt,
   required DateTime now,
+  required String reachId,
 }) =>
-    now.toUtc().difference(fetchedAt.toUtc()) > maxHoldFor(product);
+    now.toUtc().difference(fetchedAt.toUtc()) >
+    maxHoldFor(product, reachId: reachId);

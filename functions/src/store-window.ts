@@ -33,7 +33,7 @@ import {
   ForecastProductId,
   ForecastSourceId,
 } from "./store-keys.js";
-import {storeValidUntil} from "./store-document.js";
+import {isIslandReach, storeValidUntil} from "./store-document.js";
 
 /**
  * How long a value may be held on re-verification alone, per product.
@@ -46,7 +46,7 @@ import {storeValidUntil} from "./store-document.js";
  * documents that are simply waiting, which is the bug this file exists to fix.
  */
 export const MAX_HOLD_MS: Readonly<Record<string, number>> = {
-  analysisAssimilation: 6 * 3600_000,
+  currentFlow: 6 * 3600_000,
   shortRange: 6 * 3600_000,
   mediumRange: 18 * 3600_000,
   longRange: 36 * 3600_000,
@@ -68,10 +68,65 @@ export const MAX_HOLD_MS: Readonly<Record<string, number>> = {
 /** Default cap for a product not named above. Deliberately short. */
 export const DEFAULT_MAX_HOLD_MS = 6 * 3600_000;
 
+/**
+ * Hold caps that REPLACE `MAX_HOLD_MS` for Hawaii and Puerto Rico reaches.
+ *
+ * Mirrors `islandMaxHold` in
+ * `lib/services/4_infrastructure/river_data/hold_policy.dart` and is pinned
+ * against it by `hold-policy-drift.test.ts`.
+ *
+ * A second table rather than a bigger shared number: the cap encodes how long
+ * silence can mean "nothing changed", which follows the publish cadence.
+ * Island short range publishes every 6 hours (Puerto Rico) or 12 (Hawaii)
+ * against CONUS's hourly, measured 2026-08-30 from NOAA's production listing.
+ * Raising the shared cap to 24 hours would let a genuinely stuck CONUS
+ * document look healthy for a day.
+ *
+ * 24 hours is two missed Hawaii cycles — the same shape as long range's
+ * 6-hour cycle and 36-hour cap. Below it a healthy Hawaii document expires
+ * BETWEEN runs, and every device holding that favourite drops to the live path
+ * for half of every cycle.
+ */
+export const ISLAND_MAX_HOLD_MS: Readonly<Record<string, number>> = {
+  shortRange: 24 * 3600_000,
+  // `currentFlow` is a misnomer: `store-upstream` maps it to the
+  // `"short_range"` series, so it publishes on short range's cadence and needs
+  // short range's cap. Omitting it left island current-flow documents on the
+  // 6-hour CONUS cap while carrying 12-hourly Hawaii data.
+  currentFlow: 24 * 3600_000,
+};
+
+/**
+ * Run-age caps that REPLACE `MAX_RUN_AGE_MS` for island reaches.
+ *
+ * The CONUS cap of 16 hours would have false-alarmed on the day this was
+ * written: NWPS reach 800000010 (Oahu) reported its short-range run as 00:00Z
+ * at 15:16Z on 2026-08-30 — 15.3 hours old and still the newest in existence.
+ *
+ * 28 hours is one full Hawaii cycle plus the observed publication lag plus
+ * margin, and still catches a stuck run: two missed cycles is 36 hours.
+ */
+export const ISLAND_MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
+  shortRange: 28 * 3600_000,
+  // Same reason as ISLAND_MAX_HOLD_MS: this product carries short-range water.
+  currentFlow: 28 * 3600_000,
+};
+
 /** One stored document, reduced to what the window decision needs. */
 export interface StoredWindowSample {
   documentId: string;
   source: ForecastSourceId;
+  /**
+   * Which reach this document is for.
+   *
+   * Carried explicitly rather than parsed back out of `documentId`. The id
+   * format is a cross-language contract and re-deriving a field from it here
+   * would make this file a second place that has to know it — the kind of
+   * quiet duplication that survives a rename until something breaks in
+   * production. Needed since Phase 9, because a Hawaii or Puerto Rico
+   * short-range document expires on a different cycle from a CONUS one.
+   */
+  reachId: string;
   product: ForecastProductId;
   /** ISO instant the value was fetched from upstream. */
   fetchedAt: string;
@@ -115,7 +170,7 @@ export interface StoredWindowSample {
  *   forgot that run age = publish lag + stall: NOAA's `referenceTime` is
  *   already ~3 h behind the wall clock on an ordinary day. Replaying 163
  *   samples from `publish_cadence_log`, an 8 h cap would have fired on
- *   **29 of them (17.8%)** for `analysisAssimilation` and 7 (4.3%) for
+ *   **29 of them (17.8%)** for `currentFlow` and 7 (4.3%) for
  *   `shortRange`, with a maximum observed age of 11.0 h. 16 h clears the
  *   worst observed sample, the documented five-hour stall on top of the
  *   baseline lag, and one missed refresh interval.
@@ -136,7 +191,7 @@ export interface StoredWindowSample {
  *   reach 49.5 h before replacement.
  */
 export const MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
-  analysisAssimilation: 16 * 3600_000,
+  currentFlow: 16 * 3600_000,
   shortRange: 16 * 3600_000,
   mediumRange: 24 * 3600_000,
   longRange: 36 * 3600_000,
@@ -154,7 +209,14 @@ export const MAX_RUN_AGE_MS: Readonly<Record<string, number>> = {
  * @param {ForecastProductId} product - The product.
  * @return {number | null} Cap in milliseconds, or null if not applicable.
  */
-export function maxRunAgeMs(product: ForecastProductId): number | null {
+export function maxRunAgeMs(
+  product: ForecastProductId,
+  reachId: string
+): number | null {
+  if (isIslandReach(reachId)) {
+    const island = ISLAND_MAX_RUN_AGE_MS[product];
+    if (island !== undefined) return island;
+  }
   return MAX_RUN_AGE_MS[product] ?? null;
 }
 
@@ -176,6 +238,18 @@ export interface WindowPlan {
   abandoned: string[];
   /** Documents already covered past the next refresh; nothing to do. */
   covered: number;
+  /**
+   * Documents outside the work list — reaches nobody favourites any more,
+   * still inside the GC's seven-day grace.
+   *
+   * Counted SEPARATELY from [abandoned], and that separation is the whole
+   * point. No run will ever rewrite an orphan, so every hour it sits further
+   * past its hold cap; folding it into `abandoned` reported "upstream has
+   * gone quiet" at ERROR, hourly, for a store that was working perfectly.
+   * Measured 2026-08-30: 83 store errors in seven days, every hold-cap one of
+   * them four unfavourited reaches.
+   */
+  orphaned: number;
   /** Documents whose window could not be read as dates. */
   malformed: string[];
 }
@@ -186,7 +260,14 @@ export interface WindowPlan {
  * @param {ForecastProductId} product - The product.
  * @return {number} Cap in milliseconds.
  */
-export function maxHoldMs(product: ForecastProductId): number {
+export function maxHoldMs(
+  product: ForecastProductId,
+  reachId: string
+): number {
+  if (isIslandReach(reachId)) {
+    const island = ISLAND_MAX_HOLD_MS[product];
+    if (island !== undefined) return island;
+  }
   return MAX_HOLD_MS[product] ?? DEFAULT_MAX_HOLD_MS;
 }
 
@@ -201,14 +282,24 @@ export function maxHoldMs(product: ForecastProductId): number {
  * @return {WindowPlan} What to extend, what to abandon, what needs nothing.
  */
 export function planWindowExtensions(
+  liveDocumentIds: ReadonlySet<string>,
   samples: readonly StoredWindowSample[],
   now: Date
 ): WindowPlan {
   const plan: WindowPlan = {
-    extend: [], abandoned: [], covered: 0, malformed: [],
+    extend: [], abandoned: [], covered: 0, orphaned: 0, malformed: [],
   };
 
   for (const s of samples) {
+    // Orphans first, before any judgement about staleness. A document for a
+    // reach nobody follows is not stale — it is unmaintained on purpose, and
+    // no run will ever rewrite it. Judging it by a hold cap says "upstream
+    // has gone quiet" about a store that is working exactly as designed.
+    if (!liveDocumentIds.has(s.documentId)) {
+      plan.orphaned++;
+      continue;
+    }
+
     const fetchedAt = Date.parse(s.fetchedAt);
     const currentUntil = Date.parse(s.validUntil);
     if (Number.isNaN(fetchedAt) || Number.isNaN(currentUntil)) {
@@ -218,7 +309,7 @@ export function planWindowExtensions(
       continue;
     }
 
-    if (now.getTime() - fetchedAt > maxHoldMs(s.product)) {
+    if (now.getTime() - fetchedAt > maxHoldMs(s.product, s.reachId)) {
       // Upstream has been quiet longer than "nothing changed" can explain.
       // Let it expire and let the device tell the truth by fetching live.
       plan.abandoned.push(s.documentId);
@@ -236,9 +327,9 @@ export function planWindowExtensions(
     //
     // Clamping makes the two sides agree to the instant, which is what
     // hold_policy.dart and ADR decision 22 both claim.
-    const capEnd = fetchedAt + maxHoldMs(s.product);
+    const capEnd = fetchedAt + maxHoldMs(s.product, s.reachId);
     const target = Math.min(
-      storeValidUntil(s.source, s.product, now).getTime(), capEnd);
+      storeValidUntil(s.source, s.product, now, s.reachId).getTime(), capEnd);
     if (target <= currentUntil) {
       plan.covered++;
       continue;

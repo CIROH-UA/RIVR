@@ -1,7 +1,7 @@
 // functions/src/store-upstream.test.ts
 //
 // Round 2 found this module untested, and F2 in it: the server fetched NOAA's
-// `analysis_assimilation` series and stored it under the analysisAssimilation
+// `analysis_assimilation` series and stored it under the currentFlow
 // key, while the CLIENT stores a `short_range` body under that same key and
 // reads it with ForecastValues.currentFlow — which only ever looks at
 // short/medium/long range. Every stored AA document would have decoded to a
@@ -71,12 +71,12 @@ describe("only fetchable work is advertised as fetchable", () => {
   // place. GEOGLOWS is fetched by store-geoglows.ts on its own daily schedule.
   test("GEOGLOWS is fetchable, on its own daily path", () => {
     assert.deepEqual(CAN_FETCH.geoglows, ["geoglowsForecast"]);
-    assert.equal(canFetch("geoglows", "geoglowsForecast"), true);
+    assert.equal(canFetch("geoglows", "geoglowsForecast", "23021904"), true);
   });
 
   test("the NWM fetcher refuses GEOGLOWS rather than half-serving it", () => {
     // Routing is fetchForStore's job; store-upstream must not quietly try.
-    assert.equal(canFetch("nwm", "geoglowsForecast"), false);
+    assert.equal(canFetch("nwm", "geoglowsForecast", "23021904"), false);
   });
 
   // This test previously asserted these two were NOT fetchable at all, which
@@ -87,8 +87,8 @@ describe("only fetchable work is advertised as fetchable", () => {
   // fetchable. What must stay true is the part the old test's NAME described:
   // they do not belong on the HOURLY cycle.
   test("the near-static products are fetchable", () => {
-    assert.equal(canFetch("nwm", "returnPeriods"), true);
-    assert.equal(canFetch("nwm", "reachMetadata"), true);
+    assert.equal(canFetch("nwm", "returnPeriods", "23021904"), true);
+    assert.equal(canFetch("nwm", "reachMetadata", "23021904"), true);
   });
 
   test("the near-static products are NOT on the hourly cycle", () => {
@@ -123,12 +123,51 @@ describe("only fetchable work is advertised as fetchable", () => {
       "the app watches a different NWM product set than the server writes");
   });
 
-  test("the four hourly NWM products are fetchable", () => {
+  test("the four hourly NWM products are fetchable for a CONUS reach", () => {
     for (const p of
-      ["analysisAssimilation", "shortRange", "mediumRange", "longRange"] as
+      ["currentFlow", "shortRange", "mediumRange", "longRange"] as
       const) {
-      assert.equal(canFetch("nwm", p), true);
+      assert.equal(canFetch("nwm", p, "23021904"), true);
     }
+  });
+
+  // Phase 9 review, finding 6. The phase MEASURED that NWPS reports only
+  // `["analysis_assimilation", "short_range"]` for Oahu reach 800000010, and
+  // that NOMADS has no medium_range_hawaii or long_range_puertorico directory
+  // at all — then acted on it only by omitting island entries from the
+  // hold-cap tables. Every other part of the system still believed these
+  // products exist everywhere.
+  //
+  // Untreated, the first Honolulu or San Juan favourite puts two products per
+  // reach into permanent per-cycle fetch failure: `reachesToRetry` never
+  // empties, and the app offers forecast ranges NOAA cannot serve. Round 2's
+  // F3 was this same defect for a whole source — planning work that cannot be
+  // served guarantees a failure per reach per run.
+  test("islands have NO medium or long range", () => {
+    for (const p of ["mediumRange", "longRange"] as const) {
+      assert.equal(canFetch("nwm", p, "800000010"), false,
+        `${p} does not exist for Hawaii or Puerto Rico; planning it is a ` +
+        "guaranteed failure every cycle, forever");
+    }
+  });
+
+  test("islands DO have current flow, short range and the static pair", () => {
+    // The other direction, and the one that would break a real user: an
+    // over-broad exclusion leaves an island favourite with nothing at all.
+    for (const p of
+      ["currentFlow", "shortRange", "returnPeriods", "reachMetadata"] as
+      const) {
+      assert.equal(canFetch("nwm", p, "800000010"), true, `${p}`);
+    }
+  });
+
+  test("the exclusion is by DOMAIN, not by product", () => {
+    // Stated as a difference so a blanket removal of mediumRange cannot pass.
+    assert.notEqual(
+      canFetch("nwm", "mediumRange", "23021904"),
+      canFetch("nwm", "mediumRange", "800000010"),
+      "medium range exists for CONUS and not for the islands; one answer " +
+      "for both is wrong whichever answer it is");
   });
 });
 
@@ -138,12 +177,12 @@ describe("the Dart contract has not drifted", () => {
   // "analysis_assimilation" passed every test — the mutation survived when
   // this file was first written, which is exactly the fake-guard shape the
   // review gate hunts.
-  test("analysisAssimilation is fetched as short_range, like the client", () => {
-    assert.equal(SERIES_BY_PRODUCT.analysisAssimilation, "short_range",
+  test("currentFlow is fetched as short_range, like the client", () => {
+    assert.equal(SERIES_BY_PRODUCT.currentFlow, "short_range",
       "the client stores a short_range body under this key; fetching " +
       "analysis_assimilation stores something ForecastValues.currentFlow " +
       "never reads, so every surface shows no flow");
-    assert.equal(SECTION_BY_PRODUCT.analysisAssimilation, "shortRange",
+    assert.equal(SECTION_BY_PRODUCT.currentFlow, "shortRange",
       "the run identity must come from the shortRange section, as " +
       "NwmDataSource does");
   });
@@ -160,14 +199,14 @@ describe("the Dart contract has not drifted", () => {
   // F2, pinned. If the client ever stops deriving current flow from the short
   // range series, this file's mapping becomes wrong again — and the symptom is
   // a null flow on screen, with nothing wrong server-side.
-  test("the client still derives analysisAssimilation from short_range", () => {
+  test("the client still derives currentFlow from short_range", () => {
     const src = readFileSync(
       REPO + "lib/services/4_infrastructure/river_data/nwm_data_source.dart",
       "utf8");
     // lastIndexOf, not indexOf: the FIRST occurrence is in validUntil's
     // switch, which says nothing about which series is fetched. Getting this
     // wrong made the test read the wrong branch entirely.
-    const idx = src.lastIndexOf("case ForecastProduct.analysisAssimilation:");
+    const idx = src.lastIndexOf("case ForecastProduct.currentFlow:");
     assert.notEqual(idx, -1, "the AA branch is gone from NwmDataSource");
     const branch = src.slice(idx, idx + 700);
 

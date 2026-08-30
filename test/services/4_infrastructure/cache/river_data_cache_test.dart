@@ -1009,7 +1009,7 @@ void guard9EvictOrderingTests() {
   const key = RiverDataKey(
     source: ForecastSource.nwm,
     reachId: '18471070',
-    product: ForecastProduct.analysisAssimilation,
+    product: ForecastProduct.currentFlow,
   );
 
   RiverDataEntry entry() => RiverDataEntry(

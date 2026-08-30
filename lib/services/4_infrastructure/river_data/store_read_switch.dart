@@ -76,6 +76,27 @@ class StoreReadSwitch {
   /// nothing of the sort.
   final ChangeNotifier changes = ChangeNotifier();
 
+  bool _resolved = false;
+
+  /// Whether the switch's value can be TRUSTED as a decision yet.
+  ///
+  /// `isStoreReadEnabled` is `getBool`, which returns false both for "the
+  /// operator turned this off" and for "we have not fetched yet". Those are
+  /// very different facts and the difference used to be harmless, because the
+  /// only consequence of reading false early was not subscribing — which the
+  /// post-fetch announce then corrected.
+  ///
+  /// It stopped being harmless when the coordinator gained a reclaim that
+  /// EVICTS on the off-branch. Acting on an unresolved false means throwing
+  /// away good cached data on an ordinary launch of a device where the store
+  /// is enabled and was never turned off. Round 6 (Phase 8 re-review) found
+  /// exactly that, introduced by the previous round's fix.
+  ///
+  /// True once a fetch has completed, in either direction — a failed fetch
+  /// still resolves, because Remote Config then serves the last activated
+  /// value and that IS the operator's decision.
+  bool get isResolved => _resolved;
+
   /// Whether devices may read the store.
   ///
   /// False until a fetch has activated a true value — `getBool` returns false
@@ -131,6 +152,7 @@ class StoreReadSwitch {
       // resolves AFTER attach(). Without announcing it the store never
       // activated on a cold start unless a favourites change happened to
       // follow.
+      _resolved = true;
       _announce();
       AppLogger.info(
         _tag,
@@ -144,6 +166,7 @@ class StoreReadSwitch {
         _tag,
         'remote config fetch failed; keeping the last activated value: $e',
       );
+      _resolved = true;
       _announce();
     }
   }

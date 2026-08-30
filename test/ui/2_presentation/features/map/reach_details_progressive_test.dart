@@ -212,7 +212,7 @@ class _RecordingRepo implements IRiverDataRepository {
             },
           ],
         };
-      case ForecastProduct.analysisAssimilation:
+      case ForecastProduct.currentFlow:
         if (undecodableFlow) return <String, dynamic>{};
         // Must be decodable: `fromApiResponse` reads json['reach'], and an
         // empty map made it throw. Review found that every "passing" test was
@@ -333,7 +333,7 @@ void main() {
     testWidgets('renders with zero completed reads', (t) async {
       final repo = _RecordingRepo(delays: {
         ForecastProduct.reachMetadata: const Duration(seconds: 30),
-        ForecastProduct.analysisAssimilation: const Duration(seconds: 30),
+        ForecastProduct.currentFlow: const Duration(seconds: 30),
         ForecastProduct.returnPeriods: const Duration(seconds: 30),
       });
       _register(repo);
@@ -381,7 +381,7 @@ void main() {
       final blocking = repo.requested.take(3).toSet();
       expect(blocking, {
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       }, reason: 'first paint must not wait on the 156 KB bundle');
       expect(blocking, isNot(contains(ForecastProduct.mediumRange)));
@@ -404,7 +404,7 @@ void main() {
 
       expect(repo.requested.toSet(), {
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       });
       expect(repo.requested, isNot(contains(ForecastProduct.reachSummary)),
@@ -421,7 +421,7 @@ void main() {
       // body and be counted as "already done" by the next one.
       final repo = _RecordingRepo(delays: {
         ForecastProduct.reachMetadata: const Duration(milliseconds: 80),
-        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 40),
+        ForecastProduct.currentFlow: const Duration(milliseconds: 40),
         ForecastProduct.returnPeriods: const Duration(milliseconds: 60),
       });
       _register(repo);
@@ -442,7 +442,7 @@ void main() {
     testWidgets('the name appears while flow is still outstanding', (t) async {
       final repo = _RecordingRepo(delays: {
         ForecastProduct.reachMetadata: const Duration(milliseconds: 50),
-        ForecastProduct.analysisAssimilation: const Duration(seconds: 30),
+        ForecastProduct.currentFlow: const Duration(seconds: 30),
         ForecastProduct.returnPeriods: const Duration(seconds: 30),
       });
       _register(repo);
@@ -464,7 +464,7 @@ void main() {
         (t) async {
       final repo = _RecordingRepo(delays: {
         ForecastProduct.reachMetadata: const Duration(milliseconds: 10),
-        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 20),
+        ForecastProduct.currentFlow: const Duration(milliseconds: 20),
         ForecastProduct.returnPeriods: const Duration(seconds: 30),
       });
       _register(repo);
@@ -514,7 +514,7 @@ void main() {
     // kept answering. A named river with no flow beats an error card.
     testWidgets('flow fails but identity succeeds — no error card', (t) async {
       final repo = _RecordingRepo(failures: {
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       });
       _register(repo);
@@ -531,7 +531,7 @@ void main() {
         (t) async {
       final repo = _RecordingRepo(failures: {
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       });
       _register(repo);
@@ -560,7 +560,7 @@ void main() {
     testWidgets('Retry re-issues the reads', (t) async {
       final repo = _RecordingRepo(failures: {
         ForecastProduct.reachMetadata,
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
         ForecastProduct.returnPeriods,
       });
       _register(repo);
@@ -628,7 +628,7 @@ void main() {
         delays: {ForecastProduct.returnPeriods: const Duration(seconds: 30)},
         failures: {
           ForecastProduct.reachMetadata,
-          ForecastProduct.analysisAssimilation,
+          ForecastProduct.currentFlow,
         },
       );
       _register(repo);
@@ -781,7 +781,7 @@ void main() {
 
     testWidgets('category appears when flow lands AFTER thresholds', (t) async {
       final repo = _RecordingRepo(delays: {
-        ForecastProduct.analysisAssimilation: const Duration(milliseconds: 400),
+        ForecastProduct.currentFlow: const Duration(milliseconds: 400),
       });
       int? recolour;
       _register(repo);
@@ -875,7 +875,7 @@ void main() {
     testWidgets('disposing while reads are outstanding is safe', (t) async {
       final repo = _RecordingRepo(delays: {
         ForecastProduct.reachMetadata: const Duration(seconds: 5),
-        ForecastProduct.analysisAssimilation: const Duration(seconds: 5),
+        ForecastProduct.currentFlow: const Duration(seconds: 5),
         ForecastProduct.returnPeriods: const Duration(seconds: 5),
       });
       _register(repo);
@@ -929,12 +929,12 @@ void main() {
       _register(_RecordingRepo(
         delays: {
           ForecastProduct.reachMetadata: const Duration(seconds: 5),
-          ForecastProduct.analysisAssimilation: const Duration(seconds: 5),
+          ForecastProduct.currentFlow: const Duration(seconds: 5),
           ForecastProduct.returnPeriods: const Duration(seconds: 5),
         },
         failures: {
           ForecastProduct.reachMetadata,
-          ForecastProduct.analysisAssimilation,
+          ForecastProduct.currentFlow,
           ForecastProduct.returnPeriods,
         },
       ));
@@ -1017,7 +1017,7 @@ void main() {
     // only an absence.
     testWidgets('a reach with no flow says so', (t) async {
       final repo = _RecordingRepo(failures: {
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
       });
       _register(repo);
 
@@ -1068,7 +1068,7 @@ void main() {
 
     testWidgets('Retry from the no-flow card actually refetches', (t) async {
       final repo = _RecordingRepo(failures: {
-        ForecastProduct.analysisAssimilation,
+        ForecastProduct.currentFlow,
       });
       _register(repo);
 

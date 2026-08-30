@@ -25,7 +25,7 @@ lib/
       shared/                            -- Core entities (ReachData, FavoriteRiver, UserSettings, etc.)
       features/{auth,forecast,map}/      -- Feature-specific entities
     2_usecases/
-      shared/                            -- BaseUseCase
+      shared/                            -- shared use-case helpers
       features/{auth,favorites,forecast,map,settings}/  -- Use cases by feature
   services/
     0_config/shared/                     -- config.dart (gitignored), constants.dart
@@ -57,7 +57,7 @@ lib/
       shared/                            -- ConnectivityProvider
       features/{auth,favorites,forecast}/ -- Providers (ChangeNotifier)
     2_presentation/
-      routing/                           -- AppRouter, AuthGuard, routes
+      routing/                           -- AppRouter, routes
       shared/{pages,widgets}/            -- Shared UI components
       features/{auth,favorites,forecast,map,onboarding,settings}/  -- Pages + widgets
   utils/                                 -- Utilities (river_image, email_validator, etc.)
@@ -70,6 +70,23 @@ functions_geoglows/                      -- Firebase Cloud Functions (Python, "g
                                             flood colours now come from a daily tileset)
   vpu_slices.json                        -- bundled VPU -> river-slice index (stream conditions)
 ```
+
+### Map camera and the location puck (ADR 0013)
+
+**The location zoom is 12, and that is the tileset's ceiling, not a taste
+call.** `nwm-channels-v3` is tiled z0-12; above that Mapbox stretches the z12
+tile, so lines thicken and no new stream appears. Zoom 14 (the old value) shows
+1.6 km on a Pro Max against 6.4 km at 12 — three quarters of the view thrown
+away for no extra data.
+
+**The blue dot is Mapbox's own location component**, with `showAccuracyRing`
+on, so a vague fix draws a visible circle instead of implying precision. Every
+setting defaults to false, which is why the map drew nothing before. It is
+re-applied on every style load — a basemap change rebuilds the style and takes
+the component with it.
+
+**The camera centres on the FIRST open only**; after that the recentre button.
+The flag is static because the page state is recreated on every open.
 
 ### Flood colours — current design (superseded the Cloud Function pipeline)
 
@@ -188,7 +205,25 @@ and "done" messages have never caught any of them.
 - **Coordinator pattern:** Repository implementations map raw errors to `ServiceResult` failures
 - **Entity/DTO separation:** Pure domain entities in `models/1_domain/`, DTOs with serialization in `services/3_datasources/`
 - **Provider pattern:** Providers extend ChangeNotifier, registered in main.dart via MultiProvider
-- **Phased data loading:** ForecastService uses loadOverviewData -> loadSupplementaryData -> loadCompleteReachData
+- **ONE data path — `IRiverDataRepository`.** Every surface that shows river
+  data reads through it: favourites, the map sheet, the forecast pages, the
+  Weekly Outlook. Ask for a `RiverDataKey` (source + reachId + product) and it
+  answers from the shared cache, the cloud store, or upstream, in that order.
+  Nothing calls NOAA or GEOGLOWS directly any more. *(The old phased loader —
+  `loadOverviewData` → `loadSupplementaryData` → `loadCompleteReachData` — was
+  deleted in ADR 0011 Phase 3; `one_forecast_path_test.dart` fails if anything
+  calls it again. `ForecastService` is now 50 lines and one method, backing
+  the `reachMetadata` product.)*
+- **Products, not bundles.** A surface asks for exactly what it renders —
+  `currentFlow`, `shortRange`, `mediumRange`, `longRange`, `returnPeriods`,
+  `reachMetadata`, `geoglowsForecast`. The composite `reachSummary` bundle is
+  gone: it made every card pay a 156 KB medium-range fetch to draw one number.
+  **`currentFlow` fetches the SHORT RANGE series** despite what an older name
+  suggested — see the ADR 0011 note further down.
+- **Freshness is publish-aligned, not a timer.** Each product expires when its
+  upstream could next publish, per NWM domain (CONUS hourly, islands 6-hourly).
+  Two separate questions are tracked: how long since we WROTE (hold cap) and
+  how old the WATER is (run age).
 - **Unit conversion:** All forecast data converted at the API layer (NoaaApiService) before reaching UI
 - **DI:** GetIt via `services/5_injection/dependency_container.dart` (orchestrator) + per-feature files (`auth_dependencies.dart`, `favorites_dependencies.dart`, etc.)
 
@@ -328,7 +363,9 @@ flutter test integration_test/                  # Integration tests
 | `lib/services/0_config/shared/constants.dart` | Non-sensitive constants, forecast definitions |
 | `lib/models/1_domain/shared/reach_data.dart` | Core entity for river reaches (800+ lines) |
 | `lib/services/3_datasources/shared/dtos/reach_data_dto.dart` | ReachData DTO with NOAA API parsing/serialization |
-| `lib/services/4_infrastructure/forecast/forecast_service.dart` | Central forecast loading, caching, phased loading |
+| `lib/services/4_infrastructure/forecast/forecast_service.dart` | What survived the old 1,000-line loader: **one method**, `loadBasicReachInfo`, backing the `reachMetadata` product |
+| `lib/services/4_infrastructure/river_data/river_data_repository.dart` | **The one data path.** Shared cache, source registry, freshness, the out-of-sync signal |
+| `lib/services/4_infrastructure/river_data/store_backed_data_source.dart` | Reads the Firestore store, falls through to live when the kill switch is off |
 | `lib/services/4_infrastructure/api/noaa_api_service.dart` | All NOAA API calls with unit conversion |
 | `lib/ui/1_state/features/favorites/favorites_provider.dart` | Primary state management for favorites |
 | `lib/ui/1_state/features/auth/auth_provider.dart` | Authentication state |
@@ -431,7 +468,14 @@ silently migrates the deployed functions to a different runtime. Also note the
 function signatures, so it is imported lazily inside the one function that uses
 it. Moving it back to module scope will break deploys.
 
-### ADR 0011 cloud store (Phases 4-7 complete; store live since 2026-08-25)
+### ADR 0011 cloud store — COMPLETE (all 10 phases, closed 2026-08-30)
+
+**Four things are carried, not resolved.** No island reach has ever been in the
+store, so everything built for Hawaii and Puerto Rico is unit-tested only —
+**one real favourited island river exercises it in production within an hour**.
+The alert peak windowing has not fired a real alert. Guard 2's non-favourite
+sheet timing was never measured, and guard 3's store provenance is inferred
+rather than instrumented. Do not read "complete" as "verified" for those four.
 
 Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget
@@ -480,6 +524,13 @@ surface that renders a favourite reads the river's NAME and its THRESHOLDS —
 without them the flow numbers stay fresh while each favourite still makes two
 device-side calls just to draw itself.
 
+**The full alert loop is verified end to end** (2026-08-30, 04:20 UTC, on the
+TestFlight build of 2026.2.0+719): NOAA published, the store wrote, evaluation
+ran in the same invocation over 12 reaches, three rivers were classified
+against their own return periods, and three notifications reached a real lock
+screen. The trigger model shows in the copy — two `entry`, one `persistence`
+reading "still Action Event".
+
 **Alerts CANNOT be tested from a locally-built iOS app.** Firebase has a
 Production APNs auth key (`P663R3US8S`, team `2UL5XK6YRM`) and **no development
 key**. A build installed from Xcode registers against Apple's sandbox push
@@ -490,8 +541,15 @@ work normally. To test alerts on a debug build, upload the same `.p8` to the
 empty *development* slot in Project Settings → Cloud Messaging; otherwise use
 TestFlight. This costs an hour if you do not know it.
 
-**Phase 8 (prove it on device) is 8 of 9 guards**, measured 2026-08-30 and
-recorded in ADR 0011 with the build each number came from: favourites paint in
+**Phase 8 (prove it on device) is COMPLETE (2026-08-30).** Eight guards met or
+honestly partial; guard 9 — the independent review — was **accepted rather than
+passed** after five rounds, none of which returned clean on first reading.
+Nothing user-facing was found after round 2; rounds 3-5 found only CI and test
+problems, three of them successive versions of the same wall-clock-dependent
+assertion. Two guards are partial and the ADR says so: guard 2's non-favourite
+sheet timing was never measured, and guard 3's store provenance is inferred
+rather than instrumented. Measured 2026-08-30 and recorded in ADR 0011 with the build each
+number came from: favourites paint in
 **969 ms** cold on iPhone and **2473 ms** on an Android emulator (bar: 3 s),
 two accounts on two platforms show identical values, airplane mode renders,
 and a unit switch repaints every card with **zero** refetches. Retaking Phase
@@ -537,6 +595,24 @@ but publishes 10:15-10:30 UTC. `GeoglowsDataSource.windowFor` expires at the
 next publication and takes the run received into account, retrying in 30
 minutes when publication is late. The old next-midnight window let a device
 hold yesterday's forecast a full extra day.
+
+**The kill switch's reclaim waits for Remote Config to RESOLVE.**
+`isStoreReadEnabled` reads false both for "off" and for "not fetched yet", and
+eviction is destructive, so the coordinator defers while `isResolved` is false
+and keeps its persisted flag. A failed fetch still counts as resolved — Remote
+Config then serves the last activated value, which is the operator's decision.
+`StoreBackedDataSource.fetch` re-checks the switch after its await for the same
+reason: otherwise an in-flight read plants a fresh 30-day copy after the
+reclaim has already run. Both were found broken by the Phase 8 reviews (ADR
+0011 decision 23).
+
+**The kill switch is NOT being removed, and is not scheduled for removal**
+(ADR 0011 decision 25, 2026-08-30). Phase 9 planned to delete it "once the
+store has run clean"; the store had logged 83 errors in seven days, all benign
+and all unnoticed, so that precondition was false. Jerson's call is to keep it
+outright — it costs nothing to leave in place and is a useful operational
+lever, letting any developer move every device off the store within minutes.
+**Do not re-propose removing it as cleanup.**
 
 **Phase 5's kill switch is `store_read_enabled` (Remote Config).** It is NOT
 published by the flood builder. It **exists and is `true`** — created by hand
@@ -605,6 +681,27 @@ samples after 90 days. The field is separate from `sampledAt` on purpose — a
 TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
 delete every sample the moment it was written. `river_data` never needed this;
 it is overwritten in place and swept by `storeGcDaily`.
+
+**`analysisAssimilation` is now `currentFlow`, and the distinction matters.**
+The store product by that name never fetched analysis assimilation — it calls
+`fetchForecast(reachId, 'short_range')` — while **NOAA returns a REAL
+`analysisAssimilation` section** in the same payload, which the app also
+consumes as `ReachData.analysisAssimilation`. One name, two meanings, three
+defects (review rounds 2 and 3, then an island-schedule regression in Phase 9
+itself). Renamed 2026-08-30. `publish-cadence-probe.ts` still says
+`analysisAssimilation` **on purpose** — there it is NOAA's section name, and a
+blanket rename across it would make the probe read a key that is never sent.
+
+**The NWM is four models on four schedules, and the store now knows it.**
+Short range publishes hourly for CONUS, every 6 hours for Puerto Rico, every 12
+for Hawaii and every 3 for Alaska — measured 2026-08-30 by counting the `tNNz`
+run directories on NOMADS. Analysis assimilation is hourly everywhere. Hawaii
+and Puerto Rico have **no medium or long range at all**. Reaches in the COMID
+band 800000000-921999999 are island reaches and take a 6-hour short-range
+window, a 24-hour hold cap and a 28-hour run-age cap; `nwm_domain.dart` and
+`store-document.ts` carry the numbers and a drift test pins them together.
+**Alaska is not handled on purpose** — the `nwm-channels-v3` tileset 404s over
+Fairbanks, Juneau, Kenai and Anchorage, so no Alaska river can be tapped.
 
 **Requires the composite index `river_data(product ASC, runId ASC)`.** Without
 it every hourly run aborts on FAILED_PRECONDITION. Declared in

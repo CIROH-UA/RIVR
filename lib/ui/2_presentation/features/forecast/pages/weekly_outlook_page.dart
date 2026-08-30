@@ -79,6 +79,28 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     final provider = context.read<FavoritesProvider>();
     _favoritesProvider = provider;
     provider.addListener(_onFavoritesChanged);
+
+    // **Reset the back-off HERE, on mount, before anything can fail.**
+    //
+    // ADR 0003's design flaw, fixed 2026-08-30. The reset used to sit at the
+    // end of a long chain — tap, route, page, favourites load, `buildOutlook`
+    // returns, THEN record. Any break anywhere in that chain is
+    // indistinguishable from a user ignoring the digest, so the counter
+    // ratchets up unopposed and the next digest is silently dropped.
+    //
+    // That is not hypothetical. All three links broke at once: taps never
+    // reached Dart on iOS (ADR 0008), then the page returned early on its
+    // empty state before recording, then the row build took minutes (ADR
+    // 0010) and users backed out first. Repeated testing drove the counter to
+    // exactly 4, the biweekly threshold, and a real send was dropped as
+    // `📬 0/1 due this week`. **A user tapping every digest was throttled for
+    // engaging.**
+    //
+    // All three links are since fixed, which is precisely why this must move
+    // anyway: the placement measured whether the APP worked, not whether the
+    // PERSON cared, so the next unrelated break would do it again. Opening
+    // the page is the engagement. Everything after is decoration.
+    _recordOutlookOpen();
     _load();
   }
 
@@ -217,11 +239,13 @@ class _WeeklyOutlookPageState extends State<WeeklyOutlookPage> {
     // Copied to a local: promotion does not survive into the closure.
     final result = outcome;
 
-    // Opening the outlook is engagement whether or not the load succeeded —
-    // the back-off counter resets on the OUTAGE path too. Round 16 caught this
-    // running after the isTotalFailure return, so a user who opened the page
-    // during an outage kept escalating toward digest suppression.
-    _recordOutlookOpen();
+    // The back-off reset used to live HERE, and moved to initState on
+    // 2026-08-30 (ADR 0003's design flaw). Round 16 had already caught it
+    // running after the `isTotalFailure` return, so a user who opened during
+    // an outage kept escalating toward suppression; moving it earlier fixed
+    // that one case. The flaw was the position itself — anything between the
+    // tap and this line could swallow the engagement — so it now happens on
+    // mount and this comment is what stops it drifting back down here.
 
     // Every favourite failed. buildOutlook catches per row, so this is the
     // shape a real outage takes — and it used to render "No forecast is
