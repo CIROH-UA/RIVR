@@ -454,7 +454,7 @@ describe("run currency — the failure write recency cannot see", () => {
     // taking the newest would have the trigger and the monitor ordering one
     // document differently.
     assert.ok(Math.abs(runs[0].runAgeMs - 40 * 3600_000) < 60_000,
-        "the newest segment was taken; the oldest is what governs freshness");
+      "the newest segment was taken; the oldest is what governs freshness");
   });
 
   test("an unparseable runId is ignored, not read as age zero", () => {
