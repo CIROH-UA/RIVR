@@ -138,8 +138,11 @@ void main() {
       // even help, without knowing which.
       final src = _code(controls);
 
-      expect(src.contains('LocationDenial? get lastDenial'), isTrue,
-          reason: 'the page has no way to tell the four apart');
+      expect(
+        src.contains('Future<LocationDenial?> recenterToDeviceLocation()'),
+        isTrue,
+        reason: 'the caller has no way to tell the four apart',
+      );
       for (final cause in const [
         'LocationDenial.serviceDisabled',
         'LocationDenial.denied',
@@ -179,11 +182,13 @@ void main() {
 
       final handler = RegExp(
         r'_recenterToLocation\(\) async \{[\s\S]{0,800}?'
-        r'lastDenial[\s\S]{0,200}?_showLocationDenialDialog\(denial\);',
+        r'recenterToDeviceLocation\(\);[\s\S]{0,200}?'
+        r'_showLocationDenialDialog\(denial\);',
       );
       expect(handler.hasMatch(src), isTrue,
           reason: 'the call must be inside the recentre handler, reached from '
-              'lastDenial — not merely present somewhere in the file');
+              'the recentre result — not merely present somewhere in the '
+              'file');
     });
 
     test('the dialog offers Open Settings, and only when it helps', () {
@@ -194,6 +199,45 @@ void main() {
       expect(src.contains('if (message.openSettings)'), isTrue,
           reason: 'the button must be conditional — offering Settings for a '
               'missing GPS fix sends the user on an errand that cannot work');
+    });
+
+    test('the denial is RETURNED, not left in a field for the caller', () {
+      // Two defects lived in the field version, and neither could be caught
+      // by a source guard — I wrote two and both passed the mutation that
+      // reintroduced the bug.
+      //
+      // The answer depended on statement ORDER inside the method: the
+      // fallback to a cached position can move the camera after a failed
+      // fresh fix (map recentres AND "Can't Find Your Location" appears), and
+      // the not-ready early return skips the location call entirely (a stale
+      // denial shows a permissions dialog for a map that is merely loading).
+      //
+      // A return value has one answer per outcome and no ordering to get
+      // wrong. This pins the SHAPE, which is what actually removed the bugs.
+      final src = _code(controls);
+
+      expect(
+        src.contains('Future<LocationDenial?> recenterToDeviceLocation()'),
+        isTrue,
+        reason: 'a void method forces the caller back to reading a field '
+            'after the fact, which is where both defects lived',
+      );
+      expect(src.contains('LocationDenial? get lastDenial'), isFalse,
+          reason: 'the field accessor is the thing that made the bug '
+              'expressible; it should not come back');
+    });
+
+    test('the page uses the RETURN value, not a field', () {
+      final src = _code(page);
+
+      expect(
+        src.contains('await _controlsService.recenterToDeviceLocation();\n'
+            '    if (!mounted || denial == null) return;'),
+        isTrue,
+        reason: 'reading a field after the call reintroduces the ordering '
+            'dependency the return value removed',
+      );
+      expect(src.contains('_controlsService.lastDenial'), isFalse);
     });
 
     test('the location accuracy is logged, since the ring is drawn from it',

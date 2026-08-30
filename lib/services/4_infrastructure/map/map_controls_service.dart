@@ -33,17 +33,21 @@ class MapControlsService {
   static const double _defaultZoom = 12.0;
   static const int _animationDurationMs = 1000;
 
-  /// Why the last location attempt produced nothing, or null if it succeeded.
+  /// Why the last `initializeLocation` produced nothing, or null if it
+  /// succeeded.
   ///
   /// `initializeLocation` returns `Position?`, which collapses four different
   /// situations into one null — services off, refused, refused permanently,
-  /// and simply no fix. The caller needs to tell them apart to say anything
-  /// useful, and to know whether Settings would even help. Without this the
-  /// recentre button was a silent dead end.
+  /// and simply no fix. Without telling them apart the recentre button was a
+  /// silent dead end.
+  ///
+  /// PRIVATE. Read exactly once, immediately after the call that sets it, and
+  /// handed out as a return value — see [recenterToDeviceLocation].
   LocationDenial? _lastDenial;
 
-  /// See [_lastDenial]. Null when the last attempt succeeded.
-  LocationDenial? get lastDenial => _lastDenial;
+  // No public accessor on purpose. `recenterToDeviceLocation` RETURNS the
+  // denial instead: a field read after the call made the answer depend on
+  // statement order inside that method, and both orderings shipped a defect.
   static const String _terrain3DKey = 'terrain_3d_enabled';
   // The map camera is deliberately not persisted. It opens on the user's
   // location when one is available and on the configured default otherwise,
@@ -387,20 +391,40 @@ class MapControlsService {
   }
 
   /// Recenter map to device location
-  Future<void> recenterToDeviceLocation() async {
+  /// Move the camera to the device, and report what to TELL the user.
+  ///
+  /// **Returns the denial instead of leaving it in a field**, and that is the
+  /// fix for two defects rather than a style preference. While the caller read
+  /// a mutable `lastDenial` after the fact, the answer depended on statement
+  /// ORDER inside this method, and both orderings were wrong in a way no
+  /// source guard could see:
+  ///
+  /// - The fallback to `_lastKnownLocation` means a FAILED fresh fix can still
+  ///   move the camera. The recorded denial then survived, so the map
+  ///   recentred correctly AND the user got "Can't Find Your Location" on top
+  ///   of it.
+  /// - The not-ready early return skips `initializeLocation` entirely, so a
+  ///   denial from a previous attempt was still sitting there and the page
+  ///   showed a permissions dialog for a map that had not finished loading.
+  ///
+  /// One return value per outcome removes both. Null means "say nothing":
+  /// either the camera moved, or nothing happened that the user can act on.
+  Future<LocationDenial?> recenterToDeviceLocation() async {
     if (_mapboxMap == null) {
       AppLogger.error('MapControlsService', 'Map not initialized');
-      return;
+      // Not a location problem. Transient, and it resolves itself.
+      return null;
     }
 
     try {
       // Try to get fresh location, but fall back to last known
       geo.Position? position = await initializeLocation();
+      final denial = _lastDenial;
       position ??= _lastKnownLocation;
 
       if (position == null) {
         AppLogger.error('MapControlsService', 'No location available for recentering');
-        return;
+        return denial ?? LocationDenial.noFix;
       }
 
       // Create camera options for the new position
@@ -419,8 +443,12 @@ class MapControlsService {
       );
 
       AppLogger.info('MapControlsService', 'Map recentered to device location');
+      // The camera moved. Whatever the fresh fix reported, there is nothing
+      // to tell the user.
+      return null;
     } catch (e) {
       AppLogger.error('MapControlsService', 'Error recentering map', e);
+      return LocationDenial.noFix;
     }
   }
 

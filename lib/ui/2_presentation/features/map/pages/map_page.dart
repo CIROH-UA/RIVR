@@ -602,12 +602,13 @@ class MapPageState extends State<MapPage> {
   /// dialog for its own empty case since long before. Found by Jerson asking
   /// what happens when location is not granted, not by a test.
   void _recenterToLocation() async {
-    await _controlsService.recenterToDeviceLocation();
-    if (!mounted) return;
-
-    // Success is a moved camera and nothing to say. Only a denial speaks.
-    final denial = _controlsService.lastDenial;
-    if (denial == null) return;
+    // The RETURN value, not a field read afterwards. Reading a field meant
+    // the answer depended on statement order inside the service, and two
+    // orderings were wrong: a cached position could move the camera AND
+    // raise "Can't Find Your Location", and a not-ready map could show a
+    // permissions dialog left over from a previous attempt.
+    final denial = await _controlsService.recenterToDeviceLocation();
+    if (!mounted || denial == null) return;
 
     _showLocationDenialDialog(denial);
   }
