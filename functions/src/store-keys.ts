@@ -136,15 +136,76 @@ export interface ParsedStorageKey {
  *   a well-formed store key with a recognised source and product.
  */
 export function parseStorageKey(key: string): ParsedStorageKey | null {
+  const shape = classifyStorageKey(key);
+  return shape.kind === "valid" ? shape.key : null;
+}
+
+/** What a document id turned out to be. */
+export type StorageKeyShape =
+  | {kind: "valid"; key: ParsedStorageKey}
+  | {kind: "retired-product"; source: ForecastSourceId; reachId: string;
+      product: string}
+  | {kind: "malformed"};
+
+/**
+ * Classify a document id, distinguishing a RETIRED product from a malformed
+ * key.
+ *
+ * **These were the same thing until 2026-08-30, and it cost 31 undeletable
+ * documents.** Phase 9 renamed the product `analysisAssimilation` to
+ * `currentFlow`. Every existing `nwm__<reach>__analysisAssimilation` document
+ * then failed `parseStorageKey` — the product is no longer in
+ * `FORECAST_PRODUCTS` — so the GC classified them "unparseable-id" and
+ * RETAINED THEM FOREVER, by the deliberate rule that an unreadable id must
+ * never be treated as garbage. The ADR and the deploy log both claimed the GC
+ * would sweep them after its seven-day grace. It never would have.
+ *
+ * The two cases deserve opposite answers:
+ *
+ * - **Malformed** — wrong shape, unknown source, empty reach. Keep. We cannot
+ *   prove what it is, and deleting on a parse failure turns a formatting
+ *   change into data loss.
+ * - **Retired product** — correct shape, known source, real reach, a product
+ *   name this codebase no longer has. Nothing will ever write it or read it
+ *   again, so it is garbage regardless of whether its reach is still
+ *   followed. That last part matters: these reaches ARE followed, so the
+ *   "still-followed" rule would have kept them too.
+ *
+ * Deliberately a STRUCTURAL rule rather than a list of retired names. A list
+ * is a promise that someone will remember to update it, and this repository
+ * has now been bitten twice by exactly that — CI's test-directory allow-list
+ * and this. A rename is handled the day it happens, with no follow-up step.
+ *
+ * The risk, stated: a product that exists on the client but not on the server
+ * would look retired here. It cannot happen from the writing side — the
+ * server is what creates these documents — so such an id could only appear if
+ * something else wrote it.
+ *
+ * @param {string} key - A document ID to classify.
+ * @return {StorageKeyShape} What it is.
+ */
+export function classifyStorageKey(key: string): StorageKeyShape {
   const parts = key.split(SEPARATOR);
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) return {kind: "malformed"};
   const [source, reachId, product] = parts;
-  if (!reachId) return null;
-  if (!(FORECAST_SOURCES as readonly string[]).includes(source)) return null;
-  if (!(FORECAST_PRODUCTS as readonly string[]).includes(product)) return null;
+  if (!reachId) return {kind: "malformed"};
+  if (!(FORECAST_SOURCES as readonly string[]).includes(source)) {
+    return {kind: "malformed"};
+  }
+  if (!(FORECAST_PRODUCTS as readonly string[]).includes(product)) {
+    return {
+      kind: "retired-product",
+      source: source as ForecastSourceId,
+      reachId,
+      product,
+    };
+  }
   return {
-    source: source as ForecastSourceId,
-    reachId,
-    product: product as ForecastProductId,
+    kind: "valid",
+    key: {
+      source: source as ForecastSourceId,
+      reachId,
+      product: product as ForecastProductId,
+    },
   };
 }
