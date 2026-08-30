@@ -77,7 +77,7 @@ describe("stale FCM tokens are actually removed", () => {
         "arrayRemove"));
 
     assert.deepEqual(offenders, [],
-      `these files prune tokens but are not covered by this guard: ` +
+      "these files prune tokens but are not covered by this guard: " +
       `${offenders.join(", ")}. Add them to CLEANUP_SOURCES.`);
   });
 });
