@@ -2187,9 +2187,20 @@ what Phase 9 exists to remove. That is a real cost. It is outweighed by the
 switch being *fixed, tested and verified on a device* since those breaks, and
 by the fact that the thing it protects against is unbounded.
 
-**Revisit when both are true:** the app has shipped and run in production
-through at least one full store incident-free month, AND the error channel is
-quiet enough that a new alarm would actually be noticed. Neither holds today.
+**Jerson's call, 2026-08-30, and it is the deciding one:** keep it, because
+"it does not harm having it there at all — we should keep it to give us more
+flexibility as developers."
+
+That is a stronger position than the one argued above, and it is worth stating
+plainly rather than folding into it. The reasoning here was "remove it later,
+once conditions X and Y hold". His is that the switch has ongoing value as an
+operational lever regardless of those conditions — being able to move every
+device off the store within minutes is useful during development and during an
+incident, not only as insurance for a launch.
+
+**So this is no longer scheduled for removal.** Do not re-propose it as
+cleanup. If it is ever removed it will be because it has become misleading or
+costly, not because the store has been well-behaved for long enough.
 
 The Remote Config parameter `store_read_enabled` therefore stays too, and
 stays `true`.
@@ -2382,7 +2393,11 @@ disposition. Entries in `app_releases.md` / `notifications_history.md` per phase
 
 **Guards.**
 1. `grep -rn "loadCompleteReachData" lib/` returns nothing.
-2. No Remote Config fallback parameter remains, and no code reads one.
+2. ~~No Remote Config fallback parameter remains, and no code reads one.~~
+   **Withdrawn by decision 25.** `store_read_enabled` stays, and so does the
+   code that reads it. A guard that contradicts a decision made later is worse
+   than no guard: it invites someone to satisfy the checklist by undoing the
+   decision.
 3. `flutter analyze` reports zero unused-element warnings across touched files.
 4. Every ADR listed is updated or explicitly confirmed accurate, with a date.
 5. **CLAUDE.md read as if new would build the current architecture.** Every
