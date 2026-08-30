@@ -1598,6 +1598,51 @@ number isn't current the app says so before they have to wonder.
 
 ## Phase 8 — Prove it on device ▶ IN PROGRESS
 
+### Guard 7 — Android (2026-08-30)
+
+**It shares the path, and it is the tightest number in this phase.** Android 15
+emulator (Pixel, API 35, arm64), profile build at `62ef301`, same account, same
+six favourites as the iPhone.
+
+| run | to first favourites paint |
+|---|---|
+| 1 | 2603 ms |
+| 2 | 2473 ms |
+| 3 | 2285 ms |
+
+**2473 ms median against the 3 s bar** — inside it, but with 0.5 s of headroom
+where the iPhone had 2 s. That is the first figure in this phase that is close
+to a limit rather than comfortably past it, and it is worth watching rather
+than celebrating. Two caveats cut opposite ways: an emulator is generally
+slower than real hardware, so a physical Android device may do better; and this
+emulator runs on an M-series Mac, which flatters it compared with a budget
+phone.
+
+**Getting here cost two production-config changes and one incident**, recorded
+because the diagnosis was wrong twice before it was right:
+
+1. The emulator was refused with `FirebaseInstallationsException: 403`. First
+   hypothesis — no SHA fingerprints registered — **disproven**: two were.
+2. Second hypothesis — the Firebase app's fingerprint list is the blocker —
+   **also disproven**: adding the debug SHA there changed nothing.
+3. The real cause, read out of `gcloud services api-keys describe`: the Android
+   **API key** carries its own separate allow-list of package + SHA-1 pairs.
+   The debug fingerprint has to be in BOTH places. This blocks any developer's
+   local Android build, not just this emulator.
+
+**The incident:** `gcloud services api-keys update` REPLACES the restriction
+lists rather than appending, and a bash `while read` loop silently drops a
+file's last line when it has no trailing newline. The first update therefore
+removed the **release** fingerprint and one API target for about thirty
+seconds. Restored from a `describe --format=json` backup taken beforehand, and
+verified by comparing composition — the broken state had the same COUNT of
+fingerprints as the good one, so counting would have missed it.
+
+**The first Android trace read 74288 ms and is not a measurement.** The
+stopwatch starts at app launch and that run included a human typing credentials
+into the emulator. It is recorded here only so nobody finds it in a log and
+quotes it.
+
 ### Guard 8 — every number recorded with its build (2026-08-30)
 
 | guard | figure | build |
@@ -1606,6 +1651,7 @@ number isn't current the app says so before they have to wonder.
 | 2 | 969 / 1008 / 961 ms | profile, tree that became `4217077` |
 | 4 | favourites render offline | profile, same build as guard 2 |
 | 6 | 0 refetches, 480 log lines | debug at `7cf587c` — app code identical to `4217077` |
+| 7 | 2603 / 2473 / 2285 ms, Android | profile at `62ef301` — app code identical to `4217077` |
 
 **This guard immediately caught its own violation, which is the argument for
 having it.** Guards 2 and 4 were first written down as "profile build off
