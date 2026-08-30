@@ -2387,9 +2387,39 @@ and it was not a *silent* no-op as described here: it threw on every cycle that
 found a stale token. Nothing was pruned and every alert run retried the same
 dead devices.)
 
-**Docs.** Rewrite CLAUDE.md's architecture and data-flow sections. Settle ADR
-0001 Step 7, ADR 0002 Stage 2b, ADR 0003's back-off flaw, and confirm ADR 0010's
-disposition. Entries in `app_releases.md` / `notifications_history.md` per phase.
+**Docs.** Rewrite CLAUDE.md's architecture and data-flow sections. Entries in
+`app_releases.md` / `notifications_history.md` per phase.
+
+### The four ADRs are settled — 2026-08-30
+
+Guard 4 asks that each is "updated or explicitly confirmed accurate, with a
+date". All four were re-read rather than rubber-stamped, and they did not all
+end the same way.
+
+| ADR | Disposition |
+|---|---|
+| **0010** — Weekly Outlook latency | **CLOSED.** Both causes verified gone in code: rows now run through `Future.wait`, and NWM rows read `mediumRange`/`returnPeriods`/`reachMetadata` from the repository. Its own Phases 1-2 (per-row rendering, bounded wait) were insurance against a slow load and are **not scheduled**. NOT claimed: the page has not been re-timed on device. |
+| **0001 Step 7** — retire the `ForecastResponse`/`GeoglowsForecast` fork | **Back to parked, deliberately.** It briefly had a user-visible cost (ADR 0010); that cost turned out to be fixable without it. Doing it speculatively means designing a source-agnostic model against exactly two sources, which produces an abstraction shaped like whichever one was written first. |
+| **0002 Stage 2b** — the unified `RiverForecast` model | **Confirmed still parked.** The gate — a third source carrying forecast *detail* — has not been reached. Subsumes 0001 Step 7. |
+| **0003** — engagement back-off | **FIXED, not deferred.** See below. |
+
+**0003 is the one worth reading.** Its back-off counter reset at the END of
+tap → route → page → favourites → `buildOutlook` → record, so any break in that
+chain was indistinguishable from a user ignoring the digest. Three links broke
+at once in production and drove a real counter to the biweekly threshold; a
+send was dropped as `📬 0/1 due this week`. **A user tapping every digest was
+throttled for engaging.**
+
+All three links were already repaired by other work, and that is exactly the
+argument for fixing the position rather than closing the ticket: with the
+symptoms gone, the flaw would have sat there measuring app health instead of
+user intent until the next unrelated break did it again. The reset now happens
+on mount. A latent trap that has already fired once is not less dangerous for
+having been patched downstream.
+
+**Also corrected while checking:** three other ADRs still described ADR 0010's
+stall as open (0001, 0003, 0009). Confirming a disposition means fixing what
+points at it, or the next reader finds two documents disagreeing.
 
 **Guards.**
 1. `grep -rn "loadCompleteReachData" lib/` returns nothing.

@@ -673,6 +673,44 @@ void main() {
               'week as ignored');
     });
 
+    // ADR 0003's design flaw, fixed 2026-08-30. The stronger property, and the
+    // one the outage test above cannot express: the reset must not wait on the
+    // row build AT ALL.
+    //
+    // It used to sit at the end of tap -> route -> page -> favourites ->
+    // buildOutlook -> record, so any break anywhere in that chain looked
+    // exactly like a user ignoring the digest and the counter ratcheted up
+    // unopposed. Three links broke at once in production (iOS taps never
+    // reaching Dart, the empty state returning early, the row build taking
+    // minutes) and drove a real user's counter to the biweekly threshold —
+    // a send was then dropped as "0/1 due this week". Someone was throttled
+    // for tapping every digest.
+    //
+    // All three links are fixed, which is exactly why the POSITION had to
+    // move: it measured whether the app worked, not whether the person cared.
+    testWidgets('the back-off resets on mount, before any row loads',
+        (t) async {
+      // A load slow enough that it certainly has not finished, standing in for
+      // every way the chain can stall or break after the page opens.
+      _register(loadDelay: const Duration(seconds: 30));
+
+      await t.pumpWidget(_wrap(const WeeklyOutlookPage(), signedIn: true));
+      await t.pump();
+
+      expect(find.text('Retry'), findsNothing,
+          reason: 'precondition: the load has NOT completed or failed yet');
+      expect(
+          _settings.updates
+              .any((u) => u.containsKey('weeklyDigestsSinceOpen')),
+          isTrue,
+          reason: 'opening the page IS the engagement. Waiting for rows means '
+              'any future break in the chain silently throttles a user who '
+              'did everything right.');
+
+      // Let the pending timer drain so the test does not leak it.
+      await t.pump(const Duration(seconds: 30));
+    });
+
     // REGRESSION (round 16, F48): these lookups sat inside caught bodies,
     // where a missing IUserSettingsService registration degraded to a debug
     // log — the exact laundering guard 8 forbids, one round after the same
