@@ -49,6 +49,23 @@ class FavoritesProvider with ChangeNotifier {
   /// where they are stored — they are NOT raw CMS.
   final Map<String, String> _sessionReturnPeriodUnits = {};
 
+  /// Reverse-geocoded place label per reach ("Pitumarca, Peru").
+  ///
+  /// **Here rather than on the entity, and here rather than in the card.**
+  /// A GEOGLOWS reach publishes no river name, so the label a card shows is
+  /// geocoded from its coordinates — and it lived only inside
+  /// `FavoriteRiverCard`'s own state, where the favourites PAGE could not see
+  /// it. That is why renaming a GEOGLOWS favourite offered no way back: the
+  /// "Restore to ..." button is built by the page, which had nothing to
+  /// restore to. Reported on a device 2026-08-29.
+  ///
+  /// Cached alongside the other per-reach session state (the precedent is
+  /// `_sessionReturnPeriodUnits` directly above) rather than promoted onto
+  /// `FavoriteRiver`, because it is derived, per-session and not the user's
+  /// data — the entity would then carry a field that is null for every NWM
+  /// reach and populated asynchronously for the rest.
+  final Map<String, String> _sessionPlaceLabels = {};
+
   final Map<String, Map<int, double>> _sessionReturnPeriods =
       {}; // reachId -> return periods
 
@@ -314,6 +331,7 @@ class FavoritesProvider with ChangeNotifier {
       _sessionData.remove(reachId);
       _sessionReturnPeriods.remove(reachId);
       _sessionReturnPeriodUnits.remove(reachId);
+      _sessionPlaceLabels.remove(reachId);
       _refreshingReachIds.remove(reachId);
       _refreshGenerations.remove(reachId);
 
@@ -782,6 +800,27 @@ class FavoritesProvider with ChangeNotifier {
   String? getReturnPeriodUnit(String reachId) =>
       _sessionReturnPeriodUnits[reachId];
 
+  /// Record the geocoded place label for [reachId].
+  ///
+  /// Called by the card once the geocoder answers. **Deliberately does NOT
+  /// notify.** Every visible card geocodes independently, so notifying here
+  /// would rebuild the whole list once per card on first paint, to publish a
+  /// value nothing rebuilds for — the only reader is the rename dialog, which
+  /// reads on open. The same reasoning as the return-period unit beside it.
+  ///
+  /// Ignores empty labels: an empty "restore to" target is worse than no
+  /// button, because it looks like a working control that clears the name.
+  void cachePlaceLabel(String reachId, String label) {
+    if (label.trim().isEmpty) return;
+    _sessionPlaceLabels[reachId] = label;
+  }
+
+  /// The geocoded place label for [reachId], or null if not resolved yet.
+  ///
+  /// Null is normal and must be handled: geocoding is asynchronous and may
+  /// never succeed (offline, no coordinates, a reach in the ocean).
+  String? getPlaceLabel(String reachId) => _sessionPlaceLabels[reachId];
+
   /// Filter favorites by search query
   List<FavoriteRiver> filterFavorites(String query) {
     if (query.isEmpty) return favorites;
@@ -830,6 +869,7 @@ class FavoritesProvider with ChangeNotifier {
     _sessionData.clear();
     _sessionReturnPeriods.clear();
     _sessionReturnPeriodUnits.clear();
+    _sessionPlaceLabels.clear();
     // Through the single membership hook, so the cache un-pins too — review
     // found this path bypassing it, leaving pins for favourites that no longer
     // exist.

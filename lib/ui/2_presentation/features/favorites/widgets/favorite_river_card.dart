@@ -5,12 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:get_it/get_it.dart';
+import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/0_config/shared/constants.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/models/1_domain/shared/flow_classification.dart';
-import 'package:rivr/services/4_infrastructure/geo/geocoding_service.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/services/4_infrastructure/favorites/flood_risk_video_service.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/components/slide_action_buttons.dart';
@@ -95,11 +95,33 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   /// Reverse-geocode a GEOGLOWS reach's coordinates to a city/country label.
+  ///
+  /// The result is published to [FavoritesProvider] as well as held locally.
+  /// A GEOGLOWS reach has no river name, so this label is the only thing a
+  /// rename can be restored TO — and it used to live only in this widget's
+  /// state, where the favourites page could not reach it. That is why
+  /// renaming a GEOGLOWS favourite was a one-way door.
   Future<void> _resolvePlaceLabel() async {
     final f = widget.favorite;
     if (!f.source.isGeoglows || !f.hasCoordinates) return;
-    final label = await GeocodingService.placeLabel(f.latitude, f.longitude);
-    if (label != null && label != _placeLabel && mounted) {
+    // Through the INTERFACE, not the static. ADR 0011 recorded
+    // `favorite_river_card` as one of two surfaces still calling
+    // `GeocodingService`'s statics, and the cost is not tidiness: a static
+    // cannot be faked, so nothing could test that this label reaches the
+    // provider — and reaching the provider is the entire fix for the GEOGLOWS
+    // rename being a one-way door. The wiring is where every defect in that
+    // ADR turned out to live.
+    final label = await GetIt.I<IGeocodingService>()
+        .placeLabel(f.latitude, f.longitude);
+    if (label == null || !mounted) return;
+
+    // Published BEFORE the mounted-dependent setState and independently of
+    // whether the label changed. The dialog needs it even when this card
+    // never rebuilds — for instance when the label is resolved once and the
+    // user renames much later.
+    context.read<FavoritesProvider>().cachePlaceLabel(f.reachId, label);
+
+    if (label != _placeLabel) {
       setState(() => _placeLabel = label);
     }
   }

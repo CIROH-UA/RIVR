@@ -2715,7 +2715,8 @@ larger correctness win and a prerequisite.
   `ConnectivityService._canReachInternet` reaches
   `clients3.google.com/generate_204` via the integration harness. Pre-existing;
   named here rather than left inside a sweeping "no network" claim. The statics remain only for surfaces not yet on
-  the DI graph — `favorite_river_card` and `map_search_service` — which Phase 3
+  the DI graph — `map_search_service`; `favorite_river_card` moved onto it
+  2026-08-30 (see below) — which Phase 3
   and Phase 9 own. `weekly_outlook_service` took the interface in Phase 1 and no
   longer calls them.
 - **A silently-failing store is the most dangerous outcome in this document**,

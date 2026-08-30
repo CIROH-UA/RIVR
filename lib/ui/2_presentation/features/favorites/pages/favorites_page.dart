@@ -1266,10 +1266,28 @@ class _FavoritesPageState extends State<FavoritesPage>
   void _showRenameDialog(FavoriteRiver favorite) {
     final controller = TextEditingController(text: favorite.customName);
 
-    // Check if there's a default name to restore to
+    // What this rename can be undone TO.
+    //
+    // An NWM reach publishes a river name. A GEOGLOWS reach publishes none —
+    // its card shows a reverse-geocoded place instead ("Pitumarca, Peru") —
+    // so gating on `riverName` alone meant the restore button never appeared
+    // for GEOGLOWS and a rename was a one-way door: no way back short of
+    // deleting the favourite and re-adding it. Reported on a device
+    // 2026-08-29.
+    //
+    // The place label is resolved asynchronously inside FavoriteRiverCard,
+    // which this page cannot see, so the card publishes it to the provider.
+    // It can still be null — geocoding is async and may never succeed — and
+    // null correctly means no button, exactly as an NWM reach with no name
+    // gets none. A button that restores to nothing would be worse than its
+    // absence.
+    final restoreTarget = (favorite.riverName?.trim().isNotEmpty ?? false)
+        ? favorite.riverName!.trim()
+        : context.read<FavoritesProvider>().getPlaceLabel(favorite.reachId);
+
     final hasDefaultName =
-        favorite.riverName != null && favorite.riverName!.isNotEmpty;
-    final defaultName = favorite.riverName ?? 'Station ${favorite.reachId}';
+        restoreTarget != null && restoreTarget.trim().isNotEmpty;
+    final defaultName = restoreTarget ?? 'Station ${favorite.reachId}';
 
     showCupertinoDialog(
       context: context,
