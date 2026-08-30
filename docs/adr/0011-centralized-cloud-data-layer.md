@@ -1899,6 +1899,39 @@ The fix is the same shape as the digest's: window with the equivalent of
 `ForecastPeak.upcomingPoints` before taking the maximum. Deferred to Phase 9
 rather than changed under a phase gate that is already four reviews deep.
 
+### Decision 24 — one island number, and it is the faster one (2026-08-30)
+
+NWM short range publishes every 6 hours for Puerto Rico and every 12 for
+Hawaii. Both networks use NHDPlus COMIDs in the same band
+(800000000–921999999), so **a reach id cannot tell the two apart**, and the
+app has no coordinates at the point where a freshness window is computed. One
+number has to cover both.
+
+**Twelve is the efficient choice and the wrong one.** It would hold a Puerto
+Rico forecast for up to six hours after a newer run existed — showing someone
+water that has been superseded, which is the failure this entire ADR is
+against. Six costs Hawaii one redundant refetch per run and can never serve a
+stale value.
+
+**The rule, stated so it survives the next optimisation:** when the options
+are "waste a fetch" and "show the wrong number", the wasted fetch wins. Anyone
+later tempted to raise this to 12 for efficiency is trading correctness for
+bandwidth, and should change the reasoning here first.
+
+The same choice runs the other way for the HOLD caps, and that is not a
+contradiction: the hold cap decides when we stop *vouching* for a value we are
+already showing, so it must be generous enough not to disown data that is
+genuinely current — 24 hours, two missed Hawaii cycles. Expiry asks "may
+something newer exist?"; the hold cap asks "is this still defensible?". Erring
+short on the first and long on the second is the same instinct, not opposite
+ones.
+
+**Rejected: resolve the island from coordinates.** It would separate Hawaii
+from Puerto Rico exactly, and it needs a lat/lon that `validUntil` does not
+have and would have to be threaded through the store, the envelope and both
+data sources — a large cross-language contract change to save Hawaii four
+fetches a day.
+
 ### Decision 23 — eviction waits for a decision, not a default (2026-08-30)
 
 The Phase 5 kill switch reclaims by evicting every favourite's stored entries,
@@ -2155,6 +2188,24 @@ makes it safe is that the island tables name only `shortRange`, which GEOGLOWS
 does not have. That is an implicit coupling, and implicit couplings in this
 ADR have a record of being broken by an edit that looked obviously correct, so
 it is now pinned in both languages and mutation-checked.
+
+**Two more gaps, both found by auditing this change rather than by review.**
+
+- **The wiring was untested.** Every fake source accepted `reachId` and threw
+  it away, so nothing could tell a correct implementation from one passing a
+  constant — the window came out identical either way. The repository handing
+  its key's reach to the source, and `StoreBackedDataSource` forwarding it
+  unchanged, are now both pinned and both mutation-checked. This is the same
+  shape as every other defect in this ADR: the function is green and the
+  connection between two components is not tested.
+- **`nwm_domain.dart` claimed the reach-detail sheet already shared the island
+  band. It did not** — the sheet carried its own copy of
+  `800000000`/`921999999`, and the claim was false from the moment it was
+  written. The sheet now calls `nwmDomainOf`; a test derived from the tree
+  fails if any file in `lib/` reintroduces the literals; and the horizon logic,
+  which had **no test at all** (the two tests mentioning a forecast horizon
+  passed the finished string in as a parameter), is now a public function with
+  its own cases.
 
 **Deployed and verified by composition, 2026-08-30 15:39 UTC:** seven store
 functions present (counted, not inferred from the deploy's exit status),

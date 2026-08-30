@@ -4,6 +4,8 @@
 // exactly the shape of thing that gets an off-by-one and is never noticed:
 // a misclassified reach does not crash, it just expires on the wrong schedule.
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 import 'package:rivr/services/4_infrastructure/river_data/hold_policy.dart';
@@ -43,6 +45,33 @@ void main() {
       // is an NHDPlus COMID range, not a general-purpose test.
       expect(nwmDomainOf('760337'), NwmDomain.conus);
     });
+  });
+
+  test('the band is defined in exactly ONE place in lib/', () {
+    // The gap that let the duplicate survive. `nwm_domain.dart` claimed the
+    // reach-detail sheet already shared this definition; the sheet in fact
+    // carried its own copy of the two literals, and the claim was false from
+    // the day it was written. A comment cannot notice a second copy.
+    //
+    // Derived from the tree rather than hardcoded, so a third copy is caught
+    // on the day it appears rather than the day it drifts.
+    final offenders = <String>[];
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      if (f.path.endsWith('nwm_domain.dart')) continue;
+      final body = f
+          .readAsLinesSync()
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
+      if (body.contains('800000000') || body.contains('921999999')) {
+        offenders.add(f.path);
+      }
+    }
+    expect(offenders, isEmpty,
+        reason: 'these files carry their own copy of the island COMID band: '
+            '${offenders.join(', ')}. Use nwmDomainOf instead.');
   });
 
   test('the island tables cannot reach a GEOGLOWS product', () {

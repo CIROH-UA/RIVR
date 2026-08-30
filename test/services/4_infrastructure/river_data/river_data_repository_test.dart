@@ -106,10 +106,21 @@ class _ControllableSource implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => ForecastProduct.values.toSet();
 
+  /// Every reachId `validUntil` was asked about.
+  ///
+  /// The repository has to hand its KEY's reach to the source. A fake that
+  /// ignores the argument cannot tell a correct implementation from one that
+  /// passes a constant, and since Phase 9 the answer depends on which reach it
+  /// is — an island document computed as CONUS expires eleven times before new
+  /// data can exist.
+  final List<String> validUntilReaches = [];
+
   @override
   DateTime validUntil(ForecastProduct product, DateTime now,
-          {required String reachId}) =>
-      now.toUtc().add(validFor);
+      {required String reachId}) {
+    validUntilReaches.add(reachId);
+    return now.toUtc().add(validFor);
+  }
 
   /// The model run the next fetch reports, when set.
   String? nextRunId;
@@ -277,6 +288,25 @@ void main() {
     // age check. After a cache wipe — sign-out, or the kill switch flipping
     // ON to OFF — a failing fetch leaves yesterday's number on screen with
     // nothing to say so, now that the "1d ago" label is gone.
+    // Phase 9 wiring. Not "does the window come out right" — the fake returns
+    // a constant, so that would pass with any reach at all — but "is the key's
+    // OWN reach what the source was asked about".
+    test('the repository asks the source about the KEY\'s reach', () async {
+      const island = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '800000010',
+        product: ForecastProduct.shortRange,
+      );
+      source.validUntilReaches.clear();
+
+      await repo.read(island);
+
+      expect(source.validUntilReaches, contains('800000010'),
+          reason: 'a hardcoded or defaulted reach here puts every island '
+              'document back on the CONUS hour, invisibly');
+      expect(source.validUntilReaches, isNot(contains(key.reachId)));
+    });
+
     test('a failed fetch on a cache MISS raises it', () async {
       source.offline = true;
       await expectLater(repo.read(key), throwsA(anything));

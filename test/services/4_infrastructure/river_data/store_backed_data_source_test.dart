@@ -40,10 +40,20 @@ class _CountingSource implements IRiverDataSource {
         ForecastProduct.reachMetadata,
       };
 
+  /// Every reachId `validUntil` was asked about.
+  ///
+  /// Recorded rather than ignored because the wrapper's whole job here is to
+  /// pass it through unchanged, and a fake that swallows the argument makes
+  /// that untestable — which is how the store and the live path would come to
+  /// expire the same document at different instants without a test noticing.
+  final List<String> validUntilReaches = [];
+
   @override
   DateTime validUntil(ForecastProduct product, DateTime now,
-          {required String reachId}) =>
-      now.add(const Duration(hours: 1));
+      {required String reachId}) {
+    validUntilReaches.add(reachId);
+    return now.add(const Duration(hours: 1));
+  }
 
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
@@ -384,6 +394,22 @@ void main() {
         reason: 'a different freshness window on the two paths would make '
             'store entries expire early and refetch upstream',
       );
+    });
+
+    test('the reachId reaches the inner source UNCHANGED', () {
+      // The wiring, not the logic. Both sides above compute the same answer
+      // even if the wrapper substitutes a different reach, because the fake
+      // returns a constant — so equality alone cannot see a dropped or
+      // rewritten id. Since Phase 9 the window depends on WHICH reach it is,
+      // and a wrapper that quietly passed its own id would put island reaches
+      // back on the CONUS hour with every test still green.
+      final s = build(_Switch(true));
+      upstream.validUntilReaches.clear();
+
+      s.validUntil(ForecastProduct.shortRange, DateTime.utc(2026, 8, 25, 12),
+          reachId: '800000010');
+
+      expect(upstream.validUntilReaches, ['800000010']);
     });
   });
 
