@@ -26,7 +26,11 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
-import {MAX_HOLD_MS, DEFAULT_MAX_HOLD_MS} from "./store-window.js";
+import {
+  MAX_HOLD_MS,
+  DEFAULT_MAX_HOLD_MS,
+  MAX_RUN_AGE_MS,
+} from "./store-window.js";
 
 const REPO = resolve(__dirname, "..", "..") + "/";
 const DART = REPO +
@@ -66,14 +70,20 @@ function stripComments(src: string): string {
   return src.replace(/^\s*\/\/.*$/gm, "").replace(/\/\/.*$/gm, "");
 }
 
-/** The client's map, read out of the Dart source. */
-function dartHolds(): Record<string, number> {
+/**
+ * One of the client's duration maps, read out of the Dart source.
+ *
+ * @param {string} name - The Dart constant's name.
+ * @return {Record<string, number>} Product to milliseconds.
+ */
+function dartMap(name: string): Record<string, number> {
   const dart = stripComments(readFileSync(DART, "utf8"));
-  const block = /const Map<ForecastProduct, Duration> maxHold = \{([\s\S]*?)\};/
-    .exec(dart);
+  const block = new RegExp(
+    `const Map<ForecastProduct, Duration> ${name} = \\{([\\s\\S]*?)\\};`
+  ).exec(dart);
   assert.notEqual(block, null,
-    "hold_policy.dart no longer declares `maxHold` — if it moved, this test " +
-    "must follow it, because without it guard 4 is back to being a claim");
+    `hold_policy.dart no longer declares \`${name}\` — if it moved, this ` +
+    "test must follow it, because without it guard 4 is back to being a claim");
 
   const out: Record<string, number> = {};
   const entry = /ForecastProduct\.(\w+):\s*(Duration\([^)]*\))/g;
@@ -81,8 +91,18 @@ function dartHolds(): Record<string, number> {
   while ((m = entry.exec(block![1])) !== null) {
     out[m[1]] = durationMs(m[2]);
   }
-  assert.ok(Object.keys(out).length > 0, "no entries parsed from maxHold");
+  assert.ok(Object.keys(out).length > 0, `no entries parsed from ${name}`);
   return out;
+}
+
+/** The client's hold caps. */
+function dartHolds(): Record<string, number> {
+  return dartMap("maxHold");
+}
+
+/** The client's run-age caps. */
+function dartRunAges(): Record<string, number> {
+  return dartMap("maxRunAge");
 }
 
 describe("guard 4 — the client and the server hold for the same time", () => {
@@ -147,3 +167,44 @@ describe("guard 4 — the client and the server hold for the same time", () => {
     }
   });
 });
+
+describe("guard 4 — the client judges RUN AGE by the server's numbers too",
+  () => {
+    // Closing guard 4 properly. Sharing MAX_HOLD_MS made the two sides agree
+    // about how long ago we WROTE; it left them disagreeing about how old the
+    // WATER is, which is the dimension that catches the 2026-08-29 GEOGLOWS
+    // incident. Until this existed the server alarmed and the phone showed
+    // nothing at all — the document looked freshly written and in-window,
+    // because it was.
+    test("every server run-age cap has an identical client cap", () => {
+      const dart = dartRunAges();
+
+      for (const [product, ms] of Object.entries(MAX_RUN_AGE_MS)) {
+        assert.equal(dart[product], ms,
+          `${product}: the server alarms at ${ms / 3600_000}h of run age but ` +
+          `the client waits ${(dart[product] ?? NaN) / 3600_000}h. A client ` +
+          "that waits LONGER shows yesterday's water with no warning while " +
+          "the operational alarm is already firing.");
+      }
+    });
+
+    test("the client adds no run-age cap the server does not know", () => {
+      const dart = dartRunAges();
+
+      for (const product of Object.keys(dart)) {
+        assert.ok(product in MAX_RUN_AGE_MS,
+          `${product} has a client run-age cap with no server counterpart`);
+      }
+    });
+
+    test("the near-static products are judged by NEITHER side", () => {
+      // They carry no run identity at all. A default here is how the hold cap
+      // reported a healthy store as down within a minute of going live.
+      const dart = dartRunAges();
+      for (const product of ["reachMetadata", "returnPeriods"]) {
+        assert.ok(!(product in dart),
+          `${product} has a run-age cap but carries no run identity`);
+        assert.ok(!(product in MAX_RUN_AGE_MS));
+      }
+    });
+  });

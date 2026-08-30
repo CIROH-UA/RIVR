@@ -91,11 +91,20 @@ class RiverDataRepository implements IRiverDataRepository {
   /// rendered and marked confirmed, and stayed unquestioned until some later
   /// read happened to look.
   void _judge(RiverDataKey key, RiverDataEntry entry) {
+    final now = _now();
+
+    // Two questions, not one, and the second was missing until guard 4 was
+    // closed properly. `heldTooLong` asks how long ago this was fetched;
+    // `runTooOld` asks how old the water is. A store refreshing punctually
+    // while carrying yesterday's forecast passes the first and fails the
+    // second — which is exactly what GEOGLOWS did every day until 2026-08-29,
+    // with the server alarming and the phone showing nothing.
     if (heldTooLong(
-      product: key.product,
-      fetchedAt: entry.window.fetchedAt,
-      now: _now(),
-    )) {
+          product: key.product,
+          fetchedAt: entry.window.fetchedAt,
+          now: now,
+        ) ||
+        runTooOld(product: key.product, runId: entry.runId, now: now)) {
       _markUnconfirmed(key);
     } else {
       _markConfirmed(key);

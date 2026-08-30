@@ -1165,6 +1165,13 @@ products carry no run identity at all, and inheriting another product's cadence
 is exactly how the hold cap called a healthy store down within a minute of
 reaching production.
 
+**The client applies these same caps**, added when guard 4 was closed properly.
+Until then the phone had no notion of run age: during the 2026-08-29 incident
+the server would have alarmed while the device showed nothing at all, because
+every check it had asked "how long ago did we write?" and the answer was
+"minutes". `runTooOld` in `hold_policy.dart` asks the other question, against
+these numbers, pinned by the same drift test.
+
 Both dimensions are logged side by side, because the pair is what makes a
 healthy verdict checkable: punctual writes carrying yesterday's water look
 perfect in one list and wrong in the other.
@@ -1178,9 +1185,8 @@ that product's own cap.
   "something is broken" — and it is per product because the products differ by
   an order of magnitude (short range 6 h, long range 36 h, GEOGLOWS 48 h). A
   second constant here would drift from the window logic it has to agree with.
-  The client now shares this constant too (decision 22), so guard 4 holds for
-  write recency — but NOT for run currency below, which has no client
-  counterpart.
+  The client shares this constant (decision 22), and shares `MAX_RUN_AGE_MS`
+  below as well, so guard 4 holds for both of the server's dimensions.
 - **A product with no documents is skipped, not reported down.** Nobody has
   favourited a river that needs it, so there is nothing to be stale.
 - **The NEWEST document per product is judged.** One old document among fresh
@@ -1326,7 +1332,7 @@ overclaims are corrected in decisions 21 and 22 above rather than deleted.
 | 1 — no value view renders a timestamp | **met**, tested and mutation-checked |
 | 2 — offline shows the indicator, healthy shows nothing | **met for the offline half** — favourites (full), reach forecast (offline only), map (its own notice); weekly outlook has none. The staleness half stays on favourites by decision, not omission |
 | 3 — a frozen store raises the indicator | **met**, on the second attempt. The first passed its own test while failing in production: the repository stamped its own read clock over the server's `fetchedAt`, so the hold clock reset on every device read and the guard could never fire on store-served data. The test proving it wrote the crafted entry straight into the fake cache — asserting the premise instead of proving it. Now tested through a store-shaped source |
-| 4 — the indicator is driven by the same signal that alarms operationally | **met for write recency only.** Client and server share `MAX_HOLD_MS`, pinned by a drift test that fails in both directions. They do NOT share run currency: `MAX_RUN_AGE_MS` has no client counterpart, and decision 21 records that run currency is the dimension which catches the GEOGLOWS incident. So the shared signal is the weaker of the two |
+| 4 — the indicator is driven by the same signal that alarms operationally | **met, on the third attempt.** Both of the server's dimensions are now shared: `MAX_HOLD_MS` (how long ago we wrote) and `MAX_RUN_AGE_MS` (how old the water is), each mirrored in `hold_policy.dart` and pinned by a drift test that fails in both directions. The first attempt claimed a shared constant that existed only in TypeScript; the second shared the weaker dimension and left the phone silent through the very incident that motivated the phase |
 | 5 — independent agent review passes | **run 2026-08-29 and it did NOT pass.** This section is its result. Guards 3 and 4, and run currency, were all built in response to it; a re-review is still owed |
 
 What was genuinely delivered: the timestamps are gone from the values, the

@@ -53,11 +53,13 @@
 // SERVER's `fetchedAt`, forwarded through `SourceFetchResult.fetchedAt`, not
 // to its own read clock.
 //
-// What is still not true: the server also alarms on RUN AGE
-// (`MAX_RUN_AGE_MS`), and the client has no notion of that at all. So the
-// shared signal is write recency only — and decision 21 records that write
-// recency is the dimension which would NOT have caught the GEOGLOWS incident.
-// Guard 4 is met for one of the server's two signals, and not the sharper one.
+// Both of the server's dimensions are now shared, which is what finally
+// closed the guard: `MAX_HOLD_MS` (how long ago we wrote) and
+// `MAX_RUN_AGE_MS` (how old the water is), each mirrored in
+// `hold_policy.dart` and pinned by the same drift test. The second was added
+// last and matters most — it is the one that catches a store refreshing
+// punctually while carrying yesterday's forecast, which the phone could not
+// see at all before.
 
 import 'package:flutter/cupertino.dart';
 import 'package:get_it/get_it.dart';

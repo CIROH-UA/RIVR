@@ -70,6 +70,68 @@ const Duration defaultMaxHold = Duration(hours: 6);
 Duration maxHoldFor(ForecastProduct product) =>
     maxHold[product] ?? defaultMaxHold;
 
+/// How old the RUN ITSELF may be, per product.
+///
+/// **A different question from [maxHold], and the one that catches the
+/// incident this whole phase came from.** `maxHold` asks how long ago we last
+/// wrote; this asks how old the water is that we wrote. A store refreshing
+/// perfectly on schedule can carry yesterday's forecast forever and look
+/// flawless by the first measure — which is exactly what GEOGLOWS did every
+/// day until 2026-08-29, while every freshness check the app had said fine.
+///
+/// The client had no notion of this at all until now. The server alarmed and
+/// the phone stayed silent, which meant guard 4 — "the indicator is driven by
+/// the same signal that alarms operationally" — was true only for the weaker
+/// of the server's two signals, and false for the one that matters.
+///
+/// MUST equal `MAX_RUN_AGE_MS` in `functions/src/store-window.ts`. Pinned by
+/// the same drift test. Products absent here are NOT judged: the near-static
+/// products carry no run identity, and defaulting them is how the hold cap
+/// reported a healthy store as down within a minute of reaching production.
+const Map<ForecastProduct, Duration> maxRunAge = {
+  ForecastProduct.analysisAssimilation: Duration(hours: 16),
+  ForecastProduct.shortRange: Duration(hours: 16),
+  ForecastProduct.mediumRange: Duration(hours: 24),
+  ForecastProduct.longRange: Duration(hours: 36),
+  ForecastProduct.geoglowsForecast: Duration(hours: 42),
+};
+
+/// How old [product]'s run may be, or null when it is not judged.
+Duration? maxRunAgeFor(ForecastProduct product) => maxRunAge[product];
+
+/// The instant a run identity refers to, or null when it carries none.
+///
+/// Mirrors `parseRunInstant` on the server, including the pipe-joined form and
+/// its choice of the OLDEST segment: a payload spanning several runs is only
+/// as fresh as the oldest water in it, and the server orders these the same
+/// way.
+DateTime? runInstant(String? runId) {
+  if (runId == null || runId.isEmpty) return null;
+  DateTime? oldest;
+  for (final part in runId.split('|')) {
+    final t = DateTime.tryParse(part.trim());
+    if (t == null) continue;
+    if (oldest == null || t.isBefore(oldest)) oldest = t;
+  }
+  return oldest?.toUtc();
+}
+
+/// Whether the run a value came from is older than its product allows.
+///
+/// False when the product is not judged, or the run cannot be read — never
+/// guess. An unreadable run is not evidence of staleness.
+bool runTooOld({
+  required ForecastProduct product,
+  required String? runId,
+  required DateTime now,
+}) {
+  final cap = maxRunAgeFor(product);
+  if (cap == null) return false;
+  final at = runInstant(runId);
+  if (at == null) return false;
+  return now.toUtc().difference(at) > cap;
+}
+
 /// Whether a value fetched at [fetchedAt] has been held longer than its
 /// product allows.
 ///

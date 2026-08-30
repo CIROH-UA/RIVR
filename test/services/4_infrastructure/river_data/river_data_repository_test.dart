@@ -496,6 +496,64 @@ void main() {
           reason: 'the decay must not silence a problem that is still live');
     });
 
+    // ── Guard 4, closed: the client judges RUN AGE too ────────────────────
+    //
+    // THE incident, from the phone's side. On 2026-08-29 the store wrote
+    // GEOGLOWS punctually every single day carrying a run a day old. Every
+    // freshness check the app had said fine, because they all asked "how long
+    // ago did we write?" and the answer was "minutes". The server alarms on
+    // run age; until this the client had no notion of it, so the operational
+    // alarm fired and the phone showed nothing at all.
+    test('a punctually-written value carrying OLD water raises it', () async {
+      source.nextFetchedAt = now.subtract(const Duration(minutes: 15));
+      source.nextValidUntil = now.add(const Duration(hours: 1));
+      // shortRange's run-age cap is 16h.
+      source.nextRunId =
+          now.subtract(const Duration(hours: 20)).toIso8601String();
+
+      await repo.refresh(key);
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'written 15 minutes ago and still 20 hours out of date — '
+              'this is the shape that ran undetected for days, and the shape '
+              'the phone could not see until guard 4 was closed');
+    });
+
+    test('a current run written just as recently stays silent', () async {
+      source.nextFetchedAt = now.subtract(const Duration(minutes: 15));
+      source.nextValidUntil = now.add(const Duration(hours: 1));
+      source.nextRunId =
+          now.subtract(const Duration(hours: 3)).toIso8601String();
+
+      await repo.refresh(key);
+      expect(repo.outOfSync.value, isFalse);
+    });
+
+    test('a run identity that cannot be read is never treated as stale',
+        () async {
+      // Never guess. An unreadable run is not evidence of anything.
+      source.nextFetchedAt = now.subtract(const Duration(minutes: 5));
+      source.nextValidUntil = now.add(const Duration(hours: 1));
+      source.nextRunId = 'not-a-date';
+
+      await repo.refresh(key);
+      expect(repo.outOfSync.value, isFalse);
+    });
+
+    test('a pipe-joined run is judged by its OLDEST segment', () async {
+      // Same choice the server makes: a payload spanning runs is only as
+      // fresh as the oldest water in it.
+      source.nextFetchedAt = now.subtract(const Duration(minutes: 5));
+      source.nextValidUntil = now.add(const Duration(hours: 1));
+      final old = now.subtract(const Duration(hours: 20)).toIso8601String();
+      final fresh = now.subtract(const Duration(hours: 2)).toIso8601String();
+      source.nextRunId = '$old|$fresh';
+
+      await repo.refresh(key);
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'judging by the newest segment would call this current');
+    });
+
     test('it notifies listeners, so the banner can rebuild', () async {
       var notified = 0;
       repo.outOfSync.addListener(() => notified++);
