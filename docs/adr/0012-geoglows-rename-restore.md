@@ -71,9 +71,29 @@ before matching, because a guard a comment can satisfy is not a guard — this
 repository learned that twice on 2026-08-30 alone. All three mutation-checked
 by reintroducing the original defect.
 
-**Not verified:** nobody has yet renamed a GEOGLOWS favourite on a device and
-pressed restore. The chain is guarded at every link; the end-to-end journey is
-not.
+**VERIFIED end to end on the iPhone 17 Pro Max simulator, 2026-08-30**, signed
+in as the account that actually holds GEOGLOWS favourites. The whole journey:
+
+1. GEOGLOWS card showed its geocoded place, "Pitumarca, Peru" (reach
+   `620569308`).
+2. Swipe → Rename. **No restore button**, correctly — the reach has never been
+   renamed, and the button requires an existing custom name.
+3. Renamed it, saved. Card became the custom name.
+4. Swipe → Rename again. **"Restore to "Pitumarca, Peru"" appeared** — the
+   defect this ADR exists for.
+5. Tapped it, saved. Card returned to "Pitumarca, Peru".
+
+**The sync half was confirmed in the same pass**, which the widget tests
+cannot reach: the user document now holds
+`"geoglows:620569308": "Pitumarca, Peru"`, so the restored name went to
+Firestore and a flood alert for that river would use it. Both the old bare-id
+keys and the new source-prefixed ones are present, exactly as this ADR's
+sibling documented — old keys are not migrated, and the next rename writes the
+new one.
+
+**Still not verified:** the same journey on physical hardware. The simulator
+shares the app binary and the real Firestore backend, so what remains untested
+is the device-specific layer only.
 
 ## Not changed
 
