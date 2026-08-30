@@ -27,7 +27,11 @@ import {
   quotaUsage,
 } from "./store-trigger.js";
 import {ForecastProductId} from "./store-keys.js";
-import {maxHoldMs, maxRunAgeMs} from "./store-window.js";
+import {
+  StoredWindowSample,
+  maxHoldMs,
+  maxRunAgeMs,
+} from "./store-window.js";
 import {MANAGED_PRODUCTS, GEOGLOWS_PRODUCTS} from "./store-service.js";
 
 const MANAGED: ForecastProductId[] =
@@ -167,10 +171,13 @@ describe("per-product freshness — the hole the heartbeat had", () => {
    * @param {string} id - Document id.
    * @return {object} A StoredWindowSample.
    */
-  function sample(product: string, ageHours: number, id = "d") {
+  function sample(
+    product: string, ageHours: number, id = "d", reachId = "23021904"
+  ) {
     return {
       documentId: `${product}__${id}`,
       source: "nwm",
+      reachId,
       product,
       fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
       validUntil: NOW.toISOString(),
@@ -300,6 +307,59 @@ describe("per-product freshness — the hole the heartbeat had", () => {
   });
 });
 
+describe("a mixed-domain store is judged by the STRICTEST cap", () => {
+  // Phase 9. Hawaii and Puerto Rico short range may be held 24 hours because
+  // they publish 6- or 12-hourly; CONUS may be held 6. These aggregates take
+  // the NEWEST document per product, so without care a single fresh island
+  // write would buy the writer 24 hours of silence while every CONUS reach in
+  // the store went stale — the writer-liveness check quietly disabled by one
+  // river in Honolulu.
+  const NOW = new Date("2026-08-30T12:00:00.000Z");
+  const ISLAND = "800000010";
+  const CONUS = "23021904";
+
+  /**
+   * One stored document.
+   * @param {number} ageHours - How long ago it was fetched.
+   * @param {string} reachId - Which reach.
+   * @return {object} A StoredWindowSample.
+   */
+  function doc(ageHours: number, reachId: string) {
+    return {
+      documentId: `nwm__${reachId}__shortRange`,
+      source: "nwm",
+      reachId,
+      product: "shortRange",
+      fetchedAt: new Date(NOW.getTime() - ageHours * 3600_000).toISOString(),
+      validUntil: NOW.toISOString(),
+    } as StoredWindowSample;
+  }
+
+  test("one fresh island write cannot mask a stale CONUS store", () => {
+    // Newest document is 1 h old (island). Without the strictest-cap rule the
+    // cap would be 24 h and this would read healthy.
+    const rows = assessProductFreshness(
+      [doc(1, ISLAND), doc(20, CONUS)], NOW);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].capMs, 6 * 3600_000,
+      "a store holding any CONUS reach must be judged at the CONUS cap");
+  });
+
+  test("an island-only store is NOT alarmed on healthy data", () => {
+    // 12 hours is one whole Hawaii cycle and perfectly normal. Judging it at
+    // the CONUS cap would alarm every cycle, forever, on a working store.
+    const rows = assessProductFreshness([doc(12, ISLAND)], NOW);
+    assert.equal(rows[0].capMs, 24 * 3600_000);
+    assert.equal(rows[0].stale, false);
+  });
+
+  test("an island-only store still alarms when it really is stuck", () => {
+    const rows = assessProductFreshness([doc(30, ISLAND)], NOW);
+    assert.equal(rows[0].stale, true,
+      "24 hours is two missed Hawaii cycles — not 'hold forever'");
+  });
+});
+
 describe("run currency — the failure write recency cannot see", () => {
   /**
    * A stored document written NOW but carrying a run from `runAgeHours` ago.
@@ -313,11 +373,13 @@ describe("run currency — the failure write recency cannot see", () => {
     product: string,
     runAgeHours: number,
     fetchedAgeHours = 0.5,
-    id = "d"
+    id = "d",
+    reachId = "23021904"
   ) {
     return {
       documentId: `${product}__${id}`,
       source: product.startsWith("geoglows") ? "geoglows" : "nwm",
+      reachId,
       product,
       fetchedAt:
         new Date(NOW.getTime() - fetchedAgeHours * 3600_000).toISOString(),
@@ -497,7 +559,7 @@ describe("every managed product is actually judged", () => {
   // line saying so. Same mutation class as store-health-wiring.test.ts.
   test("MANAGED_PRODUCTS and GEOGLOWS_PRODUCTS all have a run-age cap", () => {
     for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
-      assert.notEqual(maxRunAgeMs(p), null,
+      assert.notEqual(maxRunAgeMs(p, "23021904"), null,
         `${p} is on the refresh cycle but has no MAX_RUN_AGE_MS entry, so it ` +
         "is silently exempt from run-currency checking");
     }
@@ -505,7 +567,7 @@ describe("every managed product is actually judged", () => {
 
   test("and a hold cap, so write recency judges them too", () => {
     for (const p of [...MANAGED_PRODUCTS, ...GEOGLOWS_PRODUCTS]) {
-      assert.ok(maxHoldMs(p) > 0, `${p} has no hold cap`);
+      assert.ok(maxHoldMs(p, "23021904") > 0, `${p} has no hold cap`);
     }
   });
 });

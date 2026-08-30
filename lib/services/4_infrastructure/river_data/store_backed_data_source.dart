@@ -81,10 +81,10 @@ class StoreBackedDataSource implements IRiverDataSource {
     required StoreReadSwitch readSwitch,
     FirebaseFirestore? firestore,
     Set<String> Function()? storeBackedIds,
-  })  : _inner = inner,
-        _switch = readSwitch,
-        _injectedDb = firestore,
-        _storeBackedIds = storeBackedIds;
+  }) : _inner = inner,
+       _switch = readSwitch,
+       _injectedDb = firestore,
+       _storeBackedIds = storeBackedIds;
 
   static const String _tag = 'STORE_SOURCE';
 
@@ -126,8 +126,11 @@ class StoreBackedDataSource implements IRiverDataSource {
   /// disagree about when the value expires and the store's entries would be
   /// refetched early — the exact defeat this class exists to prevent.
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
-      _inner.validUntil(product, now);
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    required String reachId,
+  }) => _inner.validUntil(product, now, reachId: reachId);
 
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
@@ -158,9 +161,9 @@ class StoreBackedDataSource implements IRiverDataSource {
           _tag,
           fromStore != null
               ? 'switch flipped off mid-fetch; discarding the store answer '
-                  'for ${key.storageKey}'
+                    'for ${key.storageKey}'
               : 'switch flipped off mid-fetch; the store had nothing for '
-                  '${key.storageKey} anyway',
+                    '${key.storageKey} anyway',
         );
       } else if (fromStore != null) {
         servedFromStore++;

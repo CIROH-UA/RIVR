@@ -251,12 +251,55 @@ export function refreshFloor(
  * @param {Date} now - When the value was fetched, or re-verified.
  * @return {Date} The validUntil to stamp.
  */
+/**
+ * Lowest NHDPlus COMID in the Hawaii / Puerto Rico band, inclusive.
+ *
+ * Mirrors `islandComidMin` in
+ * `lib/models/1_domain/shared/river_data/nwm_domain.dart`, which carries the
+ * measurements and the reasoning. Pinned by the drift test in
+ * `store-document.test.ts` — a one-sided change here is exactly the class of
+ * bug that test now exists to catch, because until Phase 9 it compared only
+ * the skew constants and would have let the two sides expire the same
+ * document hours apart.
+ */
+export const ISLAND_COMID_MIN = 800000000;
+
+/** Highest NHDPlus COMID in the island band, inclusive. */
+export const ISLAND_COMID_MAX = 921999999;
+
+/**
+ * Hours between island short-range runs.
+ *
+ * Six, covering both islands with the FASTER of the two real cadences —
+ * Hawaii is 12-hourly, Puerto Rico 6-hourly, and one COMID band covers both.
+ * Twelve would hold a Puerto Rico forecast six hours past a newer run, which
+ * is showing stale water; six costs Hawaii one redundant refetch per run.
+ */
+export const ISLAND_SHORT_RANGE_CYCLE_HOURS = 6;
+
+/**
+ * Whether [reachId] is a Hawaii or Puerto Rico reach.
+ *
+ * Unparseable ids are treated as CONUS, matching `nwmDomainOf` in Dart: CONUS
+ * has the shorter windows, so a misclassification costs a refetch rather than
+ * serving a value past its run.
+ *
+ * @param {string} reachId - NWM reach identifier.
+ * @return {boolean} True for the island domain.
+ */
+export function isIslandReach(reachId: string): boolean {
+  if (!/^\d+$/.test(reachId)) return false;
+  const id = Number(reachId);
+  return id >= ISLAND_COMID_MIN && id <= ISLAND_COMID_MAX;
+}
+
 export function storeValidUntil(
   source: ForecastSourceId,
   product: ForecastProductId,
-  now: Date
+  now: Date,
+  reachId: string
 ): Date {
-  const publish = validUntil(source, product, now);
+  const publish = validUntil(source, product, now, reachId);
   const floor = refreshFloor(source, product, now);
   return publish.getTime() >= floor.getTime() ? publish : floor;
 }
@@ -281,7 +324,8 @@ const STATIC_PRODUCT_MS = 30 * 24 * 3600_000;
 export function validUntil(
   source: ForecastSourceId,
   product: ForecastProductId,
-  now: Date
+  now: Date,
+  reachId: string
 ): Date {
   if (source === "geoglows") {
     switch (product) {
@@ -295,9 +339,23 @@ export function validUntil(
 
   switch (product) {
   case "analysisAssimilation":
-  case "shortRange":
-    // Hourly, driven by current flow.
+    // Hourly in EVERY NWM domain. `analysis_assim_hawaii` published t00z..t14z
+    // on 2026-08-30, the same as CONUS — analysis is what the model just did,
+    // not what it forecasts, so it does not take short range's slower island
+    // cycle. Split from `shortRange` deliberately: they shared this branch,
+    // and the shared branch is what carried the CONUS hour onto the islands.
     return new Date(nextTopOfHour(now).getTime() + NWM_SKEW_MS);
+  case "shortRange":
+    // Hourly for CONUS; every six hours for Hawaii and Puerto Rico. Measured
+    // 2026-08-30 from NOAA's production listing — `short_range` published
+    // hourly, `short_range_puertorico` at t00z/t06z/t12z, `short_range_hawaii`
+    // at t00z/t12z. Stamping the CONUS hour on an island document expired it
+    // eleven times before new data could exist.
+    return isIslandReach(reachId) ?
+      new Date(
+        nextCycle(now, ISLAND_SHORT_RANGE_CYCLE_HOURS).getTime() +
+          NWM_SKEW_MS) :
+      new Date(nextTopOfHour(now).getTime() + NWM_SKEW_MS);
   case "mediumRange":
   case "longRange":
     // Every 6 hours (00/06/12/18Z).
@@ -370,7 +428,8 @@ export function buildStoreDocument(input: BuildDocumentInput): StoreDocument {
     product,
     window: {
       fetchedAt: fetchedAt.toISOString(),
-      validUntil: storeValidUntil(source, product, fetchedAt).toISOString(),
+      validUntil:
+        storeValidUntil(source, product, fetchedAt, reachId).toISOString(),
     },
     unit,
     payload,

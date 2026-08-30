@@ -630,6 +630,17 @@ TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
 delete every sample the moment it was written. `river_data` never needed this;
 it is overwritten in place and swept by `storeGcDaily`.
 
+**The NWM is four models on four schedules, and the store now knows it.**
+Short range publishes hourly for CONUS, every 6 hours for Puerto Rico, every 12
+for Hawaii and every 3 for Alaska — measured 2026-08-30 by counting the `tNNz`
+run directories on NOMADS. Analysis assimilation is hourly everywhere. Hawaii
+and Puerto Rico have **no medium or long range at all**. Reaches in the COMID
+band 800000000-921999999 are island reaches and take a 6-hour short-range
+window, a 24-hour hold cap and a 28-hour run-age cap; `nwm_domain.dart` and
+`store-document.ts` carry the numbers and a drift test pins them together.
+**Alaska is not handled on purpose** — the `nwm-channels-v3` tileset 404s over
+Fairbanks, Juneau, Kenai and Anchorage, so no Alaska river can be tapped.
+
 **Requires the composite index `river_data(product ASC, runId ASC)`.** Without
 it every hourly run aborts on FAILED_PRECONDITION. Declared in
 `firestore.indexes.json` and created in production.

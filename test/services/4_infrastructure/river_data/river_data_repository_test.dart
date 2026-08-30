@@ -107,7 +107,8 @@ class _ControllableSource implements IRiverDataSource {
   Set<ForecastProduct> get supportedProducts => ForecastProduct.values.toSet();
 
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
+  DateTime validUntil(ForecastProduct product, DateTime now,
+          {required String reachId}) =>
       now.toUtc().add(validFor);
 
   /// The model run the next fetch reports, when set.

@@ -14,7 +14,8 @@ class _StubSource implements IRiverDataSource {
   @override
   Set<ForecastProduct> get supportedProducts => const {};
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) => now;
+  DateTime validUntil(ForecastProduct product, DateTime now,
+          {required String reachId}) => now;
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async =>
       const SourceFetchResult(payload: {}, unit: 'CMS');

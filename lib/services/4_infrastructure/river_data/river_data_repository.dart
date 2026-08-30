@@ -103,8 +103,14 @@ class RiverDataRepository implements IRiverDataRepository {
           product: key.product,
           fetchedAt: entry.window.fetchedAt,
           now: now,
+          reachId: key.reachId,
         ) ||
-        runTooOld(product: key.product, runId: entry.runId, now: now)) {
+        runTooOld(
+          product: key.product,
+          runId: entry.runId,
+          now: now,
+          reachId: key.reachId,
+        )) {
       _markUnconfirmed(key);
     } else {
       _markConfirmed(key);
@@ -231,8 +237,9 @@ class RiverDataRepository implements IRiverDataRepository {
   @override
   Future<void> ingest(RiverDataEntry entry) {
     final k = entry.key.storageKey;
-    final chained = (_ingesting[k] ?? Future<void>.value())
-        .then((_) => _ingestLocked(entry));
+    final chained = (_ingesting[k] ?? Future<void>.value()).then(
+      (_) => _ingestLocked(entry),
+    );
     // Kept separately from `chained`: the map holds the error-swallowing
     // wrapper so one bad ingest cannot poison the chain, while the CALLER gets
     // the real future. Round 6 found the previous cleanup compared the wrapper
@@ -241,9 +248,11 @@ class RiverDataRepository implements IRiverDataRepository {
     // and bounded, but it was dead code that read as live.
     final guarded = chained.catchError((Object _) {});
     _ingesting[k] = guarded;
-    unawaited(guarded.whenComplete(() {
-      if (identical(_ingesting[k], guarded)) _ingesting.remove(k);
-    }));
+    unawaited(
+      guarded.whenComplete(() {
+        if (identical(_ingesting[k], guarded)) _ingesting.remove(k);
+      }),
+    );
     return chained;
   }
 
@@ -327,7 +336,9 @@ class RiverDataRepository implements IRiverDataRepository {
         // server: recomputing from the read clock would extend the server's
         // expiry every time a device read it. Everything else passes null and
         // gets the publish-aligned window as before.
-        validUntil: result.validUntil ?? source.validUntil(key.product, now),
+        validUntil:
+            result.validUntil ??
+            source.validUntil(key.product, now, reachId: key.reachId),
       ),
       unit: result.unit,
       runId: result.runId,

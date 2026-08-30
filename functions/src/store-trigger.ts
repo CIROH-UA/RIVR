@@ -274,6 +274,18 @@ export function assessProductFreshness(
   now: Date
 ): ProductFreshness[] {
   const newest = new Map<ForecastProductId, number>();
+  // The STRICTEST cap among the reaches actually present, not the cap of
+  // whichever document happens to be newest.
+  //
+  // This aggregate answers "is the writer running at all?", so it has to hold
+  // the writer to the fastest cadence anyone is relying on. Hawaii and Puerto
+  // Rico short range may be held 24 hours (they publish 6- or 12-hourly);
+  // CONUS may be held 6. Taking the newest document's own cap would let a
+  // single fresh island write buy the writer 24 hours of silence while every
+  // CONUS reach in the store rotted. Taking the minimum means a store holding
+  // any CONUS reach is judged at 6 hours, and a store holding only island
+  // reaches is judged at 24 rather than alarming every cycle on healthy data.
+  const cap = new Map<ForecastProductId, number>();
 
   for (const s of samples) {
     const fetchedAt = Date.parse(s.fetchedAt);
@@ -282,12 +294,15 @@ export function assessProductFreshness(
     if (seen === undefined || fetchedAt > seen) {
       newest.set(s.product, fetchedAt);
     }
+    const c = maxHoldMs(s.product, s.reachId);
+    const seenCap = cap.get(s.product);
+    if (seenCap === undefined || c < seenCap) cap.set(s.product, c);
   }
 
   const out: ProductFreshness[] = [];
   for (const [product, fetchedAt] of newest) {
     const ageMs = now.getTime() - fetchedAt;
-    const capMs = maxHoldMs(product);
+    const capMs = cap.get(product) ?? maxHoldMs(product, "");
     out.push({product, ageMs, capMs, stale: ageMs > capMs});
   }
 
@@ -373,6 +388,7 @@ export function assessRunCurrency(
   now: Date
 ): ProductRunCurrency[] {
   const newestRun = new Map<ForecastProductId, number>();
+  const runCap = new Map<ForecastProductId, number>();
 
   for (const s of samples) {
     if (!s.runId) continue;
@@ -380,11 +396,17 @@ export function assessRunCurrency(
     if (runAt === null) continue;
     const seen = newestRun.get(s.product);
     if (seen === undefined || runAt > seen) newestRun.set(s.product, runAt);
+    // Strictest cap present, for the same reason as the hold check above.
+    const c = maxRunAgeMs(s.product, s.reachId);
+    if (c !== null) {
+      const seenCap = runCap.get(s.product);
+      if (seenCap === undefined || c < seenCap) runCap.set(s.product, c);
+    }
   }
 
   const out: ProductRunCurrency[] = [];
   for (const [product, runAt] of newestRun) {
-    const capMs = maxRunAgeMs(product);
+    const capMs = runCap.get(product) ?? null;
     if (capMs === null) continue;
     const runAgeMs = now.getTime() - runAt;
     out.push({product, runAgeMs, capMs, stale: runAgeMs > capMs});

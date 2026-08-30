@@ -14,6 +14,11 @@ import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
 import 'package:rivr/services/4_infrastructure/river_data/hold_policy.dart';
 
 void main() {
+  // Every existing case in this file was written against CONUS cadences, so
+  // it keeps a CONUS reach. The island cases are a separate group below.
+  const conusReach = '23021904';
+  const islandReach = '800000010';
+
   final now = DateTime.utc(2026, 8, 30, 12, 0);
 
   group('maxHoldFor', () {
@@ -27,14 +32,16 @@ void main() {
         ForecastProduct.reachMetadata,
         ForecastProduct.returnPeriods,
       ]) {
-        expect(maxHoldFor(p).inMinutes, greaterThan(0), reason: '$p has none');
+        expect(maxHoldFor(p, reachId: conusReach).inMinutes, greaterThan(0),
+            reason: '$p has none');
       }
     });
 
     test('an unnamed product falls back to the SHORT default', () {
       // Failing towards "check again" is the safe direction; failing towards
       // "hold forever" is how a stale value becomes invisible.
-      expect(maxHoldFor(ForecastProduct.reachSummary), defaultMaxHold);
+      expect(maxHoldFor(ForecastProduct.reachSummary, reachId: conusReach),
+          defaultMaxHold);
       expect(defaultMaxHold, const Duration(hours: 6));
     });
 
@@ -47,7 +54,8 @@ void main() {
         ForecastProduct.reachMetadata,
         ForecastProduct.returnPeriods,
       ]) {
-        expect(maxHoldFor(p).inDays, greaterThan(30), reason: '$p');
+        expect(maxHoldFor(p, reachId: conusReach).inDays, greaterThan(30),
+            reason: '$p');
       }
     });
   });
@@ -58,16 +66,14 @@ void main() {
         heldTooLong(
           product: ForecastProduct.shortRange,
           fetchedAt: now.subtract(const Duration(hours: 5)),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isFalse,
       );
       expect(
         heldTooLong(
           product: ForecastProduct.shortRange,
           fetchedAt: now.subtract(const Duration(hours: 7)),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isTrue,
       );
     });
@@ -79,8 +85,7 @@ void main() {
         heldTooLong(
           product: ForecastProduct.shortRange,
           fetchedAt: now.add(const Duration(hours: 2)),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isFalse,
       );
     });
@@ -98,8 +103,7 @@ void main() {
         heldTooLong(
           product: ForecastProduct.shortRange,
           fetchedAt: now.subtract(const Duration(hours: 1)),
-          now: localNow,
-        ),
+          now: localNow, reachId: conusReach),
         isFalse,
       );
     });
@@ -152,20 +156,27 @@ void main() {
         runTooOld(
           product: ForecastProduct.reachMetadata,
           runId: DateTime.utc(2020).toIso8601String(),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isFalse,
       );
     });
 
     test('an absent or unreadable run is never treated as stale', () {
       expect(
-        runTooOld(product: ForecastProduct.shortRange, runId: null, now: now),
+        runTooOld(
+          product: ForecastProduct.shortRange,
+          runId: null,
+          now: now,
+          reachId: conusReach,
+        ),
         isFalse,
       );
       expect(
         runTooOld(
-            product: ForecastProduct.shortRange, runId: 'nope', now: now),
+            product: ForecastProduct.shortRange,
+            runId: 'nope',
+            now: now,
+            reachId: conusReach),
         isFalse,
       );
     });
@@ -176,8 +187,7 @@ void main() {
         runTooOld(
           product: ForecastProduct.shortRange,
           runId: now.subtract(const Duration(hours: 11)).toIso8601String(),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isFalse,
         reason: '11h is the worst run age measured across 163 real probe '
             'samples; alarming here alarms on ordinary days',
@@ -186,8 +196,7 @@ void main() {
         runTooOld(
           product: ForecastProduct.shortRange,
           runId: now.subtract(const Duration(hours: 17)).toIso8601String(),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isTrue,
       );
     });
@@ -201,8 +210,7 @@ void main() {
         runTooOld(
           product: ForecastProduct.geoglowsForecast,
           runId: ago(35.5).toIso8601String(),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isFalse,
         reason: 'a stored run legitimately reaches 35.5h before our 11:30 '
             'fetch replaces it — measured in production',
@@ -211,8 +219,7 @@ void main() {
         runTooOld(
           product: ForecastProduct.geoglowsForecast,
           runId: ago(49.5).toIso8601String(),
-          now: now,
-        ),
+          now: now, reachId: conusReach),
         isTrue,
         reason: '49.5h is what the old 01:30 schedule produced, holding '
             "yesterday's run all day",
@@ -224,10 +231,103 @@ void main() {
         runTooOld(
           product: ForecastProduct.shortRange,
           runId: now.add(const Duration(hours: 3)).toIso8601String(),
-          now: now,
+          now: now, reachId: conusReach),
+        isFalse,
+      );
+    });
+  });
+
+  // ── Phase 9: the caps were CONUS-shaped and would have failed islands ─────
+  group('Hawaii and Puerto Rico reaches get their own caps', () {
+    test('a 12-hour-old island short range is still HELD, CONUS is not', () {
+      // The concrete failure. Hawaii short range publishes at t00z and t12z
+      // only (measured 2026-08-30), so a document fetched 12 hours ago is the
+      // newest that exists. The CONUS cap of 6 hours would have expired it and
+      // sent every device with a Hawaii favourite back upstream for half of
+      // every cycle — breaking guard 1's "renders with zero upstream calls".
+      final at = DateTime.utc(2026, 8, 30, 12, 0);
+      final fetched = at.subtract(const Duration(hours: 12));
+      expect(
+        heldTooLong(
+          product: ForecastProduct.shortRange,
+          fetchedAt: fetched,
+          now: at,
+          reachId: islandReach,
         ),
         isFalse,
       );
+      expect(
+        heldTooLong(
+          product: ForecastProduct.shortRange,
+          fetchedAt: fetched,
+          now: at,
+          reachId: conusReach,
+        ),
+        isTrue,
+        reason: 'a CONUS reach silent for 12 hours really is broken; the two '
+            'domains must not share one answer',
+      );
+    });
+
+    test('the island cap still ENDS — 25 hours is too long', () {
+      // Not "hold forever". Two missed Hawaii cycles is a real outage.
+      final at = DateTime.utc(2026, 8, 30, 12, 0);
+      expect(
+        heldTooLong(
+          product: ForecastProduct.shortRange,
+          fetchedAt: at.subtract(const Duration(hours: 25)),
+          now: at,
+          reachId: islandReach,
+        ),
+        isTrue,
+      );
+    });
+
+    test('15.3h of run age is normal on an island, alarming on CONUS', () {
+      // The exact measurement: NWPS reach 800000010 reported its short-range
+      // run as 00:00Z at 15:16Z on 2026-08-30, still current. The CONUS cap of
+      // 16 hours was one missed publication from alarming on a healthy river.
+      final at = DateTime.utc(2026, 8, 30, 15, 16);
+      final run = DateTime.utc(2026, 8, 30, 0, 0).toIso8601String();
+      expect(
+        runTooOld(
+          product: ForecastProduct.shortRange,
+          runId: run,
+          now: at,
+          reachId: islandReach,
+        ),
+        isFalse,
+      );
+      expect(
+        runTooOld(
+          product: ForecastProduct.shortRange,
+          runId: run,
+          now: at.add(const Duration(hours: 1)),
+          reachId: conusReach,
+        ),
+        isTrue,
+        reason: 'the same run one hour later trips the CONUS cap — which is '
+            'why the island reach needed its own',
+      );
+    });
+
+    test('only short range differs; the other products are unchanged', () {
+      // Analysis assimilation publishes hourly in every domain, and the
+      // islands have no medium or long range at all. Widening the whole table
+      // would be the obvious wrong fix.
+      for (final p in [
+        ForecastProduct.analysisAssimilation,
+        ForecastProduct.mediumRange,
+        ForecastProduct.longRange,
+        ForecastProduct.reachMetadata,
+        ForecastProduct.returnPeriods,
+      ]) {
+        expect(
+          maxHoldFor(p, reachId: islandReach),
+          maxHoldFor(p, reachId: conusReach),
+          reason: '$p must not have picked up an island cap',
+        );
+      }
     });
   });
 }

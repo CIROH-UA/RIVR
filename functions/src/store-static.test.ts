@@ -74,7 +74,7 @@ describe("the static products are actually reachable", () => {
     // The client refetches upstream the moment it considers a document stale,
     // so a shorter window here silently reintroduces the device-side call.
     for (const p of STATIC_PRODUCTS) {
-      const until = validUntil("nwm", p, NOW);
+      const until = validUntil("nwm", p, NOW, "23021904");
       const days = (until.getTime() - NOW.getTime()) / (24 * 3600_000);
       assert.equal(days, 30, `${p} should be valid for 30 days`);
     }

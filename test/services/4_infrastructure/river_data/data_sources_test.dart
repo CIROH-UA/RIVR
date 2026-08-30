@@ -163,6 +163,13 @@ class _FakeUnit implements IFlowUnitPreferenceService {
 }
 
 void main() {
+  // Two reach ids, because the NWM publish schedule now depends on which
+  // domain a reach is in (Phase 9). `conusReach` is the White River reach used
+  // throughout ADR 0011's device testing; `islandReach` is the Oahu reach whose
+  // NWPS response was measured on 2026-08-30.
+  const conusReach = '23021904';
+  const islandReach = '800000010';
+
   runIdTests();
   group('NwmDataSource', () {
     late _FakeNoaa api;
@@ -196,8 +203,7 @@ void main() {
       expect(
         nwm.validUntil(
           ForecastProduct.shortRange,
-          DateTime.utc(2026, 7, 10, 12, 30),
-        ),
+          DateTime.utc(2026, 7, 10, 12, 30), reachId: conusReach),
         DateTime.utc(2026, 7, 10, 13, 5),
       );
     });
@@ -206,8 +212,7 @@ void main() {
       expect(
         nwm.validUntil(
           ForecastProduct.mediumRange,
-          DateTime.utc(2026, 7, 10, 13, 10),
-        ),
+          DateTime.utc(2026, 7, 10, 13, 10), reachId: conusReach),
         DateTime.utc(2026, 7, 10, 18, 5),
       );
     });
@@ -215,7 +220,7 @@ void main() {
     test('validUntil: return periods are effectively static (~30 days)', () {
       final now = DateTime.utc(2026, 7, 10, 12, 0);
       expect(
-        nwm.validUntil(ForecastProduct.returnPeriods, now),
+        nwm.validUntil(ForecastProduct.returnPeriods, now, reachId: conusReach),
         now.add(const Duration(days: 30)),
       );
     });
@@ -225,9 +230,77 @@ void main() {
       // defended only by a comment.
       final now = DateTime.utc(2026, 7, 10, 12, 0);
       expect(
-        nwm.validUntil(ForecastProduct.reachMetadata, now),
+        nwm.validUntil(ForecastProduct.reachMetadata, now, reachId: conusReach),
         now.add(const Duration(days: 30)),
       );
+    });
+
+    // ── Phase 9: the publish schedule is not CONUS's ────────────────────
+    //
+    // Measured 2026-08-30 from NOAA's production directory listing:
+    // `short_range` published every hour, `short_range_puertorico` at
+    // t00z/t06z/t12z and `short_range_hawaii` at t00z/t12z only. The Oahu
+    // reach below reported a `referenceTime` of 00:00Z at 15:16Z the same
+    // day — fifteen hours old and still current.
+    group('island reaches do not inherit the CONUS short-range hour', () {
+      test('short range expires on the 6-hour cycle, not the next hour', () {
+        // 12:30 on a CONUS reach expires at 13:05. The same instant on an
+        // island reach must wait for 18:00, because nothing new can exist
+        // before then and expiring early sends the device upstream to be
+        // handed back the identical run.
+        expect(
+          nwm.validUntil(
+            ForecastProduct.shortRange,
+            DateTime.utc(2026, 7, 10, 12, 30),
+            reachId: islandReach,
+          ),
+          DateTime.utc(2026, 7, 10, 18, 5),
+        );
+      });
+
+      test('the two domains genuinely disagree', () {
+        // The assertion that would have failed before this change, stated as
+        // a difference rather than as two numbers — a shared constant edited
+        // in one place cannot make this pass by accident.
+        final at = DateTime.utc(2026, 7, 10, 12, 30);
+        expect(
+          nwm.validUntil(ForecastProduct.shortRange, at,
+              reachId: islandReach),
+          isNot(nwm.validUntil(ForecastProduct.shortRange, at,
+              reachId: conusReach)),
+          reason: 'an island short-range window computed as CONUS is the '
+              'defect this test exists for',
+        );
+      });
+
+      test('analysis assimilation stays hourly EVERYWHERE', () {
+        // `analysis_assim_hawaii` published t00z..t14z on 2026-08-30, exactly
+        // like CONUS. Analysis is what the model just did, not what it
+        // forecasts, so it does not take short range's slower island cycle.
+        // Pinned because the two products used to share one branch, and that
+        // shared branch is what carried the CONUS assumption to the islands —
+        // widening it to cover both would be the obvious wrong fix.
+        final at = DateTime.utc(2026, 7, 10, 12, 30);
+        expect(
+          nwm.validUntil(ForecastProduct.analysisAssimilation, at,
+              reachId: islandReach),
+          DateTime.utc(2026, 7, 10, 13, 5),
+        );
+      });
+
+      test('the static products are unaffected by domain', () {
+        final now = DateTime.utc(2026, 7, 10, 12, 0);
+        for (final p in [
+          ForecastProduct.returnPeriods,
+          ForecastProduct.reachMetadata,
+        ]) {
+          expect(
+            nwm.validUntil(p, now, reachId: islandReach),
+            nwm.validUntil(p, now, reachId: conusReach),
+            reason: '$p does not publish on a model cycle at all',
+          );
+        }
+      });
     });
 
     test('reachMetadata is advertised as supported', () {
@@ -316,7 +389,11 @@ void main() {
 
     test('validUntil throws for unsupported products', () {
       expect(
-        () => nwm.validUntil(ForecastProduct.geoglowsForecast, DateTime.now()),
+        () => nwm.validUntil(
+          ForecastProduct.geoglowsForecast,
+          DateTime.now(),
+          reachId: conusReach,
+        ),
         throwsArgumentError,
       );
     });
@@ -399,8 +476,7 @@ void main() {
         expect(
           geoglows.validUntil(
             ForecastProduct.geoglowsForecast,
-            DateTime.utc(2026, 7, 10, 15, 20),
-          ),
+            DateTime.utc(2026, 7, 10, 15, 20), reachId: '760337'),
           DateTime.utc(2026, 7, 11, 10, 45),
         );
       });
@@ -411,8 +487,7 @@ void main() {
         expect(
           geoglows.validUntil(
             ForecastProduct.geoglowsForecast,
-            DateTime.utc(2026, 7, 10, 0, 20),
-          ),
+            DateTime.utc(2026, 7, 10, 0, 20), reachId: '760337'),
           DateTime.utc(2026, 7, 10, 10, 45),
         );
       });

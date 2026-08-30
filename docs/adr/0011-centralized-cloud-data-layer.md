@@ -2070,8 +2070,82 @@ Affordable because every working version is on `main`.
 store has run clean through Phase 8. Delete everything with no callers — **the
 list is derived at the time, not predicted here** (an earlier draft named
 `reach_data_provider` and was wrong). Rename `analysisAssimilation`, which
-fetches short range. Fix `validUntil`'s CONUS-only assumption for Alaska and
-Hawaii/Puerto Rico. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
+fetches short range.
+
+### `validUntil`'s CONUS assumption — DONE 2026-08-30
+
+**The National Water Model is not one model on one schedule, and every
+freshness window in this app was written as though it were.** `validUntil`
+stamped `shortRange` as expiring at the next top of the hour, because that is
+what CONUS does.
+
+**Measured, not looked up.** From NOAA's own production directory listing
+(`nomads.ncep.noaa.gov/.../nwm.<date>/<product>/`, counting the distinct `tNNz`
+run hours present on 2026-08-30):
+
+| Domain | short range | analysis assimilation | medium / long |
+|---|---|---|---|
+| CONUS | hourly | hourly | 6-hourly |
+| Puerto Rico | **6-hourly** (t00/t06/t12z) | hourly | **none** |
+| Hawaii | **12-hourly** (t00/t12z) | hourly | **none** |
+| Alaska | 3-hourly (t00/03/06/09/12z) | hourly | blend only, 6-hourly |
+
+Corroborated at the API the app actually calls: NWPS reach `800000010` (Oahu)
+reported its short-range `referenceTime` as `00:00Z` at 15:16Z the same day —
+fifteen hours old and still current, which rules out hourly on its own. That
+reach also exposes only `["analysis_assimilation", "short_range"]`, where a
+CONUS reach exposes five products.
+
+**What it cost.** An island short-range document expired eleven times before
+any new data could exist, and each expiry sent the device back upstream to be
+handed the identical run. That is the Phase 5 dead-air bug — a value marked
+stale while still being the newest that exists anywhere — except per-domain,
+and far larger: 15 minutes an hour became 11 hours out of 12.
+
+**Not live, and said plainly.** All 36 reaches in the store on 2026-08-30 are
+CONUS, so no user has hit this. It was latent, and would have arrived with the
+first person in San Juan or Honolulu who favourited a river.
+
+**The fix is in three places, because the assumption was.**
+
+1. `validUntil` takes a `reachId` — REQUIRED, not optional, so the CONUS
+   assumption cannot be reintroduced by omission. There were only two call
+   sites and the compiler named both.
+2. **The hold caps too**, which is the half that would have been missed.
+   `MAX_HOLD_MS.shortRange` is 6 hours; a healthy Hawaii document is 12 hours
+   old, so it would have been left to expire between runs and every device
+   holding that favourite would drop to the live path for half of every cycle
+   — breaking guard 1's "renders with ZERO upstream calls" for anyone with a
+   Hawaii river. Island tables: 24 h hold (two missed Hawaii cycles), 28 h run
+   age. **The CONUS run-age cap of 16 h would have false-alarmed on the day
+   this was written**, on a river that was completely healthy.
+3. The health aggregates take the **strictest** cap present, not the cap of
+   whichever document happens to be newest — otherwise one fresh island write
+   would buy the writer 24 hours of silence while every CONUS reach rotted.
+
+**One number covers both islands, and the choice is the interesting part.**
+Hawaii is 12-hourly, Puerto Rico 6-hourly, and they share one COMID band
+(800000000–921999999), so a reach id cannot tell them apart. Twelve is the
+efficient choice and the wrong one: it would hold a Puerto Rico forecast six
+hours after a newer run existed, which is showing stale water. Six costs
+Hawaii one redundant refetch per run. **When the options are "waste a fetch"
+and "show the wrong number", the wasted fetch wins.**
+
+**Alaska is deliberately NOT handled, and that is a finding rather than a
+gap.** `byu-hydroinformatics.nwm-channels-v3` returns 404 for Fairbanks,
+Juneau, Kenai and Anchorage at both z5 and z7 — there is no Alaska line on the
+map to tap. An Alaska branch would be untestable code for a case that cannot
+occur, and would read to a later maintainer as though it had been verified.
+The measured cadence is recorded above for the day the tileset changes.
+
+**The drift guard did not catch this, and now does.** The client's island
+cycle was changed with the server left alone, and all 406 server tests stayed
+green: `store-document.test.ts` pinned the SKEW constants and the envelope
+field NAMES, and nothing pinned the SCHEDULE. Two sides can agree on a
+five-minute skew while expiring the same document six hours apart. The guard
+now pins the island band, the cycle, and — separately — that the client still
+*calls* `nwmDomainOf`, because constants can agree while the code stops
+consulting them. Both mutations verified failing. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
 premature: `arrayRemove` was fixed in `notification-service.ts` and an
 identical copy in `weekly-digest.ts` was missed, because the guard test named
 one file. The weekly digest kept failing to prune dead tokens every Friday

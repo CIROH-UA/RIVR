@@ -29,6 +29,8 @@ import {resolve} from "node:path";
 import {
   MAX_HOLD_MS,
   DEFAULT_MAX_HOLD_MS,
+  ISLAND_MAX_HOLD_MS,
+  ISLAND_MAX_RUN_AGE_MS,
   MAX_RUN_AGE_MS,
 } from "./store-window.js";
 
@@ -111,6 +113,16 @@ function dartHolds(): Record<string, number> {
 /** The client's run-age caps. */
 function dartRunAges(): Record<string, number> {
   return dartMap("maxRunAge");
+}
+
+/** The client's island hold caps. */
+function dartIslandHolds(): Record<string, number> {
+  return dartMap("islandMaxHold");
+}
+
+/** The client's island run-age caps. */
+function dartIslandRunAges(): Record<string, number> {
+  return dartMap("islandMaxRunAge");
 }
 
 describe("guard 4 — the client and the server hold for the same time", () => {
@@ -216,3 +228,60 @@ describe("guard 4 — the client judges RUN AGE by the server's numbers too",
       }
     });
   });
+
+describe("guard 4 — the island caps are shared too", () => {
+  // Phase 9 added a SECOND pair of tables, for Hawaii and Puerto Rico, whose
+  // short range publishes 6- or 12-hourly against CONUS's hourly. Everything
+  // the block above argues applies to them identically: a client that holds
+  // longer than the server keeps showing water the server has given up on.
+  //
+  // Written at the same time as the tables themselves rather than after,
+  // because the pattern this ADR keeps rediscovering is that the cross-
+  // language claim is made in a comment first and pinned much later, if ever.
+  test("every server island hold cap has an identical client cap", () => {
+    const dart = dartIslandHolds();
+    for (const [product, ms] of Object.entries(ISLAND_MAX_HOLD_MS)) {
+      assert.equal(dart[product], ms,
+        `${product}: island hold caps disagree — server ${ms / 3600_000}h, ` +
+        `client ${(dart[product] ?? NaN) / 3600_000}h`);
+    }
+  });
+
+  test("every server island run-age cap has an identical client cap", () => {
+    const dart = dartIslandRunAges();
+    for (const [product, ms] of Object.entries(ISLAND_MAX_RUN_AGE_MS)) {
+      assert.equal(dart[product], ms,
+        `${product}: island run-age caps disagree — server ` +
+        `${ms / 3600_000}h, client ${(dart[product] ?? NaN) / 3600_000}h`);
+    }
+  });
+
+  test("the client adds no island cap the server does not know", () => {
+    for (const product of Object.keys(dartIslandHolds())) {
+      assert.ok(product in ISLAND_MAX_HOLD_MS,
+        `${product} has a client island hold cap with no server counterpart`);
+    }
+    for (const product of Object.keys(dartIslandRunAges())) {
+      assert.ok(product in ISLAND_MAX_RUN_AGE_MS,
+        `${product} has a client island run-age cap with no counterpart`);
+    }
+  });
+
+  test("an island override is never STRICTER than the CONUS cap", () => {
+    // The direction check, not just equality. An island override tighter than
+    // the shared cap would be pointless at best and, for the run-age table,
+    // would alarm on data that is normal for the domain — which is the exact
+    // failure that motivated these tables. Stated as a property so a future
+    // edit that flips one number is caught for the right reason.
+    for (const [product, ms] of Object.entries(ISLAND_MAX_HOLD_MS)) {
+      assert.ok(ms > (MAX_HOLD_MS[product] ?? DEFAULT_MAX_HOLD_MS),
+        `${product}: island reaches publish more SLOWLY than CONUS, so a ` +
+        "tighter island cap cannot be right");
+    }
+    for (const [product, ms] of Object.entries(ISLAND_MAX_RUN_AGE_MS)) {
+      const conus = MAX_RUN_AGE_MS[product];
+      if (conus === undefined) continue;
+      assert.ok(ms > conus, `${product}: same argument for run age`);
+    }
+  });
+});

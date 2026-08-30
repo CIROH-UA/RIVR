@@ -41,7 +41,8 @@ class _CountingSource implements IRiverDataSource {
       };
 
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) =>
+  DateTime validUntil(ForecastProduct product, DateTime now,
+          {required String reachId}) =>
       now.add(const Duration(hours: 1));
 
   @override
@@ -377,8 +378,9 @@ void main() {
       expect(s.source, upstream.source);
       expect(s.supportedProducts, upstream.supportedProducts);
       expect(
-        s.validUntil(ForecastProduct.shortRange, now),
-        upstream.validUntil(ForecastProduct.shortRange, now),
+        s.validUntil(ForecastProduct.shortRange, now, reachId: '23021904'),
+        upstream.validUntil(ForecastProduct.shortRange, now,
+            reachId: '23021904'),
         reason: 'a different freshness window on the two paths would make '
             'store entries expire early and refetch upstream',
       );

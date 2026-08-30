@@ -70,12 +70,12 @@ describe("the write-time floor closes the gap that was measured", () => {
 
   test("hourly products used to expire 15 minutes before the refresher", () => {
     assert.equal(
-      validUntil("nwm", "shortRange", written).toISOString(),
+      validUntil("nwm", "shortRange", written, "23021904").toISOString(),
       "2026-08-28T15:05:00.000Z");
   });
 
   test("a stored hourly window now outlives the next refresher run", () => {
-    const stamped = storeValidUntil("nwm", "shortRange", written);
+    const stamped = storeValidUntil("nwm", "shortRange", written, "23021904");
     assert.equal(stamped.toISOString(), "2026-08-28T15:30:00.000Z");
     assert.ok(
       stamped.getTime() >=
@@ -92,7 +92,7 @@ describe("the write-time floor closes the gap that was measured", () => {
     for (const product of products) {
       for (let m = 0; m < 24 * 60; m += 5) {
         const now = new Date(Date.UTC(2026, 7, 28, 0, m));
-        const stamped = storeValidUntil("nwm", product, now);
+        const stamped = storeValidUntil("nwm", product, now, "23021904");
         const rescue = nextHourlyRefresh(now).getTime() + REFRESH_MARGIN_MS;
         assert.ok(stamped.getTime() >= rescue,
           `${product} at ${now.toISOString()} expires before its refresher`);
@@ -108,7 +108,7 @@ describe("the write-time floor closes the gap that was measured", () => {
       // minutes away and the next refresher run is on the far side of it.
       for (let m = 0; m < 24 * 60; m += 5) {
         const now = new Date(Date.UTC(2026, 7, 28, 0, m));
-        const stamped = storeValidUntil("geoglows", "geoglowsForecast", now);
+        const stamped = storeValidUntil("geoglows", "geoglowsForecast", now, "23021904");
         const rescuer = nextGeoglowsRefresh(
           new Date(now.getTime() + REFRESH_MARGIN_MS));
         assert.ok(stamped.getTime() >= rescuer.getTime() + REFRESH_MARGIN_MS,
@@ -137,7 +137,7 @@ describe("the write-time floor closes the gap that was measured", () => {
       // 02:20 run — four minutes away — as the thing that will rescue the
       // document, because that run is itself the one doing the stamping.
       const offCycle = new Date("2026-08-29T02:16:30.000Z");
-      const stamped = storeValidUntil("nwm", "shortRange", offCycle);
+      const stamped = storeValidUntil("nwm", "shortRange", offCycle, "23021904");
       assert.equal(stamped.toISOString(), "2026-08-29T03:30:00.000Z");
       assert.ok(stamped > new Date("2026-08-29T03:20:00.000Z"),
         "must outlive the 03:20 run, not merely the 02:20 one");
@@ -149,7 +149,7 @@ describe("the write-time floor closes the gap that was measured", () => {
       // floor picked the imminent run as its rescuer.
       for (let m = 0; m < 24 * 60; m++) {
         const now = new Date(Date.UTC(2026, 7, 29, 0, m));
-        const stamped = storeValidUntil("nwm", "shortRange", now);
+        const stamped = storeValidUntil("nwm", "shortRange", now, "23021904");
         // The first refresh that starts at least a margin from now.
         const rescuer = nextHourlyRefresh(
           new Date(now.getTime() + REFRESH_MARGIN_MS));
@@ -161,8 +161,8 @@ describe("the write-time floor closes the gap that was measured", () => {
   test("static products keep their 30-day window; the floor is a no-op", () => {
     const written = new Date("2026-08-28T02:30:00.000Z");
     assert.equal(
-      storeValidUntil("nwm", "reachMetadata", written).toISOString(),
-      validUntil("nwm", "reachMetadata", written).toISOString());
+      storeValidUntil("nwm", "reachMetadata", written, "23021904").toISOString(),
+      validUntil("nwm", "reachMetadata", written, "23021904").toISOString());
   });
 
   test("the floor never SHORTENS a window", () => {
@@ -174,8 +174,8 @@ describe("the write-time floor closes the gap that was measured", () => {
       for (let h = 0; h < 24; h++) {
         const now = new Date(Date.UTC(2026, 7, 28, h, 7));
         assert.ok(
-          storeValidUntil("nwm", product, now).getTime() >=
-            validUntil("nwm", product, now).getTime(),
+          storeValidUntil("nwm", product, now, "23021904").getTime() >=
+            validUntil("nwm", product, now, "23021904").getTime(),
           `${product} at ${h}:07 was shortened by the floor`);
       }
     }
@@ -189,6 +189,7 @@ describe("re-verifying a document upstream has not replaced", () => {
     return {
       documentId: "nwm__10376596__shortRange",
       source: "nwm",
+      reachId: "10376596",
       product: "shortRange",
       fetchedAt: "2026-08-28T15:20:00.000Z",
       validUntil: "2026-08-28T16:30:00.000Z",
@@ -251,21 +252,21 @@ describe("re-verifying a document upstream has not replaced", () => {
     for (const p of ["analysisAssimilation", "shortRange", "mediumRange",
       "longRange", "geoglowsForecast"] as const) {
       assert.ok(MAX_HOLD_MS[p] > 0, `${p} has no hold cap`);
-      assert.equal(maxHoldMs(p), MAX_HOLD_MS[p]);
+      assert.equal(maxHoldMs(p, "23021904"), MAX_HOLD_MS[p]);
     }
     // The near-static products are named now, and must be: they hold a 30-day
     // window and are rewritten only when missing or nearly expired, so the
     // 6-hour default called a healthy 17-hour-old document DOWN the minute the
     // per-product health check reached production (2026-08-29).
     for (const p of ["returnPeriods", "reachMetadata"] as const) {
-      assert.ok(maxHoldMs(p) > 30 * 24 * 3600_000,
+      assert.ok(maxHoldMs(p, "23021904") > 30 * 24 * 3600_000,
         `${p} holds a 30-day window; a shorter cap reports it stale`);
     }
 
     // A genuinely unnamed product still falls back to the short default rather
     // than to "forever", which is the direction a mistake here must fail in.
     // `returnPeriods` used to stand in for this case and no longer can.
-    assert.equal(maxHoldMs("mediumRangeBlend"), DEFAULT_MAX_HOLD_MS);
+    assert.equal(maxHoldMs("mediumRangeBlend", "23021904"), DEFAULT_MAX_HOLD_MS);
   });
 
   test("an unreadable window is named and left exactly as it is", () => {

@@ -2,6 +2,7 @@
 
 import 'package:rivr/models/1_domain/shared/forecast_source.dart';
 import 'package:rivr/models/1_domain/shared/river_data/forecast_product.dart';
+import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
 import 'package:rivr/models/1_domain/shared/river_data/publish_schedule.dart';
 import 'package:rivr/models/1_domain/shared/river_data/river_data_key.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -58,12 +59,32 @@ class NwmDataSource implements IRiverDataSource {
   };
 
   @override
-  DateTime validUntil(ForecastProduct product, DateTime now) {
+  DateTime validUntil(
+    ForecastProduct product,
+    DateTime now, {
+    required String reachId,
+  }) {
     switch (product) {
       case ForecastProduct.analysisAssimilation:
-      case ForecastProduct.shortRange:
-        // Hourly (driven by current flow).
+        // Hourly in EVERY domain — `analysis_assim_hawaii` and
+        // `analysis_assim_alaska` both published t00z..t14z on 2026-08-30,
+        // same as CONUS. Analysis is what the model just did, not what it
+        // forecasts, so it does not inherit short range's slower island
+        // cycle. Kept as a separate case from `shortRange` for that reason:
+        // they used to share a branch, and that shared branch is what carried
+        // the CONUS assumption onto the islands.
         return PublishSchedule.nextTopOfHour(now).add(_skew);
+      case ForecastProduct.shortRange:
+        // Hourly for CONUS; 6-hourly for Hawaii and Puerto Rico. See
+        // [NwmDomain] for the measurements and for why one number covers both
+        // islands.
+        return switch (nwmDomainOf(reachId)) {
+          NwmDomain.conus => PublishSchedule.nextTopOfHour(now).add(_skew),
+          NwmDomain.island => PublishSchedule.nextCycle(
+            now,
+            everyHours: islandShortRangeCycleHours,
+          ).add(_skew),
+        };
       case ForecastProduct.mediumRange:
       case ForecastProduct.longRange:
         // Every 6 hours (00/06/12/18Z).
@@ -151,14 +172,20 @@ class NwmDataSource implements IRiverDataSource {
           runId: _runIdOf(aaPayload, 'shortRange'),
         );
       case ForecastProduct.shortRange:
-        final shortPayload = await _api.fetchForecast(key.reachId, 'short_range');
+        final shortPayload = await _api.fetchForecast(
+          key.reachId,
+          'short_range',
+        );
         return SourceFetchResult(
           payload: shortPayload,
           unit: unit,
           runId: _runIdOf(shortPayload, 'shortRange'),
         );
       case ForecastProduct.mediumRange:
-        final mediumPayload = await _api.fetchForecast(key.reachId, 'medium_range');
+        final mediumPayload = await _api.fetchForecast(
+          key.reachId,
+          'medium_range',
+        );
         return SourceFetchResult(
           payload: mediumPayload,
           unit: unit,
@@ -173,7 +200,9 @@ class NwmDataSource implements IRiverDataSource {
         );
       case ForecastProduct.returnPeriods:
         return SourceFetchResult(
-          payload: {'returnPeriods': await _api.fetchReturnPeriods(key.reachId)},
+          payload: {
+            'returnPeriods': await _api.fetchReturnPeriods(key.reachId),
+          },
           unit: unit,
         );
       case ForecastProduct.mediumRangeBlend:
