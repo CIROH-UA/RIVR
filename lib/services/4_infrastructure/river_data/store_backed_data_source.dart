@@ -152,10 +152,15 @@ class StoreBackedDataSource implements IRiverDataSource {
       // (`store_read_coordinator.dart`, "Re-read AFTER the await"); this is
       // the same argument on the fetch path.
       if (!_switch.isStoreReadEnabled) {
+        // Only claim to have discarded something when there WAS something —
+        // during an incident this log is read as evidence the store answered.
         AppLogger.info(
           _tag,
-          'switch flipped off mid-fetch; discarding the store answer for '
-          '${key.storageKey}',
+          fromStore != null
+              ? 'switch flipped off mid-fetch; discarding the store answer '
+                  'for ${key.storageKey}'
+              : 'switch flipped off mid-fetch; the store had nothing for '
+                  '${key.storageKey} anyway',
         );
       } else if (fromStore != null) {
         servedFromStore++;

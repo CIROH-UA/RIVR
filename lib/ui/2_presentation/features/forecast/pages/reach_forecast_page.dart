@@ -479,6 +479,7 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       setState(() {
         _error = 'Failed to load this river\'s forecast';
         _loading = false;
+        _flowSettled = true;
       });
       return;
     }
@@ -493,6 +494,12 @@ class _ReachForecastPageState extends State<ReachForecastPage> {
       _unit = unitService.getDisplayUnit();
       _error = null;
       _loading = false;
+      // GEOGLOWS loads its flow in this one read, so it settles here. Without
+      // this the "current flow is not available" strip could NEVER appear on a
+      // global river — the third Phase 8 review found `_flowSettled` was set
+      // only in the NWM branch, so a GEOGLOWS reach that decoded to no points
+      // showed a blank gauge and said nothing about why.
+      _flowSettled = true;
     });
 
     _fillGeoglowsPlaceLabel(widget.lat, widget.lon);

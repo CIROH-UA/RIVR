@@ -202,8 +202,9 @@ export function buildRows(
     const all = seriesFor(reach);
     if (all.length === 0) continue;
 
-    // Window to WHAT IS AHEAD before deriving anything, exactly as the client
-    // does in `WeeklyOutlookService._assemble`.
+    // Window from the CURRENT reading onward before deriving anything, the
+    // same way `WeeklyOutlookService._assemble` does via
+    // `ForecastPeak.upcomingPoints`.
     //
     // Both sides ran the identical peak-anchored trend rule — the comment on
     // `trendOf` says so, and it is true of the arithmetic. It was false of the
@@ -270,11 +271,40 @@ export function upcomingFrom(
   series: Array<{value: number; validTime: string}>,
   now: Date
 ): Array<{value: number; validTime: string}> {
-  const ahead = series.filter((p) => {
+  if (series.length === 0) return series;
+
+  // ANCHOR on the point nearest `now`, then keep everything from it onward.
+  //
+  // The first attempt at this filtered `t >= now`, which is NOT what the
+  // client does and the third Phase 8 review caught the difference. The anchor
+  // is normally the most recent PAST reading — the "current" value — so
+  // filtering it out drops the very point the trend is measured against. With
+  // a 3-hourly series the two windows start one point apart, which was enough
+  // to flip a river between rising and falling and to change which crest is
+  // reported as the peak.
+  //
+  // Ported from `ForecastPeak.upcomingPoints` in lib/utils/forecast_peak.dart.
+  // Keep the two in step; a comment claiming they match is what went wrong
+  // twice here.
+  const refMs = now.getTime();
+  let anchorMs: number | null = null;
+  let anchorDiff = Number.POSITIVE_INFINITY;
+  for (const p of series) {
     const t = Date.parse(p.validTime);
-    return !Number.isNaN(t) && t >= now.getTime();
+    if (Number.isNaN(t)) continue;
+    const d = Math.abs(t - refMs);
+    if (d < anchorDiff) {
+      anchorDiff = d;
+      anchorMs = t;
+    }
+  }
+  if (anchorMs === null) return series;
+
+  const anchored = series.filter((p) => {
+    const t = Date.parse(p.validTime);
+    return !Number.isNaN(t) && t >= anchorMs!;
   });
-  return ahead.length > 0 ? ahead : series;
+  return anchored.length > 0 ? anchored : series;
 }
 
 /** Peak-anchored trend, identical rule to the client's computeFlowTrend. */

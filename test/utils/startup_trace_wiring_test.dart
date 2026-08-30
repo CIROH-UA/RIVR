@@ -77,5 +77,21 @@ void main() {
               'harmless in content, wrong by default, and inconsistent with '
               'AppLogger, which gates its debug and info levels the same way');
     });
+
+    // Both source branches must settle the flow, not just NWM.
+    //
+    // The third Phase 8 review found `_flowSettled` set only in the NWM
+    // branch, so on a GEOGLOWS reach the "current flow is not available" strip
+    // could never appear — a global river that decoded to no points showed a
+    // blank gauge and said nothing about why. Narrow to reach, but a real
+    // behaviour change from the `!_loading` gate it replaced.
+    test('both load paths settle the flow flag', () {
+      final page = _read(
+          'lib/ui/2_presentation/features/forecast/pages/reach_forecast_page.dart');
+      final settles = '_flowSettled = true'.allMatches(page).length;
+      expect(settles, greaterThanOrEqualTo(3),
+          reason: 'expected the NWM read plus BOTH GEOGLOWS outcomes to '
+              'settle the flag; found $settles');
+    });
   });
 }

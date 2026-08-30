@@ -511,12 +511,32 @@ void main() {
           reason: 'without this the repository falls back to the '
               'schedule-only window and loses the run-awareness entirely');
 
-      // The fake reports the 2026-07-10 00Z run.
-      expect(
-        result.validUntil,
-        GeoglowsDataSource.windowFor(
-          DateTime.now().toUtc(), DateTime.utc(2026, 7, 10)),
-      );
+      // The fake reports the 2026-07-10 00Z run, which is far in the past, so
+      // `windowFor` takes its late-publication branch and returns
+      // `now + 30 minutes` — a MOVING target. Comparing against a second call
+      // to `windowFor(DateTime.now(), ...)` therefore compares two instants a
+      // few milliseconds apart.
+      //
+      // That is a real flake and CI caught it: run before 10:45 UTC the branch
+      // returns a FIXED instant (today's publication) and the two agree, so it
+      // passed locally at 05:00 and failed on CI at 14:20. Asserted with a
+      // tolerance instead of exact equality, and the tolerance is the point of
+      // the test — the value must track `now`, not the next midnight.
+      final before = DateTime.now().toUtc();
+      final expected =
+          GeoglowsDataSource.windowFor(before, DateTime.utc(2026, 7, 10));
+      final skew = result.validUntil!.difference(expected).abs();
+
+      expect(skew, lessThan(const Duration(seconds: 5)),
+          reason: 'expected roughly $expected, got ${result.validUntil}');
+
+      // And the property that actually matters: it is nowhere near the old
+      // next-midnight behaviour this replaced.
+      final nextMidnight = DateTime.utc(
+        before.year, before.month, before.day).add(const Duration(days: 1));
+      expect(result.validUntil!.isBefore(nextMidnight), isTrue,
+          reason: 'a run this old must be re-checked shortly, not held until '
+              'the next midnight — which is the bug this fixed');
     });
 
     test('a fallback run stamp yields the schedule-only window', () async {
