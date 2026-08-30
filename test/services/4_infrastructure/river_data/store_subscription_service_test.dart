@@ -185,6 +185,37 @@ void main() {
     // the device") unreachable: name and thresholds are read by every surface
     // that renders a favourite, so each one still made two device-side calls.
     // Phase 5 review round 1, B3. The server now writes both.
+    // Phase 9, the client half — done a day late and only after the standing
+    // "did you write the tests" question caught it. The SERVER learned that
+    // Hawaii and Puerto Rico have no medium or long range (`canFetch` in
+    // store-upstream.ts) and the client kept offering all six to every reach,
+    // in the same change whose commit message says "fixed on one side of a
+    // language boundary is not fixed".
+    //
+    // What it costs: two listeners per island favourite on documents that can
+    // never exist — exactly what the comment on `kStoredProducts` warns about.
+    test('an ISLAND reach does not watch medium or long range', () {
+      final ids = StoreSubscriptionService.documentIdsFor([_key('800000010')]);
+
+      expect(ids, isNot(contains('nwm__800000010__mediumRange')));
+      expect(ids, isNot(contains('nwm__800000010__longRange')));
+      expect(ids, contains('nwm__800000010__currentFlow'),
+          reason: 'the products islands DO have must still be watched, or an '
+              'island favourite gets nothing from the store at all');
+      expect(ids, contains('nwm__800000010__shortRange'));
+      expect(ids, contains('nwm__800000010__reachMetadata'));
+      expect(ids, contains('nwm__800000010__returnPeriods'));
+    });
+
+    test('a CONUS reach still watches all six', () {
+      // The direction that would silently halve the store's value for
+      // everyone: an over-broad exclusion.
+      final ids = StoreSubscriptionService.documentIdsFor([_key('23021904')]);
+      expect(ids, contains('nwm__23021904__mediumRange'));
+      expect(ids, contains('nwm__23021904__longRange'));
+      expect(ids.length, 6);
+    });
+
     test('an NWM reach watches all six stored products', () {
       final ids = StoreSubscriptionService.documentIdsFor([_key('1')]);
       expect(ids, {

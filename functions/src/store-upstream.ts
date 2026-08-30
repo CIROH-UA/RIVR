@@ -113,7 +113,7 @@ export const CAN_FETCH: Readonly<Record<ForecastSourceId, ForecastProductId[]>>
  * from the hold-cap tables, which left every other part of the system
  * believing these products exist everywhere. Found by the Phase 9 review.
  */
-const ISLAND_UNAVAILABLE: readonly ForecastProductId[] =
+export const ISLAND_UNAVAILABLE: readonly ForecastProductId[] =
   ["mediumRange", "longRange"];
 
 /**
