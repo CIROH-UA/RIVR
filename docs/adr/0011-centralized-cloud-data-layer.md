@@ -1598,6 +1598,19 @@ number isn't current the app says so before they have to wonder.
 
 ## Phase 8 — Prove it on device ▶ IN PROGRESS
 
+### Guard 4 — airplane mode (2026-08-30)
+
+**Favourites render, with their flow numbers.** Airplane mode on, RIVR
+force-quit, relaunched from the home screen: the rivers appear with values, not
+empty cards, spinners or an error. iPhone, iOS 26.6, profile build off
+`fc2bb4f`.
+
+This is the guard the whole cloud layer was built to make true, and it is worth
+being precise about what it proves and what it does not. It proves the app can
+draw a favourite from what it already holds, with no network of any kind. It
+does not prove the values are current — that is what the Phase 7 indicator is
+for, and in this test the offline strip was correctly showing at the same time.
+
 ### Guard 2 — favourites render cold (2026-08-30)
 
 **969 ms median, against a 3 s bar.** Three cold starts, iPhone (iOS 26.6),
