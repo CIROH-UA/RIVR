@@ -25,7 +25,7 @@ lib/
       shared/                            -- Core entities (ReachData, FavoriteRiver, UserSettings, etc.)
       features/{auth,forecast,map}/      -- Feature-specific entities
     2_usecases/
-      shared/                            -- BaseUseCase
+      shared/                            -- shared use-case helpers
       features/{auth,favorites,forecast,map,settings}/  -- Use cases by feature
   services/
     0_config/shared/                     -- config.dart (gitignored), constants.dart
@@ -57,7 +57,7 @@ lib/
       shared/                            -- ConnectivityProvider
       features/{auth,favorites,forecast}/ -- Providers (ChangeNotifier)
     2_presentation/
-      routing/                           -- AppRouter, AuthGuard, routes
+      routing/                           -- AppRouter, routes
       shared/{pages,widgets}/            -- Shared UI components
       features/{auth,favorites,forecast,map,onboarding,settings}/  -- Pages + widgets
   utils/                                 -- Utilities (river_image, email_validator, etc.)
