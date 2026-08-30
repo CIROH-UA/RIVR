@@ -48,17 +48,37 @@ class RiverDataRepository implements IRiverDataRepository {
   /// different river silently cancelled a genuine stall on the flow the user
   /// was reading. Keeping the set makes both impossible: the warning stands
   /// while, and only while, something is actually unresolved.
-  final Set<String> _unconfirmed = {};
+  final Map<String, DateTime> _unconfirmed = {};
+
+  /// How long an unconfirmed mark stands without being renewed.
+  ///
+  /// **Round 3 found the set had no way out at all.** A key entered on a
+  /// failed fetch and left only when that exact key was adopted again — and
+  /// nothing guarantees it ever is. Tapping any river on the map issues three
+  /// reads for a reach that is not a favourite, so one of them failing during
+  /// a partial NOAA outage (documented happening on 2026-08-22) latched that
+  /// key for the life of the process. The user closed the sheet, returned to
+  /// Favourites, and found the orange strip permanently over perfectly current
+  /// data — surviving pull-to-refresh, reconnecting, and the store pushing
+  /// fresh documents. Force-quitting was the only cure.
+  ///
+  /// That is the cry-wolf outcome this indicator exists to avoid, so a mark
+  /// decays. Anything genuinely unresolved is re-raised every time its surface
+  /// reads it — favourites refresh far more often than this — while a reach
+  /// nobody is looking at any more simply fades.
+  static const Duration unconfirmedTtl = Duration(minutes: 30);
 
   /// Phase 7 makes this the whole of the app's honesty about freshness: with
   /// the timestamps gone, silence is a claim that the numbers are current, and
   /// this is the only thing entitled to withdraw that claim.
   void _markUnconfirmed(RiverDataKey key) {
-    if (_unconfirmed.add(key.storageKey)) _sync();
+    _unconfirmed[key.storageKey] = _now();
+    _sync();
   }
 
   void _markConfirmed(RiverDataKey key) {
-    if (_unconfirmed.remove(key.storageKey)) _sync();
+    _unconfirmed.remove(key.storageKey);
+    _sync();
   }
 
   /// Judge a value we are about to serve or store.
@@ -83,6 +103,8 @@ class RiverDataRepository implements IRiverDataRepository {
   }
 
   void _sync() {
+    final cutoff = _now().subtract(unconfirmedTtl);
+    _unconfirmed.removeWhere((_, at) => at.isBefore(cutoff));
     final value = _unconfirmed.isNotEmpty;
     if (_outOfSync.value != value) _outOfSync.value = value;
   }

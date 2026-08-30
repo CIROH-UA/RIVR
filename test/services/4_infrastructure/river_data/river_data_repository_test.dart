@@ -427,6 +427,75 @@ void main() {
               'exists; warning here is the noise that gets the strip ignored');
     });
 
+    // Round 3 mutation: replacing `_judge` with an unconditional
+    // `_markConfirmed` in `_ingestLocked` — vouching for whatever the store
+    // pushes, however old — compiled clean and left all 1256 tests green. The
+    // only ingest test asserted the flag CLEARS, which that mutation satisfies
+    // by construction. Nothing asserted ingest can RAISE it.
+    test('a pushed store document that is already too old RAISES it',
+        () async {
+      // shortRange holds for 6h. The server fetched this 14h ago.
+      await repo.ingest(RiverDataEntry(
+        key: key,
+        window: FreshnessWindow(
+          fetchedAt: now.subtract(const Duration(hours: 14)),
+          validUntil: now.add(const Duration(hours: 1)),
+        ),
+        unit: 'CMS',
+        runId: 'run-old',
+        payload: const {'value': 1.0},
+      ));
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'the store pushed water older than the server itself would '
+              'stand behind; adopting it silently is the failure this guard '
+              'exists for');
+    });
+
+    // Round 3 BLOCKER. A key entered the set on a failed fetch and left only
+    // when that exact key was adopted again — which for a river tapped once
+    // on the map never happens. The strip then sat over the favourites page
+    // permanently, surviving pull-to-refresh, reconnecting and fresh store
+    // documents, until the app was force-quit.
+    test('a mark for a key nobody reads again decays', () async {
+      const transient = RiverDataKey(
+        source: ForecastSource.nwm,
+        reachId: '55555555',
+        product: ForecastProduct.reachMetadata,
+      );
+
+      source.offline = true;
+      await expectLater(repo.read(transient), throwsA(anything));
+      expect(repo.outOfSync.value, isTrue);
+
+      // The user closes the sheet and never opens that river again. Time
+      // passes and favourites keep refreshing normally.
+      now = now.add(RiverDataRepository.unconfirmedTtl + const Duration(minutes: 1));
+      source.offline = false;
+      await repo.read(key);
+
+      expect(repo.outOfSync.value, isFalse,
+          reason: 'a reach nobody is looking at any more must not hold the '
+              'warning open forever');
+    });
+
+    test('but a mark that keeps being re-raised does NOT decay', () async {
+      await repo.read(key);
+      now = now.add(const Duration(hours: 2));
+      source.offline = true;
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.outOfSync.value, isTrue);
+
+      // Still failing well after the TTL, and still being read.
+      now = now.add(RiverDataRepository.unconfirmedTtl + const Duration(minutes: 1));
+      await repo.read(key);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(repo.outOfSync.value, isTrue,
+          reason: 'the decay must not silence a problem that is still live');
+    });
+
     test('it notifies listeners, so the banner can rebuild', () async {
       var notified = 0;
       repo.outOfSync.addListener(() => notified++);

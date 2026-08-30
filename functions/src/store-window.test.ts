@@ -282,23 +282,39 @@ describe("re-verifying a document upstream has not replaced", () => {
     // fetch. Simulate hourly re-verification of a value upstream never
     // replaces: it must stop being extended, not drift indefinitely.
     const fetchedAt = "2026-08-28T09:20:00.000Z";
+    const capEnd = Date.parse(fetchedAt) + 6 * 3600_000; // 15:20
     let validUntilNow = "2026-08-28T10:30:00.000Z";
     let extensions = 0;
+    let abandoned = false;
+
     for (let h = 10; h <= 20; h++) {
       const at = new Date(Date.UTC(2026, 7, 28, h, 20));
       const plan = planWindowExtensions(
         [sample({fetchedAt, validUntil: validUntilNow})], at);
-      if (plan.extend.length === 0) {
+
+      if (plan.abandoned.length > 0) {
         assert.deepEqual(plan.abandoned, ["nwm__10376596__shortRange"]);
+        abandoned = true;
         break;
       }
+      if (plan.extend.length === 0) continue; // covered to the cap already
       validUntilNow = plan.extend[0].validUntil;
       extensions++;
+
+      // THE invariant, and the reason this test changed shape. An extension
+      // must never promise past the hold cap. It used to stamp the full
+      // refresh floor, so the last one before abandonment reached an hour and
+      // ten minutes BEYOND the cap — and the client, which stops vouching
+      // exactly at the cap, spent that gap warning about the newest data in
+      // existence. For GEOGLOWS the same arithmetic gave a day of it.
+      assert.ok(Date.parse(validUntilNow) <= capEnd,
+        `extended to ${validUntilNow}, past the 15:20 cap — the client would ` +
+        "warn while the server was still vouching");
     }
-    // Six-hour cap on a 09:20 fetch: extended at 10:20 through 15:20, then
-    // abandoned. The exact count matters less than that it terminates.
+
     assert.ok(extensions > 0, "nothing was ever extended");
-    assert.ok(extensions <= 6, `held for ${extensions} hours past a 6h cap`);
+    assert.ok(abandoned, "the document was never abandoned; it can be held " +
+      "forever one extension at a time");
   });
 
   test("an empty sample set is a no-op, not an error", () => {

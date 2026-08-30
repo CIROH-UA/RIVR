@@ -23,6 +23,13 @@
 // SERVER stops extending the document and lets it expire; the client should
 // stop vouching for it at the same instant, not at some number of its own.
 //
+// The server stops extending a document at this point and the client stops
+// vouching for it at the same instant — literally the same, since
+// `planWindowExtensions` clamps its last extension to `fetchedAt + maxHold`.
+// It did not always: the extension used to promise a full refresh interval
+// past the cap, so the client warned for up to that long about the newest data
+// in existence. Fixed after the third review.
+//
 // That shared constant is what makes guard 4 true rather than asserted. An
 // earlier version of this phase CLAIMED the two sides shared a number while
 // `MAX_HOLD_MS` existed only in TypeScript — the only occurrence of the name

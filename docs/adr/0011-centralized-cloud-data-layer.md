@@ -1254,8 +1254,9 @@ The last row is the one worth defending. A failure that left in-window data on
 screen has cost the user nothing, and a warning there is the noise that teaches
 people to dismiss the strip before the day it matters.
 
-**Guard 3 is NOT met, and the first version of this decision claimed it was
-met under a redefinition.** That claim does not survive reading the code, and
+**Guard 3 was NOT met by the first two attempts** — this paragraph is the
+history, not the status. The scoreboard below carries the current verdict.
+The first version of this decision claimed it was met under a redefinition. That claim does not survive reading the code, and
 the review said so.
 
 The argument made was: when a stored document expires the client falls through
@@ -1289,7 +1290,16 @@ serve this?"; `fetchedAt` answers "how long has nobody actually checked?".
 The client now applies the SAME per-product cap the server does
 (`hold_policy.dart` mirroring `MAX_HOLD_MS`) to `fetchedAt`. Past it the server
 stops extending and lets the document expire; the client stops vouching for it
-at the same instant. Deliberately it does NOT force a refetch: the window is
+at the same instant.
+
+**"The same instant" was not true when first written, and the third review
+caught it.** `planWindowExtensions` stamped the full refresh floor, so the last
+extension before abandonment promised one whole refresh interval BEYOND the
+cap — and the client, stopping exactly at the cap, spent that gap warning about
+the newest data in existence, then cleared it by re-fetching identical bytes
+through the live path. About 70 minutes for short range; about a day for
+GEOGLOWS, whose refresh interval is a day. Extensions are now clamped to
+`fetchedAt + maxHold`, which is what makes the sentence above true. Deliberately it does NOT force a refetch: the window is
 still valid, so this is a statement about confidence, not a reason to spend a
 network call.
 

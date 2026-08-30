@@ -225,7 +225,20 @@ export function planWindowExtensions(
       continue;
     }
 
-    const target = storeValidUntil(s.source, s.product, now).getTime();
+    // Never promise past the hold cap. The extension used to stamp the full
+    // refresh floor, so the LAST extension before a document was abandoned
+    // reached one whole refresh interval beyond the cap — and the client,
+    // which stops vouching exactly at the cap, spent that interval showing a
+    // warning over the newest data that exists anywhere. For short range that
+    // is ~70 minutes; for GEOGLOWS, whose refresh interval is a day, it is
+    // ~24 hours. The warning then cleared by re-fetching the identical bytes
+    // through the live path.
+    //
+    // Clamping makes the two sides agree to the instant, which is what
+    // hold_policy.dart and ADR decision 22 both claim.
+    const capEnd = fetchedAt + maxHoldMs(s.product);
+    const target = Math.min(
+      storeValidUntil(s.source, s.product, now).getTime(), capEnd);
     if (target <= currentUntil) {
       plan.covered++;
       continue;
