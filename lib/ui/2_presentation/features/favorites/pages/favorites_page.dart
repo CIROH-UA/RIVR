@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
+import 'package:rivr/utils/startup_trace.dart';
 import 'package:rivr/ui/1_state/features/forecast/reach_data_provider.dart';
 import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.dart';
@@ -263,6 +264,15 @@ class _FavoritesPageState extends State<FavoritesPage>
                         if (favoritesProvider.isEmpty) {
                           return _buildEmptyState();
                         }
+
+                        // ADR 0011 Phase 8 guard 2. Past every early return,
+                        // so this frame is the one that actually shows rivers.
+                        // The mark is one-shot; later rebuilds are ignored.
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          StartupTrace.markFavouritesRendered(
+                            favoritesProvider.favorites.length,
+                          );
+                        });
 
                         // Trigger Phase A coach marks when favorites are loaded
                         if (!_hasShownFavoritesTour && !_isTourActive) {

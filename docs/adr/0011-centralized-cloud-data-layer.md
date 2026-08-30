@@ -1,6 +1,6 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phase 0 deployed and collecting. Phases 1–3 complete, merged. Phases 4–9 specified, not implemented.
+**Status:** Phases 0–7 complete. Phase 0 still collecting (it is the instrument, not a step). Phases 1–3 merged 2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 completed and deployed 2026-08-29/30, Phase 7 verified on device. **Phase 8 (prove it on device) is in progress; Phase 9 (sweep) not started.**
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
@@ -1596,7 +1596,44 @@ number isn't current the app says so before they have to wonder.
 
 ---
 
-## Phase 8 — Prove it on device
+## Phase 8 — Prove it on device ▶ IN PROGRESS
+
+### Guard 1 — Phase 0's timings retaken (2026-08-30)
+
+Same five endpoints, same probe, **189 hourly samples over 7.7 days**
+(2026-08-22 09:07Z → 2026-08-30 02:01Z) against the original **50 samples taken
+across 30 minutes**. Averages and worst cases count successful calls only; the
+success column carries the failures.
+
+| endpoint | success then | success now | avg then | avg now | worst then | worst now |
+|---|---|---|---|---|---|---|
+| `?series=analysis_assimilation` | 10/10 | **166/177** | 2.1 s | **3.9 s** | 8.4 s | **52.8 s** |
+| `?series=short_range` | 10/10 | **166/177** | 2.2 s | **4.2 s** | 8.6 s | **52.6 s** |
+| `?series=medium_range` | 9/10 | **155/177** | 10.9 s | **12.4 s** | 34.7 s | **60.2 s** |
+| `?series=long_range` | 10/10 | **158/177** | 15.7 s | **9.5 s** | 51.5 s | **57.6 s** |
+| unfiltered (all series) | 8/10 | **143/177** | 10.5 s | **20.5 s** | 35.6 s | **57.9 s** |
+
+**The original numbers were optimistic, and the correction runs the same
+direction as the decision.** The two light endpoints — the ones a detail sheet
+needs — were recorded as 10/10 at ~2.1 s from half an hour of sampling. Over
+nearly eight days they are **94%** at ~4 s, with a worst case of **52.8 s**.
+The 30-minute window simply could not see a 6% failure rate or a
+fifty-second tail.
+
+That does not overturn Phase 0's thesis, it sharpens it. Weight is still what
+fails worst (`unfiltered` doubled to 20.5 s and is the least reliable at 81%),
+so asking a narrower question still helps. But "upstream is not slow" was
+itself a 30-minute impression: upstream is *usually* fast and unreliable often
+enough that ~1 device request in 17 fails, and one in a hundred takes most of a
+minute. **A device on this path has a bad day regularly.** That is the case for
+the store stated in measurements rather than in argument, and it is stronger
+than the case Phase 0 made.
+
+`long_range` improving (15.7 s → 9.5 s) is the one figure moving the other way,
+and it is the clearest evidence that the original sitting caught a degraded
+window rather than a baseline.
+
+
 
 **Guards.**
 1. Phase 0's timings retaken and compared **in the same table**.

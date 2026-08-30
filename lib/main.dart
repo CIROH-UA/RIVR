@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:rivr/utils/startup_trace.dart';
 import 'package:rivr/services/4_infrastructure/shared/analytics_service.dart';
 import 'package:rivr/ui/2_presentation/routing/route_observer.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // ADD: FCM import
@@ -62,6 +63,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 Future<void> main() async {
+  // ADR 0011 Phase 8 guard 2. First line, so the number includes everything a
+  // person actually waits through.
+  StartupTrace.begin();
   WidgetsFlutterBinding.ensureInitialized();
 
   // On iOS, Firebase auto-inits natively from GoogleService-Info.plist before
