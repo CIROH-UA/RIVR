@@ -451,7 +451,14 @@ silently migrates the deployed functions to a different runtime. Also note the
 function signatures, so it is imported lazily inside the one function that uses
 it. Moving it back to module scope will break deploys.
 
-### ADR 0011 cloud store (Phases 4-7 complete; store live since 2026-08-25)
+### ADR 0011 cloud store — COMPLETE (all 10 phases, closed 2026-08-30)
+
+**Four things are carried, not resolved.** No island reach has ever been in the
+store, so everything built for Hawaii and Puerto Rico is unit-tested only —
+**one real favourited island river exercises it in production within an hour**.
+The alert peak windowing has not fired a real alert. Guard 2's non-favourite
+sheet timing was never measured, and guard 3's store provenance is inferred
+rather than instrumented. Do not read "complete" as "verified" for those four.
 
 Seven functions keep a Firestore `river_data` collection fresh for every
 favourited reach, so the app reads one shared value instead of every widget

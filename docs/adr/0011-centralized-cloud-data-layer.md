@@ -1,8 +1,53 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phases 0–8 complete. Phase 0 still collecting (it is the instrument, not a step). Phases 1–3 merged 2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 completed and deployed 2026-08-29/30, Phase 7 verified on device. **Phase 8 complete 2026-08-30** — eight guards met or honestly partial, guard 9
-accepted rather than passed after five reviews. **Phase 9 (sweep) not
-started.**
+**Status: COMPLETE — all ten phases (0–9), closed 2026-08-30.**
+
+Phase 0 keeps collecting; it is the instrument, not a step. Phases 1–3 merged
+2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 deployed 2026-08-29/30 with
+Phase 7 verified on device; Phase 8 complete 2026-08-30 with guard 9 **accepted
+rather than passed** after five reviews; Phase 9 complete 2026-08-30 with guard
+7 **passed** by an independent review that verified the claims rather than
+merely failing to disprove them.
+
+### What "complete" means here, and what it does not
+
+**Delivered and measured.** Favourites paint in 969 ms cold on iPhone and
+2473 ms on an Android emulator against a 3 s bar; two accounts on two platforms
+show identical values; airplane mode renders; a unit switch repaints every card
+with zero refetches; and a full publish cycle was watched from a NOAA run
+through to three notifications on a real lock screen.
+
+**Four things remain true but UNVERIFIED, and closing this ADR does not make
+them verified.** They are carried, not resolved:
+
+1. **No island reach has ever been in the store.** Everything Phase 9 built for
+   Hawaii and Puerto Rico — the 6-hour window, the 24/28-hour caps, the
+   medium/long-range exclusion — is tested only against unit tests written from
+   a NOMADS directory listing read once. **One real favourited island river
+   would exercise the whole path in production within an hour**, and it is the
+   largest untested area in this document.
+2. **The alert peak windowing has not fired a real alert.** 452 server tests
+   cover it; nothing in the logs proves a windowed peak until an elevated river
+   produces one. Expect an all-clear on the first run for any river whose only
+   threshold-exceeding point is now in the past — correct behaviour, and it
+   will look like a change.
+3. **Guard 2's non-favourite sheet timing was never measured** — no instrument
+   exists for it.
+4. **Guard 3's store provenance is inferred, not instrumented.**
+   `servedFromStore`/`servedFromUpstream` counters would prove it.
+
+**And one claim in CLAUDE.md is unchecked:** "nothing calls NOAA or GEOGLOWS
+directly any more". Believed, not verified. It was on the list the Phase 9
+review did not examine, and the other item on that list — "the GC sweeps the
+renamed documents" — turned out to be false.
+
+**The pattern worth carrying out of this ADR**, across nine phases and roughly
+twenty reviews: **not one defect was in an algorithm.** Every single one was in
+a connection between two components, or in a claim that was true when it was
+written. The habits that caught them — mutation-check in both directions,
+derive expected counts from the right baseline, never let a comment satisfy a
+guard, and run the function instead of asserting what it does — are worth more
+than the architecture they were used to build.
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
