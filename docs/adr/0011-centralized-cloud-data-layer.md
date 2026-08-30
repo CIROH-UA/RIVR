@@ -709,10 +709,54 @@ half of a review is as informative as the findings. I sealed a list before it
 ran. It confirmed my worry about untested island wiring (going further than I
 had), and it cleared two I was wrong about (the `.gitignore` rework, and
 orphans loosening the health aggregate — both verified correct). It did not
-examine whether `storeGcDaily` actually deletes the orphaned documents, which
-remains asserted rather than observed, and did not check CLAUDE.md's prose
-claim that "nothing calls NOAA or GEOGLOWS directly any more". **Both are
-still open.**
+examine whether `storeGcDaily` actually deletes the orphaned documents, and
+did not check CLAUDE.md's prose claim that "nothing calls NOAA or GEOGLOWS
+directly any more". The first was then checked here and **found false** — see
+below. The second remains open.
+
+### The GC could never have collected the renamed documents (2026-08-30)
+
+**Checked because the review did not, and the claim was FALSE.** Both this ADR
+and `notifications_history.md` said the 31 old-name documents would be "swept
+by `storeGcDaily` after its 7-day grace". Running the real `selectGarbage`
+against real production data, with `now` pushed eight days forward, returned:
+
+```
+scanned: 216   would delete: 18
+retained: {"still-followed": 167, "unparseable-id": 31}
+old-name documents: 31, of which GC would delete: 0
+```
+
+**Two independent rules each kept them, which is why it was invisible.** The
+rename removed `analysisAssimilation` from `FORECAST_PRODUCTS`, so
+`parseStorageKey` returned null and every one was retained as
+`unparseable-id` — by the deliberate rule that an id we cannot read must never
+be treated as garbage. And their reaches are all still favourited, so the
+`still-followed` rule would have kept them too. Nothing could ever collect
+them: 31 documents, and the same again on every future rename.
+
+**The fix distinguishes a RETIRED product from a MALFORMED key**, which had
+been the same case. A well-formed id — right shape, known source, real reach —
+naming a product this codebase no longer has can only be something we used to
+write; nothing will read or rewrite it, so being followed is irrelevant. A
+genuinely foreign id is still kept, because deleting what you cannot parse is
+data loss waiting for the first unrelated document. The grace window still
+applies, so a rename plus a rollback inside a week loses nothing.
+
+**Structural, not a list of retired names.** A list is a promise that someone
+will remember to update it, and this repository was bitten twice by exactly
+that in one day — CI's test-directory allow-list, and this.
+
+Re-run against production after the fix: **31 of 31 swept, `assertGcSane`
+passes** (49 of 216 is 23%, under the 50% ceiling), and the 167 live documents
+are still retained as `still-followed`. Mutation-checked in both directions
+with mutations that COMPILE — the first attempts did not, and a mutation that
+does not compile proves nothing.
+
+**The lesson is the one this ADR keeps relearning.** "Swept after the grace
+window" was written twice, in two documents, and was never true. It took
+running the function to find out, and an independent review that passed
+everything else did not look here.
 
 **You are done when** browsing hundreds of streams leaves the cache bounded,
 favourites survive eviction unconditionally, and a stream you looked at earlier
