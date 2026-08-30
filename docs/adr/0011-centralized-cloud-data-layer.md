@@ -1596,7 +1596,7 @@ number isn't current the app says so before they have to wonder.
 
 ---
 
-## Phase 8 — Prove it on device ▶ IN PROGRESS
+## Phase 8 — Prove it on device ▶ 8 of 9; re-review owed
 
 ### Guard 7 — Android (2026-08-30)
 
@@ -1872,6 +1872,35 @@ case is guard 4.
 For contrast, guard 1's retaken table says a single `analysis_assimilation`
 call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
 screen now paints in a quarter of one such call, because it makes none.
+
+### Phase 8 — where it actually stands (2026-08-30)
+
+Two independent reviews. Neither passed on first reading, which by now is the
+expected outcome rather than a surprise.
+
+| Guard | Status |
+|---|---|
+| 1 — Phase 0's timings retaken | **met** — 189 samples over 7.7 days; the originals were optimistic and the correction strengthens the case for the store |
+| 2 — favourites < 3 s cold; non-favourite sheet < 500 ms | **partly met** — favourites measured at 969 ms median; **the sheet half was never measured and no instrument exists for it** |
+| 3 — two accounts, two devices, one river | **met on the observation, not on the mechanism** — both showed 13966 CFS; that they READ it from the store is inferred, and the counters that would prove it were not used |
+| 4 — airplane mode | **met** |
+| 5 — a full publish cycle observed | **met** — probe to lock screen, three notifications, on TestFlight |
+| 6 — unit switching, no refetch | **met** — 480 log lines, zero fetches |
+| 7 — Android shares the path | **met with caveat** — 2473 ms median on an emulator, not hardware |
+| 8 — every number carries its build | **met** — after catching two of its own violations |
+| 9 — independent review passes | **not met.** Two ran; the second found four blockers, all now fixed and mutation-checked. A third has not been run |
+
+**What the reviews found, because the list is more useful than the verdict.**
+Round 1: the `arrayRemove` fix had been applied to one of two files while the
+ADR claimed both were done, and the kill switch's cross-launch reclaim evicted
+nothing on essentially every device. Round 2: the fix for that reclaim
+introduced a worse bug — it could evict a healthy device's cache on an ordinary
+launch — plus a store fetch that could resurrect an evicted entry with a 30-day
+window, a forecast page announcing "current flow is not available" during a
+healthy load, and two guards claiming more than was measured.
+
+**Every one of those was in something already declared finished.** That is the
+pattern worth carrying into Phase 9, more than any individual defect.
 
 ### Guard 1 — Phase 0's timings retaken (2026-08-30)
 
