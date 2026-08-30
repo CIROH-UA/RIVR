@@ -1,6 +1,30 @@
 # 0010 — The Weekly Outlook takes minutes to load
 
-**Status:** Superseded in scope by **ADR 0011** (centralized cloud data layer), which absorbs Option G and the server-store decisions. Phases 1-2 here (per-row rendering, bounded wait) remain valid as UI resilience. Nothing implemented.
+**Status: CLOSED 2026-08-30** by ADR 0011 Phases 3 and 5, verified in code
+rather than assumed. Superseded in scope by ADR 0011, which absorbed Option G
+and the server-store decisions.
+
+**The 3-5 minute stall had two causes and both are gone.**
+
+1. *Serial rows.* `WeeklyOutlookService.buildOutlook` now runs
+   `Future.wait(favorites.map(_buildRow))`, so N favourites cost one round
+   rather than N. Pinned by "every favourite is loaded concurrently, not one
+   after another" in `weekly_outlook_service_test.dart`, whose header names
+   replacing `Future.wait` with a serial loop as the regression it exists to
+   catch.
+2. *Network per NWM row.* The rows read `mediumRange`, `returnPeriods` and
+   `reachMetadata` through `IRiverDataRepository` — the same products every
+   other surface reads, served from the cloud store. `loadCompleteReachData`
+   is gone from the file, and from the codebase; ADR 0011 Phase 9 added
+   `one_forecast_path_test.dart`, which fails if any code in `lib/` calls it
+   again.
+
+**What is NOT claimed:** the page has not been re-timed on a device since the
+fix. The 3-5 minute figure was measured; its replacement is inferred from the
+two causes being removed. Phases 1-2 here (per-row rendering, bounded wait)
+remain valid as UI resilience and are still unimplemented — they were
+insurance against a slow load, and the load is no longer slow, so they are
+**not scheduled**.
 **Related:** ADR 0001 (river data layer SSOT), ADR 0008 (push notifications)
 
 ## Symptom

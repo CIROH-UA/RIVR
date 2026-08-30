@@ -92,6 +92,17 @@ Widgets  ── convert RP→flow unit, call the canonical fn, render ───�
 
 **Home↔forecast current‑flow consistency — fixed via freshness, not unification (2026-07-13).** The favorites card and the forecast‑page gauge already compute current flow with the *same* function (`ForecastService.getCurrentFlow`, reached through the repository's `reachSummary` for the card and directly for the page), so the value is already canonical — they only diverged because the card displays a *persisted snapshot* (`lastKnownFlow`) that refreshed on app‑launch and pull‑to‑refresh but not when the list became visible again. Fix: the favorites list now revalidates on view — `WidgetsBindingObserver` (app resumed) + `RouteAware.didPopNext` (returning from a pushed page, e.g. the forecast page) both call `refreshAllFavorites()`, which re‑reads through the repository's publish‑aligned SWR (cheap: fresh‑cached served without network). Sim‑verified: returning from a reach whose run had advanced updated the card from the stale value to the page's live value. A *structural* guarantee that the two can never differ for even a moment still belongs to 2b (one canonical value read by both), but that is not required for the trust win — grafting current‑flow onto the repository in isolation would only add a within‑page seam (gauge from the repo, chart/category from the fork). Shipped on `bugfix/favorites-revalidate-on-view`.
 
+**Stage 2b confirmed still parked, 2026-08-30 (ADR 0011 Phase 9 guard 4).**
+Re-read rather than rubber-stamped. The gate below is unchanged and has NOT
+been reached: RIVR still has exactly two forecast sources, NWM and GEOGLOWS.
+
+One thing did change and is worth recording, because it removes the argument
+that was most likely to unpark this: between 2026-08-21 and 2026-08-30 the
+`ForecastResponse` fork had a *user-visible* cost — the Weekly Outlook's 3-5
+minute stall (ADR 0010). That turned out to be fixable without the unified
+model, and ADR 0011 Phase 3 fixed it by moving those rows onto the repository.
+So the fork is back to costing readers duplication and costing users nothing.
+
 **Stage 2b parked, gated on the next source.** The source‑agnostic `RiverForecast` model that retires the `ForecastResponse`/`GeoglowsForecast` fork (ADR 0001 Step 7) — which also subsumes the *cross‑source* current‑flow and return‑period unification (audit #4–#7) — is the remaining work. It is sequenced when a new data source actually carries forecast *detail* — the forcing function that makes the generalization concrete rather than speculative, and the point at which not having it would force a fork.
 
 ## Development plan

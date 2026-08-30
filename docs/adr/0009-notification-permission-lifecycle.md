@@ -305,7 +305,7 @@ now, denied-at-OS, and the two multi-device rows. **Android remains entirely
 unproven** and still needs a real device or a `google_apis_playstore` AVD.
 
 **New, and it gates nothing here but is user-visible:** the deep-linked page
-took 3-5 minutes to render. See ADR 0010.
+took 3-5 minutes to render. See ADR 0010 (**closed 2026-08-30**: the serial row build and the per-row network fetch were both removed by ADR 0011 Phases 3 and 5).
 
 ## Phase 5 — what is still needed
 
