@@ -1598,10 +1598,29 @@ number isn't current the app says so before they have to wonder.
 
 ## Phase 8 — Prove it on device ▶ IN PROGRESS
 
+### Guard 8 — every number recorded with its build (2026-08-30)
+
+| guard | figure | build |
+|---|---|---|
+| 1 | endpoint latency and success | server-side probe data, no app build involved (189 samples, 2026-08-22 → 08-30) |
+| 2 | 969 / 1008 / 961 ms | profile, tree that became `4217077` |
+| 4 | favourites render offline | profile, same build as guard 2 |
+| 6 | 0 refetches, 480 log lines | debug at `7cf587c` — app code identical to `4217077` |
+
+**This guard immediately caught its own violation, which is the argument for
+having it.** Guards 2 and 4 were first written down as "profile build off
+`fc2bb4f`". They were not: `fc2bb4f` created the instrument with only a
+`dart:developer` call, the `debugPrint` that made the measurement readable was
+added afterwards, and the runs happened on that working tree — which became
+`4217077`. Attributing a number to a build that could not have produced it is
+a small error and exactly the kind that makes a table stop being evidence.
+
 ### Guard 6 — unit switching on device (2026-08-30)
 
 **Every surface repainted; ZERO refetches.** CMS → CFS switched in Settings on
-the iPhone, then back to favourites. 480 log lines captured across the switch
+the iPhone — **debug build at `7cf587c`**, whose app code is identical to
+`4217077` (the two commits between them touch only this document) — then back
+to favourites. 480 log lines captured across the switch
 and **not one** upstream call, `_doFetch`, background revalidation or any
 `RIVER_DATA_REPO` activity at all. All six favourite cards logged new values.
 
@@ -1624,8 +1643,8 @@ through repeatedly this week.
 
 **Favourites render, with their flow numbers.** Airplane mode on, RIVR
 force-quit, relaunched from the home screen: the rivers appear with values, not
-empty cards, spinners or an error. iPhone, iOS 26.6, profile build off
-`fc2bb4f`.
+empty cards, spinners or an error. iPhone, iOS 26.6, same profile build as
+guard 2 (the tree that became `4217077`).
 
 This is the guard the whole cloud layer was built to make true, and it is worth
 being precise about what it proves and what it does not. It proves the app can
@@ -1636,8 +1655,8 @@ for, and in this test the offline strip was correctly showing at the same time.
 ### Guard 2 — favourites render cold (2026-08-30)
 
 **969 ms median, against a 3 s bar.** Three cold starts, iPhone (iOS 26.6),
-**profile build** off `fc2bb4f` — AOT-compiled like a release, so the figure is
-not debug-mode slow.
+**profile build of the tree that became `4217077`** — AOT-compiled like a
+release, so the figure is not debug-mode slow.
 
 | run | to first favourites paint |
 |---|---|
