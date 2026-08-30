@@ -30,6 +30,7 @@
 // | Offline                                        | "No internet"     |
 // | Serving data past its window, refresh failed   | "may not be current" |
 // | HELD past its product's cap, even if in-window | "may not be current" |
+// | Carrying a RUN older than its cap, however recently written | "may not be current" |
 // | Online, a fetch failed, data still fresh       | nothing           |
 //
 // The last row is deliberate. A failure that still leaves in-window data on

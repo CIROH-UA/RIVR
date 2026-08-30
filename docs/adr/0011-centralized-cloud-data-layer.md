@@ -1166,6 +1166,14 @@ is exactly how the hold cap called a healthy store down within a minute of
 reaching production.
 
 **The client applies these same caps**, added when guard 4 was closed properly.
+One deliberate difference in how the two AGGREGATE: the server judges the
+newest run across a product's documents, because one lagging reach is a
+per-reach fetch failure it already records and retries; the client judges the
+single entry in front of the user. So a device favouriting a reach whose run
+lags the rest will show the strip while the store reports healthy. That is the
+device being more honest about the water on ITS screen, and honesty is the
+right direction here — but it is a divergence, and it is written down rather
+than discovered later.
 Until then the phone had no notion of run age: during the 2026-08-29 incident
 the server would have alarmed while the device showed nothing at all, because
 every check it had asked "how long ago did we write?" and the answer was
@@ -1238,11 +1246,13 @@ the whole repository, not of the river on screen, so on a single-river page it
 could warn about a different river entirely. It stays on the favourites page,
 where every affected river is visible at once.
 
-The premise has one known exception, and it is the one that actually happened:
+The premise had one known exception, and it is the one that actually happened:
 during the GEOGLOWS incident devices were online and still showed yesterday's
-water. Neither the banner nor `outOfSync` would have caught it — the app
-considered that data in-window. That case is answered by run currency
-(decision 21) and by marking held documents as held, not by more banners.
+water, and at the time neither the banner nor `outOfSync` would have caught it
+— the app considered that data in-window. **That is no longer true.** Closing
+guard 4 gave the client the server's run-age caps, so `outOfSync` now rises on
+exactly that shape: a value written minutes ago carrying a run a day old. What
+was answered by more monitoring is now also answered on the device.
 
 `SyncStatusBanner` **subsumes `OfflineBanner`** rather than sitting above it.
 Offline is one of the two reasons the app cannot vouch for a number, not a
@@ -1255,6 +1265,7 @@ separate subject; two strips would be two competing answers to one question.
 | Serving data past its window, refresh failed | "These numbers may not be current" |
 | Online, a fetch failed, data still in window | nothing |
 | Held past its product's cap, even though in window | "may not be current" |
+| Carrying a run older than its product's cap, however recently written | "may not be current" |
 
 The last row is the one worth defending. A failure that left in-window data on
 screen has cost the user nothing, and a warning there is the noise that teaches
@@ -1316,6 +1327,20 @@ mechanism that keeps the flood-category ladder honest across the two
 languages. A client holding LONGER than the server would keep showing water the
 server had already given up on, silently, which is this scenario again.
 
+**Found by the fourth review and deliberately NOT fixed here: the GEOGLOWS
+LIVE path warns truthfully for about six hours a day.** `GeoglowsDataSource`
+sets `validUntil` to next UTC midnight + 15 min, but GEOGLOWS actually
+publishes at 10:15-10:30 UTC. So a device on the live path holds the previous
+day's 00Z run in-window until midnight, reaching ~48 h of run age against a
+42 h cap, and the strip appears from about 18:00 UTC. **The warning is
+correct** — a day-newer run has existed since 10:15 — so this is the new guard
+exposing a window mis-calibration that predates it, not a false alarm. The
+STORE path is unaffected: its documents expire at 11:40, giving 35.7 h of run
+age with 6.3 h of margin, measured on the four live documents. Fixing it means
+changing when every device revalidates GEOGLOWS, which is a live-path change
+and belongs with Phase 9's sweep, not smuggled into the phase that removed the
+timestamps.
+
 **What was kept, and why it is not a timestamp.** The forecast chart's time
 axis stays: when the peak arrives is the subject the user came for, not a claim
 about our data's age. The map legend's date stays for the reason this document
@@ -1333,7 +1358,7 @@ overclaims are corrected in decisions 21 and 22 above rather than deleted.
 | 2 — offline shows the indicator, healthy shows nothing | **met for the offline half** — favourites (full), reach forecast (offline only), map (its own notice); weekly outlook has none. The staleness half stays on favourites by decision, not omission |
 | 3 — a frozen store raises the indicator | **met**, on the second attempt. The first passed its own test while failing in production: the repository stamped its own read clock over the server's `fetchedAt`, so the hold clock reset on every device read and the guard could never fire on store-served data. The test proving it wrote the crafted entry straight into the fake cache — asserting the premise instead of proving it. Now tested through a store-shaped source |
 | 4 — the indicator is driven by the same signal that alarms operationally | **met, on the third attempt.** Both of the server's dimensions are now shared: `MAX_HOLD_MS` (how long ago we wrote) and `MAX_RUN_AGE_MS` (how old the water is), each mirrored in `hold_policy.dart` and pinned by a drift test that fails in both directions. The first attempt claimed a shared constant that existed only in TypeScript; the second shared the weaker dimension and left the phone silent through the very incident that motivated the phase |
-| 5 — independent agent review passes | **run 2026-08-29 and it did NOT pass.** This section is its result. Guards 3 and 4, and run currency, were all built in response to it; a re-review is still owed |
+| 5 — independent agent review passes | **four ran; the fourth found no code defects.** Rounds 1-3 each found real blockers and each was fixed. Round 4 (2026-08-30) replayed 187 probe samples and 125 production documents against the client's new run-age check and recorded **0 false trips**, verified the run-identity formats against the live NOAA API, and reproduced all three mutation claims. Its single blocker was a stale sentence in this document, corrected. Treat the guard as met on code and thin on process: no review has passed on its first reading |
 
 What was genuinely delivered: the timestamps are gone from the values, the
 indicator exists and is correct for the cases it covers, per-product write
@@ -1351,8 +1376,12 @@ and a drift test that could be defeated by an ordinary trailing comment. All
 were fixed; the corrections are in decisions 21 and 22 above rather than
 deleted.
 
-What remains: guard 5 is still owed a review that passes, and guard 4 is met
-for only one of the server's two signals.
+What remains: guard 5. A fourth review ran on 2026-08-30 against the state
+above and found **no code defects** — it replayed 187 probe samples and 125
+production documents and recorded 0 false trips — but blocked on a stale
+sentence right here, which still said guard 4 was half-met after the row above
+had been corrected. That sentence is this one, rewritten. The third time this
+document went stale on guard 4's status specifically.
 
 ### How alerting actually works, end to end
 
@@ -1485,11 +1514,11 @@ notifications a person would actually want rather than twelve identical ones.
 
 ## Phase 7 — The trust model
 
-**Status: built 2026-08-29, re-review outstanding** (decisions 21 and 22). The
-first pass reported itself complete with three guards unmet; an independent
-review found that, and the gaps were closed in response. See "Phase 7 — where
-it actually stands" below the decisions. Do not treat this phase as closed
-until guard 5 is genuinely satisfied.
+**Status: complete 2026-08-30** (decisions 21 and 22), after four independent
+reviews. The first pass reported itself complete with three guards unmet; each
+round found real blockers and each was fixed, and the fourth found no code
+defects. See "Phase 7 — where it actually stands" below the decisions, which
+records what each round caught rather than only the outcome.
 
 **Last, deliberately.** Removing the timestamp is a promise; it may only ship
 once Phase 4's monitoring proves the guarantee, because afterwards **users cannot

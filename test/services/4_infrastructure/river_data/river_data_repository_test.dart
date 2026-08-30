@@ -184,7 +184,7 @@ void main() {
   //
   // The bar is deliberately narrow: NOT "offline", NOT "a fetch failed", but
   // "we served a value past its window and could not replace it".
-  group('outOfSync — Phase 7 guards 2 and 3', () {
+  group('outOfSync — Phase 7 guards 2, 3 and 4', () {
     test('starts false: nothing has been served, nothing is suspect', () {
       expect(repo.outOfSync.value, isFalse);
     });

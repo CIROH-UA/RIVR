@@ -63,6 +63,14 @@ function durationMs(literal: string): number {
  * Recording a superseded value in a trailing comment is a normal thing to do,
  * which is what made it dangerous rather than contrived.
  *
+ * Handles line comments only. A BLOCK comment containing a whole earlier copy
+ * of a map declaration, placed ABOVE the live one, would still be the block
+ * parsed, since the block regex takes the first match — a false pass. Left as
+ * a note rather than code: line comments are the Dart convention, every other
+ * block-comment shape fails safe (a commented entry INSIDE the map is caught
+ * by the last-match-wins entry scan and fails the test), and the line-comment
+ * case is the one that actually happened.
+ *
  * @param {string} src - Dart source.
  * @return {string} The same source with line comments removed.
  */

@@ -1,6 +1,15 @@
 // lib/services/4_infrastructure/river_data/hold_policy.dart
 //
-// ADR 0011 Phase 7, guards 3 and 4 — how long a value may be HELD.
+// ADR 0011 Phase 7, guards 3 and 4 — the two questions the client asks about
+// a value's age.
+//
+//   maxHold     how long ago did we FETCH this?      (guard 3)
+//   maxRunAge   how old is the WATER we fetched?     (guard 4)
+//
+// Both mirror the server. The second was added last and matters most: a store
+// refreshing punctually while carrying yesterday's forecast passes the first
+// and fails the second, and that is the shape of the incident this phase came
+// from.
 //
 // **The problem this closes.** A stored document's `validUntil` is not fixed:
 // when a refresher run finds that upstream has not published anything new, it
@@ -30,7 +39,7 @@
 // past the cap, so the client warned for up to that long about the newest data
 // in existence. Fixed after the third review.
 //
-// That shared constant is what makes guard 4 true rather than asserted. An
+// Those shared constants are what make guard 4 true rather than asserted. An
 // earlier version of this phase CLAIMED the two sides shared a number while
 // `MAX_HOLD_MS` existed only in TypeScript — the only occurrence of the name
 // anywhere in `lib/` was the comment saying it was shared. A drift test
