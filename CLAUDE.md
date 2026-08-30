@@ -188,7 +188,25 @@ and "done" messages have never caught any of them.
 - **Coordinator pattern:** Repository implementations map raw errors to `ServiceResult` failures
 - **Entity/DTO separation:** Pure domain entities in `models/1_domain/`, DTOs with serialization in `services/3_datasources/`
 - **Provider pattern:** Providers extend ChangeNotifier, registered in main.dart via MultiProvider
-- **Phased data loading:** ForecastService uses loadOverviewData -> loadSupplementaryData -> loadCompleteReachData
+- **ONE data path — `IRiverDataRepository`.** Every surface that shows river
+  data reads through it: favourites, the map sheet, the forecast pages, the
+  Weekly Outlook. Ask for a `RiverDataKey` (source + reachId + product) and it
+  answers from the shared cache, the cloud store, or upstream, in that order.
+  Nothing calls NOAA or GEOGLOWS directly any more. *(The old phased loader —
+  `loadOverviewData` → `loadSupplementaryData` → `loadCompleteReachData` — was
+  deleted in ADR 0011 Phase 3; `one_forecast_path_test.dart` fails if anything
+  calls it again. `ForecastService` is now 50 lines and one method, backing
+  the `reachMetadata` product.)*
+- **Products, not bundles.** A surface asks for exactly what it renders —
+  `currentFlow`, `shortRange`, `mediumRange`, `longRange`, `returnPeriods`,
+  `reachMetadata`, `geoglowsForecast`. The composite `reachSummary` bundle is
+  gone: it made every card pay a 156 KB medium-range fetch to draw one number.
+  **`currentFlow` fetches the SHORT RANGE series** despite what an older name
+  suggested — see the ADR 0011 note further down.
+- **Freshness is publish-aligned, not a timer.** Each product expires when its
+  upstream could next publish, per NWM domain (CONUS hourly, islands 6-hourly).
+  Two separate questions are tracked: how long since we WROTE (hold cap) and
+  how old the WATER is (run age).
 - **Unit conversion:** All forecast data converted at the API layer (NoaaApiService) before reaching UI
 - **DI:** GetIt via `services/5_injection/dependency_container.dart` (orchestrator) + per-feature files (`auth_dependencies.dart`, `favorites_dependencies.dart`, etc.)
 
@@ -328,7 +346,9 @@ flutter test integration_test/                  # Integration tests
 | `lib/services/0_config/shared/constants.dart` | Non-sensitive constants, forecast definitions |
 | `lib/models/1_domain/shared/reach_data.dart` | Core entity for river reaches (800+ lines) |
 | `lib/services/3_datasources/shared/dtos/reach_data_dto.dart` | ReachData DTO with NOAA API parsing/serialization |
-| `lib/services/4_infrastructure/forecast/forecast_service.dart` | Central forecast loading, caching, phased loading |
+| `lib/services/4_infrastructure/forecast/forecast_service.dart` | What survived the old 1,000-line loader: **one method**, `loadBasicReachInfo`, backing the `reachMetadata` product |
+| `lib/services/4_infrastructure/river_data/river_data_repository.dart` | **The one data path.** Shared cache, source registry, freshness, the out-of-sync signal |
+| `lib/services/4_infrastructure/river_data/store_backed_data_source.dart` | Reads the Firestore store, falls through to live when the kill switch is off |
 | `lib/services/4_infrastructure/api/noaa_api_service.dart` | All NOAA API calls with unit conversion |
 | `lib/ui/1_state/features/favorites/favorites_provider.dart` | Primary state management for favorites |
 | `lib/ui/1_state/features/auth/auth_provider.dart` | Authentication state |
