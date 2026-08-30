@@ -22,6 +22,23 @@ import 'package:rivr/models/2_usecases/features/settings/sync_settings_after_log
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 
 /// Simple authentication state management for RIVR
+/// Whether this user can receive ANY notification, and therefore needs the
+/// tap-routing listeners and a fresh FCM token.
+///
+/// Pure and top-level so the decision is testable without an auth session, a
+/// use case or a Firebase mock — the reason the original defect had no test.
+///
+/// **ADR 0008 defect, carried into ADR 0011's Phase 9 list.** The gate was
+/// `enableNotifications` alone. The Weekly Outlook shipped with its OWN
+/// toggle, so a user can have flood alerts off and the weekly digest on — and
+/// that user still gets a notification every Friday. With no listeners
+/// registered, tapping it opened the app wherever it was last instead of
+/// routing to the digest, and their token was never refreshed, so the weekly
+/// could eventually stop arriving at all.
+bool wantsAnyNotification(UserSettings? settings) =>
+    settings?.enableNotifications == true ||
+    settings?.weeklyOutlookEnabled == true;
+
 class AuthProvider with ChangeNotifier {
   final IAuthRepository _authRepository;
   final SignInUseCase _signInUseCase;
@@ -166,10 +183,26 @@ class AuthProvider with ChangeNotifier {
       _currentUserSettings = result.data;
       AppLogger.info('AuthProvider', 'User settings loaded successfully');
 
-      // Set up notification listeners and refresh token if notifications are enabled
-      if (_currentUserSettings?.enableNotifications == true) {
+      // Listeners are needed by ANY notification the user can receive, not
+      // just flood alerts.
+      //
+      // ADR 0008 defect, carried into ADR 0011's Phase 9 list: this was gated
+      // on `enableNotifications` alone. A user who turned flood alerts OFF but
+      // left the Weekly Outlook ON still receives a notification every Friday
+      // — and with no listeners registered, tapping it opened the app to
+      // wherever it was last, instead of routing to the digest. The token was
+      // never refreshed for them either, so their weekly could eventually stop
+      // arriving at all.
+      //
+      // The two settings are independent by design (Weekly Outlook shipped
+      // with its own toggle), so the gate has to be the union.
+      if (wantsAnyNotification(_currentUserSettings)) {
         AppLogger.debug(
-            'AuthProvider', 'Notifications enabled, setting up listeners');
+            'AuthProvider',
+            'Notifications reachable (alerts: '
+                '${_currentUserSettings?.enableNotifications}, weekly: '
+                '${_currentUserSettings?.weeklyOutlookEnabled}), '
+                'setting up listeners');
         _fcmService.setupNotificationListeners();
         await _fcmService.refreshTokenIfNeeded(_currentUser!.uid);
       }

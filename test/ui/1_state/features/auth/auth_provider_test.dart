@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/widgets.dart';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_cache.dart';
@@ -170,9 +172,13 @@ class _MockAuthRepository implements IAuthRepository {
 }
 
 class _MockSettingsRepository implements ISettingsRepository {
+  /// Settings returned by [getUserSettings]. Null by default, which is what
+  /// every pre-existing test wants; the notification-listener tests set it.
+  UserSettings? settings;
+
   @override
   Future<ServiceResult<UserSettings?>> getUserSettings(String userId) async =>
-      ServiceResult.success(null);
+      ServiceResult.success(settings);
   @override
   Future<ServiceResult<UserSettings?>> updateFlowUnit(
           String userId, FlowUnit flowUnit) async =>
@@ -209,8 +215,10 @@ class _MockFCMService implements IFCMService {
   }) async =>
       NotificationPermissionResult.granted;
 
+  int setupListenerCalls = 0;
+
   @override
-  void setupNotificationListeners() {}
+  void setupNotificationListeners() => setupListenerCalls++;
   @override
   Future<NotificationPermissionResult> enableNotifications(
           String userId) async =>
@@ -529,4 +537,78 @@ void main() {
       });
     });
   });
+  // ── ADR 0008 defect, carried into ADR 0011's Phase 9 list ────────────────
+  //
+  // The gate was `enableNotifications` alone. The Weekly Outlook shipped with
+  // its OWN toggle, so a user can have flood alerts off and the weekly digest
+  // on — and that user still receives a notification every Friday. With no
+  // listeners registered, tapping it opened the app wherever it was last
+  // instead of routing to the digest, and their token was never refreshed, so
+  // the weekly could eventually stop arriving at all.
+  //
+  // Tested through the pure decision rather than the provider: reaching the
+  // gate through `refreshUserSettings` needs a signed-in user, a sync use case
+  // and a settings repository, which is exactly the plumbing that left this
+  // branch untested for as long as it was wrong.
+  group('wantsAnyNotification — who needs listeners', () {
+    UserSettings settings({required bool alerts, required bool weekly}) =>
+        UserSettings(
+          userId: 'u1',
+          email: 'u@example.com',
+          firstName: 'U',
+          lastName: 'Ser',
+          preferredFlowUnit: FlowUnit.cfs,
+          preferredTimeFormat: TimeFormat.twelveHour,
+          enableNotifications: alerts,
+          weeklyOutlookEnabled: weekly,
+          favoriteReachIds: const [],
+          createdAt: DateTime.utc(2026, 1, 1),
+          updatedAt: DateTime.utc(2026, 1, 1),
+          lastLoginDate: DateTime.utc(2026, 1, 1),
+        );
+
+    test('alerts on, weekly off', () {
+      expect(wantsAnyNotification(settings(alerts: true, weekly: false)),
+          isTrue);
+    });
+
+    // THE regression. False before the fix.
+    test('alerts OFF, weekly ON — still needs listeners', () {
+      expect(
+        wantsAnyNotification(settings(alerts: false, weekly: true)),
+        isTrue,
+        reason: 'a weekly-only user gets a notification every Friday; without '
+            'listeners the tap does not route and their token is never '
+            'refreshed',
+      );
+    });
+
+    test('both on', () {
+      expect(wantsAnyNotification(settings(alerts: true, weekly: true)),
+          isTrue);
+    });
+
+    // The other direction must still hold: someone who wants nothing should
+    // not have listeners registered or a token refreshed on their behalf.
+    test('both off — no listeners', () {
+      expect(wantsAnyNotification(settings(alerts: false, weekly: false)),
+          isFalse);
+    });
+
+    test('no settings at all — no listeners', () {
+      expect(wantsAnyNotification(null), isFalse);
+    });
+  });
+
+  // The call site must actually use the decision; a pure function nothing
+  // calls is the wiring gap this project keeps rediscovering.
+  test('the provider gates listener setup on wantsAnyNotification', () {
+    final src = File('lib/ui/1_state/features/auth/auth_provider.dart')
+        .readAsStringSync();
+    expect(src.contains('if (wantsAnyNotification(_currentUserSettings))'),
+        isTrue,
+        reason: 'the gate was inlined again, so the decision above no longer '
+            'describes what the app does');
+  });
+
 }
