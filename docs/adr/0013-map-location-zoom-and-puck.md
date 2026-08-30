@@ -138,6 +138,38 @@ again, or make the page read a field, both fail.
 answer is usually to change the code's shape so the defect is not expressible,
 not to write a more elaborate pattern.
 
+## 5. First open recentres, then the map remembers (2026-08-30)
+
+Jerson, after testing on the simulator: *"the map view does not remember the
+last map location. Is that a good or bad UX?"*
+
+**Making centring first-open-only had broken the reasoning that justified
+discarding the camera.** The comment retiring camera persistence on 2026-08-20
+said: *"It opens on the user's location when one is available and on the
+configured default otherwise, so there is nothing to restore."* That stopped
+being true the moment it only did so once. The result was worse than either
+behaviour it replaced: pan to a river in Montana, close the map, reopen — and
+you were on Provo at zoom 9, neither where you were nor where you are.
+
+**The three options are not equal.** Always recentring is never wrong but
+discards what you were doing. Remembering forever goes stale — a camera from
+last week drops you on a river you looked at once, which is exactly why it was
+un-persisted. First open recentres, then remembers, keeps both: once per launch
+you land on yourself, and within that launch reopening returns you to what you
+were looking at.
+
+**Session memory only, deliberately.** Static on the page state, because
+`Navigator.pushNamed` builds a fresh page every time; stored as plain numbers
+so nothing holds a disposed platform object; never written to disk.
+
+**Verified on the simulator, and the first attempt at verifying it was not
+good enough.** Panning away and reopening produced an identical screenshot,
+which is also what a failed back-tap produces. Re-run by backing out, confirming
+the favourites list was actually on screen, and only then reopening: the map
+came back to San Rafael Swell rather than Provo. Three mutations verified
+failing — idle stops recording, open ignores the memory, and the field made
+non-static.
+
 ## Unverified
 
 **How far off an iOS approximate fix actually is.** Stated from memory as
