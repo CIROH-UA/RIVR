@@ -497,8 +497,14 @@ work normally. To test alerts on a debug build, upload the same `.p8` to the
 empty *development* slot in Project Settings → Cloud Messaging; otherwise use
 TestFlight. This costs an hour if you do not know it.
 
-**Phase 8 (prove it on device) is 8 of 9 guards — only the independent review
-remains.** Measured 2026-08-30 and recorded in ADR 0011 with the build each
+**Phase 8 (prove it on device) is COMPLETE (2026-08-30).** Eight guards met or
+honestly partial; guard 9 — the independent review — was **accepted rather than
+passed** after five rounds, none of which returned clean on first reading.
+Nothing user-facing was found after round 2; rounds 3-5 found only CI and test
+problems, three of them successive versions of the same wall-clock-dependent
+assertion. Two guards are partial and the ADR says so: guard 2's non-favourite
+sheet timing was never measured, and guard 3's store provenance is inferred
+rather than instrumented. Measured 2026-08-30 and recorded in ADR 0011 with the build each
 number came from: favourites paint in
 **969 ms** cold on iPhone and **2473 ms** on an Android emulator (bar: 3 s),
 two accounts on two platforms show identical values, airplane mode renders,

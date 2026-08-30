@@ -1,6 +1,8 @@
 # 0011 — One source of truth for favourite rivers
 
-**Status:** Phases 0–7 complete. Phase 0 still collecting (it is the instrument, not a step). Phases 1–3 merged 2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 completed and deployed 2026-08-29/30, Phase 7 verified on device. **Phase 8 (prove it on device) is in progress; Phase 9 (sweep) not started.**
+**Status:** Phases 0–8 complete. Phase 0 still collecting (it is the instrument, not a step). Phases 1–3 merged 2026-08-23; Phase 4 live 2026-08-25; Phases 5–7 completed and deployed 2026-08-29/30, Phase 7 verified on device. **Phase 8 complete 2026-08-30** — eight guards met or honestly partial, guard 9
+accepted rather than passed after five reviews. **Phase 9 (sweep) not
+started.**
 **Supersedes in scope:** ADR 0010 (Weekly Outlook latency) — one symptom of this
 **Related:** ADR 0001 (SSOT repository), ADR 0002 (canonical derived values),
 ADR 0008 (push)
@@ -1596,7 +1598,7 @@ number isn't current the app says so before they have to wonder.
 
 ---
 
-## Phase 8 — Prove it on device ▶ 8 of 9; re-review owed
+## Phase 8 — Prove it on device ▶ COMPLETE (guard 9 accepted, not passed)
 
 ### Guard 7 — Android (2026-08-30)
 
@@ -1954,7 +1956,29 @@ expected outcome rather than a surprise.
 | 6 — unit switching, no refetch | **met** — 480 log lines, zero fetches |
 | 7 — Android shares the path | **met with caveat** — 2473 ms median on an emulator, not hardware |
 | 8 — every number carries its build | **met** — after catching two of its own violations |
-| 9 — independent review passes | **not met.** Five ran. Round 2 found four blockers in shipped behaviour; 3, 4 and 5 each found a defect introduced by the previous round's FIX, in the same test, from the same cause — a wall-clock-dependent value asserted against a wall-clock-dependent bound. All fixed; severity fell each round (user-facing → 13 h/day CI break → 30 min/day → 9¾ h/day, all test-only after round 3). Round 5's blocker was found and fixed independently before its report landed |
+| 9 — independent review passes | **ACCEPTED, not passed — a deliberate call, 2026-08-30.** Five ran. Round 2 found four blockers in shipped behaviour; 3, 4 and 5 each found a defect introduced by the previous round's FIX, in the same test, from the same cause — a wall-clock-dependent value asserted against a wall-clock-dependent bound. All fixed; severity fell each round (user-facing → 13 h/day CI break → 30 min/day → 9¾ h/day, all test-only after round 3). Round 5's blocker was found and fixed independently before its report landed |
+
+**Guard 9 was accepted rather than passed, and the distinction is the point.**
+No round returned clean on first reading. The decision to stop was made on
+evidence rather than fatigue:
+
+- **Nothing user-facing has been found since round 2.** Rounds 3, 4 and 5
+  produced one CI-breaking test, one narrower version of it, one wider version
+  of it, and three guards that were weaker than they claimed. None could reach
+  a person using the app.
+- **The severity fell monotonically**, and the last round's only code finding
+  was that a test sliced a file to the wrong boundary.
+- **Round 5 found the blocker independently, after it had already been fixed
+  here** — two routes to the same defect, which says more about the check than
+  another clean round would have.
+- **The cost is real.** Five rounds took most of a night, and the marginal
+  finding is now about the tests rather than the software.
+
+What this does NOT mean: that the phase is defect-free. It means the remaining
+risk is concentrated in this repository's test scaffolding rather than in what
+ships, and that a sixth round would most likely find a sixth version of the
+same test problem. Recorded so nobody later reads "Phase 8 complete" and
+assumes a clean review.
 
 **What the reviews found, because the list is more useful than the verdict.**
 Round 1: the `arrayRemove` fix had been applied to one of two files while the
