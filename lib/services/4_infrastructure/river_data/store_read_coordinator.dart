@@ -163,6 +163,30 @@ class StoreReadCoordinator {
       // Evict ONLY on a real transition out of reading the store. See
       // [_storeWasActive] — doing this whenever the switch reads false meant
       // doing it constantly on the default configuration.
+      // Do NOT reclaim on a value we cannot trust yet.
+      //
+      // `isStoreReadEnabled` is false both for "the operator turned this off"
+      // and for "Remote Config has not resolved". Round 5 made the off-branch
+      // keep its flag when it evicted nothing, which fixed a reclaim that
+      // never fired — and created a worse one. Round 6 (Phase 8 re-review)
+      // reproduced it: with the flag kept, a device where the store is ENABLED
+      // and was never turned off can reach this branch on an ordinary launch
+      // if favourites happen to load before Remote Config resolves, and then
+      // evicts every favourite's entries from memory and disk. Before round 5
+      // that was impossible only because the flag was consumed (uselessly) at
+      // attach.
+      //
+      // Eviction is a destructive act taken on the operator's behalf. It waits
+      // for the operator's actual decision. `initialize()` announces when it
+      // resolves, which re-enters this method.
+      if (!_switch.isResolved) {
+        AppLogger.info(
+          _tag,
+          'switch not resolved yet; deferring any reclaim',
+        );
+        return;
+      }
+
       if (await _wasActive()) {
         AppLogger.info(_tag, 'kill switch off; detaching and reclaiming');
         final evicted = await _evictStoreEntries();

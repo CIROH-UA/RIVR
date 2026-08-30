@@ -58,8 +58,23 @@ class _NoopCache implements IRiverDataCache {
 }
 
 class _FakeSwitch implements StoreReadSwitch {
-  _FakeSwitch(this._enabled);
+  /// [resolved] defaults true so every existing test keeps its meaning: they
+  /// are all about a switch whose value is known. The unresolved case is the
+  /// one round 6 found, and it gets its own tests.
+  _FakeSwitch(this._enabled, {bool resolved = true}) : _resolved = resolved;
   bool _enabled;
+  bool _resolved;
+
+  @override
+  bool get isResolved => _resolved;
+
+  /// Remote Config finishing its fetch: the value becomes trustworthy and the
+  /// switch announces, exactly as `initialize()` does.
+  void resolve({bool? to}) {
+    if (to != null) _enabled = to;
+    _resolved = true;
+    changes.notifyListeners();
+  }
 
   @override
   final ChangeNotifier changes = ChangeNotifier();
@@ -423,6 +438,76 @@ void main() {
     // switch OFF, force-quit, relaunch, and store-written names and thresholds
     // survive their full 30-day window — verbatim the failure the persistence
     // exists to prevent.
+    // ── Round 6: the regression round 5's fix introduced ──────────────────
+    //
+    // `isStoreReadEnabled` is `getBool`, false both for "turned off" and for
+    // "not fetched yet". Round 5 made the off-branch KEEP its flag when it
+    // evicted nothing — correct for the bug it targeted, and it turned that
+    // ambiguity into a destructive act: on a device where the store is ENABLED
+    // and was never turned off, a launch where favourites load before Remote
+    // Config resolves would reach the off-branch with favourites in hand and
+    // evict every one of their entries from memory and disk.
+    //
+    // Before round 5 this was impossible, but only because the flag was
+    // consumed uselessly at attach. Eviction now waits for the operator's
+    // actual decision.
+    test('an UNRESOLVED switch never evicts, however many favourites are in',
+        () async {
+      SharedPreferences.setMockInitialValues(
+          {'adr0011_store_was_active': true});
+      final cache = _NoopCache();
+      // Reads false because Remote Config has not answered yet — not because
+      // anyone turned the store off.
+      final sw = _FakeSwitch(false, resolved: false);
+
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: sw,
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isEmpty,
+          reason: 'this is a device whose store is enabled; evicting here '
+              'throws away good data on an ordinary launch');
+
+      // Remote Config resolves and the store really is ON.
+      sw.resolve(to: true);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isEmpty,
+          reason: 'the switch is on; nothing should ever have been reclaimed');
+      c.dispose();
+    });
+
+    test('a RESOLVED off switch still reclaims, as it must', () async {
+      SharedPreferences.setMockInitialValues(
+          {'adr0011_store_was_active': true});
+      final cache = _NoopCache();
+      final sw = _FakeSwitch(false, resolved: false);
+
+      final c = StoreReadCoordinator(
+        subscriptions: subs,
+        readSwitch: sw,
+        cache: cache,
+        favouritesListenable: favourites,
+        favourites: () => favourites.reaches,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(cache.evicted, isEmpty);
+
+      // The operator really did turn it off; Remote Config confirms it.
+      sw.resolve(to: false);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(cache.evicted, isNotEmpty,
+          reason: 'deferring must not become never — the kill switch has to '
+              'reclaim once the decision is known');
+      c.dispose();
+    });
+
     test('favourites arriving LATE still get reclaimed', () async {
       SharedPreferences.setMockInitialValues(
           {'adr0011_store_was_active': true});
