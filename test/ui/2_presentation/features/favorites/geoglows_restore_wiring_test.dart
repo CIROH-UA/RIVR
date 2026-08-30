@@ -82,6 +82,21 @@ void main() {
     expect(src.contains('restoreTargetFor('), isTrue,
         reason: 'the page is deciding for itself again; that is where both '
             'restore-button defects came from');
+
+    // The ARGUMENTS, not just the call. All three parameters are `String?`,
+    // so `riverName: favorite.customName` compiles, passes all thirteen
+    // tests of the pure function, and breaks the button — the wiring failing
+    // while the logic stays green, which is this repository's signature
+    // defect. Found by auditing rather than by the tests themselves.
+    for (final binding in const [
+      'customName: favorite.customName',
+      'riverName: favorite.riverName',
+      'getPlaceLabel(favorite.reachId)',
+    ]) {
+      expect(src.contains(binding), isTrue,
+          reason: 'the page no longer passes $binding — a wrong binding here '
+              'is invisible to every test of restoreTargetFor');
+    }
     expect(
       src.contains("favorite.riverName != null &&\n"
           "        favorite.riverName!.isNotEmpty"),

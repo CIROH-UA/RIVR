@@ -160,6 +160,27 @@ void main() {
       );
     });
 
+    test('an NWM name equal to the custom name is null even when a place '
+        'label differs', () {
+      // The gap this audit found. Every "already the default" case was
+      // written with `placeLabel: null`, so precedence and equality were
+      // never tested together.
+      //
+      // If the precedence were ever flipped — place label first — the target
+      // would become "Somewhere, USA", which differs from the custom name, so
+      // the button would come back AND offer the wrong thing: restoring a
+      // river called "Provo River" to a city. Both defects at once, and every
+      // other test in this file still green.
+      expect(
+        restoreTargetFor(
+          customName: 'Provo River',
+          riverName: 'Provo River',
+          placeLabel: 'Somewhere, USA',
+        ),
+        isNull,
+      );
+    });
+
     test('the network name WINS over the geocoded place', () {
       // An NWM reach can have both. Its published name is the truer default,
       // and the place label is only a stand-in for reaches that have none.
