@@ -22,6 +22,8 @@
 
 import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart';
+
 /// Startup timing for the current launch.
 class StartupTrace {
   StartupTrace._();
@@ -54,10 +56,15 @@ class StartupTrace {
     _favouritesMarked = true;
     final ms = _sinceStart.elapsedMilliseconds;
     _favouritesAtMs = ms;
-    developer.log(
-      'favourites rendered in ${ms}ms with $favouriteCount favourites',
-      name: 'STARTUP_TRACE',
-    );
+    final line =
+        'favourites rendered in ${ms}ms with $favouriteCount favourites';
+    developer.log(line, name: 'STARTUP_TRACE');
+    // AND on stdout, deliberately. `dart:developer` is not forwarded by
+    // `flutter run`, so reading it needs a VM-service tap — and a tap cannot
+    // connect until after the app has started, which is after this fires. The
+    // measurement would be lost to that race on every cold start, which is
+    // the only kind of start worth measuring.
+    debugPrint('STARTUP_TRACE: $line');
   }
 
   /// The figure this phase reports: ms from launch to the first favourites

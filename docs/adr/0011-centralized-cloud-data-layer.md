@@ -1598,6 +1598,38 @@ number isn't current the app says so before they have to wonder.
 
 ## Phase 8 — Prove it on device ▶ IN PROGRESS
 
+### Guard 2 — favourites render cold (2026-08-30)
+
+**969 ms median, against a 3 s bar.** Three cold starts, iPhone (iOS 26.6),
+**profile build** off `fc2bb4f` — AOT-compiled like a release, so the figure is
+not debug-mode slow.
+
+| run | to first favourites paint |
+|---|---|
+| 1 | 969 ms |
+| 2 | 1008 ms |
+| 3 | 961 ms |
+
+Six favourites. The spread is 47 ms across three runs, which is the more
+interesting number: this is not a lucky sample.
+
+**What the measurement includes**, since a figure without its definition is how
+the Phase 0 table came to be optimistic: wall-clock from the first line of
+`main()` to the end of the first frame in which the favourites list is built
+with content. Firebase init, auth restore, provider construction, the cache
+read and layout are all inside it. Only what the OS did before Dart started is
+outside.
+
+**Two things it does NOT measure, stated so nobody reads more into it.** The
+app's on-disk cache was warm — this is "app not in memory", the ordinary cold
+start, not a first-ever install with an empty cache, which is a different and
+slower case that remains unmeasured. And the device was online; the offline
+case is guard 4.
+
+For contrast, guard 1's retaken table says a single `analysis_assimilation`
+call to NOAA averages **3.9 s** and fails 6% of the time. The whole favourites
+screen now paints in a quarter of one such call, because it makes none.
+
 ### Guard 1 — Phase 0's timings retaken (2026-08-30)
 
 Same five endpoints, same probe, **189 hourly samples over 7.7 days**
