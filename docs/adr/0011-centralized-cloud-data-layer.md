@@ -1652,6 +1652,7 @@ quotes it.
 | 4 | favourites render offline | profile, same build as guard 2 |
 | 6 | 0 refetches, 480 log lines | debug at `7cf587c` — app code identical to `4217077` |
 | 7 | 2603 / 2473 / 2285 ms, Android | profile at `62ef301` — app code identical to `4217077` |
+| 3 | 13966 CFS on both devices | iPhone debug `7cf587c`, Android profile `62ef301` |
 
 **This guard immediately caught its own violation, which is the argument for
 having it.** Guards 2 and 4 were first written down as "profile build off
@@ -1684,6 +1685,31 @@ conflict was invisible until the tap came back empty. Repeated on a debug build
 to get the evidence, because a spinner is something a person notices and a fast
 background fetch is not — and that is exactly the class of defect that got
 through repeatedly this week.
+
+### Guard 3 — two accounts, two devices, one river (2026-08-30)
+
+**Identical: 13966 CFS, Normal, on both.** iPhone (iOS 26.6, debug at
+`7cf587c`) signed in as the primary account; Android 15 emulator (profile at
+`62ef301`) signed in as a **different** account, `jersonjara7.18@…`, with White
+River (18471070) added fresh. Same units on both.
+
+The store holds exactly one document for that reach —
+`nwm__18471070__analysisAssimilation`, run `2026-08-29T23:00:00Z`, unit CFS,
+fetched `2026-08-30T02:20:16Z` — read out of Firestore directly. That is the
+mechanism the guard is really testing: not that two clients computed the same
+answer, but that they read one shared value.
+
+**They disagreed at first, and the reason is worth keeping.** Android showed
+13966 while the iPhone showed 13744.1 — same units, same category, different
+number. The iPhone was backgrounded and its log had produced no new lines since
+before the store's 02:20 refresh, so it was displaying what it last drew rather
+than what the store held. One pull-to-refresh and it read 13966.
+
+So convergence is **on render, not continuous**: a device that is not looking
+shows what it last drew. That is correct behaviour and not a defect, but it
+means "two devices agree" is only meaningful for two devices that have both
+rendered since the last store write. Worth stating, because the guard's wording
+("identical values") invites the stronger reading.
 
 ### Guard 4 — airplane mode (2026-08-30)
 
