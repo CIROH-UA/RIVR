@@ -70,6 +70,26 @@ void main() {
             '${missing.join(', ')}');
   });
 
+  test('the deleted data path is not presented as a current pattern', () {
+    // The worst kind of stale doc, and it survived until Phase 9: CLAUDE.md's
+    // "Key Patterns" list described the phased loader —
+    // `loadOverviewData -> loadSupplementaryData -> loadCompleteReachData` —
+    // as how this app loads data, months after ADR 0011 Phase 3 deleted all
+    // three and routed every surface through IRiverDataRepository. Someone
+    // reading the file as their introduction would have built the thing the
+    // phase exists to remove.
+    //
+    // Narrow on purpose: the method NAMES may legitimately appear in
+    // CLAUDE.md as history ("was deleted in Phase 3"), and a test cannot
+    // reliably tell history from instruction. What it CAN pin is the heading
+    // that presented it as current.
+    expect(claudeMd.contains('Phased data loading'), isFalse,
+        reason: 'the phased loader is deleted; presenting it as a key pattern '
+            'is how a new contributor rebuilds the old data path');
+    expect(claudeMd.contains('IRiverDataRepository'), isTrue,
+        reason: 'the one data path must be the one the document teaches');
+  });
+
   test('the architecture tree names no deleted class', () {
     // The specific rot this caught. The tree annotates directories with the
     // classes they hold — `routing/ -- AppRouter, AuthGuard, routes` — and
