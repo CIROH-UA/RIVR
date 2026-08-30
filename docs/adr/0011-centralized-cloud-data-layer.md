@@ -1954,7 +1954,7 @@ expected outcome rather than a surprise.
 | 6 — unit switching, no refetch | **met** — 480 log lines, zero fetches |
 | 7 — Android shares the path | **met with caveat** — 2473 ms median on an emulator, not hardware |
 | 8 — every number carries its build | **met** — after catching two of its own violations |
-| 9 — independent review passes | **not met.** Two ran; the second found four blockers, all now fixed and mutation-checked. A third has not been run |
+| 9 — independent review passes | **not met.** Five ran. Round 2 found four blockers in shipped behaviour; 3, 4 and 5 each found a defect introduced by the previous round's FIX, in the same test, from the same cause — a wall-clock-dependent value asserted against a wall-clock-dependent bound. All fixed; severity fell each round (user-facing → 13 h/day CI break → 30 min/day → 9¾ h/day, all test-only after round 3). Round 5's blocker was found and fixed independently before its report landed |
 
 **What the reviews found, because the list is more useful than the verdict.**
 Round 1: the `arrayRemove` fix had been applied to one of two files while the
@@ -1963,7 +1963,21 @@ nothing on essentially every device. Round 2: the fix for that reclaim
 introduced a worse bug — it could evict a healthy device's cache on an ordinary
 launch — plus a store fetch that could resurrect an evicted entry with a 30-day
 window, a forecast page announcing "current flow is not available" during a
-healthy load, and two guards claiming more than was measured.
+healthy load, and two guards claiming more than was measured. Round 3: a test
+that broke CI for 13 hours a day, and a digest window that still did not match
+the app's after being fixed and declared matching. Round 4: that fix's
+replacement broke CI for 30 minutes a day, and three guards passed against the
+regressions they existed to catch. Round 5: the replacement for THAT broke CI
+for nearly ten hours a day — three attempts at one assertion, each wrong at a
+different hour.
+
+**The same assertion produced rounds 3, 4 and 5.** Each fix removed one
+wall-clock dependency and introduced another, because the value under test
+(`windowFor`) changes shape at 10:45 UTC and every bound written against it
+inherited that boundary. It was finally settled by removing the clock from the
+assertion entirely rather than by choosing a better bound. Worth remembering as
+a shape: when a fix keeps failing in a new place, the framing is wrong, not the
+number.
 
 **Every one of those was in something already declared finished.** That is the
 pattern worth carrying into Phase 9, more than any individual defect.

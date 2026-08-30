@@ -537,14 +537,16 @@ void main() {
       //
       //   1. compared against the next midnight  -> failed 23:30-24:00 UTC,
       //      because the late-retry branch returns `now + 30 min`.
-      //   2. bounded the gap to under an hour    -> failed 00:00-10:45 UTC,
+      //   2. bounded the gap to under an hour    -> failed 00:00-09:45 UTC,
       //      because BEFORE the publication time the branch returns a fixed
       //      instant (today's 10:45) rather than `now + 30 min`, so the gap
       //      is up to ten hours and legitimately so.
       //
-      // Measured, not reasoned: gap is 615 min at 00:30Z, 285 min at 06:00Z,
-      // 1 min at 10:44Z, then 30 min from 10:46Z onward. Attempt 2 was
-      // WORSE than attempt 1 — half an hour of daily breakage became eleven.
+      // Measured, not reasoned, and the boundary is 09:45 rather than the
+      // 10:45 first written here — the gap reaches exactly 60 min at 09:45
+      // and passes from 09:46. Gaps: 615 min at 00:30Z, 285 at 06:00Z, 61 at
+      // 09:44Z, 59 at 09:46Z, 30 from 10:46Z onward. Attempt 2 was WORSE than
+      // attempt 1 — half an hour of daily breakage became nearly ten.
       //
       // So the assertion is now against `windowFor` itself at a FIXED instant,
       // which is what the test is really about: `fetch` must ask the same

@@ -97,7 +97,32 @@ void main() {
       expect(geoStart, greaterThan(-1),
           reason: '_loadGeoglows is gone or renamed; this guard must follow '
               'it rather than silently passing');
-      final geoBody = page.substring(geoStart);
+      // Bounded to the METHOD by matching braces, not to end-of-file.
+      //
+      // `substring(geoStart)` ran to EOF, so it counted settles in anything
+      // defined after `_loadGeoglows` — the failure message said "inside
+      // _loadGeoglows" and it was not. Round 5 defeated it that way. A first
+      // attempt at the bound looked for the next `\n  Future<`, which is also
+      // wrong here: the next member is a getter, so it found nothing and ran
+      // to EOF all over again. Braces cannot be fooled by what kind of member
+      // comes next.
+      var depth = 0;
+      var geoEnd = page.length;
+      var seenOpen = false;
+      for (var i = geoStart; i < page.length; i++) {
+        final ch = page[i];
+        if (ch == '{') {
+          depth++;
+          seenOpen = true;
+        } else if (ch == '}') {
+          depth--;
+          if (seenOpen && depth == 0) {
+            geoEnd = i + 1;
+            break;
+          }
+        }
+      }
+      final geoBody = page.substring(geoStart, geoEnd);
 
       final inGeoglows = '_flowSettled = true'.allMatches(geoBody).length;
       expect(inGeoglows, greaterThanOrEqualTo(2),
