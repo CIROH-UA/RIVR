@@ -2492,11 +2492,12 @@ asserting the probe reads NOAA's name while no product id uses it.
 31 documents are orphaned (27 superseded plus 4 for reaches nobody
 favourites) — 16% of the collection, under `assertGcSane`'s 50%
 ceiling, swept by `storeGcDaily` after its 7-day grace. Devices re-fetch that
-product once per favourite. **The TestFlight build already installed
-(2026.2.0+719) will miss on this product and fall through to the live path**
-for current flow until a new build ships: one upstream call per favourite
-rather than zero. Degraded, not broken, and stated here rather than
-discovered.
+product once per favourite. **The build installed at the time
+(2026.2.0+719) misses on this product and falls through to the live path**
+for current flow: one upstream call per favourite rather than zero. Degraded,
+not broken, and stated here rather than discovered. **Closed by
+2026.2.1+786**, submitted to TestFlight 2026-08-30, which carries the rename —
+so the gap lasts only until that build is installed.
 
 ### `validUntil`'s CONUS assumption — DONE 2026-08-30
 

@@ -85,8 +85,14 @@ setting defaults to false, which is why the map drew nothing before. It is
 re-applied on every style load — a basemap change rebuilds the style and takes
 the component with it.
 
-**The camera centres on the FIRST open only**; after that the recentre button.
-The flag is static because the page state is recreated on every open.
+**The camera centres on the FIRST open only**; after that it is remembered for
+the rest of the app run, and the recentre button is the way back to yourself.
+Both flags are static because the page is rebuilt by `pushNamed` on every open
+— and **both are cleared on sign-out**, or the next user opens on the previous
+user's river and is never centred on their own.
+
+**A refused location shows a dialog with Open Settings**, offered only for the
+two states Settings can actually fix. It used to do nothing at all.
 
 ### Flood colours — current design (superseded the Cloud Function pipeline)
 
