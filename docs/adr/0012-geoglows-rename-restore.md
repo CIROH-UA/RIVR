@@ -120,6 +120,25 @@ the comparison went missing.
 default, no button; after renaming to something different, the button returns
 offering the correct target.
 
+### Two more gaps, found by auditing rather than by the tests (2026-08-30)
+
+Asked "did you write tests to avoid regressions", the honest answer was
+"mostly", and checking found two:
+
+- **Precedence and equality were never tested together.** Every "already the
+  default" case used `placeLabel: null`. Flip the precedence so the place
+  label wins and an NWM river called "Provo River" would offer to restore to
+  "Somewhere, USA" — the button back AND pointing at the wrong thing — with
+  all thirteen tests green. Now covered; the flipped-precedence mutation fails
+  two tests.
+- **The page's ARGUMENT BINDINGS were unpinned.** All three parameters are
+  `String?`, so `riverName: favorite.customName` compiles and passes every
+  test of the pure function while breaking the button. Verified: that mutation
+  leaves `favorite_rename_test.dart` **completely green** and is caught only
+  by the wiring guard. The wiring failing while the logic stays green is this
+  repository's signature defect, and extracting a pure function does not
+  remove it — it moves it to the call site.
+
 **Still not verified:** the same journey on physical hardware. The simulator
 shares the app binary and the real Firestore backend, so what remains untested
 is the device-specific layer only.
