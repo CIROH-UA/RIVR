@@ -2145,7 +2145,22 @@ field NAMES, and nothing pinned the SCHEDULE. Two sides can agree on a
 five-minute skew while expiring the same document six hours apart. The guard
 now pins the island band, the cycle, and — separately — that the client still
 *calls* `nwmDomainOf`, because constants can agree while the code stops
-consulting them. Both mutations verified failing. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
+consulting them. Both mutations verified failing.
+
+**A near-miss found while verifying the deploy, not by review.** GEOGLOWS
+river ids are also 9 digits, and nothing stops one landing inside the NWM
+island COMID band — the band check reads the number, not the network. None of
+the 36 reaches in the store collide today, but that is luck. What actually
+makes it safe is that the island tables name only `shortRange`, which GEOGLOWS
+does not have. That is an implicit coupling, and implicit couplings in this
+ADR have a record of being broken by an edit that looked obviously correct, so
+it is now pinned in both languages and mutation-checked.
+
+**Deployed and verified by composition, 2026-08-30 15:39 UTC:** seven store
+functions present (counted, not inferred from the deploy's exit status),
+`storeHealth` 200 `{"status":"healthy"}`, and `reachId` confirmed to be a real
+selectable top-level field on the documents — without which every sample would
+have carried an empty id and the island caps could never have fired, silently. (**Both ADR 0008 defects are now fixed** — though the first claim of that was
 premature: `arrayRemove` was fixed in `notification-service.ts` and an
 identical copy in `weekly-digest.ts` was missed, because the guard test named
 one file. The weekly digest kept failing to prune dead tokens every Friday

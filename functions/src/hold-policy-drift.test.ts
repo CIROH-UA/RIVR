@@ -267,6 +267,29 @@ describe("guard 4 — the island caps are shared too", () => {
     }
   });
 
+  test("the island tables cannot reach a GEOGLOWS document", () => {
+    // A near-miss found while verifying the deploy on 2026-08-30. GEOGLOWS
+    // river ids are also 9 digits, and nothing stops one landing inside the
+    // NWM island COMID band — `isIslandReach` reads the number, not the
+    // network. None of the 36 reaches in the store today collide, but that is
+    // luck, not design.
+    //
+    // What actually makes it safe is that the island tables name ONLY
+    // `shortRange`, which GEOGLOWS does not have. That is an implicit
+    // coupling, and implicit couplings in this ADR have a record of being
+    // broken by an edit that looked obviously correct. Adding
+    // `geoglowsForecast` to either table would silently give an island-band
+    // GEOGLOWS reach the wrong cap; this fails first.
+    for (const table of [ISLAND_MAX_HOLD_MS, ISLAND_MAX_RUN_AGE_MS]) {
+      for (const product of Object.keys(table)) {
+        assert.ok(!product.startsWith("geoglows"),
+          `${product} is a GEOGLOWS product with an NWM island cap. The ` +
+          "island band is an NHDPlus COMID range and says nothing about a " +
+          "GEOGLOWS river id that happens to fall inside it.");
+      }
+    }
+  });
+
   test("an island override is never STRICTER than the CONUS cap", () => {
     // The direction check, not just equality. An island override tighter than
     // the shared cap would be pointless at best and, for the run-age table,

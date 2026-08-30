@@ -6,6 +6,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rivr/models/1_domain/shared/river_data/nwm_domain.dart';
+import 'package:rivr/services/4_infrastructure/river_data/hold_policy.dart';
 
 void main() {
   group('nwmDomainOf', () {
@@ -42,6 +43,28 @@ void main() {
       // is an NHDPlus COMID range, not a general-purpose test.
       expect(nwmDomainOf('760337'), NwmDomain.conus);
     });
+  });
+
+  test('the island tables cannot reach a GEOGLOWS product', () {
+    // A near-miss found while verifying the deploy on 2026-08-30. GEOGLOWS
+    // river ids are also 9 digits and nothing stops one landing inside the
+    // NWM island COMID band — `nwmDomainOf` reads the number, not the
+    // network. None of the reaches in the store today collide, but that is
+    // luck rather than design.
+    //
+    // What makes it safe is that the island cap tables name ONLY
+    // `shortRange`, which GEOGLOWS does not have. Adding `geoglowsForecast`
+    // to either would silently give an island-band GEOGLOWS reach an NWM
+    // island cap, so this fails first.
+    for (final table in [islandMaxHold, islandMaxRunAge]) {
+      for (final product in table.keys) {
+        expect(
+          product.id.toLowerCase().contains('geoglows'),
+          isFalse,
+          reason: '$product is a GEOGLOWS product with an NWM island cap',
+        );
+      }
+    }
   });
 
   test('the island cycle is the FASTER of the two island domains', () {
