@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/app_version_label.dart';
 
 /// Account screen.
 ///
@@ -31,6 +32,11 @@ class AccountPage extends StatelessWidget {
                 const SizedBox(height: 24),
                 _SignOutSection(auth: auth),
                 _DeleteAccountSection(auth: auth),
+                const SizedBox(height: 24),
+                // The only place in the app that names the build. Support and
+                // App Review both ask for it, and reading it off the compiled
+                // bundle means it cannot be left stale.
+                const AppVersionLabel(),
                 const SizedBox(height: 24),
               ],
             );
