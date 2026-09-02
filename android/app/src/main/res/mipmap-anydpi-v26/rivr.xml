@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive launcher icon, API 26+.
+
+     The artwork is the BACKGROUND layer and the foreground is empty. That is
+     deliberate: an adaptive icon guarantees only the inner 66% of the
+     foreground survives the launcher's mask, so putting full-bleed artwork
+     there would crop a third of the river away. As the background it fills the
+     masked shape edge to edge, which is what the iOS icon does too.
+
+     Before this, the foreground was @mipmap/rivr — the whole legacy icon,
+     rounded corners and all — over a flat white background, so every launcher
+     drew a rounded square inside its own mask with white showing between. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/rivr"/>
+    <background android:drawable="@mipmap/rivr_background"/>
+    <foreground android:drawable="@mipmap/rivr_foreground"/>
 </adaptive-icon>
