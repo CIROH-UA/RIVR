@@ -1,6 +1,5 @@
 # RIVR Architecture Audit — Oqupa Pattern Comparison
 **Date:** April 6, 2026
-**Auditor:** Claude Opus 4.6
 **Reference:** `Oqupa-Platform/oqupa/docs/flutter-architecture-guide.md`
 **Prior audit:** `04-03-2026.md` (459/1000, Clean Architecture scored 14/90)
 
