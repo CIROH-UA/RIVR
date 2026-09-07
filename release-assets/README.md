@@ -20,7 +20,7 @@ release-assets/
       iphone-6.7/                    -- 6.7" display (required)
       iphone-6.5/                    -- 6.5" display (required)
       iphone-5.5/                    -- 5.5" display (optional, recommended)
-      ipad-12.9/                     -- unused: RIVR is iPhone-only (device family 1 since build 801, 2026-09-07)
+      ipad-12.9/                     -- unused: RIVR is iPhone-only (device family 1 since build 805, 2026-09-07)
     icon/                            -- App Store icon (required)
   shared/
     promotional/                     -- Shared promotional images
@@ -285,7 +285,7 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 | ~~In-app account-deletion flow~~   | ✅ DONE  | **Shipped** in `1.1.0+7` (merged to `development` `e438854`, 2026-05-16). Account page reachable from the three-dots menu with Delete Account at the bottom; reauth + Firestore + FCM + biometric cleanup. 17 tests. Pending: Jerson's real-device smoke. |
 | Apple Developer account access     | High     | `admin@hydromap.com` 2FA SMS goes to a dead phone. Recovery requires Dr. Ames (back end of May). See `project_apple_account_lockout.md`. |
 | iPhone 5.5" screenshots            | Medium   | Optional but recommended.                    |
-| ~~iPad 12.9" screenshots~~         | —        | Not needed. Build 801 dropped iPad from the device family (2026-09-07): Add for Review demanded 13" iPad screenshots for an app never run on an iPad; Jerson chose iPhone-only. |
+| ~~iPad 12.9" screenshots~~         | —        | Not needed. Build 805 dropped iPad from the device family (2026-09-07): Add for Review demanded 13" iPad screenshots for an app never run on an iPad; Jerson chose iPhone-only. |
 | Tablet screenshots                 | Low      | Optional for Play Store.                     |
 | Promotional images                 | Low      | Nice to have for marketing.                  |
 
