@@ -43,46 +43,53 @@ Alternative options:
 
 ---
 
+## Promotional Text (A -- Apple Only)
+**Max 170 characters, editable without a new build**
+
+```
+Live river flow and flood forecasts for millions of rivers worldwide, straight from NOAA's National Water Model and GEOGLOWS. Free, no ads, no paywall.
+```
+
+---
+
 ## Full Description (B)
 
 **Google Play: max 4,000 characters. Apple: no hard limit, ~4,000 recommended.**
 
 ```
-RIVR puts the power of the NOAA National Water Model in your pocket. Monitor real-time river flow conditions, assess flood risk, and view short-, medium-, and long-range forecasts for rivers and streams across the United States.
+RIVR puts the NOAA National Water Model in your pocket. Check current river flow, see how close a river is to flooding, and read forecasts hours to weeks ahead — for rivers and streams across the United States and around the world.
 
-REAL-TIME RIVER FLOW DATA
-Track current flow conditions for over 2.7 million river reaches modeled by the National Water Model. See flow rates in cubic feet per second (cfs) or cubic meters per second (cms), with at-a-glance status indicators showing whether a river is flowing at normal, above-normal, or flood levels.
+LIVE RIVER FLOW
+Current flow for 2.7 million US river reaches, updated hourly, in cubic feet or cubic meters per second. Every river carries a status badge — Normal, Action, Moderate, Major or Extreme — so you know at a glance whether it is running high.
 
-FLOOD RISK ASSESSMENT
-Understand flood risk instantly with return period analysis. RIVR compares current and forecasted flows against established flood thresholds (2-year, 5-year, 10-year, 25-year, 50-year, and 100-year return periods) to show you whether a river is at normal flow or approaching action, moderate, major, or extreme flood risk.
+FLOOD RISK, EXPLAINED
+RIVR compares each river's flow against its own return-period thresholds (2-year through 100-year floods), the same benchmarks hydrologists and emergency managers use. You see not just the number, but what it means.
 
-MULTI-RANGE FORECASTS
-View forecasts at three time horizons:
-- Short range: Detailed hourly forecasts for the next 18 hours
-- Medium range: Daily forecasts extending out 10 days
-- Long range: Extended outlook up to 30 days
+FORECASTS AT THREE RANGES
+• Short range: hourly, next 18 hours
+• Medium range: daily, next 10 days
+• Long range: outlook to 30 days
+Charts plot the forecast against flood thresholds, so a coming peak is obvious before it arrives.
 
-Interactive charts display forecasted flow alongside return period thresholds so you can see at a glance when and if flood levels may be reached.
+RIVERS WORLDWIDE
+Outside the US, RIVR draws on the GEOGLOWS global streamflow model for 15-day forecasts on rivers across every continent.
 
-INTERACTIVE MAP
-Explore rivers across the US on a fully interactive map powered by Mapbox. Search for rivers by name or location, tap any river reach to view current conditions, and discover new waterways in your area.
+A MAP OF EVERY STREAM
+Explore rivers on an interactive map, in 2D or 3D. Rivers at flood stage are coloured by severity, updated daily. Tap any stream for its conditions and forecast.
 
-SAVE YOUR FAVORITES
-Build a personalized list of rivers you care about. Save your favorite fishing spots, kayaking runs, or rivers near your home and community. Your favorites dashboard shows current conditions for all saved rivers at a glance.
+FAVOURITES AND ALERTS
+Save the rivers you care about — near home, a fishing spot, a paddling run — and see them all on one screen. Turn on flood alerts and RIVR notifies you the moment a favourite river crosses a flood threshold, and as it gets worse.
 
-PUSH NOTIFICATIONS
-Receive alerts when rivers on your favorites list reach elevated flood risk levels. Stay informed about changing conditions without having to check the app constantly.
+BUILT ON PUBLIC SCIENCE
+Data comes from NOAA's Office of Water Prediction, the CIROH return-period service, and the GEOGLOWS initiative. RIVR is built by HydroMap LLC with the Brigham Young University hydroinformatics group.
 
-POWERED BY NOAA
-RIVR uses data from the NOAA National Water Prediction Service and the National Water Model, operated by NOAA's Office of Water Prediction. Return period thresholds are provided by the Cooperative Institute for Research to Operations in Hydrology (CIROH). This means you get the same authoritative data used by professional hydrologists and emergency managers, presented in an accessible mobile format.
-
-FREE TO USE
-RIVR is completely free with no in-app purchases, no ads, and no paywalls. Built as a public service tool to democratize access to critical water data.
-
-Whether you are a kayaker checking river levels before a trip, a homeowner monitoring flood risk near your property, a farmer tracking irrigation water supply, or an emergency manager assessing conditions across a region, RIVR gives you the data you need in a clean, fast, mobile-first experience.
+FREE, NO ADS
+No subscriptions, no in-app purchases, no ads. Built as a public service.
 ```
 
-**Character count:** ~2,250 (well within both store limits)
+**Character count:** ~1,900. Submitted to App Store Connect 2026-09-07. The
+earlier draft said US-only; the screenshots show Peru, China and Congo, so the
+copy now says what the reviewer will see.
 
 ---
 
@@ -90,10 +97,11 @@ Whether you are a kayaker checking river levels before a trip, a homeowner monit
 **Max 100 characters, comma-separated, no spaces after commas**
 
 ```
-river,flow,flood,forecast,NOAA,water,stream,hydrology,gauge,creek,weather,discharge,level,monitor
+river,NOAA,water,stream,hydrology,gauge,creek,discharge,level,monitor,kayak,fishing,rain,cfs,alert
 ```
 
-**Character count:** 95
+**Character count:** 98. `flow`, `flood` and `forecast` were dropped on
+purpose — they are in the app name, and Apple does not index a keyword twice.
 
 **Notes:**
 - Do not repeat words from the app name or subtitle (Apple indexes those separately).
@@ -155,10 +163,12 @@ We would love to hear your feedback -- contact us at the support link below.
 
 ### Support URL (Required for both stores)
 ```
-https://hydromap.com/support
+https://hydromap.com/contact/
 ```
 
-**Notes:** Both stores require a support URL. The page must exist and be live at submission time. Action item before submission: publish a support page at `hydromap.com/support` with at minimum a contact email (`admin@hydromap.com`) and a brief FAQ, or redirect this URL to a help-center page hosted elsewhere.
+**Notes:** Verified live 2026-09-07. `hydromap.com/support` is NOT a page — the
+site serves its homepage for unknown paths, so that URL "works" (HTTP 200) while
+showing a reviewer nothing about support. Use the contact page.
 
 ### Marketing URL (A -- Apple, Optional)
 ```
@@ -167,7 +177,12 @@ https://hydromap.com
 
 ### Privacy Policy URL (Required for both stores)
 ```
-https://hydromap.com/privacy
+https://hydromap.com/privacy-policy/?product=rivr
+```
+
+### Terms of Service URL (A -- Apple, optional; also linked from the app)
+```
+https://hydromap.com/terms-of-service/?product=rivr
 ```
 
 **Notes:**
@@ -176,7 +191,9 @@ https://hydromap.com/privacy
 - Must accurately describe what data the app collects (Firebase Auth account data, favorites stored in Firestore, FCM tokens for push notifications, analytics events).
 - Google Play requires this before you can publish.
 - Apple requires this for apps that use account-based features.
-- Action item before submission: host the policy at `hydromap.com/privacy` (currently in draft at `docs/internal/privacy-policy-draft.md`, awaiting attorney review and hosting setup — see project schedule).
+- Hosted and verified live 2026-09-07 (mentions RIVR and Firebase). The
+  `?product=rivr` query selects the RIVR section of HydroMap's policy. As with
+  support, `hydromap.com/privacy` is a homepage catch-all, not the policy.
 
 ---
 
@@ -223,21 +240,29 @@ RIVR should receive a **4+** rating. Key answers:
 
 ## App Review Notes (A -- Apple)
 
+**Reviewer sign-in:** `appreview@hydromap.com` — a real Firebase Auth user,
+created 2026-09-07. The password is NOT in this repo; it lives in App Store
+Connect's Sign-In Information field and with Jerson. The app has no email
+verification gate, so the account works as soon as it exists.
+
+**Version field:** must equal the build's short version (`2026.2.x`, from
+`make version`) or App Store Connect will not attach the build. It defaults to
+`1.0.0` on a new app record.
+
 **Notes for the App Store review team (not shown to users):**
 
 ```
 RIVR is a river flow monitoring app that displays real-time data from the NOAA National Water Model.
 
-Demo instructions:
-1. Launch the app and sign in (or create an account with any valid email).
-2. The Favorites tab shows saved rivers. If empty, tap the "+" button or go to the Map tab.
-3. On the Map tab, tap any blue river line to see current flow data.
-4. Tap "View Details" to see full forecast charts and flood risk analysis.
-5. Tap the star icon to save a river to favorites.
+Sign in with the reviewer account provided. Any new account created with an email address also has full access — there are no paid tiers.
 
-The app requires an internet connection to fetch real-time data from NOAA servers.
+To see the app working:
+1. Favorites (home) lists saved rivers with their current flow and flood status.
+2. Tap a river card for its forecast page: flow gauge, trend and forecast chart.
+3. Tap the map icon (top left) to open the map. Tap any river line for its detail sheet, then "View Forecast".
+4. Settings > Notifications shows the flood alert controls.
 
-No demo account is needed -- the app uses Firebase Auth and any new account can access all features. There are no paid features, subscriptions, or in-app purchases.
+Location permission is optional; it only centres the map. Notifications are optional. The app needs an internet connection for live data.
 ```
 
 ---
@@ -246,7 +271,7 @@ No demo account is needed -- the app uses Firebase Auth and any new account can 
 
 ### Copyright (A)
 ```
-2026 HydroMap
+2026 HydroMap LLC
 ```
 
 ### Developer Name (B)
