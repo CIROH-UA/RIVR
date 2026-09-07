@@ -341,6 +341,55 @@ and wrong rather than visibly broken.
 Current scale: **18 users, 14 with favourites, 36 favourite rows, 29 distinct
 reaches.** Cost scales with distinct favourited reaches × cadence, not with users.
 
+### The GEOGLOWS asymmetry — measured 2026-08-25
+
+That scaling law holds for **favourites**. It is silent about map browsing, and
+the two sources are not comparable.
+
+NWM costs us **nothing** per request: the app calls NOAA directly. GEOGLOWS
+goes through our own Python proxy, which unpacks zarr from S3 per river.
+Measured over July 2026 (57 real requests):
+
+| | per GEOGLOWS request |
+|---|---|
+| vCPU-seconds | **21.7** |
+| GiB-seconds | 134 |
+| est. cost | ~**0.086¢** |
+
+Twenty-one CPU-seconds to return 22 KB. Projected, at list prices: ~$26/month
+at 1k requests/day, ~$257 at 10k, ~$2,570 at 100k. Raising the proxy to 2 GiB
+(the OOM fix) adds roughly 38% to that.
+
+**Caveat, stated because the number invites over-reading:** those 57 requests
+were mostly cold starts — the function scales to zero and the `geoglows`
+import alone is ~12 s. 21.7 vCPU-s is close to a worst case; warm instances
+and the per-river `lru_cache` should cut it substantially at volume. The
+cold/warm split could not be separated from the metrics, so no warm figure is
+claimed here.
+
+**What the store does and does not cover.** A favourited GEOGLOWS reach is
+unpacked **once per day** however many users follow it — the law above holds.
+A tapped **non-favourited** reach misses the store and falls through to a full
+unpack, so that cost scales with *views*, not with distinct reaches. Nothing
+caps it today.
+
+**Not being fixed now, deliberately.** At present scale (18 registered, 3
+monthly active) this is single-digit dollars a month. Recorded so the decision
+is a decision. The options, in order of leverage:
+
+1. **Store on view, not only on favourite** — any tapped reach is written, so
+   cost returns to scaling with distinct reaches. Small change, large effect.
+2. **Push upstream** — the 21.7 vCPU-s exists because of how the `geoglows`
+   package reads S3. A lighter endpoint deletes the problem rather than
+   managing it.
+3. **Precompute globally** — infeasible at millions of reaches, the same wall
+   ADR 0005 hit.
+
+**Related, and the reason this was measured at all:** the proxy had been
+OOM-killed at its 1 GiB ceiling on eleven days over the preceding month —
+a live, user-visible failure on the shipped app, not a latent one. Fixed
+2026-08-25 by raising it to 2 GiB.
+
 ---
 
 # Phases
@@ -2443,11 +2492,12 @@ asserting the probe reads NOAA's name while no product id uses it.
 31 documents are orphaned (27 superseded plus 4 for reaches nobody
 favourites) — 16% of the collection, under `assertGcSane`'s 50%
 ceiling, swept by `storeGcDaily` after its 7-day grace. Devices re-fetch that
-product once per favourite. **The TestFlight build already installed
-(2026.2.0+719) will miss on this product and fall through to the live path**
-for current flow until a new build ships: one upstream call per favourite
-rather than zero. Degraded, not broken, and stated here rather than
-discovered.
+product once per favourite. **The build installed at the time
+(2026.2.0+719) misses on this product and falls through to the live path**
+for current flow: one upstream call per favourite rather than zero. Degraded,
+not broken, and stated here rather than discovered. **Closed by
+2026.2.1+786**, submitted to TestFlight 2026-08-30, which carries the rename —
+so the gap lasts only until that build is installed.
 
 ### `validUntil`'s CONUS assumption — DONE 2026-08-30
 

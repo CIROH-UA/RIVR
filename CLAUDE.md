@@ -85,8 +85,14 @@ setting defaults to false, which is why the map drew nothing before. It is
 re-applied on every style load — a basemap change rebuilds the style and takes
 the component with it.
 
-**The camera centres on the FIRST open only**; after that the recentre button.
-The flag is static because the page state is recreated on every open.
+**The camera centres on the FIRST open only**; after that it is remembered for
+the rest of the app run, and the recentre button is the way back to yourself.
+Both flags are static because the page is rebuilt by `pushNamed` on every open
+— and **both are cleared on sign-out**, or the next user opens on the previous
+user's river and is never centred on their own.
+
+**A refused location shows a dialog with Open Settings**, offered only for the
+two states Settings can actually fix. It used to do nothing at all.
 
 ### Flood colours — current design (superseded the Cloud Function pipeline)
 
@@ -432,6 +438,47 @@ firebase deploy --only functions:geoglows:<name>      # Deploy one Python functi
 # logged 253 in the 30 days to 2026-08-20 (correction in ADR 0005). Docs
 # previously claimed they were deleted (ADR 0005).
 ```
+
+### App icon and splash — one source, one script
+
+**Every icon and splash asset is generated from one full-bleed square PNG**
+(`release-assets/app-icon/rivr-launch-icon.png`) by
+`python3 scripts/generate_app_icons.py`. Never hand-edit the generated files;
+replace the source and re-run, or the platforms drift apart.
+
+"Full-bleed" is the rule that matters. **The source must have no rounded
+corners, no border and no padding baked in** — every platform applies its own
+mask, so a baked-in shape shows up as a double-rounded corner or a white
+hairline inside iOS's superellipse. The set replaced on 2026-09-02 had the
+artwork sitting at **73% of the canvas inside a white square**, which made RIVR
+the one visibly small icon on the home screen.
+
+| Target | Shape | Why |
+|---|---|---|
+| iOS `AppIcon.appiconset` | full-bleed, **RGB with no alpha at all** | the App Store rejects an icon with an alpha channel; iOS draws its own mask |
+| Android `mipmap-*/rivr.png` | squircle, transparent corners | pre-API-26 launchers apply no mask, so the shape has to be in the file |
+| Android adaptive (`mipmap-anydpi-v26/rivr.xml`) | artwork is the **background** layer, foreground transparent | only the inner 66% of a *foreground* is guaranteed to survive the launcher mask, so full-bleed art there loses a third of the river |
+| Splash logos | squircle floating on white | matches the launch screens already in the project; proportions (72.7%, and 44.1% for `drawable-v31`) were measured off the assets replaced, not chosen |
+
+`Contents.json` is not regenerated — the filenames are stable, so the script
+only overwrites pixels. Verify a change the way the rest of this repo does:
+build, then read the icon back out of the artifact rather than trusting the
+build's exit code.
+
+```bash
+unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep -E "mipmap|launch_logo"
+xcrun -sdk iphoneos pngcrush -revert-iphone-optimizations \
+  build/ios/iphoneos/Runner.app/AppIcon60x60@2x.png /tmp/icon.png   # Apple CgBI PNG
+```
+
+### The version on screen comes from the bundle, never from source
+
+`AppVersionLabel` (`lib/ui/2_presentation/shared/widgets/app_version_label.dart`)
+reads `package_info_plus` and renders `RIVR <version> (<build>)` at the bottom
+of the Account page — the app's **only** version stamp. It reads what
+`make version` actually compiled in, so it cannot be left stale the way a
+constant would. It renders nothing until the platform answers and nothing if
+that fails; a version stamp is not worth a layout jump.
 
 ### iOS release — three things that have each cost a build
 

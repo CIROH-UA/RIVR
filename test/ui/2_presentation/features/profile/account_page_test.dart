@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/services/1_contracts/features/auth/i_auth_repository.dart';
@@ -172,6 +173,32 @@ void main() {
     expect(find.text('Flow unit'), findsNothing);
     expect(find.text('Notifications'), findsNothing);
     expect(find.text('DANGER ZONE'), findsNothing);
+  });
+
+  testWidgets('stamps the compiled build below the last action',
+      (tester) async {
+    // Wiring, not formatting: app_version_label_test.dart already proves the
+    // widget renders what the platform reports. What this guards is that the
+    // widget is ON this page — the app's only version stamp — and sits under
+    // Delete Account rather than in the middle of the actions.
+    PackageInfo.setMockInitialValues(
+      appName: 'RIVR',
+      packageName: 'com.hydromap.rivr',
+      version: '2026.2.1',
+      buildNumber: '786',
+      buildSignature: '',
+    );
+
+    final repo = _StubAuthRepository();
+    await pumpAccount(tester, repo);
+    await tester.pumpAndSettle();
+
+    expect(find.text('RIVR 2026.2.1 (786)'), findsOneWidget);
+    expect(
+      tester.getCenter(find.text('RIVR 2026.2.1 (786)')).dy,
+      greaterThan(tester.getCenter(find.text('Delete Account')).dy),
+      reason: 'the version stamp belongs at the very bottom of the page',
+    );
   });
 
   testWidgets('Delete Account is the last actionable row', (tester) async {

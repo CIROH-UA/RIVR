@@ -71,6 +71,11 @@ dependencies:
 
   flutter_localizations:
     sdk: flutter
+
+  # Reads the version and build number the app was actually compiled with, so
+  # the string on the Account page cannot drift from pubspec.yaml.
+  package_info_plus: ^10.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
