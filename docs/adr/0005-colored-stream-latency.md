@@ -2010,6 +2010,23 @@ broken. A person looking at the product found it.
 `firebase.json` declares `firestore` and `functions` (codebases `default`,
 `geoglows`). **There is no `storage` block.**
 
+### DECIDED — the tileset build pipeline stays outside this repo (2026-09-09)
+
+`~/Developer/rivr-tiles/` — the daily flood-tileset build script
+(`daily/build_flooded.py`), its Cloud Run container (`cloudrun/`), and the
+GEOGLOWS geometry-index tooling (Phase 4a) — is not moving into RIVR.
+
+Jerson's call: this repo holds every line of code that ships to a device or
+serves a request the app makes. The daily tileset build is a separate,
+self-contained pipeline that runs on its own schedule (Cloud Scheduler →
+Cloud Run, see Phase 4c/4d above) and produces a *dataset* — the daily
+`rivr-flooded-YYYYMMDD` vector tileset — which the app then consumes exactly
+like it consumes NOAA or CIROH: as an external data source, not as app code.
+
+Documented here rather than moved so "all of RIVR's app code lives in the
+CIROH RIVR repo" stays true without conflating a data-production pipeline
+with the application itself.
+
 ---
 
 ## Estimated
