@@ -413,6 +413,15 @@ To set up signing on a new machine:
 
 Use `lib/services/0_config/shared/config.template.dart` and `android/local.properties.template` as references when setting up a new environment.
 
+**The Android map token comes from `android/local.properties` alone**
+(`mapbox.token=pk.…`), injected by `build.gradle.kts` into the manifest and the
+`mapbox_access_token` resource; the Dart code never sets it. On 2026-09-10 the
+key was missing, the build exited 0 with the literal placeholder, and AAB 800
+reached Play as a draft with a map that never loads — only an emulator run
+caught it. Release builds now refuse to start without a `pk.` token; the
+check that matters is `bundletool dump manifest … | grep com.mapbox.token`
+on the bundle you are about to upload.
+
 ## Build & Run
 
 ```bash
