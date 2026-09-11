@@ -53,11 +53,21 @@ android {
         // Enable multidex support for Firebase and other large dependencies
         multiDexEnabled = true
 
-        // Inject Mapbox token from local.properties into AndroidManifest.xml
-        manifestPlaceholders["MAPBOX_TOKEN"] = localProperties.getProperty("mapbox.token", "YOUR_MAPBOX_TOKEN_HERE")
-
-        // Inject Mapbox token as string resource (used by Mapbox SDK at runtime)
-        resValue("string", "mapbox_access_token", localProperties.getProperty("mapbox.token", ""))
+        // Inject Mapbox token from local.properties into AndroidManifest.xml and
+        // as the string resource the Mapbox SDK reads at runtime. The Dart side
+        // never calls MapboxOptions.setAccessToken, so this is the ONLY place the
+        // Android map gets its token. A missing key used to inject the literal
+        // placeholder and build a bundle whose map never loads — build 800 went
+        // to Play that way on 2026-09-10 and only an emulator run caught it.
+        val mapboxToken = localProperties.getProperty("mapbox.token", "").trim()
+        if (!mapboxToken.startsWith("pk.")) {
+            val isRelease = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+            val msg = "android/local.properties has no usable mapbox.token (see local.properties.template)."
+            if (isRelease) throw GradleException("$msg Refusing to build a release whose map cannot load.")
+            logger.warn("WARNING: $msg The map will not load in this build.")
+        }
+        manifestPlaceholders["MAPBOX_TOKEN"] = mapboxToken
+        resValue("string", "mapbox_access_token", mapboxToken)
     }
 
     // Signing configuration for release builds (only if key.properties exists)

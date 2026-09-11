@@ -259,7 +259,7 @@ Sign in with the reviewer account provided. Any new account created with an emai
 To see the app working:
 1. Favorites (home) lists saved rivers with their current flow and flood status.
 2. Tap a river card for its forecast page: flow gauge, trend and forecast chart.
-3. Tap the map icon (top left) to open the map. Tap any river line for its detail sheet, then "View Forecast".
+3. Tap the "+" button (bottom right) to open the map. Tap any river line for its detail sheet, then "View Forecast".
 4. Settings > Notifications shows the flood alert controls.
 
 Location permission is optional; it only centres the map. Notifications are optional. The app needs an internet connection for live data.
