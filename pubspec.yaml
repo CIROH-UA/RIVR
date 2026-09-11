@@ -46,7 +46,7 @@ dependencies:
   firebase_remote_config: ^6.0.0
   shared_preferences: ^2.5.3
   http: ^1.4.0
-  mapbox_maps_flutter: ^2.9.1
+  mapbox_maps_flutter: 2.12.0 # pinned: first version with 16 KB page-size libs (Play requirement); bump deliberately, map must be re-checked on a device
   provider: ^6.1.5
   local_auth: ^3.0.2
   flutter_secure_storage: ^11.0.0
