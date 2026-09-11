@@ -46,7 +46,7 @@ android {
     defaultConfig {
         applicationId = "com.hydromap.rivr"
         minSdk = 30 // Raised for better performance and modern features
-        targetSdk = 35 // Updated for latest Android features and Firebase compatibility
+        targetSdk = 36 // Play requires 36 for new submissions from 2026-08 (refused 800 on 2026-09-10)
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
