@@ -288,3 +288,39 @@ who registered but never verified are the only population that still hits
 
 Everything else above is either measured or has a check attached, and is
 proposed as written.
+
+---
+
+## Verification status (2026-09-22)
+
+**Measured**
+
+| What | How |
+|---|---|
+| The whole suite is green with the change in: **1,426 Dart tests** (baseline 1,404 — 22 added) and **468 Cloud Functions tests** (baseline 454 — 14 added). `flutter analyze` clean apart from one pre-existing deprecation. | `flutter test`, `npm --prefix functions test` |
+| Every critical path is **mutation-checked** — reverting the behaviour fails a test: register-links-instead-of-creates; sign-in-merges-the-guest; the failed-sign-in restore; the verification gate on BOTH code paths; the Account page's guest branch; launch-opens-a-guest. | see the table in the guards section |
+| **An existing signed-in account is unaffected.** A debug build of this branch launched on the iPhone 17 Pro simulator with a previously signed-in account and rendered its 7 favourites in 1,771 ms, with live flow values and the usual out-of-sync banner. | `flutter run`, 2026-09-22 |
+| The anonymous provider is enabled on the project (M15). | admin v2 config read-back |
+
+**Unverified — the guest path has NOT been exercised in a running app**
+
+Nobody has yet watched the app open as a guest, save a river, see the prompt,
+create an account and keep the river. The tests assert each step, and the
+mutations prove the tests bite, but that is not the same thing and must not be
+written up as if it were.
+
+The blocker is this machine, not the code: **Xcode's `Simulator.app` and
+`SimulatorKit.framework` are both absent** from
+`/Applications/Xcode.app/Contents/Developer/`, so there is no simulator window
+to drive and `idb ui tap` fails with *"SimulatorKit is required for HID
+interactions"*. This contradicts `reference_sim_driving_setup` memory, which
+records idb as working since 2026-07-24. Bypassing the onboarding gate by
+writing `flutter.has_seen_onboarding` into the app's preferences — by
+PlistBuddy and by `simctl spawn defaults write`, both confirmed written and
+read back — did not take either, so `shared_preferences` is reading from
+somewhere else on this Flutter version.
+
+**The cheapest test that would settle it** is the one Apple will run anyway:
+a TestFlight build on a real iPhone, fresh install, following ADR 0014's
+guard 8. Either repair Xcode (`xcode-select --install`, or reinstall Xcode so
+the Simulator ships with it) or verify on device.
