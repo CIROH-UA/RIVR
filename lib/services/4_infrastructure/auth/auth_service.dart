@@ -53,40 +53,37 @@ class AuthService implements IAuthService {
     required String email,
     required String password,
   }) async {
-    // ADR 0014 B6 — a guest signing into an existing account. Their rivers
-    // must follow them, and the abandoned guest document must stop sending
-    // alerts to this same device. The order is deliberate: neutralise the
-    // guest doc BEFORE the sign-in attempt (only the guest may write it —
-    // after the switch the rules lock it), restore it if the sign-in fails,
-    // merge into the account after success, and delete the guest last.
+    // ADR 0014 B6 — a guest signing into an account they already have. Their
+    // rivers must follow them.
+    //
+    // NOTHING IS WRITTEN UNTIL THE SIGN-IN HAS SUCCEEDED. The first version
+    // of this cleared the guest's favourites BEFORE the attempt so an
+    // orphaned document could not keep driving alerts, and restored them if
+    // the sign-in failed. On its first real use (2026-09-22, build 832) the
+    // restore did not happen and a tester's two saved rivers were destroyed
+    // — the document was left with `mergePending: true` and an empty
+    // favourites list. A design that destroys data first and repairs it
+    // afterwards only has to fail once, and it fails on the network, which
+    // is exactly when it is least able to repair anything.
+    //
+    // The abandoned document is now handled the only safe way round: read
+    // it, sign in, merge, then delete. If the delete fails, `guestGcDaily`
+    // sweeps it later — a guest document that lingers is a cost, while a
+    // guest document that is emptied is lost data.
     final guest = currentUser;
     final bool fromGuest = guest != null && guest.isAnonymous;
-    Map<String, dynamic>? guestDoc;
-    if (fromGuest) {
-      guestDoc = await _readUserDoc(guest.uid);
-      if (guestDoc != null) await _neutraliseGuestDoc(guest.uid);
-    }
+    final Map<String, dynamic>? guestDoc =
+        fromGuest ? await _readUserDoc(guest.uid) : null;
 
     try {
       AppLogger.debug('AuthService', 'Signing in with email: $email');
 
-      final UserCredential credential;
-      try {
-        credential = await _authDatasource.signIn(
-          email: email,
-          password: password,
-        );
-      } catch (_) {
-        if (fromGuest && guestDoc != null) {
-          await _restoreGuestDoc(guest.uid, guestDoc);
-        }
-        rethrow;
-      }
+      final credential = await _authDatasource.signIn(
+        email: email,
+        password: password,
+      );
 
       if (credential.user == null) {
-        if (fromGuest && guestDoc != null) {
-          await _restoreGuestDoc(guest.uid, guestDoc);
-        }
         return AuthResult.failure('Sign in failed - no user returned');
       }
 
@@ -277,46 +274,6 @@ class AuthService implements IAuthService {
           .doc(uid)
           .set(fields, SetOptions(merge: true))
           .timeout(const Duration(seconds: 10));
-
-  /// The fields that make a guest document DO things: favourites feed the
-  /// store's refresh cycle, tokens and flags make it receive alerts. These are
-  /// cleared before the guest signs into an account so an orphaned copy is
-  /// inert — the original values are restored if the sign-in fails.
-  static const _guestLiveFields = <String, dynamic>{
-    'favoriteReachIds': <String>[],
-    'favoriteSources': <String, String>{},
-    'favoriteLabels': <String, String>{},
-    'alertFrequencies': <String, String>{},
-    'fcmTokens': <String>[],
-    'enableNotifications': false,
-    'weeklyOutlookEnabled': false,
-  };
-
-  Future<void> _neutraliseGuestDoc(String uid) async {
-    try {
-      await _updateUserDoc(uid, {
-        ..._guestLiveFields,
-        'mergePending': true,
-        'updatedAt': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      AppLogger.warning('AuthService', 'neutralise guest $uid failed: $e');
-    }
-  }
-
-  Future<void> _restoreGuestDoc(String uid, Map<String, dynamic> doc) async {
-    try {
-      final restore = <String, dynamic>{
-        for (final k in _guestLiveFields.keys)
-          k: doc[k] ?? _guestLiveFields[k],
-        'mergePending': FieldValue.delete(),
-        'updatedAt': DateTime.now().toIso8601String(),
-      };
-      await _updateUserDoc(uid, restore);
-    } catch (e) {
-      AppLogger.error('AuthService', 'restore guest $uid failed: $e', e);
-    }
-  }
 
   /// Union the guest's rivers into the account. The account's own values win
   /// on every conflict — a custom name the person chose on their phone last

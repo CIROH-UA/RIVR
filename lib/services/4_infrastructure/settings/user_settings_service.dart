@@ -30,6 +30,16 @@ class UserSettingsService implements IUserSettingsService {
   UserSettings? _cachedSettings;
   String? _cachedUserId;
 
+  /// Drop the in-memory settings cache.
+  ///
+  /// Call whenever the identity behind a uid may have changed while the uid
+  /// itself stayed the same — the ADR 0014 guest-to-account link is exactly
+  /// that case.
+  void invalidateCache() {
+    _cachedSettings = null;
+    _cachedUserId = null;
+  }
+
   /// Get UserSettings for a user
   @override
   Future<UserSettings?> getUserSettings(String userId) async {
@@ -297,6 +307,18 @@ class UserSettingsService implements IUserSettingsService {
         'UserSettingsService',
         'Syncing settings after login for user: $userId',
       );
+
+      // The identity just changed, so the cache cannot be trusted — and this
+      // method WRITES what it reads (lastLoginDate), so a stale read is not a
+      // stale display, it is a stale document.
+      //
+      // ADR 0014 made that fatal: linking a guest to an account KEEPS THE
+      // UID, so the cache key does not change and `getUserSettings` happily
+      // returned the pre-link guest settings. Saving them back erased the
+      // email, the name and `isGuest: false` that registration had just
+      // written. Observed on build 832 (2026-09-22): a real account left with
+      // `isGuest: true` and no email.
+      invalidateCache();
 
       final settings = await getUserSettings(userId);
       if (settings == null) {
