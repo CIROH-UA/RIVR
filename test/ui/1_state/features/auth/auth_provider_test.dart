@@ -83,6 +83,18 @@ class _MockAuthRepository implements IAuthRepository {
     _authStateController.add(null);
   }
 
+  /// Mark the signed-in user verified, the way Firebase does once the link
+  /// in the email is clicked. `checkEmailVerified` must pick this up.
+  void simulateEmailVerified() {
+    final u = _signedInUser;
+    if (u == null) return;
+    _emailVerified = true;
+    _signedInUser = MockUser(
+      uid: u.uid, email: u.email, displayName: u.displayName,
+      isEmailVerified: true,
+    );
+  }
+
   /// ADR 0014 — a guest session: anonymous, no email, emailVerified false.
   void simulateGuest() {
     // isEmailVerified must be FALSE: firebase_auth_mocks defaults it to true,
@@ -745,6 +757,28 @@ void main() {
 
       expect(mockAuthRepo.touchLastActiveCalls, greaterThan(0),
           reason: 'guestGcDaily reaps guests on lastActiveAt alone');
+    });
+
+
+    test('verifying clears the banner, not just the flag', () async {
+      // REGRESSION, build 832 (2026-09-22): "I tapped 'I've verified it' and
+      // nothing happened." Firebase HAD the address verified; the Account
+      // page's banner reads `needsEmailVerification`, which reads the CACHED
+      // AuthUser — and checkEmailVerified only cleared a separate flag, never
+      // refreshing the cached identity. The button looked dead.
+      mockAuthRepo.seedUser(
+          email: 'a@b.com', password: 'pw', emailVerified: false);
+      mockAuthRepo.simulateSignIn('a@b.com');
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+      expect(provider.needsEmailVerification, isTrue);
+
+      mockAuthRepo.simulateEmailVerified();
+      final ok = await provider.checkEmailVerified();
+
+      expect(ok, isTrue);
+      expect(provider.needsEmailVerification, isFalse,
+          reason: 'this is what the banner actually reads');
     });
 
     test('signing out a guest is refused, not performed', () async {

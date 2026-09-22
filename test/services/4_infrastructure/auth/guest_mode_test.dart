@@ -283,8 +283,15 @@ void main() {
       expect(ds.deletedUids, contains('guest-uid'));
     });
 
-    test('a failed sign-in gives the guest their rivers back', () async {
+    test('a failed sign-in does not touch the guest document at all',
+        () async {
+      // REGRESSION, build 832 (2026-09-22). The first implementation cleared
+      // the guest's favourites BEFORE attempting the sign-in and restored
+      // them on failure. The restore did not happen and a tester lost two
+      // saved rivers; the document was left with `mergePending: true` and an
+      // empty list. Nothing may be written until the sign-in has succeeded.
       ds.signInThrows = true;
+      final before = await doc('guest-uid');
 
       final result = await service.signInWithEmailAndPassword(
         email: 'me@example.com',
@@ -292,14 +299,25 @@ void main() {
       );
 
       expect(result.isSuccess, isFalse);
-      final d = await doc('guest-uid');
-      expect(
-        (d!['favoriteReachIds'] as List).toSet(),
-        {'river-a', 'river-shared'},
-        reason: 'neutralising before the attempt must be reversible',
-      );
-      expect(d['fcmTokens'], ['token-1']);
-      expect(d['enableNotifications'], isTrue);
+      final after = await doc('guest-uid');
+      expect(after, equals(before),
+          reason: 'a failed sign-in must be a no-op on the guest document');
+      expect(after!['mergePending'], isNull,
+          reason: 'the fingerprint of the destroy-first design');
+    });
+
+    test('an abandoned sign-in leaves the rivers alone', () async {
+      // The worse half of the same bug: the user taps Sign In, changes their
+      // mind, and never completes. Any write that happens before success is
+      // a write nobody undoes.
+      final before = await doc('guest-uid');
+      ds.signInThrows = true;
+      await service.signInWithEmailAndPassword(
+          email: 'x@y.com', password: 'nope');
+      await service.signInWithEmailAndPassword(
+          email: 'x@y.com', password: 'nope-again');
+
+      expect(await doc('guest-uid'), equals(before));
     });
 
     test('an account signing in normally is not treated as a merge', () async {

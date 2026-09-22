@@ -324,3 +324,66 @@ somewhere else on this Flutter version.
 a TestFlight build on a real iPhone, fresh install, following ADR 0014's
 guard 8. Either repair Xcode (`xcode-select --install`, or reinstall Xcode so
 the Simulator ships with it) or verify on device.
+
+---
+
+## Device findings — build 832, 2026-09-22 (Jerson, iPhone)
+
+The first real run of the guest path found three defects. All are **Measured**
+— each was read out of Firebase Auth and Firestore, not inferred from the
+report.
+
+| # | Defect | Evidence | Fix |
+|---|---|---|---|
+| F1 | **A guest's saved rivers were destroyed by a failed sign-in.** The merge cleared `favoriteReachIds`, sources, labels and tokens BEFORE attempting the sign-in, and restored them only in a `catch`. The restore did not run. | `users/VpzNqmjM6IepuCtVanWpVLy3XtZ2` left with `mergePending: true`, `favoriteReachIds: []`, `updatedAt 16:02:14` — the exact neutralise fingerprint, never undone. Two real favourites lost and unrecoverable. | Nothing is written until the sign-in has succeeded: read, sign in, merge, delete. `_neutraliseGuestDoc`, `_restoreGuestDoc` and the `mergePending` flag are gone. |
+| F2 | **Linking left the account marked as a guest.** After registration the document still had `isGuest: true`, `email: ''`, `firstName: ''`. | `users/PbgDw68JsdZCTNNgDRo38xjiE1k2` (created 16:07:03 as a guest, linked ~16:10) with the identity fields empty. | `UserSettingsService.getUserSettings` caches on the uid, and **linking keeps the uid** — so `syncAfterLogin` read the stale guest settings and wrote them back over the identity `_updateUserDoc` had just written. `syncAfterLogin` now calls `invalidateCache()` first. |
+| F3 | **"I've verified it" did nothing.** | Firebase reported `emailVerified: true` the whole time; the Account page banner reads `needsEmailVerification`, which reads the CACHED `AuthUser`, which `checkEmailVerified` never refreshed. | `checkEmailVerified` refreshes `_currentUser` from the repository. |
+
+**F2 is the dangerous one long-term**: an account left with `isGuest: true`
+is, by `guestGcDaily`'s own rules, a candidate for deletion once it is idle
+90 days. The GC checks Auth providers first and would have spared it — but
+only by that one guard. That is far too close.
+
+**What this says about the design.** F1 was not a coding slip; it was a
+design that destroyed data first and repaired it afterwards, over the
+network, at exactly the moment the network is least reliable. It was written
+that way to stop an orphaned guest document driving alerts, which is a cost
+problem, and it traded a cost problem for a data-loss problem. The orphan is
+now handled by deleting it after success and by `guestGcDaily` as backstop.
+
+**What the tests missed and why.** `guest_mode_test.dart` had a test named
+*"a failed sign-in gives the guest their rivers back"* which PASSED, because
+the fake datasource threw synchronously and the restore path ran cleanly. The
+real failure needed the restore itself to fail or not be reached. The
+replacement guards assert the stronger, simpler property — **a failed or
+abandoned sign-in leaves the guest document byte-identical** — which cannot
+pass while any pre-write exists. Both are mutation-checked against a
+reinstated destroy-first implementation.
+
+
+### Known limit of the safer ordering
+
+Deleting the guest's document now happens **after** the sign-in, at which
+point `request.auth.uid` is the account — so the Firestore rules deny it and
+the orphan lingers until `guestGcDaily` reaps it (up to 90 days). While it
+lingers it still holds that device's push token and its favourites, so the
+person can receive a duplicate alert for a river they follow on both.
+
+This is deliberate. The alternative is writing to the guest document before
+the sign-in succeeds, which is precisely what destroyed a tester's rivers on
+build 832. A duplicate notification is an annoyance; an emptied document is
+lost data. If the duplicates prove real in practice, the fix is a callable
+Cloud Function that tidies the orphan with admin credentials — **not** a
+pre-write.
+
+### Also found, not a defect in the app
+
+**The Firestore rules change in B9 was never deployed.** The live ruleset is
+still `allow read, write: if request.auth != null && request.auth.uid ==
+userId`. It did not contribute to any of the above (it is permissive), but
+`firestore.rules` and production have been out of step since the guest-mode
+commit. Deploy with `firebase deploy --only firestore:rules`.
+
+**Verification email delivery works.** The address was verified through the
+emailed link, which is the first confirmation since the sender was repaired
+on 2026-09-07.
