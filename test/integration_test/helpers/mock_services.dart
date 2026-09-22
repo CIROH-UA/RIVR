@@ -30,6 +30,28 @@ import 'package:rivr/services/1_contracts/shared/i_flow_unit_preference_service.
 // ---------------------------------------------------------------------------
 
 class MockAuthService implements IAuthService {
+
+  // ADR 0014 — guest mode.
+  int signInAnonymouslyCalls = 0;
+  int touchLastActiveCalls = 0;
+  int markPromptCalls = 0;
+
+  @override
+  Future<AuthResult> signInAnonymously() async {
+    signInAnonymouslyCalls++;
+    return AuthResult.success(null);
+  }
+
+  @override
+  Future<void> touchLastActive(String userId) async {
+    touchLastActiveCalls++;
+  }
+
+  @override
+  Future<void> markAccountPromptShown(String userId) async {
+    markPromptCalls++;
+  }
+
   final StreamController<fb.User?> _authStateController =
       StreamController<fb.User?>.broadcast();
 

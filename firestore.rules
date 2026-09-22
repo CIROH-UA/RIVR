@@ -11,7 +11,15 @@ service cloud.firestore {
     // users/{userId} — each user can read and write only their own document.
     // Cloud Functions use the Admin SDK and bypass these rules entirely.
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, create, delete:
+        if request.auth != null && request.auth.uid == userId;
+      // ADR 0014 B9 — once an email is linked, isGuest can never go back to
+      // true: guestGcDaily deletes guests, and a real account must never be
+      // able to mark itself as one.
+      allow update:
+        if request.auth != null && request.auth.uid == userId
+        && !(resource.data.get('isGuest', false) == false
+             && request.resource.data.get('isGuest', false) == true);
     }
 
     // river_data — the ADR 0011 cloud store (Phase 4).

@@ -213,6 +213,133 @@ export const healthCheck = functions.https.onRequest(
 );
 
 /**
+ * Guest garbage collection (ADR 0014 B3) — runs at 4:10 AM MT.
+ *
+ * The app opens as a guest since 2026.2.3. An abandoned guest document keeps
+ * its favourited reaches in the store's hourly refresh cycle forever and can
+ * keep pushing alerts at a phone nobody reads, so the lifecycle is owned here
+ * rather than by Firebase's anonymous auto-delete (which deletes the Auth user
+ * and LEAVES the document — exactly the wrong half).
+ *
+ * The decision is pure and lives in guest-gc.ts; this only does the I/O, and
+ * it deletes the document BEFORE the Auth user so a crash in between leaves an
+ * inert identity rather than an orphaned document that still holds favourites.
+ */
+export const guestGcDaily = functions
+  .runWith({memory: "512MB", timeoutSeconds: 540})
+  .pubsub.schedule("10 4 * * *")
+  .timeZone("America/Denver")
+  .onRun(async () => {
+    const {
+      selectAbandonedGuests,
+      assertGuestGcSane,
+      GuestGcAssertionError,
+    } = await import("./guest-gc.js");
+
+    const db = admin.firestore();
+    const auth = admin.auth();
+
+    // 1. Every Auth user. listUsers pages at 1000.
+    const authUsers: Array<{
+      uid: string;
+      providerIds: string[];
+      createdAt: string;
+    }> = [];
+    let pageToken: string | undefined;
+    do {
+      const page = await auth.listUsers(1000, pageToken);
+      for (const u of page.users) {
+        authUsers.push({
+          uid: u.uid,
+          providerIds: u.providerData.map((p) => p.providerId),
+          createdAt: u.metadata.creationTime ?
+            new Date(u.metadata.creationTime).toISOString() :
+            "",
+        });
+      }
+      pageToken = page.pageToken;
+    } while (pageToken);
+
+    // 2. The guest documents. Only isGuest docs matter; an account's document
+    //    can never make an account a candidate (rule 1 decides on providers).
+    const docs = new Map<string, {
+      uid: string;
+      isGuest: boolean;
+      lastActiveAt?: string;
+      lastLoginDate?: string;
+      favoriteCount: number;
+      hasTokens: boolean;
+    }>();
+    const snapshot = await db.collection("users").get();
+    for (const d of snapshot.docs) {
+      const data = d.data();
+      docs.set(d.id, {
+        uid: d.id,
+        isGuest: data.isGuest === true,
+        lastActiveAt: data.lastActiveAt,
+        lastLoginDate: data.lastLoginDate,
+        favoriteCount: Array.isArray(data.favoriteReachIds) ?
+          data.favoriteReachIds.length :
+          0,
+        hasTokens: Array.isArray(data.fcmTokens) && data.fcmTokens.length > 0,
+      });
+    }
+
+    const decision = selectAbandonedGuests(authUsers, docs, new Date());
+
+    logger.info("🧹 guest GC scan", {
+      totalScanned: decision.totalScanned,
+      anonymousScanned: decision.anonymousScanned,
+      candidates: decision.toDelete.length,
+      retained: decision.retained,
+    });
+
+    try {
+      assertGuestGcSane(decision);
+    } catch (error) {
+      if (error instanceof GuestGcAssertionError) {
+        // Deliberately ERROR, not a throw-and-retry: a refused run means the
+        // inputs look wrong, and retrying the same inputs would only refuse
+        // again. It must be loud because nothing else reports it.
+        logger.error("⛔ guest GC refused this run", {reason: error.message});
+        return null;
+      }
+      throw error;
+    }
+
+    let deleted = 0;
+    let failed = 0;
+    let reachesReleased = 0;
+    for (const candidate of decision.toDelete) {
+      try {
+        if (candidate.hasDoc) {
+          // Deleting the document is what releases the reaches: the work list
+          // is derived from favourites, so storeGcDaily sweeps anything now
+          // unfollowed after its own grace window.
+          await db.collection("users").doc(candidate.uid).delete();
+          reachesReleased += candidate.favoriteCount;
+        }
+        await auth.deleteUser(candidate.uid);
+        deleted += 1;
+      } catch (error) {
+        failed += 1;
+        logger.warn("guest GC could not delete a guest", {
+          uid: candidate.uid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    logger.info("✅ guest GC complete", {
+      deleted,
+      failed,
+      reachesReleased,
+      idleDays: 90,
+    });
+    return null;
+  });
+
+/**
  * Daily cleanup of old notification logs (runs at 3:00 AM MT).
  * Deletes documents older than 30 days to keep the collection bounded.
  */

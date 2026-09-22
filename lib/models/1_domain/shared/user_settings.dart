@@ -53,6 +53,19 @@ class UserSettings {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  // ADR 0014 — guest mode. A guest is an anonymous Firebase user; the flag
+  // is on the DOCUMENT (not derived from Auth) so Cloud Functions can tell
+  // guests apart without an Auth lookup, and so `guestGcDaily` can reap the
+  // abandoned ones. Flipped to false the moment an email is linked.
+  final bool isGuest;
+  // Written on every launch. It is the only "sign of life" the GC has — an
+  // abandoned guest looks identical to a loyal one who never favourites.
+  final DateTime? lastActiveAt;
+  // The one dismissable "create an account" prompt (ADR 0014 UX-3) is shown
+  // once per identity, tracked here rather than on the device so a reinstall
+  // that keeps the uid does not repeat it.
+  final bool accountPromptShown;
+
   UserSettings({
     required this.userId,
     required this.email,
@@ -73,6 +86,9 @@ class UserSettings {
     required this.lastLoginDate,
     required this.createdAt,
     required this.updatedAt,
+    this.isGuest = false,
+    this.lastActiveAt,
+    this.accountPromptShown = false,
   });
 
   UserSettings copyWith({
@@ -92,6 +108,9 @@ class UserSettings {
     List<String>? fcmTokens,
     List<String>? customBackgroundImagePaths,
     DateTime? lastLoginDate,
+    bool? isGuest,
+    DateTime? lastActiveAt,
+    bool? accountPromptShown,
   }) {
     return UserSettings(
       userId: userId,
@@ -117,6 +136,9 @@ class UserSettings {
       lastLoginDate: lastLoginDate ?? this.lastLoginDate,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
+      isGuest: isGuest ?? this.isGuest,
+      lastActiveAt: lastActiveAt ?? this.lastActiveAt,
+      accountPromptShown: accountPromptShown ?? this.accountPromptShown,
     );
   }
 

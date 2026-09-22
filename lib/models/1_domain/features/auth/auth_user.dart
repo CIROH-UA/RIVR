@@ -10,12 +10,18 @@ class AuthUser {
   final bool isEmailVerified;
   final DateTime? createdAt;
 
+  /// A guest: signed in anonymously (ADR 0014). No email, no password, and
+  /// nothing to sign back in with — which is why guests are never offered
+  /// Sign Out.
+  final bool isAnonymous;
+
   AuthUser({
     required this.uid,
     required this.email,
     this.displayName,
     required this.isEmailVerified,
     this.createdAt,
+    this.isAnonymous = false,
   });
 
   /// Create AuthUser from Firebase User
@@ -26,6 +32,7 @@ class AuthUser {
       displayName: firebaseUser.displayName,
       isEmailVerified: firebaseUser.emailVerified,
       createdAt: firebaseUser.metadata.creationTime,
+      isAnonymous: firebaseUser.isAnonymous,
     );
   }
 
@@ -39,6 +46,7 @@ class AuthUser {
       createdAt: json['createdAt'] != null
           ? DateTime.parse(json['createdAt'] as String)
           : null,
+      isAnonymous: json['isAnonymous'] as bool? ?? false,
     );
   }
 
@@ -50,6 +58,7 @@ class AuthUser {
       'displayName': displayName,
       'isEmailVerified': isEmailVerified,
       'createdAt': createdAt?.toIso8601String(),
+      'isAnonymous': isAnonymous,
     };
   }
 

@@ -56,6 +56,10 @@ visible to a user after download and every one of them bites later.
 | M11 | The only place the user agrees to the Terms and Privacy Policy is the **login page** footer ("By continuing, you agree to…"). A guest never sees the login page. | `login_page.dart:243` |
 | M12 | Onboarding runs **before** auth (`main.dart:246` chooses `OnboardingPage` vs `AuthWrapper` on `hasSeenOnboarding`), so the onboarding screens are the natural place for the consent line and for the first notification/location explanation. | `main.dart` 133–248 |
 | M13 | Only **four** files under `lib/services` and `lib/ui/1_state` read the current uid. The blast radius of "which uid" is small. | `grep -rl _currentUserIdOrNull\|currentUser?.uid\|currentUserId` |
+| M15 | **The anonymous provider is now ENABLED** on ciroh-rivr-app (B1 done, 2026-09-21), via `PATCH …/config?updateMask=signIn.anonymous.enabled`. Read back as `{'enabled': True}`. | Identity Toolkit admin v2 |
+| M16 | **The verification gate lived in TWO places, not one.** `AuthWrapper` showed the page, but `AuthProvider.isAuthenticated` was `_currentUser != null && !_isAwaitingEmailVerification` — so removing the wrapper branch alone left every unverified user un-authenticated and back at the login page. Found by an integration test hanging, not by review. | implementation, 2026-09-21 |
+| M17 | **`firebase_auth_mocks`' `MockUser` defaults `isEmailVerified` to TRUE.** A guest fixture built without overriding it has `emailVerified == true`, which makes any test of the verification gate pass no matter what the gate does. Two guards were vacuous until the fixture was corrected; the mutation that should have failed them passed cleanly first time. | mutation check, 2026-09-21 |
+| M18 | **The integration suite is GREEN at baseline** — 0 failures on `test/integration_test/` before this work. This DISPROVES the standing note (MEMORY.md, and `~27 long-standing pre-existing failures` in CLAUDE.md's test section) that the suite carries ~27 known failures. All 27 failures seen during this change were caused by it, and all 27 are now fixed. | `git stash` + `flutter test test/integration_test/`, 2026-09-22 |
 | M14 | Firebase's **auto-delete of anonymous users is off** (`autoDeleteAnonymousUsers` absent from config). | same config read as M1 |
 
 ### Estimated
@@ -80,6 +84,7 @@ visible to a user after download and every one of them bites later.
 | # | Claim | Why |
 |---|---|---|
 | D1 | *"The app has no email-verification gate"* (asserted by the assistant 2026-09-07). It does: `auth_provider.dart:135`. Recorded in ADR form here because guest mode depends on it. | M4 |
+| D4 | *"The integration_test suite has ~27 long-standing pre-existing failures"* (MEMORY.md; CLAUDE.md test section). Measured 2026-09-22 on a clean tree: **0 failures.** The note is stale and was masking real regressions — the 27 failures this change produced looked exactly like the number the note predicted, which is the worst possible coincidence for a stale claim to have. | M18 |
 | D3 | *"The favourites empty state says nothing about the map"* (asserted in the first draft of this ADR, 2026-09-21). It says exactly the right thing; no copy change is needed. | `favorites_page.dart:456` |
 | D2 | *"Keep guest favourites on-device only and skip Firebase entirely."* Rejected: every data surface, the store write-through, alerts and the Weekly Outlook key on a uid in Firestore (M6–M8). A device-only guest would get no alerts — the app's most important feature for a flood — and would need a migration step at sign-up. Anonymous auth gives the same result with the platform doing the work. | M6, M7, M8 |
 
