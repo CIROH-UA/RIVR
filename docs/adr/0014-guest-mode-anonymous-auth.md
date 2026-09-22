@@ -360,6 +360,22 @@ abandoned sign-in leaves the guest document byte-identical** — which cannot
 pass while any pre-write exists. Both are mutation-checked against a
 reinstated destroy-first implementation.
 
+
+### Known limit of the safer ordering
+
+Deleting the guest's document now happens **after** the sign-in, at which
+point `request.auth.uid` is the account — so the Firestore rules deny it and
+the orphan lingers until `guestGcDaily` reaps it (up to 90 days). While it
+lingers it still holds that device's push token and its favourites, so the
+person can receive a duplicate alert for a river they follow on both.
+
+This is deliberate. The alternative is writing to the guest document before
+the sign-in succeeds, which is precisely what destroyed a tester's rivers on
+build 832. A duplicate notification is an annoyance; an emptied document is
+lost data. If the duplicates prove real in practice, the fix is a callable
+Cloud Function that tidies the orphan with admin credentials — **not** a
+pre-write.
+
 ### Also found, not a defect in the app
 
 **The Firestore rules change in B9 was never deployed.** The live ruleset is
