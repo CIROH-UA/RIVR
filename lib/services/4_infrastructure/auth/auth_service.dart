@@ -20,12 +20,18 @@ import 'package:rivr/services/3_datasources/features/auth/biometric_datasource.d
 class AuthService implements IAuthService {
   final AuthFirebaseDatasource _authDatasource;
   final BiometricDatasource _biometricDatasource;
+  // Injectable so the ADR 0014 guest/merge paths can be tested against a fake
+  // Firestore. Everything else in this class predates the split and reached
+  // for the singleton directly.
+  final FirebaseFirestore _firestore;
 
   AuthService({
     AuthFirebaseDatasource? authDatasource,
     BiometricDatasource? biometricDatasource,
+    FirebaseFirestore? firestore,
   })  : _authDatasource = authDatasource ?? AuthFirebaseDatasource(),
-        _biometricDatasource = biometricDatasource ?? BiometricDatasource();
+        _biometricDatasource = biometricDatasource ?? BiometricDatasource(),
+        _firestore = firestore ?? FirebaseFirestore.instance;
 
   /// Get current Firebase user
   @override
@@ -47,16 +53,48 @@ class AuthService implements IAuthService {
     required String email,
     required String password,
   }) async {
+    // ADR 0014 B6 — a guest signing into an existing account. Their rivers
+    // must follow them, and the abandoned guest document must stop sending
+    // alerts to this same device. The order is deliberate: neutralise the
+    // guest doc BEFORE the sign-in attempt (only the guest may write it —
+    // after the switch the rules lock it), restore it if the sign-in fails,
+    // merge into the account after success, and delete the guest last.
+    final guest = currentUser;
+    final bool fromGuest = guest != null && guest.isAnonymous;
+    Map<String, dynamic>? guestDoc;
+    if (fromGuest) {
+      guestDoc = await _readUserDoc(guest.uid);
+      if (guestDoc != null) await _neutraliseGuestDoc(guest.uid);
+    }
+
     try {
       AppLogger.debug('AuthService', 'Signing in with email: $email');
 
-      final credential = await _authDatasource.signIn(
-        email: email,
-        password: password,
-      );
+      final UserCredential credential;
+      try {
+        credential = await _authDatasource.signIn(
+          email: email,
+          password: password,
+        );
+      } catch (_) {
+        if (fromGuest && guestDoc != null) {
+          await _restoreGuestDoc(guest.uid, guestDoc);
+        }
+        rethrow;
+      }
 
       if (credential.user == null) {
+        if (fromGuest && guestDoc != null) {
+          await _restoreGuestDoc(guest.uid, guestDoc);
+        }
         return AuthResult.failure('Sign in failed - no user returned');
+      }
+
+      if (fromGuest) {
+        if (guestDoc != null) {
+          await _mergeGuestIntoAccount(credential.user!.uid, guestDoc);
+        }
+        await _deleteAbandonedGuest(guest);
       }
 
       AppLogger.info('AuthService', 'Sign in successful for user: ${credential.user!.uid}');
@@ -81,28 +119,58 @@ class AuthService implements IAuthService {
     try {
       AppLogger.debug('AuthService', 'Registering user with email: $email');
 
-      final credential = await _authDatasource.register(
-        email: email,
-        password: password,
-      );
+      // ADR 0014 B5 — a guest becomes an account IN PLACE: the credential is
+      // linked to the existing uid, so favourites, alerts and settings are
+      // untouched and nothing migrates. A brand-new user (no session at all,
+      // e.g. anonymous sign-in refused offline) takes the old create path.
+      final guest = currentUser;
+      final bool linking = guest != null && guest.isAnonymous;
 
-      if (credential.user == null) {
+      final UserCredential credential = linking
+          ? await _authDatasource.linkWithEmailPassword(
+              user: guest,
+              email: email,
+              password: password,
+            )
+          : await _authDatasource.register(
+              email: email,
+              password: password,
+            );
+
+      // linkWithCredential may hand back a credential whose user is null on
+      // some platforms; the linked identity is still the current user.
+      final user = credential.user ?? (linking ? currentUser : null);
+      if (user == null) {
         return AuthResult.failure('Registration failed - no user returned');
       }
-
-      final user = credential.user!;
-      AppLogger.info('AuthService', 'Registration successful for user: ${user.uid}');
+      AppLogger.info(
+        'AuthService',
+        '${linking ? 'Guest linked to account' : 'Registration successful'} '
+        'for user: ${user.uid}',
+      );
 
       // Update display name
       await _authDatasource.updateDisplayName(user, '$firstName $lastName');
 
-      // Create UserSettings document in Firestore
-      await _createUserSettings(
-        userId: user.uid,
-        email: email.trim(),
-        firstName: firstName,
-        lastName: lastName,
-      );
+      if (linking) {
+        // The document already exists (created at guest sign-in). Add the
+        // identity and drop the guest flag; everything else stays.
+        await _updateUserDoc(user.uid, {
+          'email': email.trim(),
+          'firstName': firstName,
+          'lastName': lastName,
+          'isGuest': false,
+          'updatedAt': DateTime.now().toIso8601String(),
+        });
+      } else {
+        // Create UserSettings document in Firestore
+        await _createUserSettings(
+          userId: user.uid,
+          email: email.trim(),
+          firstName: firstName,
+          lastName: lastName,
+        );
+      }
 
       // Send email verification (fire-and-forget)
       try {
@@ -122,12 +190,202 @@ class AuthService implements IAuthService {
     }
   }
 
-  /// Create UserSettings document after successful registration
+  // MARK: - Guest mode (ADR 0014)
+
+  /// Sign in as a guest and guarantee a `users/{uid}` document.
+  ///
+  /// Idempotent: an existing session (guest or account) is returned as is.
+  /// The document is created here because nothing else does — ADR 0014 M5:
+  /// `register` was the only path that ever wrote it.
+  @override
+  Future<AuthResult> signInAnonymously() async {
+    final existing = currentUser;
+    if (existing != null) {
+      return AuthResult.success(existing);
+    }
+    try {
+      AppLogger.debug('AuthService', 'Signing in as guest');
+      final credential = await _authDatasource.signInAnonymously();
+      final user = credential.user;
+      if (user == null) {
+        return AuthResult.failure('Guest sign-in failed - no user returned');
+      }
+      AppLogger.info('AuthService', 'Guest signed in: ${user.uid}');
+
+      final doc = await _readUserDoc(user.uid);
+      if (doc == null) {
+        await _createUserSettings(
+          userId: user.uid,
+          email: '',
+          firstName: '',
+          lastName: '',
+          isGuest: true,
+        );
+      }
+      return AuthResult.success(user);
+    } on FirebaseAuthException catch (e) {
+      AppLogger.error(
+          'AuthService', 'Guest sign-in FirebaseAuthException: ${e.code} - ${e.message}', e);
+      return AuthResult.failure(ErrorService.mapFirebaseAuthError(e));
+    } catch (e) {
+      AppLogger.error('AuthService', 'Unexpected guest sign-in error: $e', e);
+      return AuthResult.failure('Guest sign-in failed: ${e.toString()}');
+    }
+  }
+
+  /// Record a sign of life. `guestGcDaily` reaps guests whose `lastActiveAt`
+  /// is older than its window, so this must run on every launch and must
+  /// never break the launch when it fails.
+  @override
+  Future<void> touchLastActive(String userId) async {
+    try {
+      await _updateUserDoc(userId, {
+        'lastActiveAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      AppLogger.warning('AuthService', 'lastActiveAt write failed: $e');
+    }
+  }
+
+  @override
+  Future<void> markAccountPromptShown(String userId) async {
+    try {
+      await _updateUserDoc(userId, {'accountPromptShown': true});
+    } catch (e) {
+      AppLogger.warning('AuthService', 'accountPromptShown write failed: $e');
+    }
+  }
+
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _firestore.collection('users');
+
+  Future<Map<String, dynamic>?> _readUserDoc(String uid) async {
+    try {
+      final snap = await _users
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 10));
+      return snap.exists ? snap.data() : null;
+    } catch (e) {
+      AppLogger.warning('AuthService', 'read users/$uid failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> _updateUserDoc(String uid, Map<String, dynamic> fields) =>
+      _users
+          .doc(uid)
+          .set(fields, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 10));
+
+  /// The fields that make a guest document DO things: favourites feed the
+  /// store's refresh cycle, tokens and flags make it receive alerts. These are
+  /// cleared before the guest signs into an account so an orphaned copy is
+  /// inert — the original values are restored if the sign-in fails.
+  static const _guestLiveFields = <String, dynamic>{
+    'favoriteReachIds': <String>[],
+    'favoriteSources': <String, String>{},
+    'favoriteLabels': <String, String>{},
+    'alertFrequencies': <String, String>{},
+    'fcmTokens': <String>[],
+    'enableNotifications': false,
+    'weeklyOutlookEnabled': false,
+  };
+
+  Future<void> _neutraliseGuestDoc(String uid) async {
+    try {
+      await _updateUserDoc(uid, {
+        ..._guestLiveFields,
+        'mergePending': true,
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      AppLogger.warning('AuthService', 'neutralise guest $uid failed: $e');
+    }
+  }
+
+  Future<void> _restoreGuestDoc(String uid, Map<String, dynamic> doc) async {
+    try {
+      final restore = <String, dynamic>{
+        for (final k in _guestLiveFields.keys)
+          k: doc[k] ?? _guestLiveFields[k],
+        'mergePending': FieldValue.delete(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      await _updateUserDoc(uid, restore);
+    } catch (e) {
+      AppLogger.error('AuthService', 'restore guest $uid failed: $e', e);
+    }
+  }
+
+  /// Union the guest's rivers into the account. The account's own values win
+  /// on every conflict — a custom name the person chose on their phone last
+  /// year beats one they typed as a guest yesterday.
+  Future<void> _mergeGuestIntoAccount(
+      String accountUid, Map<String, dynamic> guest) async {
+    try {
+      final account = await _readUserDoc(accountUid) ?? <String, dynamic>{};
+      List<String> ids(Map<String, dynamic> d) =>
+          List<String>.from(d['favoriteReachIds'] as List? ?? const []);
+      Map<String, String> strMap(Map<String, dynamic> d, String k) =>
+          (d[k] as Map?)?.map((a, b) => MapEntry(a.toString(), b.toString())) ??
+          <String, String>{};
+
+      final mergedIds = [
+        ...ids(account),
+        ...ids(guest).where((id) => !ids(account).contains(id)),
+      ];
+      Map<String, String> mergedMap(String k) =>
+          {...strMap(guest, k), ...strMap(account, k)};
+
+      final added = mergedIds.length - ids(account).length;
+      if (added == 0 && strMap(guest, 'favoriteLabels').isEmpty) {
+        AppLogger.info('AuthService', 'Guest had nothing to merge');
+        return;
+      }
+      await _updateUserDoc(accountUid, {
+        'favoriteReachIds': mergedIds,
+        'favoriteSources': mergedMap('favoriteSources'),
+        'favoriteLabels': mergedMap('favoriteLabels'),
+        'alertFrequencies': mergedMap('alertFrequencies'),
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+      AppLogger.info(
+          'AuthService', 'Merged $added guest river(s) into $accountUid');
+    } catch (e) {
+      // The guest doc was neutralised, so nothing keeps firing; the rivers
+      // are what is lost if this fails, and that is logged loudly.
+      AppLogger.error('AuthService', 'guest merge into $accountUid failed: $e', e);
+    }
+  }
+
+  /// Delete the guest identity after its rivers have moved. ADR 0014 U3/B6:
+  /// whether `User.delete()` works on a user object that is no longer
+  /// current is not verified — so this is best effort, and the neutralised
+  /// document is inert either way until `guestGcDaily` reaps it.
+  Future<void> _deleteAbandonedGuest(User guest) async {
+    try {
+      await _users.doc(guest.uid).delete().timeout(const Duration(seconds: 10));
+    } catch (e) {
+      AppLogger.warning('AuthService', 'delete guest doc ${guest.uid}: $e');
+    }
+    try {
+      await _authDatasource.deleteUser(guest);
+      AppLogger.info('AuthService', 'Abandoned guest ${guest.uid} deleted');
+    } catch (e) {
+      AppLogger.warning(
+          'AuthService', 'guest ${guest.uid} left for guestGcDaily: $e');
+    }
+  }
+
+  /// Create UserSettings document after successful registration — or, for a
+  /// guest (ADR 0014), at first anonymous sign-in with no identity fields.
   Future<void> _createUserSettings({
     required String userId,
     required String email,
     required String firstName,
     required String lastName,
+    bool isGuest = false,
   }) async {
     try {
       AppLogger.debug('AuthService', 'Creating UserSettings for user: $userId');
@@ -144,10 +402,11 @@ class AuthService implements IAuthService {
         lastLoginDate: DateTime.now(),
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
+        isGuest: isGuest,
+        lastActiveAt: DateTime.now(),
       );
 
-      await FirebaseFirestore.instance
-          .collection('users')
+      await _users
           .doc(userId)
           .set(UserSettingsDto.fromEntity(userSettings).toJson())
           .timeout(

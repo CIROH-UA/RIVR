@@ -13,6 +13,7 @@ import 'package:rivr/models/1_domain/shared/user_settings.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_anonymously_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
@@ -45,6 +46,7 @@ class AuthProvider with ChangeNotifier {
   final SignInUseCase _signInUseCase;
   final SignUpUseCase _signUpUseCase;
   final SignOutUseCase _signOutUseCase;
+  final SignInAnonymouslyUseCase _signInAnonymouslyUseCase;
   final ResetPasswordUseCase _resetPasswordUseCase;
   final EnableBiometricUseCase _enableBiometricUseCase;
   final DisableBiometricUseCase _disableBiometricUseCase;
@@ -58,6 +60,7 @@ class AuthProvider with ChangeNotifier {
     SignInUseCase? signInUseCase,
     SignUpUseCase? signUpUseCase,
     SignOutUseCase? signOutUseCase,
+    SignInAnonymouslyUseCase? signInAnonymouslyUseCase,
     ResetPasswordUseCase? resetPasswordUseCase,
     EnableBiometricUseCase? enableBiometricUseCase,
     DisableBiometricUseCase? disableBiometricUseCase,
@@ -69,6 +72,8 @@ class AuthProvider with ChangeNotifier {
         _signInUseCase = signInUseCase ?? GetIt.I<SignInUseCase>(),
         _signUpUseCase = signUpUseCase ?? GetIt.I<SignUpUseCase>(),
         _signOutUseCase = signOutUseCase ?? GetIt.I<SignOutUseCase>(),
+        _signInAnonymouslyUseCase = signInAnonymouslyUseCase ??
+            GetIt.I<SignInAnonymouslyUseCase>(),
         _resetPasswordUseCase =
             resetPasswordUseCase ?? GetIt.I<ResetPasswordUseCase>(),
         _enableBiometricUseCase =
@@ -95,9 +100,37 @@ class AuthProvider with ChangeNotifier {
   // Getters
   AuthUser? get currentUser => _currentUser;
   UserSettings? get currentUserSettings => _currentUserSettings;
-  bool get isAuthenticated =>
-      _currentUser != null && !_isAwaitingEmailVerification;
+  /// Signed in at all — guest or account, verified or not.
+  ///
+  /// ADR 0014 UX-4: this used to exclude an unverified account, which is what
+  /// held people at EmailVerificationPage. Verification now drives a banner
+  /// (see [needsEmailVerification]) and gates nothing, so "authenticated"
+  /// means what it says.
+  bool get isAuthenticated => _currentUser != null;
   bool get isAwaitingEmailVerification => _isAwaitingEmailVerification;
+
+  // ADR 0014 — guest mode.
+  /// Signed in anonymously: no email, no password, nothing to sign out of.
+  bool get isGuest => _currentUser?.isAnonymous ?? false;
+
+  /// An account (not a guest) whose email has not been confirmed. Since ADR
+  /// 0014 this gates NOTHING — it drives a banner on the Account page. The
+  /// full-page gate locked real users out for months while verification
+  /// emails were silently undeliverable (ADR 0014 D1, journal 2026-09-07).
+  bool get needsEmailVerification =>
+      _currentUser != null && !isGuest && !_currentUser!.isEmailVerified;
+
+  /// The one dismissable "create an account" prompt, shown once per identity
+  /// after the first favourite (ADR 0014 UX-3). Never for an account, never
+  /// twice, and not until the document has been read.
+  bool get shouldShowAccountPrompt =>
+      isGuest && _currentUserSettings != null &&
+      !_currentUserSettings!.accountPromptShown;
+
+  /// Set when guest sign-in itself failed (provider off, offline on first
+  /// launch). The wrapper falls back to the login page and shows this.
+  String? _guestSignInError;
+  String? get guestSignInError => _guestSignInError;
   bool get isLoading => _isLoading;
   String get errorMessage => _errorMessage;
   String get successMessage => _successMessage;
@@ -131,11 +164,12 @@ class AuthProvider with ChangeNotifier {
             'AuthProvider', 'User signed in: ${_currentUser!.uid}');
         _setCrashlyticsUserSafe(firebaseUser.uid);
 
-        // Gate on email verification
-        if (!firebaseUser.emailVerified) {
-          _isAwaitingEmailVerification = true;
-          AppLogger.info(
-              'AuthProvider', 'Email not verified, awaiting verification');
+        // Unverified email is recorded, not enforced (ADR 0014 UX-4); a guest
+        // has no email to verify at all.
+        _isAwaitingEmailVerification =
+            !firebaseUser.isAnonymous && !firebaseUser.emailVerified;
+        if (_isAwaitingEmailVerification) {
+          AppLogger.info('AuthProvider', 'Email not verified (banner only)');
         }
 
         // Fetch user settings
@@ -161,10 +195,25 @@ class AuthProvider with ChangeNotifier {
     final firebaseUser = _authRepository.currentUser;
     if (firebaseUser != null) {
       _currentUser = AuthUser.fromFirebaseUser(firebaseUser);
-      if (!firebaseUser.emailVerified) {
-        _isAwaitingEmailVerification = true;
-      }
+      _isAwaitingEmailVerification =
+          !firebaseUser.isAnonymous && !firebaseUser.emailVerified;
       await _loadUserSettings();
+    } else {
+      // ADR 0014 UX-1 — nobody signed in: open as a guest. The stream above
+      // sees the new user and loads its settings; here we only record a
+      // failure so the wrapper can fall back to the login page with a reason
+      // instead of a spinner (UX-9).
+      final guest = await _signInAnonymouslyUseCase();
+      if (guest.isSuccess && guest.data != null) {
+        _guestSignInError = null;
+        if (_currentUser == null) {
+          _currentUser = AuthUser.fromFirebaseUser(guest.data!);
+          await _loadUserSettings();
+        }
+      } else {
+        _guestSignInError = guest.errorMessage ?? 'Could not start as a guest';
+        AppLogger.warning('AuthProvider', 'Guest sign-in failed: $_guestSignInError');
+      }
     }
 
     _isInitialized = true;
@@ -183,6 +232,8 @@ class AuthProvider with ChangeNotifier {
     if (result.isSuccess) {
       _currentUserSettings = result.data;
       AppLogger.info('AuthProvider', 'User settings loaded successfully');
+      // ADR 0014 B3 — guestGcDaily's only signal. Fire-and-forget.
+      unawaited(_authRepository.touchLastActive(_currentUser!.uid));
 
       // Listeners are needed by ANY notification the user can receive, not
       // just flood alerts.
@@ -273,7 +324,15 @@ class AuthProvider with ChangeNotifier {
     _setLoading(false);
 
     if (result.isSuccess) {
-      _isAwaitingEmailVerification = true;
+      // Linking a guest keeps the uid, so authStateChanges stays silent —
+      // refresh the identity by hand and reload the document it updated.
+      final linked = _authRepository.currentUser;
+      if (linked != null) {
+        _currentUser = AuthUser.fromFirebaseUser(linked);
+        _isAwaitingEmailVerification = !linked.emailVerified;
+        await _loadUserSettings();
+      }
+      _setSuccess('Account created. Check your email to verify it.');
       notifyListeners();
       return true;
     } else {
@@ -337,6 +396,14 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    if (isGuest) {
+      // ADR 0014 M10 — an anonymous uid signed out is gone for good, rivers
+      // and all. The Account page never offers it; this is the last line.
+      _setError('Guests have no account to sign out of. '
+          'Use "Delete my data" to start over.');
+      return;
+    }
+
     _setLoading(true);
 
     // Unregister this device's push token from the user's doc BEFORE signing
@@ -376,8 +443,9 @@ class AuthProvider with ChangeNotifier {
   /// Required by App Store Review Guideline 5.1.1(v). Returns `true` on
   /// success; on failure, sets [errorMessage] and returns `false`. The
   /// repository handles reauth + Firestore/FCM/Auth cleanup atomically.
-  Future<bool> deleteAccount(String password) async {
-    if (password.isEmpty) {
+  Future<bool> deleteAccount(String? password) async {
+    final wasGuest = isGuest;
+    if (!wasGuest && (password == null || password.isEmpty)) {
       _setError('Please enter your password to confirm account deletion');
       return false;
     }
@@ -385,7 +453,8 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
-    final result = await _deleteAccountUseCase(password: password);
+    final result =
+        await _deleteAccountUseCase(password: wasGuest ? null : password);
 
     _setLoading(false);
 
@@ -397,12 +466,49 @@ class AuthProvider with ChangeNotifier {
       _currentUserSettings = null;
       _fcmService.clearCache();
       _clearRiverDataCache();
-      _setSuccess('Account deleted');
+      MapPageState.forgetMapState();
+      _setSuccess(wasGuest ? 'Your data was deleted' : 'Account deleted');
+      // ADR 0014 B7 — the app must not be left signed out: a deleted guest
+      // simply becomes a new guest.
+      if (wasGuest) {
+        await _signInAnonymouslyUseCase();
+      }
       return true;
     } else {
       _setError(result.errorMessage ?? 'Account deletion failed');
       return false;
     }
+  }
+
+  /// ADR 0014 UX-9 — the login page's "Continue without an account" after a
+  /// failed guest start (offline first launch, provider off).
+  Future<bool> retryGuestSignIn() async {
+    _setLoading(true);
+    _clearMessages();
+    final result = await _signInAnonymouslyUseCase();
+    _setLoading(false);
+    if (result.isSuccess && result.data != null) {
+      _guestSignInError = null;
+      if (_currentUser == null) {
+        _currentUser = AuthUser.fromFirebaseUser(result.data!);
+        await _loadUserSettings();
+      }
+      notifyListeners();
+      return true;
+    }
+    _guestSignInError = result.errorMessage ?? 'Could not start as a guest';
+    _setError(_guestSignInError!);
+    return false;
+  }
+
+  /// ADR 0014 UX-3 — record the prompt as shown, locally and on the document.
+  Future<void> markAccountPromptShown() async {
+    final uid = _currentUser?.uid;
+    if (uid == null) return;
+    _currentUserSettings =
+        _currentUserSettings?.copyWith(accountPromptShown: true);
+    notifyListeners();
+    await _authRepository.markAccountPromptShown(uid);
   }
 
   // MARK: - Email Verification

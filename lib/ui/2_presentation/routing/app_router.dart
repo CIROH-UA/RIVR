@@ -10,6 +10,9 @@ import 'package:rivr/ui/2_presentation/features/settings/pages/notifications_set
 import 'package:rivr/ui/2_presentation/features/forecast/pages/weekly_outlook_page.dart';
 import 'package:rivr/ui/2_presentation/features/settings/pages/sponsors_page.dart';
 import 'package:rivr/ui/2_presentation/features/profile/pages/account_page.dart';
+import 'package:rivr/ui/2_presentation/features/auth/pages/login_page.dart';
+import 'package:rivr/ui/2_presentation/features/auth/pages/register_page.dart';
+import 'package:rivr/ui/2_presentation/features/auth/pages/forgot_password_page.dart';
 import 'package:rivr/ui/2_presentation/features/map/widgets/map_with_favorites.dart';
 import 'package:rivr/ui/2_presentation/routing/app_routes.dart';
 import 'package:rivr/ui/2_presentation/routing/route_args.dart';
@@ -151,6 +154,67 @@ class AppRouter {
 
   static Future<T?> pushAccount<T>(BuildContext context) {
     return Navigator.pushNamed<T>(context, AppRoutes.account);
+  }
+
+  // ADR 0014 — the auth pages are destinations now, reached from the Account
+  // page by a guest. Each one pops itself on success; the sibling links
+  // replace the route so Back always returns to the Account page.
+  static Future<void> pushCreateAccount(BuildContext context) {
+    return Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (ctx) => RegisterPage(
+          onSwitchToLogin: () => _replaceWithSignIn(ctx),
+          onSuccess: () => Navigator.of(ctx).pop(),
+        ),
+      ),
+    );
+  }
+
+  static Future<void> pushSignIn(BuildContext context) {
+    return Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (ctx) => LoginPage(
+          onSwitchToRegister: () => _replaceWithCreateAccount(ctx),
+          onSwitchToForgotPassword: () => Navigator.of(ctx).push(
+            CupertinoPageRoute(
+              builder: (c2) => ForgotPasswordPage(
+                onBackToLogin: () => Navigator.of(c2).pop(),
+              ),
+            ),
+          ),
+          onSuccess: () => Navigator.of(ctx).pop(),
+        ),
+      ),
+    );
+  }
+
+  static void _replaceWithSignIn(BuildContext ctx) {
+    Navigator.of(ctx).pushReplacement(
+      CupertinoPageRoute(
+        builder: (c) => LoginPage(
+          onSwitchToRegister: () => _replaceWithCreateAccount(c),
+          onSwitchToForgotPassword: () => Navigator.of(c).push(
+            CupertinoPageRoute(
+              builder: (c2) => ForgotPasswordPage(
+                onBackToLogin: () => Navigator.of(c2).pop(),
+              ),
+            ),
+          ),
+          onSuccess: () => Navigator.of(c).pop(),
+        ),
+      ),
+    );
+  }
+
+  static void _replaceWithCreateAccount(BuildContext ctx) {
+    Navigator.of(ctx).pushReplacement(
+      CupertinoPageRoute(
+        builder: (c) => RegisterPage(
+          onSwitchToLogin: () => _replaceWithSignIn(c),
+          onSuccess: () => Navigator.of(c).pop(),
+        ),
+      ),
+    );
   }
 
   static void pushFavoritesAndClear(BuildContext context) {

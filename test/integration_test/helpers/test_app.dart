@@ -50,6 +50,7 @@ import 'package:rivr/services/1_contracts/features/settings/i_settings_repositor
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_anonymously_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
@@ -236,6 +237,7 @@ AuthProvider createAuthProvider(TestServices services) {
     signInUseCase: SignInUseCase(authRepo),
     signUpUseCase: SignUpUseCase(authRepo),
     signOutUseCase: SignOutUseCase(authRepo),
+    signInAnonymouslyUseCase: SignInAnonymouslyUseCase(authRepo),
     resetPasswordUseCase: ResetPasswordUseCase(authRepo),
     enableBiometricUseCase: EnableBiometricUseCase(authRepo),
     disableBiometricUseCase: DisableBiometricUseCase(authRepo),

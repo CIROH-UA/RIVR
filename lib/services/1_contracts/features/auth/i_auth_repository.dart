@@ -23,6 +23,16 @@ abstract class IAuthRepository {
   Future<ServiceResult<void>> signOut();
   Future<ServiceResult<void>> resetPassword({required String email});
 
+  /// ADR 0014 — guest identity. Returns the existing user when one is signed
+  /// in; otherwise mints an anonymous one and its `users/{uid}` document.
+  Future<ServiceResult<User?>> signInAnonymously();
+
+  /// ADR 0014 — sign of life for guest garbage collection. Never fails.
+  Future<void> touchLastActive(String userId);
+
+  /// ADR 0014 UX-3 — remember that the account prompt was shown. Never fails.
+  Future<void> markAccountPromptShown(String userId);
+
   Future<bool> isBiometricAvailable();
   Future<bool> isBiometricEnabled();
   Future<ServiceResult<User?>> signInWithBiometrics();
@@ -41,5 +51,8 @@ abstract class IAuthRepository {
   /// [password], removes FCM token registration, deletes the user's Firestore
   /// settings document, then deletes the Firebase Auth user (which also
   /// clears any local biometric credentials).
-  Future<ServiceResult<void>> deleteAccount({required String password});
+  ///
+  /// A guest (ADR 0014) has no password: pass null and the reauthentication
+  /// step is skipped — Firebase does not require it for an anonymous user.
+  Future<ServiceResult<void>> deleteAccount({required String? password});
 }

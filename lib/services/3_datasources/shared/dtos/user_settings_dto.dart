@@ -27,6 +27,11 @@ class UserSettingsDto {
   final String lastLoginDate;
   final String createdAt;
   final String updatedAt;
+  // ADR 0014 guest fields. lastActiveAt is ISO-8601 like the other dates
+  // here; the Cloud Function that reads it (guestGcDaily) parses the string.
+  final bool isGuest;
+  final String? lastActiveAt;
+  final bool accountPromptShown;
 
   const UserSettingsDto({
     required this.userId,
@@ -48,14 +53,18 @@ class UserSettingsDto {
     required this.lastLoginDate,
     required this.createdAt,
     required this.updatedAt,
+    this.isGuest = false,
+    this.lastActiveAt,
+    this.accountPromptShown = false,
   });
 
   factory UserSettingsDto.fromJson(Map<String, dynamic> json) {
     return UserSettingsDto(
       userId: json['userId'] as String,
-      email: json['email'] as String,
-      firstName: json['firstName'] as String,
-      lastName: json['lastName'] as String,
+      // Guests (ADR 0014) have no email or name; the document stores ''.
+      email: json['email'] as String? ?? '',
+      firstName: json['firstName'] as String? ?? '',
+      lastName: json['lastName'] as String? ?? '',
       preferredFlowUnit: json['preferredFlowUnit'] as String? ?? 'cfs',
       preferredTimeFormat:
           json['preferredTimeFormat'] as String? ?? 'twelveHour',
@@ -85,6 +94,9 @@ class UserSettingsDto {
       lastLoginDate: json['lastLoginDate'] as String,
       createdAt: json['createdAt'] as String,
       updatedAt: json['updatedAt'] as String,
+      isGuest: json['isGuest'] as bool? ?? false,
+      lastActiveAt: json['lastActiveAt'] as String?,
+      accountPromptShown: json['accountPromptShown'] as bool? ?? false,
     );
   }
 
@@ -109,6 +121,9 @@ class UserSettingsDto {
       'lastLoginDate': lastLoginDate,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'isGuest': isGuest,
+      if (lastActiveAt != null) 'lastActiveAt': lastActiveAt,
+      'accountPromptShown': accountPromptShown,
     };
   }
 
@@ -136,6 +151,10 @@ class UserSettingsDto {
       lastLoginDate: DateTime.parse(lastLoginDate),
       createdAt: DateTime.parse(createdAt),
       updatedAt: DateTime.parse(updatedAt),
+      isGuest: isGuest,
+      lastActiveAt:
+          lastActiveAt == null ? null : DateTime.tryParse(lastActiveAt!),
+      accountPromptShown: accountPromptShown,
     );
   }
 
@@ -175,6 +194,9 @@ class UserSettingsDto {
       lastLoginDate: entity.lastLoginDate.toIso8601String(),
       createdAt: entity.createdAt.toIso8601String(),
       updatedAt: entity.updatedAt.toIso8601String(),
+      isGuest: entity.isGuest,
+      lastActiveAt: entity.lastActiveAt?.toIso8601String(),
+      accountPromptShown: entity.accountPromptShown,
     );
   }
 }

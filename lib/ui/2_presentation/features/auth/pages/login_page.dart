@@ -1,10 +1,9 @@
 // lib/ui/2_presentation/features/auth/pages/login_page.dart
 
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/legal_consent_line.dart';
 import 'package:rivr/ui/2_presentation/features/auth/widgets/live_validation_field.dart';
 import 'package:rivr/ui/2_presentation/features/auth/widgets/managed_async_button.dart';
 import 'package:rivr/ui/2_presentation/features/auth/widgets/auth_error_display.dart';
@@ -15,10 +14,20 @@ class LoginPage extends StatefulWidget {
   final VoidCallback onSwitchToRegister;
   final VoidCallback onSwitchToForgotPassword;
 
+  /// Called after a successful sign-in when the page was pushed as a route
+  /// from the Account page (ADR 0014). Unused inside the AuthWrapper.
+  final VoidCallback? onSuccess;
+
+  /// ADR 0014 UX-9 — shown only when the app could not start as a guest and
+  /// fell back to this page. Offers to try the guest path again.
+  final bool showGuestFallback;
+
   const LoginPage({
     super.key,
     required this.onSwitchToRegister,
     required this.onSwitchToForgotPassword,
+    this.onSuccess,
+    this.showGuestFallback = false,
   });
 
   @override
@@ -55,10 +64,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _handleLogin() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await authProvider.signIn(
+    final ok = await authProvider.signIn(
       _emailController.text.trim(),
       _passwordController.text,
     );
+    if (ok && mounted) widget.onSuccess?.call();
+  }
+
+  Future<void> _continueAsGuest() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await authProvider.retryGuestSignIn();
   }
 
   Future<bool> _handleBiometricLogin() async {
@@ -195,6 +210,34 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 40),
 
+                  if (widget.showGuestFallback) ...[
+                    Consumer<AuthProvider>(
+                      builder: (context, auth, _) => Column(
+                        children: [
+                          if (auth.guestSignInError != null)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 32, vertical: 8),
+                              child: Text(
+                                'RIVR could not start without an account: '
+                                '${auth.guestSignInError}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: CupertinoColors.systemGrey,
+                                ),
+                              ),
+                            ),
+                          CupertinoButton(
+                            onPressed: auth.isLoading ? null : _continueAsGuest,
+                            child: const Text('Continue without an account'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
                   // Register link
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -231,44 +274,7 @@ class _LoginPageState extends State<LoginPage> {
                             bottom: 30,
                             top: 16,
                           ),
-                          child: Text.rich(
-                            TextSpan(
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: CupertinoColors.systemGrey,
-                              ),
-                              children: [
-                                const TextSpan(
-                                    text:
-                                        'By continuing, you agree to our '),
-                                TextSpan(
-                                  text: 'Terms of Service',
-                                  style: TextStyle(color: primaryColor),
-                                  recognizer: TapGestureRecognizer()
-                                    ..onTap = () => launchUrl(
-                                          Uri.parse(
-                                              'https://www.hydromap.com'),
-                                          mode:
-                                              LaunchMode.externalApplication,
-                                        ),
-                                ),
-                                const TextSpan(text: ' and '),
-                                TextSpan(
-                                  text: 'Privacy Policy',
-                                  style: TextStyle(color: primaryColor),
-                                  recognizer: TapGestureRecognizer()
-                                    ..onTap = () => launchUrl(
-                                          Uri.parse(
-                                              'https://www.hydromap.com'),
-                                          mode:
-                                              LaunchMode.externalApplication,
-                                        ),
-                                ),
-                                const TextSpan(text: '. v1.0.0'),
-                              ],
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
+                          child: const LegalConsentLine(),
                         ),
                       ],
                     );

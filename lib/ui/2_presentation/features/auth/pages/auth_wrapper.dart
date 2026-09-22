@@ -49,6 +49,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
         return LoginPage(
           onSwitchToRegister: _switchToRegister,
           onSwitchToForgotPassword: _switchToForgotPassword,
+          // ADR 0014: this page is only reached when guest sign-in failed.
+          showGuestFallback: true,
         );
       case AuthPageType.register:
         return RegisterPage(onSwitchToLogin: _switchToLogin);
@@ -77,17 +79,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
           );
         }
 
-        // Show verification page if awaiting email verification
-        if (authProvider.isAwaitingEmailVerification) {
-          return EmailVerificationPage(
-            onSignOut: () async {
-              await authProvider.signOut();
-              _switchToRegister();
-            },
-          );
-        }
+        // ADR 0014 UX-4: an unverified email no longer gates the app. The
+        // Account page carries the banner; EmailVerificationPage stays as a
+        // destination the banner can open, not a wall.
 
-        // Show authenticated content if user is signed in
+        // Show authenticated content if user is signed in (guests included)
         if (authProvider.isAuthenticated) {
           return widget.authenticatedChild ?? _buildDefaultAuthenticatedView();
         }

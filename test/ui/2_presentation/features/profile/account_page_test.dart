@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:rivr/models/1_domain/shared/user_settings.dart';
@@ -14,6 +15,7 @@ import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_anonymously_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
@@ -30,11 +32,33 @@ import 'package:rivr/ui/2_presentation/features/profile/pages/account_page.dart'
 // the AccountPage wiring (structure + destructive-action UX).
 
 class _StubAuthRepository implements IAuthRepository {
+
+  // ADR 0014 — guest mode.
+  int signInAnonymouslyCalls = 0;
+  int touchLastActiveCalls = 0;
+  int markPromptCalls = 0;
+
+  @override
+  Future<ServiceResult<fb.User?>> signInAnonymously() async {
+    signInAnonymouslyCalls++;
+    return ServiceResult.success(null);
+  }
+
+  @override
+  Future<void> touchLastActive(String userId) async {
+    touchLastActiveCalls++;
+  }
+
+  @override
+  Future<void> markAccountPromptShown(String userId) async {
+    markPromptCalls++;
+  }
+
   String? capturedDeletePassword;
   bool deleteShouldSucceed = true;
 
   @override
-  Future<ServiceResult<void>> deleteAccount({required String password}) async {
+  Future<ServiceResult<void>> deleteAccount({required String? password}) async {
     capturedDeletePassword = password;
     return deleteShouldSucceed
         ? ServiceResult.success(null)
@@ -43,9 +67,13 @@ class _StubAuthRepository implements IAuthRepository {
   }
 
   @override
-  fb.User? get currentUser => null;
+  fb.User? get currentUser => presentedUser;
+  /// ADR 0014 — the page renders a different set of actions for a guest, so
+  /// the stub has to be able to present one.
+  fb.User? presentedUser;
   @override
-  Stream<fb.User?> get authStateChanges => const Stream.empty();
+  Stream<fb.User?> get authStateChanges =>
+      presentedUser == null ? const Stream.empty() : Stream.value(presentedUser);
   @override
   Future<ServiceResult<void>> signOut() async => ServiceResult.success(null);
   @override
@@ -91,6 +119,11 @@ class _StubAuthRepository implements IAuthRepository {
 }
 
 class _StubSettingsRepository implements ISettingsRepository {
+  // ADR 0014: the provider now loads settings on initialize() for a guest as
+  // well as an account, so this one member has to answer.
+  @override
+  Future<ServiceResult<UserSettings?>> syncAfterLogin(String userId) async =>
+      ServiceResult.success(null);
   @override
   noSuchMethod(Invocation invocation) =>
       throw UnimplementedError(invocation.memberName.toString());
@@ -110,6 +143,7 @@ AuthProvider _buildProvider(_StubAuthRepository repo) {
     signInUseCase: SignInUseCase(repo),
     signUpUseCase: SignUpUseCase(repo),
     signOutUseCase: SignOutUseCase(repo),
+    signInAnonymouslyUseCase: SignInAnonymouslyUseCase(repo),
     resetPasswordUseCase: ResetPasswordUseCase(repo),
     enableBiometricUseCase: EnableBiometricUseCase(repo),
     disableBiometricUseCase: DisableBiometricUseCase(repo),
@@ -286,5 +320,72 @@ void main() {
 
     expect(find.text('Delete Account'), findsNothing);
     expect(find.text('ROOT'), findsOneWidget);
+  });
+
+  // ── ADR 0014 guest mode ────────────────────────────────────────────────────
+  //
+  // The page a guest sees is a different page. Sign Out is the one that
+  // matters: an anonymous uid signed out can never be signed back into, so
+  // offering it would be a button that silently destroys every saved river
+  // (ADR 0014 M10).
+
+  Future<void> pumpAsGuest(WidgetTester tester, _StubAuthRepository repo) async {
+    repo.presentedUser = MockUser(isAnonymous: true, uid: 'guest-uid');
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final provider = _buildProvider(repo);
+    await provider.initialize();
+    await tester.pumpWidget(_wrap(provider));
+    await tester.pump();
+  }
+
+  testWidgets('a guest is never offered Sign Out', (tester) async {
+    final repo = _StubAuthRepository();
+    await pumpAsGuest(tester, repo);
+
+    expect(find.text('Sign Out'), findsNothing,
+        reason: 'signing out an anonymous uid loses the rivers for good');
+  });
+
+  testWidgets('a guest is offered both ways to get an account',
+      (tester) async {
+    final repo = _StubAuthRepository();
+    await pumpAsGuest(tester, repo);
+
+    expect(find.text("You're using RIVR as a guest"), findsOneWidget);
+    expect(find.text('Create an account'), findsOneWidget);
+    expect(find.text('Sign in to an existing account'), findsOneWidget);
+  });
+
+  testWidgets('a guest deletes data without being asked for a password',
+      (tester) async {
+    final repo = _StubAuthRepository();
+    await pumpAsGuest(tester, repo);
+
+    expect(find.text('Delete my data'), findsWidgets);
+    await tester.tap(find.text('Delete my data').last);
+    await tester.pumpAndSettle();
+
+    // The confirmation must not contain a password field — a guest has none.
+    expect(find.byType(CupertinoTextField), findsNothing);
+    await tester.tap(find.text('Delete').last);
+    await tester.pumpAndSettle();
+    expect(repo.capturedDeletePassword, isNull);
+  });
+
+  testWidgets('an account still gets Sign Out and the password prompt',
+      (tester) async {
+    final repo = _StubAuthRepository();
+    repo.presentedUser = MockUser(uid: 'account-uid', email: 'a@b.com');
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final provider = _buildProvider(repo);
+    await provider.initialize();
+    await tester.pumpWidget(_wrap(provider));
+    await tester.pump();
+
+    expect(find.text('Sign Out'), findsOneWidget);
+    expect(find.text('Delete Account'), findsOneWidget);
+    expect(find.text('Delete my data'), findsNothing);
   });
 }

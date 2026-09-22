@@ -7,6 +7,7 @@ class DeleteAccountUseCase {
   final IAuthRepository _repository;
   const DeleteAccountUseCase(this._repository);
 
-  Future<ServiceResult<void>> call({required String password}) =>
+  /// [password] is null for a guest (ADR 0014) — no reauthentication.
+  Future<ServiceResult<void>> call({required String? password}) =>
       _repository.deleteAccount(password: password);
 }

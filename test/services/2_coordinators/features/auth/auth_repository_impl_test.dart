@@ -14,6 +14,28 @@ import 'package:rivr/services/2_coordinators/features/auth/auth_repository_impl.
 // ── Stubs ───────────────────────────────────────────────────────────────────
 
 class _StubAuthService implements IAuthService {
+
+  // ADR 0014 — guest mode.
+  int signInAnonymouslyCalls = 0;
+  int touchLastActiveCalls = 0;
+  int markPromptCalls = 0;
+
+  @override
+  Future<AuthResult> signInAnonymously() async {
+    signInAnonymouslyCalls++;
+    return AuthResult.success(null);
+  }
+
+  @override
+  Future<void> touchLastActive(String userId) async {
+    touchLastActiveCalls++;
+  }
+
+  @override
+  Future<void> markAccountPromptShown(String userId) async {
+    markPromptCalls++;
+  }
+
   AuthResult? signInResult;
   AuthResult? signUpResult;
   AuthResult? signOutResult;

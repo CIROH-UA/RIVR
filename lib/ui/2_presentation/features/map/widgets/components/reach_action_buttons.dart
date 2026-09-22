@@ -9,6 +9,7 @@ import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/models/1_domain/features/map/selected_reach.dart';
+import 'package:rivr/ui/2_presentation/features/auth/widgets/guest_account_prompt.dart';
 
 /// Extracted action buttons for the reach details bottom sheet.
 /// Handles: View Forecast, favorite toggle, share, copy, open in maps.
@@ -162,6 +163,9 @@ class _ReachActionButtonsState extends State<ReachActionButtons> {
 
         if (success) {
           _showFeedback('Added to favorites');
+          // ADR 0014 UX-3 — once per guest identity, after the first save,
+          // dismissable. Never a gate: the favourite is already saved.
+          if (mounted) await GuestAccountPrompt.maybeShow(context);
         }
       }
 

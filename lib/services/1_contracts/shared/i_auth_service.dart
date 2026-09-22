@@ -19,6 +19,19 @@ abstract class IAuthService {
     required String lastName,
   });
   Future<AuthResult> sendPasswordResetEmail({required String email});
+
+  /// ADR 0014 — sign in as a guest and make sure a `users/{uid}` document
+  /// exists with `isGuest: true`. Safe to call when already signed in: it
+  /// returns the current user untouched.
+  Future<AuthResult> signInAnonymously();
+
+  /// ADR 0014 — record a sign of life for guest garbage collection. Never
+  /// throws; a failed write is logged and ignored.
+  Future<void> touchLastActive(String userId);
+
+  /// ADR 0014 UX-3 — the one "create an account" prompt has been shown to
+  /// this identity. Never throws.
+  Future<void> markAccountPromptShown(String userId);
   Future<AuthResult> signOut();
   Future<bool> isBiometricAvailable();
   Future<bool> isBiometricEnabled();

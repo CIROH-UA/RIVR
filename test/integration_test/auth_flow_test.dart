@@ -174,13 +174,21 @@ void main() {
       expect(find.byType(LoginPage), findsOneWidget);
     });
 
-    testWidgets('successful registration shows email verification page',
+    testWidgets('successful registration lands in the app',
         (tester) async {
       authProvider = createAuthProvider(services);
       await authProvider.initialize();
 
       await tester.pumpWidget(buildTestApp(
-        home: AuthWrapper(),
+        // A real authenticated child: AuthWrapper's built-in placeholder
+        // holds a CupertinoActivityIndicator, and since ADR 0014 removed the
+        // verification gate a registered user REACHES it — pumpAndSettle
+        // then never returns.
+        home: AuthWrapper(
+          authenticatedChild: const CupertinoPageScaffold(
+            child: Center(child: Text('Home Screen')),
+          ),
+        ),
         services: services,
         authProvider: authProvider,
       ));
@@ -203,9 +211,16 @@ void main() {
       await tester.tap(find.text('Create Account'));
       await tester.pumpAndSettle();
 
-      // Should show email verification page
-      expect(find.byType(EmailVerificationPage), findsOneWidget);
-      expect(find.text('Verify your email'), findsOneWidget);
+      // ADR 0014 UX-4 — registration no longer ends at a wall. Verification
+      // is still requested (the email is sent) but it gates nothing: the
+      // person lands back in the app. The previous assertion here was the
+      // verification page, which is exactly the behaviour that made an
+      // unverified user unreachable while the verification emails were
+      // silently undeliverable for months.
+      expect(find.byType(EmailVerificationPage), findsNothing);
+      expect(find.text('Home Screen'), findsOneWidget);
+      expect(authProvider.needsEmailVerification, isTrue,
+          reason: 'recorded for the Account page banner, not enforced');
     });
   });
 
@@ -268,7 +283,8 @@ void main() {
   });
 
   group('Email verification flow', () {
-    testWidgets('verification page shows after registration', (tester) async {
+    testWidgets('registration lands in the app, not on the wall',
+        (tester) async {
       authProvider = createAuthProvider(services);
       await authProvider.initialize();
 
@@ -299,14 +315,12 @@ void main() {
       await tester.tap(find.text('Create Account'));
       await tester.pumpAndSettle();
 
-      // Should show verification page
-      expect(find.byType(EmailVerificationPage), findsOneWidget);
-      expect(find.text("I've Verified My Email"), findsOneWidget);
-      expect(find.text('Resend Verification Email'), findsOneWidget);
-      expect(find.text('Use a different email'), findsOneWidget);
+      // ADR 0014 UX-4 — the app, not EmailVerificationPage.
+      expect(find.text('Home Screen'), findsOneWidget);
+      expect(find.byType(EmailVerificationPage), findsNothing);
     });
 
-    testWidgets('successful email verification navigates to authenticated view',
+    testWidgets('verifying later clears the unverified state',
         (tester) async {
       authProvider = createAuthProvider(services);
       await authProvider.initialize();
@@ -337,14 +351,18 @@ void main() {
       await tester.tap(find.text('Create Account'));
       await tester.pumpAndSettle();
 
-      // Now on verification page - simulate server-side verification
-      services.auth.simulateEmailVerification();
+      // Already in the app, with the unverified state recorded.
+      expect(find.text('Home Screen'), findsOneWidget);
+      expect(authProvider.needsEmailVerification, isTrue);
 
-      // Tap "I've Verified My Email"
-      await tester.tap(find.text("I've Verified My Email"));
+      // The person clicks the link in their inbox, then taps the Account
+      // page's "I've verified it" — which is checkEmailVerified(), the same
+      // call the old full-page gate made.
+      services.auth.simulateEmailVerification();
+      await authProvider.checkEmailVerified();
       await tester.pumpAndSettle();
 
-      // Should navigate to authenticated view
+      expect(authProvider.needsEmailVerification, isFalse);
       expect(find.text('Home Screen'), findsOneWidget);
     });
   });

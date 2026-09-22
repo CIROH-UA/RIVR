@@ -360,6 +360,12 @@ flutter test --coverage                         # With coverage report
 flutter test integration_test/                  # Integration tests
 ```
 
+**`test/integration_test/` is GREEN.** Measured 2026-09-22 on a clean tree: 0
+failures. An older note in this repo and in memory claimed it carried ~27
+long-standing pre-existing failures; that was wrong, and it hid real
+regressions — a guest-mode change produced exactly 27 new ones, which looked
+like the expected noise. Treat any failure there as new until proven otherwise.
+
 ## Key File Paths
 
 | File | Purpose |
