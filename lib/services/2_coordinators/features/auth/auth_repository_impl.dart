@@ -155,6 +155,26 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 
   @override
+  Future<ServiceResult<User?>> signInAnonymously() async {
+    try {
+      final result = await _authService.signInAnonymously();
+      return _mapAuthResult(result);
+    } catch (e) {
+      return ServiceResult.failure(
+        ServiceException.fromError(e, context: 'signInAnonymously'),
+      );
+    }
+  }
+
+  @override
+  Future<void> touchLastActive(String userId) =>
+      _authService.touchLastActive(userId);
+
+  @override
+  Future<void> markAccountPromptShown(String userId) =>
+      _authService.markAccountPromptShown(userId);
+
+  @override
   Future<ServiceResult<void>> sendEmailVerification() async {
     try {
       final result = await _authService.sendEmailVerification();
@@ -179,25 +199,35 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 
   @override
-  Future<ServiceResult<void>> deleteAccount({required String password}) async {
+  Future<ServiceResult<void>> deleteAccount({required String? password}) async {
     // Snapshot the uid *before* anything destructive — once auth/Firestore
     // calls run, currentUser may flip to null mid-flow.
-    final uid = _authService.currentUser?.uid;
-    if (uid == null) {
+    final user = _authService.currentUser;
+    final uid = user?.uid;
+    if (user == null || uid == null) {
       return ServiceResult.failure(
         const ServiceException.auth('No user signed in'),
       );
     }
 
     try {
-      // Step 1: Reauthenticate. Firebase requires a recent sign-in for delete().
-      final reauthResult = await _authService.reauthenticateWithPassword(
-        password: password,
-      );
-      if (!reauthResult.isSuccess) {
-        return ServiceResult.failure(
-          ServiceException.auth(reauthResult.error ?? 'Reauthentication failed'),
+      // Step 1: Reauthenticate. Firebase requires a recent sign-in for delete()
+      // — except for a guest (ADR 0014 B7), who has no password to give and
+      // whose anonymous session is accepted as is.
+      if (!user.isAnonymous) {
+        if (password == null || password.isEmpty) {
+          return ServiceResult.failure(
+            const ServiceException.auth('Password required'),
+          );
+        }
+        final reauthResult = await _authService.reauthenticateWithPassword(
+          password: password,
         );
+        if (!reauthResult.isSuccess) {
+          return ServiceResult.failure(
+            ServiceException.auth(reauthResult.error ?? 'Reauthentication failed'),
+          );
+        }
       }
 
       // Step 2: Drop this device's FCM token unconditionally (the doc is about

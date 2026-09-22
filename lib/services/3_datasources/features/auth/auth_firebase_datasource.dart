@@ -50,6 +50,40 @@ class AuthFirebaseDatasource {
         );
   }
 
+  /// ADR 0014 — guest identity. Firebase mints a uid with no credential.
+  /// Throws `operation-not-allowed` when the provider is off in the console.
+  Future<UserCredential> signInAnonymously() async {
+    return _firebaseAuth.signInAnonymously().timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => throw FirebaseAuthException(
+            code: 'timeout',
+            message: 'Guest sign-in timed out',
+          ),
+        );
+  }
+
+  /// ADR 0014 — turn a guest into an account IN PLACE. The uid, and with it
+  /// every Firestore document, survives; only the credential is added.
+  /// Throws `email-already-in-use` / `credential-already-in-use` when the
+  /// address already has an account (the caller offers Sign In instead).
+  Future<UserCredential> linkWithEmailPassword({
+    required User user,
+    required String email,
+    required String password,
+  }) async {
+    final credential = EmailAuthProvider.credential(
+      email: email.trim(),
+      password: password,
+    );
+    return user.linkWithCredential(credential).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => throw FirebaseAuthException(
+            code: 'timeout',
+            message: 'Account creation timed out',
+          ),
+        );
+  }
+
   Future<void> updateDisplayName(User user, String displayName) async {
     await user.updateDisplayName(displayName);
   }

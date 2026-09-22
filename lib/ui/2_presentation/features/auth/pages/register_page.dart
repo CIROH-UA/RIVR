@@ -14,7 +14,16 @@ import 'package:rivr/utils/auth/email_validator.dart';
 class RegisterPage extends StatefulWidget {
   final VoidCallback onSwitchToLogin;
 
-  const RegisterPage({super.key, required this.onSwitchToLogin});
+  /// Called after a successful registration. When the page is pushed as a
+  /// route from the Account page (ADR 0014), this pops it; inside the
+  /// AuthWrapper it is unused because the wrapper re-renders on auth state.
+  final VoidCallback? onSuccess;
+
+  const RegisterPage({
+    super.key,
+    required this.onSwitchToLogin,
+    this.onSuccess,
+  });
 
   @override
   State<RegisterPage> createState() => _RegisterPageState();
@@ -94,12 +103,13 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Future<void> _handleRegister() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await authProvider.register(
+    final ok = await authProvider.register(
       email: _emailController.text.trim(),
       password: _passwordController.text,
       firstName: _firstNameController.text.trim(),
       lastName: _lastNameController.text.trim(),
     );
+    if (ok && mounted) widget.onSuccess?.call();
   }
 
   @override
@@ -126,7 +136,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
                   // Title
                   Text(
-                    'Create your',
+                    'Keep your rivers on every device',
                     style: TextStyle(
                       fontSize: 16,
                       color: CupertinoColors.systemGrey2,

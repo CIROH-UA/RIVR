@@ -56,6 +56,10 @@ visible to a user after download and every one of them bites later.
 | M11 | The only place the user agrees to the Terms and Privacy Policy is the **login page** footer ("By continuing, you agree to…"). A guest never sees the login page. | `login_page.dart:243` |
 | M12 | Onboarding runs **before** auth (`main.dart:246` chooses `OnboardingPage` vs `AuthWrapper` on `hasSeenOnboarding`), so the onboarding screens are the natural place for the consent line and for the first notification/location explanation. | `main.dart` 133–248 |
 | M13 | Only **four** files under `lib/services` and `lib/ui/1_state` read the current uid. The blast radius of "which uid" is small. | `grep -rl _currentUserIdOrNull\|currentUser?.uid\|currentUserId` |
+| M15 | **The anonymous provider is now ENABLED** on ciroh-rivr-app (B1 done, 2026-09-21), via `PATCH …/config?updateMask=signIn.anonymous.enabled`. Read back as `{'enabled': True}`. | Identity Toolkit admin v2 |
+| M16 | **The verification gate lived in TWO places, not one.** `AuthWrapper` showed the page, but `AuthProvider.isAuthenticated` was `_currentUser != null && !_isAwaitingEmailVerification` — so removing the wrapper branch alone left every unverified user un-authenticated and back at the login page. Found by an integration test hanging, not by review. | implementation, 2026-09-21 |
+| M17 | **`firebase_auth_mocks`' `MockUser` defaults `isEmailVerified` to TRUE.** A guest fixture built without overriding it has `emailVerified == true`, which makes any test of the verification gate pass no matter what the gate does. Two guards were vacuous until the fixture was corrected; the mutation that should have failed them passed cleanly first time. | mutation check, 2026-09-21 |
+| M18 | **The integration suite is GREEN at baseline** — 0 failures on `test/integration_test/` before this work. This DISPROVES the standing note (MEMORY.md, and `~27 long-standing pre-existing failures` in CLAUDE.md's test section) that the suite carries ~27 known failures. All 27 failures seen during this change were caused by it, and all 27 are now fixed. | `git stash` + `flutter test test/integration_test/`, 2026-09-22 |
 | M14 | Firebase's **auto-delete of anonymous users is off** (`autoDeleteAnonymousUsers` absent from config). | same config read as M1 |
 
 ### Estimated
@@ -80,6 +84,7 @@ visible to a user after download and every one of them bites later.
 | # | Claim | Why |
 |---|---|---|
 | D1 | *"The app has no email-verification gate"* (asserted by the assistant 2026-09-07). It does: `auth_provider.dart:135`. Recorded in ADR form here because guest mode depends on it. | M4 |
+| D4 | *"The integration_test suite has ~27 long-standing pre-existing failures"* (MEMORY.md; CLAUDE.md test section). Measured 2026-09-22 on a clean tree: **0 failures.** The note is stale and was masking real regressions — the 27 failures this change produced looked exactly like the number the note predicted, which is the worst possible coincidence for a stale claim to have. | M18 |
 | D3 | *"The favourites empty state says nothing about the map"* (asserted in the first draft of this ADR, 2026-09-21). It says exactly the right thing; no copy change is needed. | `favorites_page.dart:456` |
 | D2 | *"Keep guest favourites on-device only and skip Firebase entirely."* Rejected: every data surface, the store write-through, alerts and the Weekly Outlook key on a uid in Firestore (M6–M8). A device-only guest would get no alerts — the app's most important feature for a flood — and would need a migration step at sign-up. Anonymous auth gives the same result with the platform doing the work. | M6, M7, M8 |
 
@@ -283,3 +288,39 @@ who registered but never verified are the only population that still hits
 
 Everything else above is either measured or has a check attached, and is
 proposed as written.
+
+---
+
+## Verification status (2026-09-22)
+
+**Measured**
+
+| What | How |
+|---|---|
+| The whole suite is green with the change in: **1,426 Dart tests** (baseline 1,404 — 22 added) and **468 Cloud Functions tests** (baseline 454 — 14 added). `flutter analyze` clean apart from one pre-existing deprecation. | `flutter test`, `npm --prefix functions test` |
+| Every critical path is **mutation-checked** — reverting the behaviour fails a test: register-links-instead-of-creates; sign-in-merges-the-guest; the failed-sign-in restore; the verification gate on BOTH code paths; the Account page's guest branch; launch-opens-a-guest. | see the table in the guards section |
+| **An existing signed-in account is unaffected.** A debug build of this branch launched on the iPhone 17 Pro simulator with a previously signed-in account and rendered its 7 favourites in 1,771 ms, with live flow values and the usual out-of-sync banner. | `flutter run`, 2026-09-22 |
+| The anonymous provider is enabled on the project (M15). | admin v2 config read-back |
+
+**Unverified — the guest path has NOT been exercised in a running app**
+
+Nobody has yet watched the app open as a guest, save a river, see the prompt,
+create an account and keep the river. The tests assert each step, and the
+mutations prove the tests bite, but that is not the same thing and must not be
+written up as if it were.
+
+The blocker is this machine, not the code: **Xcode's `Simulator.app` and
+`SimulatorKit.framework` are both absent** from
+`/Applications/Xcode.app/Contents/Developer/`, so there is no simulator window
+to drive and `idb ui tap` fails with *"SimulatorKit is required for HID
+interactions"*. This contradicts `reference_sim_driving_setup` memory, which
+records idb as working since 2026-07-24. Bypassing the onboarding gate by
+writing `flutter.has_seen_onboarding` into the app's preferences — by
+PlistBuddy and by `simctl spawn defaults write`, both confirmed written and
+read back — did not take either, so `shared_preferences` is reading from
+somewhere else on this Flutter version.
+
+**The cheapest test that would settle it** is the one Apple will run anyway:
+a TestFlight build on a real iPhone, fresh install, following ADR 0014's
+guard 8. Either repair Xcode (`xcode-select --install`, or reinstall Xcode so
+the Simulator ships with it) or verify on device.

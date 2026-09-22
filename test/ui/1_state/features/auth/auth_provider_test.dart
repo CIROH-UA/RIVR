@@ -14,6 +14,7 @@ import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_in_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_up_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/sign_out_usecase.dart';
+import 'package:rivr/models/2_usecases/features/auth/sign_in_anonymously_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/reset_password_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/enable_biometric_usecase.dart';
 import 'package:rivr/models/2_usecases/features/auth/disable_biometric_usecase.dart';
@@ -28,6 +29,37 @@ import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 // ---------------------------------------------------------------------------
 
 class _MockAuthRepository implements IAuthRepository {
+
+  // ADR 0014 — guest mode.
+  int signInAnonymouslyCalls = 0;
+  int touchLastActiveCalls = 0;
+  int markPromptCalls = 0;
+
+  /// ADR 0014 UX-9 — guest sign-in can fail: offline on first launch, or the
+  /// Anonymous provider switched off in the console.
+  bool guestSignInFails = false;
+
+  @override
+  Future<ServiceResult<fb.User?>> signInAnonymously() async {
+    signInAnonymouslyCalls++;
+    if (guestSignInFails) {
+      return ServiceResult.failure(
+          const ServiceException.auth('offline'));
+    }
+    simulateGuest();
+    return ServiceResult.success(_signedInUser);
+  }
+
+  @override
+  Future<void> touchLastActive(String userId) async {
+    touchLastActiveCalls++;
+  }
+
+  @override
+  Future<void> markAccountPromptShown(String userId) async {
+    markPromptCalls++;
+  }
+
   final StreamController<fb.User?> _authStateController =
       StreamController<fb.User?>.broadcast();
 
@@ -49,6 +81,17 @@ class _MockAuthRepository implements IAuthRepository {
   void simulateAuthStateNull() {
     _signedInUser = null;
     _authStateController.add(null);
+  }
+
+  /// ADR 0014 — a guest session: anonymous, no email, emailVerified false.
+  void simulateGuest() {
+    // isEmailVerified must be FALSE: firebase_auth_mocks defaults it to true,
+    // but a real anonymous user's emailVerified is always false — and that is
+    // the whole reason the verification gate had to learn about guests. A
+    // guest fixture with emailVerified:true makes the gate tests vacuous.
+    _signedInUser =
+        MockUser(isAnonymous: true, isEmailVerified: false, uid: 'guest-uid');
+    _authStateController.add(_signedInUser);
   }
 
   /// Simulate sign-in (used by the mock use case wrapper)
@@ -150,7 +193,7 @@ class _MockAuthRepository implements IAuthRepository {
       ServiceResult.success(_emailVerified);
 
   @override
-  Future<ServiceResult<void>> deleteAccount({required String password}) async {
+  Future<ServiceResult<void>> deleteAccount({required String? password}) async {
     if (_signedInUser == null) {
       return ServiceResult.failure(
         const ServiceException.auth('No user signed in'),
@@ -273,6 +316,7 @@ void main() {
       signInUseCase: SignInUseCase(mockAuthRepo),
       signUpUseCase: SignUpUseCase(mockAuthRepo),
       signOutUseCase: SignOutUseCase(mockAuthRepo),
+      signInAnonymouslyUseCase: SignInAnonymouslyUseCase(mockAuthRepo),
       resetPasswordUseCase: ResetPasswordUseCase(mockAuthRepo),
       enableBiometricUseCase: EnableBiometricUseCase(mockAuthRepo),
       disableBiometricUseCase: DisableBiometricUseCase(mockAuthRepo),
@@ -358,8 +402,15 @@ void main() {
 
     group('register', () {
       test(
-          'does not set success message on successful registration',
+          'confirms, and does not strand the user on a verification wall',
           () async {
+        // Before ADR 0014 this asserted the opposite: no message, and
+        // isAwaitingEmailVerification true, because registration ENDED at
+        // EmailVerificationPage. Registration now happens inside the app
+        // (usually by linking a guest), so the user stays where they were
+        // and needs telling that it worked. The unverified state is still
+        // recorded — it drives the Account page banner — it just no longer
+        // gates anything.
         final result = await provider.register(
           email: 'new@example.com',
           password: 'pass123',
@@ -368,8 +419,7 @@ void main() {
         );
 
         expect(result, isTrue);
-        expect(provider.successMessage, isEmpty);
-        expect(provider.isAwaitingEmailVerification, isTrue);
+        expect(provider.successMessage, isNotEmpty);
       });
 
       test('sets error message on failed registration', () async {
@@ -483,16 +533,20 @@ void main() {
                 'explicit signOut() does');
       });
 
-      test('a signed-out cold start clears nothing', () async {
+      test('a cold start with no session at all clears nothing', () async {
+        // ADR 0014 changed the premise: the app now signs in as a guest on
+        // launch, so "signed out at launch" only happens when guest sign-in
+        // itself fails (offline, or the provider switched off). The guard is
+        // the same one — a null that follows NO user is a cold start, not a
+        // sign-out, and clearing here wipes the pins file on every launch.
+        mockAuthRepo.guestSignInFails = true;
+
         await provider.initialize();
-        // The stream's first word is null — nobody was signed in.
         mockAuthRepo.simulateAuthStateNull();
         await Future<void>.delayed(Duration.zero);
 
-        expect(riverCache.clearCalls, 0,
-            reason: 'a null that follows no user is a cold start, not a '
-                'sign-out — clearing here wipes the pins file on every '
-                'launch of a signed-out app');
+        expect(provider.guestSignInError, isNotNull);
+        expect(riverCache.clearCalls, 0);
       });
     });
 
@@ -611,4 +665,98 @@ void main() {
             'describes what the app does');
   });
 
+
+  // ── ADR 0014 guest mode ────────────────────────────────────────────────────
+
+  group('guest mode', () {
+    test('a guest is never held at the verification wall', () async {
+      // An anonymous user's emailVerified is ALWAYS false. Before ADR 0014
+      // the gate keyed on that alone, so every guest would have been dumped
+      // on EmailVerificationPage with no way past — the 5.1.1(v) rejection
+      // again, with extra steps.
+      mockAuthRepo.simulateGuest();
+
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(provider.isGuest, isTrue);
+      expect(provider.isAwaitingEmailVerification, isFalse);
+      expect(provider.needsEmailVerification, isFalse,
+          reason: 'a guest has no email to verify');
+      expect(provider.isAuthenticated, isTrue,
+          reason: 'the app opens for a guest like any other user');
+    });
+
+    test('a guest arriving on the auth stream is not gated either', () async {
+      // Two code paths set this flag — the initial read in initialize() and
+      // the authStateChanges listener. A guest reaches the second one when
+      // the session is created AFTER startup (the UX-9 retry, or a deleted
+      // guest being replaced). Mutating either must fail a test.
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      mockAuthRepo.simulateGuest();
+      await Future.delayed(Duration.zero);
+
+      expect(provider.isGuest, isTrue);
+      expect(provider.isAwaitingEmailVerification, isFalse);
+    });
+
+    test('an unverified ACCOUNT is recorded but not gated', () async {
+      mockAuthRepo.seedUser(
+          email: 'a@b.com', password: 'pw', emailVerified: false);
+      mockAuthRepo.simulateSignIn('a@b.com');
+
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(provider.isGuest, isFalse);
+      expect(provider.needsEmailVerification, isTrue,
+          reason: 'the Account page shows a banner for this');
+    });
+
+    test('no session at all opens one as a guest', () async {
+      expect(mockAuthRepo.currentUser, isNull);
+
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(mockAuthRepo.signInAnonymouslyCalls, 1,
+          reason: 'UX-1: launch goes to the app, not to a login wall');
+      expect(provider.isGuest, isTrue);
+    });
+
+    test('an existing account is never replaced by a guest', () async {
+      mockAuthRepo.seedUser(email: 'a@b.com', password: 'pw');
+      mockAuthRepo.simulateSignIn('a@b.com');
+
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(mockAuthRepo.signInAnonymouslyCalls, 0);
+      expect(provider.isGuest, isFalse);
+    });
+
+    test('a sign of life is recorded for the garbage collector', () async {
+      mockAuthRepo.simulateGuest();
+
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(mockAuthRepo.touchLastActiveCalls, greaterThan(0),
+          reason: 'guestGcDaily reaps guests on lastActiveAt alone');
+    });
+
+    test('signing out a guest is refused, not performed', () async {
+      mockAuthRepo.simulateGuest();
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      await provider.signOut();
+
+      expect(provider.isGuest, isTrue,
+          reason: 'an anonymous uid signed out can never be recovered');
+      expect(provider.errorMessage, isNotEmpty);
+    });
+  });
 }

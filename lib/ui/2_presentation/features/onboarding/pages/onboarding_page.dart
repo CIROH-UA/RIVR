@@ -6,6 +6,7 @@ import 'package:rivr/ui/2_presentation/features/onboarding/widgets/onboarding_pa
 import 'package:rivr/ui/2_presentation/features/onboarding/widgets/page_indicator.dart';
 import 'package:rivr/services/4_infrastructure/onboarding/onboarding_service.dart';
 import 'package:rivr/ui/2_presentation/features/auth/pages/auth_coordinator.dart';
+import 'package:rivr/ui/2_presentation/shared/widgets/legal_consent_line.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
@@ -158,6 +159,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 ),
               ),
             ),
+            // ADR 0014 UX-5 — the app opens without an account, so this is
+            // the one screen every person passes. The consent line used to
+            // live only on the login page, which a guest never sees.
+            if (_isLastPage) ...[
+              const SizedBox(height: 12),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: LegalConsentLine(),
+              ),
+            ],
             const SizedBox(height: 32),
           ],
         ),
