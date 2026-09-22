@@ -543,6 +543,17 @@ class AuthProvider with ChangeNotifier {
       if (result.isSuccess && result.data) {
         _setLoading(false);
         _isAwaitingEmailVerification = false;
+        // Refresh the cached identity, not just the flag. The Account page's
+        // banner is driven by `needsEmailVerification`, which reads
+        // `_currentUser.isEmailVerified` — so without this the banner stayed
+        // on screen after a successful verification and the button looked
+        // dead. Reported on build 832 (2026-09-22): "I tapped 'I've verified
+        // it' and nothing happened", while Firebase had the address marked
+        // verified the whole time.
+        final refreshed = _authRepository.currentUser;
+        if (refreshed != null) {
+          _currentUser = AuthUser.fromFirebaseUser(refreshed);
+        }
         _setSuccess('Email verified successfully!');
         notifyListeners();
         return true;
