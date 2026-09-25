@@ -58,9 +58,19 @@ class UserSettingsDto {
     this.accountPromptShown = false,
   });
 
-  factory UserSettingsDto.fromJson(Map<String, dynamic> json) {
+  /// [fallbackUserId] is the document id. A document whose `userId` is
+  /// missing used to throw here, and a throw on this path is not a blank
+  /// field — it is favourites that cannot be saved and a map that cannot be
+  /// used (build 838). The id is always known by the caller, so use it.
+  /// Stand-in for a date a stub document never wrote.
+  static const String _epoch = '1970-01-01T00:00:00.000Z';
+
+  factory UserSettingsDto.fromJson(
+    Map<String, dynamic> json, {
+    String? fallbackUserId,
+  }) {
     return UserSettingsDto(
-      userId: json['userId'] as String,
+      userId: json['userId'] as String? ?? fallbackUserId ?? '',
       // Guests (ADR 0014) have no email or name; the document stores ''.
       email: json['email'] as String? ?? '',
       firstName: json['firstName'] as String? ?? '',
@@ -91,9 +101,13 @@ class UserSettingsDto {
       customBackgroundImagePaths: List<String>.from(
         json['customBackgroundImagePaths'] as List? ?? [],
       ),
-      lastLoginDate: json['lastLoginDate'] as String,
-      createdAt: json['createdAt'] as String,
-      updatedAt: json['updatedAt'] as String,
+      // Dates are tolerant for the same reason as userId: a document missing
+      // one is a document we can still work with, while a throw here takes
+      // the whole app down for that user. `toEntity` parses these, so the
+      // fallback has to be a valid ISO-8601 string, not ''.
+      lastLoginDate: json['lastLoginDate'] as String? ?? _epoch,
+      createdAt: json['createdAt'] as String? ?? _epoch,
+      updatedAt: json['updatedAt'] as String? ?? _epoch,
       isGuest: json['isGuest'] as bool? ?? false,
       lastActiveAt: json['lastActiveAt'] as String?,
       accountPromptShown: json['accountPromptShown'] as bool? ?? false,

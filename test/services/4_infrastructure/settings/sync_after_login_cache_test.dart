@@ -95,6 +95,34 @@ void main() {
         reason: 'the rivers still have to survive the sync');
   });
 
+
+  test('a guest can save a favourite against a stub document', () {
+    // REGRESSION, build 838 (2026-09-25). This is the failure Jerson saw:
+    // "Failed to update favorites" on every stream. The guest document had
+    // been created as a stub with only lastActiveAt, so reading it threw and
+    // FavoritesService could never get past getUserSettings.
+    //
+    // Driven at the datasource level because that is where the throw was.
+    return () async {
+      await db.collection('users').doc(uid).set({
+        'lastActiveAt': '2026-09-25T11:41:00.000Z',
+      });
+
+      final settings = await service.getUserSettings(uid);
+
+      expect(settings, isNotNull,
+          reason: 'a stub must read as empty settings, not an exception');
+      expect(settings!.userId, uid);
+      expect(settings.favoriteReachIds, isEmpty);
+
+      // And the favourite write that follows must land.
+      await service.saveUserSettings(
+        settings.copyWith(favoriteReachIds: ['23997208']),
+      );
+      expect((await doc())!['favoriteReachIds'], ['23997208']);
+    }();
+  });
+
   test('invalidateCache forces the next read to hit the datasource',
       () async {
     await service.saveUserSettings(guestSettings());

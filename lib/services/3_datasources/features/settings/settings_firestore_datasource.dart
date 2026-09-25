@@ -27,7 +27,8 @@ class SettingsFirestoreDatasource {
         .timeout(const Duration(seconds: 10));
 
     if (!doc.exists || doc.data() == null) return null;
-    return UserSettingsDto.fromJson(doc.data()!).toEntity();
+    return UserSettingsDto.fromJson(doc.data()!, fallbackUserId: doc.id)
+        .toEntity();
   }
 
   /// Write a complete settings object to Firestore.
