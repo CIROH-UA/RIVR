@@ -127,6 +127,13 @@ class AuthProvider with ChangeNotifier {
       isGuest && _currentUserSettings != null &&
       !_currentUserSettings!.accountPromptShown;
 
+  /// Bumped when this identity's stored data has changed underneath a
+  /// stable uid — today, when a guest's rivers are merged into the account
+  /// during sign-in. Anything caching per-identity data should include it in
+  /// its key, or it will keep serving what it read before the merge.
+  int _dataRevision = 0;
+  int get dataRevision => _dataRevision;
+
   /// Set when guest sign-in itself failed (provider off, offline on first
   /// launch). The wrapper falls back to the login page and shows this.
   String? _guestSignInError;
@@ -284,11 +291,15 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _clearMessages();
 
+    // The use case returns only after the merge has been written, so this is
+    // the first moment at which the account's stored list is complete.
     final result = await _signInUseCase(email: email, password: password);
 
     _setLoading(false);
 
     if (result.isSuccess) {
+      _dataRevision++;
+      notifyListeners();
       return true;
     } else {
       _setError(result.errorMessage ?? 'Sign in failed');

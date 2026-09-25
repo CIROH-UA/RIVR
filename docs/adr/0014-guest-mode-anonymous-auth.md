@@ -489,3 +489,23 @@ integration suite that a stale note once wrote off as "~27 known failures".
 2026". The Auth user was recreated twice, so its creation date is new; the
 Firestore document still carries the true `createdAt` of 2026-02-22. Not
 worth a migration.
+
+## Device findings — build 857, 2026-09-25 (Jerson, iPhone)
+
+**The river saved as a guest did not appear after signing in**, and
+pull-to-refresh did not bring it. Deleting a *different* river made it appear.
+
+| | |
+|---|---|
+| Cause (Measured from the code path) | `signInWithEmailAndPassword` merges the guest's rivers into the account **after** `_authDatasource.signIn` has returned — by which time Firebase has already switched the session and `authStateChanges` has fired. The page reloads on that identity change and reads the account's list **before the merge write lands**, then never reloads, because the identity does not change a second time. Deleting a river forced an unrelated reload, which is why that revealed it. |
+| Why 857's fix did not cover it | `ensureLoadedFor(uid)` is keyed on identity alone, and the identity was already correct. The list was stale, not misattributed. |
+| Fix | `AuthProvider` exposes a `dataRevision`, bumped once a sign-in **completes** — the first moment the account's stored list is whole, because the use case only returns after the merge is written. `FavoritesProvider.ensureLoadedFor` is keyed on `(identity, revision)`. A revision bump re-reads without blanking the list first, since it is the same person. |
+
+**Both halves mutation-checked:** ignoring the revision fails the favourites
+guard; never bumping it fails the auth guard. A failed sign-in deliberately
+does not bump, so a typo costs nothing.
+
+**Pattern note.** 857 fixed "the list belongs to the wrong person" and this
+fixes "the list is that person's, but stale". They look identical on screen
+and have different causes — which is why the guard now asserts the *contents*
+after a revision bump, not merely that a reload happened.
