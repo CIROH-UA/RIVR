@@ -87,12 +87,19 @@ class AuthService implements IAuthService {
         return AuthResult.failure('Sign in failed - no user returned');
       }
 
-      if (fromGuest) {
-        if (guestDoc != null) {
-          await _mergeGuestIntoAccount(credential.user!.uid, guestDoc);
-        }
-        await _deleteAbandonedGuest(guest);
+      if (fromGuest && guestDoc != null) {
+        await _mergeGuestIntoAccount(credential.user!.uid, guestDoc);
       }
+      // The abandoned guest is NOT deleted here. `User.delete()` was called
+      // on the stale anonymous reference and deleted the ACCOUNT THAT HAD
+      // JUST SIGNED IN instead — build 843, 2026-09-25: Jerson's real
+      // account of eight months was destroyed while the anonymous user it
+      // was supposed to remove survived. Its Firestore document was left
+      // orphaned with six favourites, which is how it was recovered.
+      //
+      // There is no safe moment to do it: once the sign-in succeeds the
+      // guest is no longer the current user, and before it succeeds nothing
+      // may be written at all. `guestGcDaily` reaps the orphan instead.
 
       AppLogger.info('AuthService', 'Sign in successful for user: ${credential.user!.uid}');
       return AuthResult.success(credential.user!);
@@ -328,25 +335,6 @@ class AuthService implements IAuthService {
       // The guest doc was neutralised, so nothing keeps firing; the rivers
       // are what is lost if this fails, and that is logged loudly.
       AppLogger.error('AuthService', 'guest merge into $accountUid failed: $e', e);
-    }
-  }
-
-  /// Delete the guest identity after its rivers have moved. ADR 0014 U3/B6:
-  /// whether `User.delete()` works on a user object that is no longer
-  /// current is not verified — so this is best effort, and the neutralised
-  /// document is inert either way until `guestGcDaily` reaps it.
-  Future<void> _deleteAbandonedGuest(User guest) async {
-    try {
-      await _users.doc(guest.uid).delete().timeout(const Duration(seconds: 10));
-    } catch (e) {
-      AppLogger.warning('AuthService', 'delete guest doc ${guest.uid}: $e');
-    }
-    try {
-      await _authDatasource.deleteUser(guest);
-      AppLogger.info('AuthService', 'Abandoned guest ${guest.uid} deleted');
-    } catch (e) {
-      AppLogger.warning(
-          'AuthService', 'guest ${guest.uid} left for guestGcDaily: $e');
     }
   }
 

@@ -148,7 +148,21 @@ class AuthFirebaseDatasource {
 
   /// Permanently delete the Firebase Auth account for [user].
   /// Caller is responsible for any Firestore / messaging cleanup beforehand.
+  ///
+  /// REFUSES to act on anyone but the CURRENT user. `User.delete()` on a
+  /// stale reference does not delete that user — it deleted the account that
+  /// had just signed in (build 843, 2026-09-25), destroying a real account
+  /// of eight months while the anonymous user it was meant to remove
+  /// survived. A stale reference is always a bug, so it throws rather than
+  /// guessing.
   Future<void> deleteUser(User user) async {
+    final current = _firebaseAuth.currentUser;
+    if (current == null || current.uid != user.uid) {
+      throw StateError(
+        'refusing to delete ${user.uid}: it is not the current user '
+        '(${current?.uid}). User.delete() acts on the current session.',
+      );
+    }
     await user.delete().timeout(
           const Duration(seconds: 15),
           onTimeout: () => throw FirebaseAuthException(
