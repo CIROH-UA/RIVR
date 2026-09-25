@@ -460,3 +460,32 @@ user.
 existing account now leaves an Auth user and a document behind until
 `guestGcDaily` sweeps them. That is a cost. Every attempt to avoid it has
 destroyed user data.
+
+## Device findings — build 848, 2026-09-25 (Jerson, iPhone)
+
+**The account survived a guest sign-in.** The 843 deletion defect is fixed:
+`Jerson.7@icloud.com` came through intact, the Account page rendered his name,
+address and verified badge, and the merge worked — the document holds all
+**10** rivers (his 8 plus the 2 saved as a guest) and all 22 custom names.
+
+**But the screen still showed only the guest's two.** Pull-to-refresh did not
+help.
+
+| | |
+|---|---|
+| Finding (Measured) | The data was never wrong. `users/tOJID…` held 10 rivers at `13:11:34`. The list ON SCREEN belonged to the guest. |
+| Cause | The favourites list is loaded once, from the page's `initState`, and `refreshAllFavorites` only refreshes the rivers **already in** `_favorites`. Signing in changes who the list belongs to without rebuilding the page, and nothing reloaded it — so pull-to-refresh was faithfully refreshing the wrong two rivers. |
+| Fix | `FavoritesProvider` records `_loadedForUserId` and gains `ensureLoadedFor(uid)`, which reloads when the identity differs and returns immediately when it does not. The page subscribes to `AuthProvider` and calls it on every identity change. Signing out empties the list rather than leaving one person's rivers on screen for the next. |
+
+**A regression caught by the existing suite, not by me.** Routing the "Try
+Again" button through `ensureLoadedFor` silently broke it: after a failed
+load the identity has *not* changed, so the conditional path correctly did
+nothing and retry became a no-op. `favorites_flow_test.dart` failed on it
+immediately. Forced reload and identity-change reload are now separate
+methods, and the difference is documented on both. This is the value of the
+integration suite that a stale note once wrote off as "~27 known failures".
+
+**Cosmetic consequence of the account restores:** "Member since September
+2026". The Auth user was recreated twice, so its creation date is new; the
+Firestore document still carries the true `createdAt` of 2026-02-22. Not
+worth a migration.

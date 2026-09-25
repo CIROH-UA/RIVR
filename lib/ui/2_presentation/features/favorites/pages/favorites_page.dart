@@ -1,5 +1,6 @@
 // lib/ui/2_presentation/features/favorites/pages/favorites_page.dart
 
+import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,7 +71,12 @@ class _FavoritesPageState extends State<FavoritesPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Initialize favorites when page loads
+    // ADR 0014: signing in from a guest changes WHO this list belongs to
+    // without rebuilding the page, and refreshAllFavorites only refreshes the
+    // rivers already loaded. Without this the guest's rivers stayed on screen
+    // and the account's never appeared, including after pull-to-refresh
+    // (build 848, 2026-09-25).
+    _auth = context.read<AuthProvider>()..addListener(_onIdentityMaybeChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeFavorites();
       _loadUserFlowUnitPreference();
@@ -94,6 +100,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   @override
   void dispose() {
+    _auth?.removeListener(_onIdentityMaybeChanged);
     appRouteObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -181,12 +188,38 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
+  AuthProvider? _auth;
+  String? _lastIdentity;
+
+  void _onIdentityMaybeChanged() {
+    final uid = _auth?.currentUser?.uid;
+    if (uid == _lastIdentity) return;
+    _lastIdentity = uid;
+    if (!mounted) return;
+    unawaited(context.read<FavoritesProvider>().ensureLoadedFor(uid));
+  }
+
+  /// First load, and any later identity change. Cheap to call repeatedly:
+  /// it does nothing when the list already belongs to this person.
   Future<void> _initializeFavorites() async {
     final authProvider = context.read<AuthProvider>();
     if (!authProvider.isAuthenticated) return;
 
+    _lastIdentity = authProvider.currentUser?.uid;
     final favoritesProvider = context.read<FavoritesProvider>();
-    await favoritesProvider.initializeAndRefresh();
+    await favoritesProvider.ensureLoadedFor(_lastIdentity);
+  }
+
+  /// A deliberate user-initiated reload — the "Try Again" button after a
+  /// failed load. It must NOT go through `ensureLoadedFor`, which correctly
+  /// does nothing when the identity is unchanged; that is exactly the case
+  /// here, and routing retry through it silently broke the button.
+  Future<void> _reloadFavorites() async {
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.isAuthenticated) return;
+
+    _lastIdentity = authProvider.currentUser?.uid;
+    await context.read<FavoritesProvider>().initializeAndRefresh();
   }
 
   // ADD: Load user's current flow unit preference
@@ -397,7 +430,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             ),
             const SizedBox(height: 24),
             CupertinoButton.filled(
-              onPressed: _initializeFavorites,
+              onPressed: _reloadFavorites,
               child: const Text('Try Again'),
             ),
           ],
