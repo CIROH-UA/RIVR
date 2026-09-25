@@ -419,3 +419,44 @@ write is never the thing that creates it.
 wrote to the user's document before an operation that could fail, and F5 let a
 best-effort write create the document that a real write was supposed to own.
 Both are "a small write, early, that turns out to be load-bearing".
+
+## Device findings — build 843, 2026-09-25 (Jerson, iPhone)
+
+**Test A passed** — a failed sign-in no longer touches a guest's rivers, which
+was the 838 fix working.
+
+**Then the worst defect of this work surfaced: signing in from a guest DELETED
+THE ACCOUNT.**
+
+| | |
+|---|---|
+| What happened | Jerson's real account `Jerson.7@icloud.com`, created 2026-02-22, vanished from Firebase Auth. So did `jersondevs@gmail.com`. |
+| Cause | After a successful guest sign-in, `_deleteAbandonedGuest` called `User.delete()` on the **stale anonymous reference** to tidy the orphan away. It deleted the user of the CURRENT session — the account that had just signed in. |
+| Proof (Measured) | The anonymous user `VpzNqmjM6IepuCtVanWpVLy3XtZ2` **still exists**. The account `tOJIDsbkqgcNF03rXF1TVVchUI52` is **gone from Auth**, while its Firestore document **survives**, holding 6 favourites and 22 custom names, `updatedAt 2026-09-22T16:02:16` — two seconds after the guest document was written at 16:02:14. That is the merge running, then the delete hitting the wrong user. The app's own `deleteAccount` deletes the document first, so a user-initiated deletion would have removed both. |
+| Recovery | The Auth user was recreated **with the same uid**, which reconnected the surviving document — all 6 rivers and every custom name intact. |
+
+**Fix.** The sign-in path no longer deletes anything, and
+`_deleteAbandonedGuest` is removed outright. There is no safe moment for it:
+after success the guest is not the current user, and before success nothing
+may be written at all. `guestGcDaily` reaps the orphan.
+
+**Structural guard.** `AuthFirebaseDatasource.deleteUser` now throws unless
+the target IS the current user. `User.delete()` acts on the session, so a
+stale reference is always a bug — it should fail loudly rather than delete
+someone else. The test fake mirrors the refusal, so the guard is exercised
+rather than merely present.
+
+**The pattern, three builds running.** 832 wrote to a document before an
+operation that could fail. 838 let a best-effort write create the document a
+real write owned. 843 called a destructive API on a reference that no longer
+meant what it said. Each is the same mistake wearing different clothes: **an
+incidental write or delete, placed where it looked harmless, turning out to be
+load-bearing.** The guards added are correspondingly structural rather than
+case-by-case — a failed attempt must leave the document byte-identical, a
+sign-of-life write may not create, and a delete may only target the current
+user.
+
+**Cost of the orphan, accepted deliberately.** A guest who signs into an
+existing account now leaves an Auth user and a document behind until
+`guestGcDaily` sweeps them. That is a cost. Every attempt to avoid it has
+destroyed user data.

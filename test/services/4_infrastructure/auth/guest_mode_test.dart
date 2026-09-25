@@ -95,6 +95,11 @@ class _FakeDatasource extends AuthFirebaseDatasource {
 
   @override
   Future<void> deleteUser(fb.User user) async {
+    // Mirrors the real datasource's refusal: deleting anyone but the current
+    // user is always a bug, because User.delete() acts on the session.
+    if (this.user == null || this.user!.uid != user.uid) {
+      throw StateError('refusing to delete a non-current user');
+    }
     deletedUids.add(user.uid);
     this.user = null;
   }
@@ -296,21 +301,36 @@ void main() {
       expect((account['favoriteSources'] as Map)['river-a'], 'nwm');
     });
 
-    test('the abandoned guest stops driving alerts and the store', () async {
+    test('signing in NEVER deletes an Auth user', () async {
+      // REGRESSION, build 843 (2026-09-25) — the worst defect of this work.
+      // After a successful guest sign-in the code called User.delete() on the
+      // stale anonymous reference to tidy it away. It deleted THE ACCOUNT
+      // THAT HAD JUST SIGNED IN. Jerson's real account of eight months was
+      // destroyed; the anonymous user it was meant to remove survived, and
+      // the account's Firestore document was left orphaned with six
+      // favourites — which is how it was recovered.
+      //
+      // There is no safe moment to delete the guest identity from this path,
+      // so nothing may be deleted here at all. guestGcDaily reaps the orphan.
       await service.signInWithEmailAndPassword(
         email: 'me@example.com',
         password: 'hunter2',
       );
 
-      // Deleted outright is the happy path; if the Auth delete fails the
-      // document must at least be inert.
-      final leftover = await doc('guest-uid');
-      if (leftover != null) {
-        expect(leftover['favoriteReachIds'], isEmpty);
-        expect(leftover['fcmTokens'], isEmpty);
-        expect(leftover['enableNotifications'], isFalse);
-      }
-      expect(ds.deletedUids, contains('guest-uid'));
+      expect(ds.deletedUids, isEmpty,
+          reason: 'no Auth user may be deleted while signing in — the stale '
+              'reference resolves to the CURRENT user');
+    });
+
+    test('the guest document survives for the garbage collector', () async {
+      await service.signInWithEmailAndPassword(
+        email: 'me@example.com',
+        password: 'hunter2',
+      );
+
+      // Deliberately left intact: an orphan costs money until guestGcDaily
+      // sweeps it, while any attempt to tidy it here costs an account.
+      expect(await doc('guest-uid'), isNotNull);
     });
 
     test('a failed sign-in does not touch the guest document at all',
