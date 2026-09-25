@@ -204,6 +204,54 @@ headroom now; a stream-order ladder on the flood tileset is the next lever.
 Always compare the output feature count to a known expected number. Exit status
 and "done" messages have never caught any of them.
 
+### Guest mode — the app opens without an account (ADR 0014)
+
+**Launch signs the person in ANONYMOUSLY and goes straight to the app.** The
+map, forecasts, favourites, flood alerts and the Weekly Outlook all work with
+no personal information; an account is optional and only carries saved rivers
+to another device. This exists because App Review rejected 2026.2.2 (805)
+under Guideline 5.1.1(v) for putting the map behind registration.
+
+**Creating an account LINKS, it does not create.** `linkWithCredential` keeps
+the uid, so favourites, alert settings and custom names are untouched and
+nothing migrates. Signing in to an *existing* account merges the guest's
+rivers into it (the account wins every conflict).
+
+**Five rules that were each learned by breaking production, 832 → 862. Do not
+undo any of them:**
+
+1. **Nothing is written to a guest's document until the sign-in has
+   SUCCEEDED.** The first version cleared favourites beforehand and restored
+   them on failure; the restore did not run and a tester's saved rivers were
+   destroyed. A repair-afterwards design only has to fail once, and it fails
+   on the network.
+2. **`deleteUser` refuses anyone but the current user.** `User.delete()` acts
+   on the session, so calling it on a stale anonymous reference deleted the
+   account that had just signed in — a real account of eight months. The
+   datasource now throws instead.
+3. **The sign-in path deletes NOTHING.** The orphaned guest is left for
+   `guestGcDaily` (90 days idle, refuses >50% or >500 per run, never touches
+   a user with a sign-in provider). An orphan costs money; tidying it inline
+   cost an account.
+4. **A best-effort write may not create.** `touchLastActive` used
+   `set(merge:)`, won a race against the real settings write, and left a stub
+   document with no `userId` — guests could not save a single favourite. It
+   uses `update` now, and a document without `userId` is treated as a stub
+   and filled in.
+5. **Anything cached per-identity must key on `(uid, AuthProvider.dataRevision)`.**
+   The merge lands *after* Firebase switches the session, so a reload driven
+   by the identity change alone reads the account's list before the merge and
+   never reloads again. `UserSettingsService.syncAfterLogin` also invalidates
+   its cache first, because linking keeps the uid.
+
+**The email-verification screen is gone as a gate.** It is an Account-page
+banner; an unverified account is fully usable. `isAuthenticated` means
+"signed in at all", guest included.
+
+**Guests never get Sign Out** — an anonymous uid signed out can never be
+recovered, so the button would silently destroy their rivers. They get
+"Delete my data" instead, which needs no password.
+
 ### Key Patterns
 
 - **Layer-first structure:** `models/` (entities + use cases) → `services/` (contracts + coordinators + datasources + infrastructure + DI) → `ui/` (state + presentation)
