@@ -387,3 +387,35 @@ commit. Deploy with `firebase deploy --only firestore:rules`.
 **Verification email delivery works.** The address was verified through the
 emailed link, which is the first confirmation since the sender was repaired
 on 2026-09-07.
+
+## Device findings — build 838, 2026-09-25 (Jerson, iPhone)
+
+**Guests could not save a favourite at all.** Every stream returned "Failed to
+update favorites".
+
+| # | Finding | Method |
+|---|---|---|
+| F4 | The guest's document was a **stub**: `users/MoomqKnWHvTWFWd6OzW7Gc3TJvi2` held only `favoriteReachIds`, `favoriteSources`, `lastActiveAt`, `updatedAt` — **no `userId`**, no defaults, no `isGuest`. | Firestore read, 2026-09-25 |
+| F5 | **`touchLastActive` created it.** It wrote through `set(merge: true)`, which creates. The auth-state listener fires the instant the anonymous user exists and calls it, so the stub landed before `signInAnonymously` ran its `_readUserDoc` check — which then saw a document and skipped `_createUserSettings` entirely. | code path + F4's field set |
+| F6 | **`UserSettingsDto.fromJson` cast `userId` unconditionally**, so reading a stub threw `type 'Null' is not a subtype of type 'String'`. `FavoritesService.addFavorite` never got past `getUserSettings`, and the throw surfaced as "Failed to update favorites". `lastLoginDate`, `createdAt` and `updatedAt` had the same unconditional cast. | test reproduction |
+
+**Fixes.** `touchLastActive` uses `update` and can no longer create anything;
+a document without `userId` is treated as a stub and filled in rather than
+trusted; and `fromJson` takes the document id as a fallback and tolerates
+missing dates. All four mutation-checked. Jerson's stub was repaired by hand
+and kept its one favourite.
+
+**Why the existing tests did not catch it — the important part.** Every
+guest-mode test set itself up by calling `AuthService.signInAnonymously()`
+directly, so none of them ever exercised the real startup ORDER: provider
+`initialize()` → anonymous user created → auth-state listener fires →
+`_loadUserSettings` → `touchLastActive`, racing the settings write that had
+not happened yet. A suite that always builds its own happy path cannot see an
+ordering defect. There is now a provider-level guard that drives
+`initialize()` and asserts on the resulting DOCUMENT — that a sign-of-life
+write is never the thing that creates it.
+
+**This is the second consecutive build broken by the same root habit**: F1
+wrote to the user's document before an operation that could fail, and F5 let a
+best-effort write create the document that a real write was supposed to own.
+Both are "a small write, early, that turns out to be load-bearing".

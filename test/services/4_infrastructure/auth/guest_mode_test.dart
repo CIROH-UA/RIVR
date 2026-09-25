@@ -143,11 +143,41 @@ void main() {
       expect(await doc('guest-uid'), isNull);
     });
 
+
+    test('the sign of life never creates a stub document', () async {
+      // REGRESSION, build 838 (2026-09-25): guests could not save favourites
+      // at all. The auth-state listener calls touchLastActive the instant the
+      // anonymous user exists; it used set-with-merge, which CREATED a
+      // document holding only `lastActiveAt`. signInAnonymously then saw a
+      // document and skipped writing the real settings, and every later read
+      // threw on the missing `userId`.
+      await service.touchLastActive('never-signed-in');
+
+      expect(await doc('never-signed-in'), isNull,
+          reason: 'only signInAnonymously and register may create a document');
+    });
+
+    test('a stub document is filled in, not trusted', () async {
+      // The other half: if a stub somehow exists (an older build left one),
+      // signing in must repair it rather than skip creation.
+      await db.collection('users').doc('guest-uid').set({
+        'lastActiveAt': '2026-09-25T00:00:00.000Z',
+      });
+
+      await service.signInAnonymously();
+
+      final d = await doc('guest-uid');
+      expect(d!['userId'], 'guest-uid');
+      expect(d['isGuest'], isTrue);
+      expect(d['enableNotifications'], isFalse);
+    });
+
     test('a sign of life is recorded for the garbage collector', () async {
       await service.signInAnonymously();
       await db.collection('users').doc('guest-uid').update({
         'lastActiveAt': '2020-01-01T00:00:00.000Z',
       });
+
 
       await service.touchLastActive('guest-uid');
 
