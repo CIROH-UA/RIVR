@@ -509,3 +509,35 @@ does not bump, so a typo costs nothing.
 fixes "the list is that person's, but stale". They look identical on screen
 and have different causes — which is why the guard now asserts the *contents*
 after a revision bump, not merely that a reload happened.
+
+## VERIFIED ON DEVICE — build 862, 2026-09-25 (Jerson, iPhone)
+
+**Measured by Jerson on a physical iPhone**, not by this machine:
+
+- Saving favourites as a guest — works.
+- Signing in to an existing account from a guest session — works; the account
+  survives and the guest's river appears in the list immediately, with no
+  pull-to-refresh and no unrelated action needed.
+- Creating an account from a guest session — works; the rivers carry over.
+- Email verification — the email arrives and the banner clears.
+
+This closes the four defects found on device across 832 → 862, and settles
+the item that stood as **Unverified** through the whole of this ADR: nobody
+had run the guest path in a real app, because this Mac's Xcode has no
+Simulator (see `reference_sim_driving_setup`). It took a real phone and five
+builds.
+
+**Status: the feature is done.** What remains before release is deployment
+and submission, not code:
+
+1. `guestGcDaily` is written and tested but **NOT DEPLOYED**
+   (`firebase deploy --only functions:default`). Nothing reaps abandoned
+   guests until it is, and guests now exist in production.
+2. Resubmit to App Review with build 862 and the 5.1.1(v) reply.
+3. Google Play still has build 805 — the pre-guest-mode binary — in review
+   since 2026-09-11. It needs the guest-mode build too, and its store listing
+   says nothing that contradicts it.
+
+**Carried, unchanged:** no island reach has ever been in the store (ADR 0011),
+and the orphaned guest documents left by a sign-in linger until `guestGcDaily`
+runs.
