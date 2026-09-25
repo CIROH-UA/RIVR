@@ -275,19 +275,34 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 
 ### What Is Missing
 
-| Asset                              | Priority | Notes                                        |
-|------------------------------------|----------|----------------------------------------------|
-| iPhone 6.7" screenshots            | High     | Required for App Store. Jerson capturing on real device + polishing in Canva. |
-| iPhone 6.5" screenshots            | High     | Required for App Store. Same source as 6.7" or down-resized. |
-| Google Play phone screenshots      | High     | Minimum 2 required; same source as iOS or re-exported. |
-| Privacy policy public hosting      | High     | Draft exists; must be hosted at `hydromap.com/privacy` before submission. **Blocked on Cloudflare/GoDaddy creds (Dr. Ames) + attorney review.** |
-| Support page public hosting        | High     | Listed in store-listing-template.md as `hydromap.com/support` — must be a live page at submission. |
-| ~~In-app account-deletion flow~~   | ✅ DONE  | **Shipped** in `1.1.0+7` (merged to `development` `e438854`, 2026-05-16). Account page reachable from the three-dots menu with Delete Account at the bottom; reauth + Firestore + FCM + biometric cleanup. 17 tests. Pending: Jerson's real-device smoke. |
-| Apple Developer account access     | High     | `admin@hydromap.com` 2FA SMS goes to a dead phone. Recovery requires Dr. Ames (back end of May). See `project_apple_account_lockout.md`. |
-| iPhone 5.5" screenshots            | Medium   | Optional but recommended.                    |
-| ~~iPad 12.9" screenshots~~         | —        | Not needed. Build 805 dropped iPad from the device family (2026-09-07): Add for Review demanded 13" iPad screenshots for an app never run on an iPad; Jerson chose iPhone-only. |
-| Tablet screenshots                 | Low      | Optional for Play Store.                     |
-| Promotional images                 | Low      | Nice to have for marketing.                  |
+**As of 2026-09-25 — nothing blocking. RIVR is LIVE on Google Play and iOS
+2026.2.3 (862) is in App Review.** The table below is kept for the few
+genuinely outstanding items only; everything the 2026-05 version of this file
+listed as missing has shipped.
+
+| Asset | Priority | Notes |
+|-------|----------|-------|
+| iPad 12.9" screenshots | — | Not needed. RIVR is iPhone-only (`TARGETED_DEVICE_FAMILY = "1"` since build 805). |
+| iPhone 5.5" screenshots | Low | Optional. The 6.5" set is uploaded and in use. |
+| Tablet screenshots (Play) | Low | Optional; no tablet-optimised layout. |
+| Promotional images | Low | Nice to have for marketing. |
+
+**Shipped since this table was last accurate:**
+
+- **Store screenshots** — five 6.5" slides designed and uploaded to both
+  stores (2026-09-07). The Play set is cropped to 9:16 because Play refuses
+  the 9:19.5 aspect the App Store accepts; both live under
+  `app-store/screenshots/iphone-6.5/` and `google-play/screenshots/phone/`.
+- **Play feature graphic** — regenerated from the current icon,
+  `google-play/feature-graphic-1024x500.png`.
+- **Apple Developer account** — recovered 2026-08-20; no longer a blocker.
+- **Privacy policy and support pages** — live. The real URLs are
+  `https://hydromap.com/privacy-policy/?product=rivr` and
+  `https://hydromap.com/contact/`. **`hydromap.com/privacy` and
+  `/support` are homepage catch-alls, not pages** — they return HTTP 200 and
+  show nothing relevant. Do not use them.
+- **Store listing copy** — `store-listing-template.md` carries the submitted
+  text, including the global-rivers description and the reviewer brief.
 
 ### Resolved This Week (2026-05-11 → 2026-05-16)
 
@@ -308,7 +323,7 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 
 ### Known Issues / Open Risks
 
-1. **Apple Developer account lockout.** `admin@hydromap.com` cannot sign in due to 2FA-SMS to a phone number that no longer exists. Recovery deferred to end of May 2026 (requires Dr. Ames, currently in Europe). Until resolved, no TestFlight upload, no certificates, no App Store submission.
+1. ~~**Apple Developer account lockout.**~~ ✅ RESOLVED 2026-08-20 — Dr. Ames recovered the account after ~3.5 months. TestFlight, certificates and App Store submission all work; several builds have shipped since.
 2. ✅ **RESOLVED — in-app account deletion** shipped in `1.1.0+7` (2026-05-16). Was an App Store 5.1.1(v) hard blocker. Account page + Delete Account at the bottom; full reauth/Firestore/FCM/biometric cleanup; 17 tests. Only Jerson's real-device smoke remains.
 3. **Privacy policy not yet attorney-reviewed.** Draft is accurate to the codebase but the legal language (Sections 5, 7, 9, 10) needs counsel review before public hosting. Prep packet ready at `docs/internal/privacy-attorney-review-packet.md` — kick off when Dr. Ames is back.
 4. **Privacy policy hosting blocked.** Cloudflare + GoDaddy credentials sit with Dr. Ames; cannot publish to `hydromap.com/privacy` until he is back.
@@ -329,13 +344,13 @@ Use zero-padded numbers to control ordering, followed by a descriptive name:
 - [x] Tighten iOS purpose strings to App Store standard (commit `5b5ae5e`)
 - [x] Replace TODO placeholders in `store-listing-template.md` with `hydromap.com` URLs (commit `0488fea`)
 - [x] Draft privacy policy → `docs/internal/privacy-policy-draft.md`
-- [ ] **(Jerson)** Capture phone screenshots on iPhone 15 Pro Max real device or simulator (1290×2796)
-- [ ] **(Jerson)** Capture phone screenshots on iPhone 14 Plus real device or simulator (1284×2778)
-- [ ] **(Jerson)** Polish screenshots in Canva (frames, copy overlays) and export to `app-store/screenshots/iphone-6.7/` and `iphone-6.5/`
-- [ ] **(Jerson)** Re-export phone screenshots for Google Play (1080×1920 or 1440×2560) into `google-play/screenshots/phone/`
+- [x] Capture phone screenshots (done 2026-09-07, 1242×2688 designed slides)
+- [x] 6.5" set uploaded to App Store Connect
+- [x] Screenshots designed with device frames + copy overlays; committed under `app-store/screenshots/iphone-6.5/`
+- [x] Play set cropped to 9:16 (1242×2208) into `google-play/screenshots/phone/` — Play rejects the 9:19.5 aspect the App Store accepts
 - [x] Build in-app account-deletion flow (App Store Guideline 5.1.1(v) blocker) — shipped `1.1.0+7` 2026-05-16
-- [ ] **(End of May)** Recover Apple Developer account access — Dr. Ames calls Apple
+- [x] Apple Developer account recovered (2026-08-20)
 - [ ] **(End of May)** Send privacy policy draft to attorney for review
-- [ ] **(End of May)** Host `hydromap.com/privacy` and `hydromap.com/support` (Cloudflare/GoDaddy creds)
-- [ ] **(Optional)** If declaring iPad in build, capture iPad Pro 12.9" screenshots (2048×2732)
+- [x] Privacy policy and contact pages live — `/privacy-policy/?product=rivr` and `/contact/` (NOT `/privacy` or `/support`, which are homepage catch-alls)
+- [x] N/A — RIVR is iPhone-only since build 805
 - [ ] **(Optional)** Android custom launch-screen drawable for parity with iOS

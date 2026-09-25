@@ -1,6 +1,8 @@
 # ADR 0014 — Guest mode: let people use RIVR before they have an account
 
-**Status:** Proposed (2026-09-21)
+**Status:** **Accepted** — implemented, verified on a physical iPhone
+(build 862, 2026-09-25), submitted to App Review, and `guestGcDaily`
+deployed. Proposed 2026-09-21.
 **Trigger:** App Store rejection of 2026.2.2 (805), Guideline 5.1.1(v),
 2026-09-21: *"The app requires users to register before accessing map. Apps
 may not require users to enter personal information to function, except when
