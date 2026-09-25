@@ -165,6 +165,34 @@ class FavoritesProvider with ChangeNotifier {
 
   /// Initialize favorites and start background refresh.
   /// Shows last-known data instantly, then refreshes in background.
+  /// Whose list `_favorites` currently holds. ADR 0014: signing in from a
+  /// guest changes the identity WITHOUT rebuilding the page, so without this
+  /// the guest's rivers stayed on screen and the account's never appeared.
+  String? _loadedForUserId;
+  String? get loadedForUserId => _loadedForUserId;
+
+  /// Reload the list if it belongs to somebody else.
+  ///
+  /// `refreshAllFavorites` only refreshes the rivers already in `_favorites`,
+  /// so it can never surface an account's rivers after a guest sign-in — that
+  /// is why pull-to-refresh looked broken (build 848, 2026-09-25).
+  Future<void> ensureLoadedFor(String? userId) async {
+    if (userId == null) {
+      _loadedForUserId = null;
+      _favorites = [];
+      notifyListeners();
+      return;
+    }
+    if (userId == _loadedForUserId) return;
+    _loadedForUserId = userId;
+    _favorites = [];
+    await initializeAndRefresh();
+  }
+
+  /// A full, unconditional load. Use [ensureLoadedFor] for identity changes;
+  /// this is the forced path (first load, and the retry button after a
+  /// failure — where the identity has NOT changed and the conditional path
+  /// would correctly do nothing).
   Future<void> initializeAndRefresh() async {
     _setLoading(true);
     _clearError();
