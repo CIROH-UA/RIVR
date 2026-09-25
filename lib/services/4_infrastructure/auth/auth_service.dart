@@ -209,8 +209,12 @@ class AuthService implements IAuthService {
       }
       AppLogger.info('AuthService', 'Guest signed in: ${user.uid}');
 
+      // Belt and braces for the same defect: a document that exists but has
+      // no `userId` is a stub, not settings, and must be filled in rather
+      // than trusted. Checking only for existence is what let the stub
+      // survive.
       final doc = await _readUserDoc(user.uid);
-      if (doc == null) {
+      if (doc == null || doc['userId'] == null) {
         await _createUserSettings(
           userId: user.uid,
           email: '',
@@ -236,11 +240,22 @@ class AuthService implements IAuthService {
   @override
   Future<void> touchLastActive(String userId) async {
     try {
-      await _updateUserDoc(userId, {
-        'lastActiveAt': DateTime.now().toIso8601String(),
-      });
+      // `update`, never `set(merge:)` — this must NOT be able to create the
+      // document. It used to, and that broke guest mode outright in build
+      // 838: the auth-state listener fires the moment the anonymous user
+      // exists and calls this, which created a STUB holding nothing but
+      // `lastActiveAt`. `signInAnonymously` then saw a document already
+      // there, skipped writing the real settings, and every later read blew
+      // up on the missing `userId` — favourites could not be saved at all.
+      //
+      // If the document does not exist yet, this throws and is swallowed;
+      // the next launch, once the settings exist, records the sign of life.
+      await _users
+          .doc(userId)
+          .update({'lastActiveAt': DateTime.now().toIso8601String()})
+          .timeout(const Duration(seconds: 10));
     } catch (e) {
-      AppLogger.warning('AuthService', 'lastActiveAt write failed: $e');
+      AppLogger.warning('AuthService', 'lastActiveAt write skipped: $e');
     }
   }
 

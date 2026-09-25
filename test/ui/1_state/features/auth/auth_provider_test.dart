@@ -39,6 +39,12 @@ class _MockAuthRepository implements IAuthRepository {
   /// Anonymous provider switched off in the console.
   bool guestSignInFails = false;
 
+  /// uids whose settings were actually written by the sign-in path.
+  final List<String> createdSettingsFor = [];
+  /// True when touchLastActive ran for a uid that had no settings yet — the
+  /// ordering that created the stub.
+  bool touchedBeforeSettings = false;
+
   @override
   Future<ServiceResult<fb.User?>> signInAnonymously() async {
     signInAnonymouslyCalls++;
@@ -47,12 +53,14 @@ class _MockAuthRepository implements IAuthRepository {
           const ServiceException.auth('offline'));
     }
     simulateGuest();
+    createdSettingsFor.add(_signedInUser!.uid);
     return ServiceResult.success(_signedInUser);
   }
 
   @override
   Future<void> touchLastActive(String userId) async {
     touchLastActiveCalls++;
+    if (!createdSettingsFor.contains(userId)) touchedBeforeSettings = true;
   }
 
   @override
@@ -736,6 +744,29 @@ void main() {
       expect(mockAuthRepo.signInAnonymouslyCalls, 1,
           reason: 'UX-1: launch goes to the app, not to a login wall');
       expect(provider.isGuest, isTrue);
+    });
+
+
+    test('startup leaves a COMPLETE guest document, not a stub', () async {
+      // The defect class my other guest tests could not see: they all called
+      // AuthService.signInAnonymously() directly, so they never exercised the
+      // real startup ORDER. In the app, the auth-state listener fires the
+      // instant the anonymous user exists and writes lastActiveAt — which,
+      // with set-merge, created the document first and made signInAnonymously
+      // skip writing the real settings. Every guest in build 838 got a stub
+      // and could not save a single favourite.
+      //
+      // So this drives initialize() and then asserts on the DOCUMENT, not on
+      // the call.
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+
+      expect(provider.isGuest, isTrue);
+      expect(mockAuthRepo.createdSettingsFor, isNotEmpty,
+          reason: 'startup must write real settings for a new guest');
+      expect(mockAuthRepo.touchedBeforeSettings, isFalse,
+          reason: 'a sign-of-life write must never be the thing that '
+              'creates the document');
     });
 
     test('an existing account is never replaced by a guest', () async {
