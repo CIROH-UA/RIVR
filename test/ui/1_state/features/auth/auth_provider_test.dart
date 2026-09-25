@@ -812,6 +812,33 @@ void main() {
           reason: 'this is what the banner actually reads');
     });
 
+
+    test('a successful sign-in bumps the data revision', () async {
+      // The merge into the account happens INSIDE the sign-in, after Firebase
+      // has already switched the session. Anything caching per-identity data
+      // needs a signal that the stored list changed under a stable uid.
+      mockAuthRepo.seedUser(email: 'a@b.com', password: 'pw');
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+      final before = provider.dataRevision;
+
+      await provider.signIn('a@b.com', 'pw');
+
+      expect(provider.dataRevision, greaterThan(before));
+    });
+
+    test('a FAILED sign-in does not bump it', () async {
+      mockAuthRepo.seedUser(email: 'a@b.com', password: 'pw');
+      await provider.initialize();
+      await Future.delayed(Duration.zero);
+      final before = provider.dataRevision;
+
+      await provider.signIn('a@b.com', 'wrong');
+
+      expect(provider.dataRevision, before,
+          reason: 'a needless reload on every typo is wasted work');
+    });
+
     test('signing out a guest is refused, not performed', () async {
       mockAuthRepo.simulateGuest();
       await provider.initialize();

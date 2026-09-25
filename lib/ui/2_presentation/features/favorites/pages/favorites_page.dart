@@ -190,13 +190,17 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   AuthProvider? _auth;
   String? _lastIdentity;
+  int _lastRevision = -1;
 
   void _onIdentityMaybeChanged() {
     final uid = _auth?.currentUser?.uid;
-    if (uid == _lastIdentity) return;
+    final rev = _auth?.dataRevision ?? 0;
+    if (uid == _lastIdentity && rev == _lastRevision) return;
     _lastIdentity = uid;
+    _lastRevision = rev;
     if (!mounted) return;
-    unawaited(context.read<FavoritesProvider>().ensureLoadedFor(uid));
+    unawaited(
+        context.read<FavoritesProvider>().ensureLoadedFor(uid, revision: rev));
   }
 
   /// First load, and any later identity change. Cheap to call repeatedly:
@@ -206,8 +210,10 @@ class _FavoritesPageState extends State<FavoritesPage>
     if (!authProvider.isAuthenticated) return;
 
     _lastIdentity = authProvider.currentUser?.uid;
+    _lastRevision = authProvider.dataRevision;
     final favoritesProvider = context.read<FavoritesProvider>();
-    await favoritesProvider.ensureLoadedFor(_lastIdentity);
+    await favoritesProvider
+        .ensureLoadedFor(_lastIdentity, revision: _lastRevision);
   }
 
   /// A deliberate user-initiated reload — the "Try Again" button after a
@@ -219,6 +225,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     if (!authProvider.isAuthenticated) return;
 
     _lastIdentity = authProvider.currentUser?.uid;
+    _lastRevision = authProvider.dataRevision;
     await context.read<FavoritesProvider>().initializeAndRefresh();
   }
 
