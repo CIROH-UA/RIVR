@@ -119,6 +119,41 @@ void main() {
     expect(p.loadedForUserId, 'account-uid');
   });
 
+
+  test('a revision bump re-reads for the SAME identity', () async {
+    // REGRESSION, build 857 (2026-09-25). Signing in from a guest merges the
+    // guest's rivers into the account AFTER Firebase has switched the
+    // session. A reload driven by the identity change alone therefore reads
+    // the account's list BEFORE the merge lands, and never reloads again —
+    // the identity does not change twice. Jerson's merged river only
+    // appeared after he deleted a different river, which forced a reload.
+    final p = build();
+
+    source.current = const [FavoriteRiver(reachId: 'acct-1', displayOrder: 0)];
+    await p.ensureLoadedFor('u', revision: 0);
+    expect(p.favorites.map((f) => f.reachId), ['acct-1']);
+
+    // The merge lands and the revision is bumped.
+    source.current = const [
+      FavoriteRiver(reachId: 'acct-1', displayOrder: 0),
+      FavoriteRiver(reachId: 'from-guest', displayOrder: 1),
+    ];
+    await p.ensureLoadedFor('u', revision: 1);
+
+    expect(p.favorites.map((f) => f.reachId), ['acct-1', 'from-guest'],
+        reason: 'the merged river must appear without any other action');
+  });
+
+  test('a repeated revision does not reload', () async {
+    final p = build();
+    await p.ensureLoadedFor('u', revision: 3);
+    final after = source.loads;
+
+    await p.ensureLoadedFor('u', revision: 3);
+
+    expect(source.loads, after);
+  });
+
   test('the same identity does not reload', () async {
     final p = build();
     await p.ensureLoadedFor('u');

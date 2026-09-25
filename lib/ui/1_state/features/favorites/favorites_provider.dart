@@ -171,21 +171,35 @@ class FavoritesProvider with ChangeNotifier {
   String? _loadedForUserId;
   String? get loadedForUserId => _loadedForUserId;
 
+  /// The data revision the current list was loaded at. Signing in from a
+  /// guest merges the guest's rivers into the account AFTER Firebase has
+  /// already switched the session, so a reload triggered by the identity
+  /// change alone reads the account's list BEFORE the merge lands and then
+  /// never reloads, because the identity does not change again. Build 857:
+  /// the merged river only appeared once some other action forced a reload.
+  int _loadedAtRevision = -1;
+
   /// Reload the list if it belongs to somebody else.
   ///
   /// `refreshAllFavorites` only refreshes the rivers already in `_favorites`,
   /// so it can never surface an account's rivers after a guest sign-in — that
   /// is why pull-to-refresh looked broken (build 848, 2026-09-25).
-  Future<void> ensureLoadedFor(String? userId) async {
+  Future<void> ensureLoadedFor(String? userId, {int revision = 0}) async {
     if (userId == null) {
       _loadedForUserId = null;
+      _loadedAtRevision = -1;
       _favorites = [];
       notifyListeners();
       return;
     }
-    if (userId == _loadedForUserId) return;
+    if (userId == _loadedForUserId && revision == _loadedAtRevision) return;
+    final identityChanged = userId != _loadedForUserId;
     _loadedForUserId = userId;
-    _favorites = [];
+    _loadedAtRevision = revision;
+    // Only blank the list when it belongs to somebody else. A revision bump
+    // is a re-read for the SAME person, and clearing there makes their
+    // rivers flash away and back.
+    if (identityChanged) _favorites = [];
     await initializeAndRefresh();
   }
 
