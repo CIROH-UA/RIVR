@@ -387,5 +387,18 @@ void main() {
     expect(find.text('Sign Out'), findsOneWidget);
     expect(find.text('Delete Account'), findsOneWidget);
     expect(find.text('Delete my data'), findsNothing);
+
+    // Jerson saw "User" and a "?" avatar after signing in (build 843) and
+    // read it as the page failing to load his details. It was not: his
+    // account had just been deleted out from under the session. This pins
+    // the page's actual behaviour so the two cannot be confused again — a
+    // signed-in account renders its own address, not a placeholder.
+    // Twice on purpose: the name line falls back to the address when the
+    // settings document has no name yet.
+    expect(find.text('a@b.com'), findsWidgets);
+    expect(find.text('User'), findsNothing,
+        reason: '"User" is what the page shows when there is NO usable '
+            'session — it is a deleted/absent account showing through, not '
+            'a failure to read details');
   });
 }
