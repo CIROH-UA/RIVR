@@ -324,6 +324,24 @@ Also: the deprecated `onReorder` is replaced by `onReorderItem`, which
 removes the manual `if (newIndex > oldIndex) newIndex--` correction and the
 last analyzer warning in the repository.
 
+### Follow-up: the open card's corner notch
+
+Reported by Jerson from the after-screenshot, same day, and he was right:
+with the row open, the card's rounded top-right and bottom-right corners sat
+against the flat left edge of the blue button, and the page background showed
+through as two white wedges. Flush everywhere else made it more obvious, not
+less — the fix above removed every other seam and left this one.
+
+The card's right-hand corners now square off as it opens, eased over the
+first 16 px of travel so the corner unrolls rather than snapping (a 12 px
+corner changing in one frame is the same class of pop this change set
+exists to remove). The left corners stay rounded: that edge is still a card
+edge, and it slides off the screen.
+
+Guarded both ways — the test asserts the right corners are rounded when
+closed and square when open, and both mutations (always rounded, always
+square) are caught.
+
 ### Not done, deliberately
 
 * **Opening one row does not close another, and scrolling does not close an

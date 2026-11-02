@@ -236,6 +236,33 @@ void main() {
         reason: 'the tap used to be swallowed, which looks like a freeze');
   });
 
+  testWidgets('the open card meets the buttons flush, with no white notch',
+      (tester) async {
+    // Reported by Jerson from a screenshot, 2026-11-02: with the row open,
+    // the card's rounded top-right and bottom-right corners sat against the
+    // flat left edge of the blue button and the page showed through as two
+    // white wedges.
+    BorderRadius cardShape() => (tester.widget<ClipRRect>(find.descendant(
+          of: find.byType(FavoriteRiverCard),
+          matching: find.byType(ClipRRect),
+        )).borderRadius as BorderRadius);
+
+    await pumpCard(tester);
+
+    expect(cardShape().topRight.x, greaterThan(0),
+        reason: 'closed, the card sits on the page and is a rounded card');
+
+    await tester.drag(find.byType(FavoriteRiverCard), const Offset(-260, 0));
+    await settle(tester);
+
+    expect(cardShape().topRight.x, 0,
+        reason: 'open, the right edge butts against the blue button — a '
+            'rounded corner there shows the page through as a notch');
+    expect(cardShape().bottomRight.x, 0);
+    expect(cardShape().topLeft.x, greaterThan(0),
+        reason: 'the left edge is still a card edge, and slides off screen');
+  });
+
   testWidgets('the row does not shrink while being dragged', (tester) async {
     await pumpCard(tester);
     // getRect, not getSize: a scale transform leaves the layout size alone
