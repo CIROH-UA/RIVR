@@ -29,6 +29,16 @@ class FavoriteRiverCard extends StatefulWidget {
   final bool isReorderable;
   final int cardIndex;
 
+  /// Run the one-time swipe hint on this card: slide open to reveal the
+  /// actions, hold, slide back. Set on exactly one card by the favourites
+  /// page (see [CoachMarkService]). Replaces a full-screen coach-mark tour —
+  /// showing the gesture on the real card beats covering the screen to
+  /// describe it.
+  final bool runSwipeHint;
+
+  /// Called once the hint has finished playing, so the page can record it.
+  final VoidCallback? onSwipeHintComplete;
+
   const FavoriteRiverCard({
     super.key,
     required this.favorite,
@@ -38,6 +48,8 @@ class FavoriteRiverCard extends StatefulWidget {
     this.onChangeImage,
     this.isReorderable = true,
     this.cardIndex = 0,
+    this.runSwipeHint = false,
+    this.onSwipeHintComplete,
   });
 
   @override
@@ -74,6 +86,41 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
     _initializeVideoBackground();
     _resolvePlaceLabel();
+    if (widget.runSwipeHint) _playSwipeHint();
+  }
+
+  /// Show that actions live behind the card by performing the gesture.
+  ///
+  /// Deliberately interruptible: the user can grab the card mid-hint and the
+  /// drag handlers take over, because `_isSliding` is already true and the
+  /// controller is just an animation. Nothing is modal and nothing blocks.
+  bool _hintPlaying = false;
+  Future<void> _playSwipeHint() async {
+    if (_hintPlaying || !mounted) return;
+    _hintPlaying = true;
+    // Let the list settle before moving anything.
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted || _isSliding) return _finishHint();
+
+    setState(() => _isSliding = true);
+    try {
+      await _slideController.animateTo(1.0,
+          duration: const Duration(milliseconds: 420), curve: Curves.easeOut);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      if (!mounted) return _finishHint();
+      await _slideController.animateTo(0.0,
+          duration: const Duration(milliseconds: 320), curve: Curves.easeIn);
+    } on TickerCanceled {
+      // Widget went away mid-animation; nothing to clean up.
+    }
+    if (mounted) setState(() => _isSliding = false);
+    _finishHint();
+  }
+
+  void _finishHint() {
+    if (!_hintPlaying) return;
+    _hintPlaying = false;
+    widget.onSwipeHintComplete?.call();
   }
 
   /// The card headline: a GEOGLOWS reach shows its place (once geocoded);
@@ -129,6 +176,8 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   @override
   void didUpdateWidget(FavoriteRiverCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    if (widget.runSwipeHint && !oldWidget.runSwipeHint) _playSwipeHint();
 
     // Re-geocode when the reach changes or its coordinates first arrive
     // (coords are enriched asynchronously from session data).
