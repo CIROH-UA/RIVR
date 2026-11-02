@@ -1,8 +1,10 @@
 // lib/ui/2_presentation/features/favorites/pages/favorites_page.dart
 
 import 'dart:async';
+// Material is no longer needed here: `ReorderableListView` was the only
+// Material widget on this page and it has been replaced by
+// `SliverReorderableList`, which lives in widgets.dart.
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:provider/provider.dart';
@@ -619,12 +621,10 @@ class _FavoritesPageState extends State<FavoritesPage>
                   ),
 
                 // Favorites list
-                SliverToBoxAdapter(
-                  child: _buildReorderableList(
-                    filteredFavorites,
-                    favoritesProvider,
-                  ),
-                ),
+                if (filteredFavorites.isEmpty && _searchQuery.isNotEmpty)
+                  SliverToBoxAdapter(child: _buildNoSearchResults())
+                else
+                  _buildReorderableList(filteredFavorites, favoritesProvider),
 
                 // Bottom padding for floating action button
                 const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -728,33 +728,33 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
+  /// The favourites, as a SLIVER, built lazily.
+  ///
+  /// This was a `ReorderableListView.builder` with `shrinkWrap: true` and
+  /// `NeverScrollableScrollPhysics` inside a `SliverToBoxAdapter`, which is
+  /// the standard way to make a list stop being lazy: shrinkWrap lays every
+  /// item out immediately. Each favourite card owns a `VideoPlayerController`,
+  /// so twenty favourites meant twenty video decoders on open — the reason
+  /// the card staggers its video initialisation by `100 ms × cardIndex` to
+  /// avoid exhausting Android's decoder slots (ADR 0016).
+  ///
+  /// `SliverReorderableList` keeps the laziness and still reorders. It does
+  /// not attach its own drag listener, so each item is wrapped in a delayed
+  /// (long-press) one, which is what `ReorderableListView` did for us on iOS.
   Widget _buildReorderableList(
     List<FavoriteRiver> favorites,
     FavoritesProvider favoritesProvider,
   ) {
-    if (favorites.isEmpty && _searchQuery.isNotEmpty) {
-      return _buildNoSearchResults();
-    }
-
-    return ReorderableListView.builder(
-      shrinkWrap: true,
-      // Revert to original physics - works better with nested CustomScrollView
-      physics:
-          const NeverScrollableScrollPhysics(), // Let parent CustomScrollView handle scrolling
+    return SliverReorderableList(
       itemCount: favorites.length,
-      onReorder: (oldIndex, newIndex) =>
+      onReorderItem: (oldIndex, newIndex) =>
           _handleReorder(oldIndex, newIndex, favoritesProvider),
       proxyDecorator: _proxyDecorator,
-      padding: const EdgeInsets.only(bottom: 20),
-      onReorderStart: (index) {
-        HapticFeedback.mediumImpact();
-      },
-      onReorderEnd: (index) {
-        HapticFeedback.lightImpact();
-      },
+      onReorderStart: (index) => HapticFeedback.mediumImpact(),
+      onReorderEnd: (index) => HapticFeedback.lightImpact(),
       itemBuilder: (context, index) {
         final favorite = favorites[index];
-        return FavoriteRiverCard(
+        final card = FavoriteRiverCard(
           key: ValueKey(favorite.reachId),
           favorite: favorite,
           cardIndex: index,
@@ -771,6 +771,17 @@ class _FavoritesPageState extends State<FavoritesPage>
           onChangeImage: () => _navigateToImageSelection(favorite),
           isReorderable: _searchQuery.isEmpty,
         );
+
+        // While searching the list is filtered, so the indices no longer
+        // address the real order and reordering is turned off — the card
+        // takes its own long-press back in that case.
+        return _searchQuery.isEmpty
+            ? ReorderableDelayedDragStartListener(
+                key: ValueKey('drag-${favorite.reachId}'),
+                index: index,
+                child: card,
+              )
+            : KeyedSubtree(key: ValueKey('fixed-${favorite.reachId}'), child: card);
       },
     );
   }
@@ -960,11 +971,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     int newIndex,
     FavoritesProvider favoritesProvider,
   ) async {
-    // Adjust newIndex if needed (ReorderableListView quirk)
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
-    }
-
+    // No `if (newIndex > oldIndex) newIndex--` here: that correction belongs
+    // to the deprecated `onReorder`. `onReorderItem` already reports the
+    // index the item lands on once it has been removed from `oldIndex`.
     await favoritesProvider.reorderFavorites(oldIndex, newIndex);
   }
 
