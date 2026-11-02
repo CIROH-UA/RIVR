@@ -14,9 +14,7 @@ import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/ui/2_presentation/routing/app_router.dart';
 import 'package:rivr/ui/1_state/features/auth/auth_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
 import 'package:rivr/services/4_infrastructure/favorites/coach_mark_service.dart';
-import 'package:rivr/services/4_infrastructure/favorites/coach_mark_targets.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/favorite_river_card.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/favorites_search_bar.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/skeleton_river_card.dart';
@@ -58,14 +56,17 @@ class _FavoritesPageState extends State<FavoritesPage>
   NotificationPermissionResult? _osPermission;
 
   // Coach mark keys
-  final GlobalKey _settingsButtonKey = GlobalKey();
-  final GlobalKey _firstCardKey = GlobalKey();
-  final GlobalKey _searchIconKey = GlobalKey();
+
 
   // Coach mark state
-  bool _hasShownFavoritesTour = true; // Default true until loaded
-  bool _hasShownSearchTip = true;
-  bool _isTourActive = false;
+  /// Which card, if any, should play the one-time swipe hint. Null means
+  /// none. Only ever set to 0 — the hint runs on the first card.
+  int? _swipeHintCardIndex;
+
+  /// Whether THIS arrival at the list has already been decided. Cleared on
+  /// every arrival, so returning to the page is a new chance to show the
+  /// hint; the once-ever part is persisted by [CoachMarkService], not here.
+  bool _swipeHintResolved = false;
 
   @override
   void initState() {
@@ -78,12 +79,16 @@ class _FavoritesPageState extends State<FavoritesPage>
     // (build 848, 2026-09-25).
     _auth = context.read<AuthProvider>()..addListener(_onIdentityMaybeChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeFavorites();
+      // The hint needs a card to demonstrate on, and on a cold launch the
+      // list is still loading at this point — deciding now would always find
+      // it empty. Decide once the rivers are actually there.
+      _initializeFavorites().then((_) {
+        if (mounted) _resolveSwipeHint();
+      });
       _loadUserFlowUnitPreference();
       _loadMutedReaches();
       _loadBannerDismissalState();
       _loadOsPermission();
-      _checkAndShowCoachMarks();
     });
   }
 
@@ -109,7 +114,14 @@ class _FavoritesPageState extends State<FavoritesPage>
   /// Called when a route pushed on top of the favorites list is popped —
   /// i.e. the user returned to the list (e.g. from the forecast page).
   @override
-  void didPopNext() => _revalidateOnView();
+  void didPopNext() {
+    _revalidateOnView();
+    // Coming back to the list is an arrival, and arriving is what the hint
+    // counts. The page is not rebuilt on a pop, so initState does not run
+    // again and this is the only place the second visit can be noticed.
+    _swipeHintResolved = false;
+    _resolveSwipeHint();
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -315,11 +327,6 @@ class _FavoritesPageState extends State<FavoritesPage>
                           );
                         });
 
-                        // Trigger Phase A coach marks when favorites are loaded
-                        if (!_hasShownFavoritesTour && !_isTourActive) {
-                          _maybeShowFavoritesTour(favoritesProvider);
-                        }
-
                         return _buildFavoritesList(favoritesProvider);
                       },
                     ),
@@ -348,9 +355,6 @@ class _FavoritesPageState extends State<FavoritesPage>
         ),
       ),
       trailing: CupertinoButton(
-        key: (_isTourActive || !_hasShownFavoritesTour)
-            ? _settingsButtonKey
-            : null,
         padding: EdgeInsets.zero,
         onPressed: _showSettingsMenu,
         child: const Icon(
@@ -655,14 +659,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             builder: (context, favoritesProvider, child) {
               if (favoritesProvider.shouldShowSearch &&
                   !favoritesProvider.isEmpty) {
-                // Trigger Phase B search tip when search icon appears
-                if (!_hasShownSearchTip && !_isTourActive) {
-                  _maybeShowSearchTip(favoritesProvider);
-                }
                 return CupertinoButton(
-                  key: (_isTourActive || !_hasShownSearchTip)
-                      ? _searchIconKey
-                      : null,
                   padding: EdgeInsets.zero,
                   onPressed: _toggleSearch,
                   child: Icon(
@@ -758,11 +755,11 @@ class _FavoritesPageState extends State<FavoritesPage>
       itemBuilder: (context, index) {
         final favorite = favorites[index];
         return FavoriteRiverCard(
-          key: index == 0 && (_isTourActive || !_hasShownFavoritesTour)
-              ? _firstCardKey
-              : ValueKey(favorite.reachId),
+          key: ValueKey(favorite.reachId),
           favorite: favorite,
           cardIndex: index,
+          runSwipeHint: _swipeHintCardIndex == index,
+          onSwipeHintComplete: _onSwipeHintComplete,
           onTap: () => _navigateToForecast(
             favorite.reachId,
             favorite.source,
@@ -896,95 +893,47 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   // Coach marks
-  Future<void> _checkAndShowCoachMarks() async {
-    final seenTour = await CoachMarkService.hasSeenFavoritesTour();
-    final seenSearch = await CoachMarkService.hasSeenSearchTip();
-    if (mounted) {
-      setState(() {
-        _hasShownFavoritesTour = seenTour;
-        _hasShownSearchTip = seenSearch;
-      });
-    }
-  }
+  /// Decide whether this arrival at the favourites list should play the
+  /// one-time swipe hint.
+  ///
+  /// Counts every arrival — an app launch onto this page, or returning to it
+  /// from somewhere else — and fires on the SECOND. The first arrival is the
+  /// moment someone has just saved a river and wants to look at it; the old
+  /// four-panel tour interrupted exactly then, which is what made it feel
+  /// invasive.
+  Future<void> _resolveSwipeHint() async {
+    if (_swipeHintResolved || _swipeHintCardIndex != null) return;
+    _swipeHintResolved = true;
 
-  void _maybeShowFavoritesTour(FavoritesProvider provider) {
-    if (_hasShownFavoritesTour || _isTourActive || provider.isEmpty) return;
+    if (await CoachMarkService.hasSeenSwipeHint()) return;
+    if (!mounted) return;
 
-    final route = ModalRoute.of(context);
-    if (route == null || !route.isCurrent) return;
-
-    _isTourActive = true;
-    _hasShownFavoritesTour = true;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
-      final targets = CoachMarkTargets.buildFavoritesTourTargets(
-        firstCardKey: _firstCardKey,
-        settingsButtonKey: _settingsButtonKey,
-      );
-
-      TutorialCoachMark(
-        targets: targets,
-        colorShadow: CupertinoColors.black,
-        opacityShadow: 0.9,
-        hideSkip: true,
-        onFinish: () {
-          CoachMarkService.completeFavoritesTour();
-          _isTourActive = false;
-          // Check if Phase B should follow immediately
-          if (!_hasShownSearchTip && provider.shouldShowSearch) {
-            _maybeShowSearchTip(provider);
-          } else if (mounted) {
-            setState(() {});
-          }
-        },
-        onSkip: () {
-          CoachMarkService.completeFavoritesTour();
-          _isTourActive = false;
-          if (mounted) setState(() {});
-          return true;
-        },
-      ).show(context: context);
-    });
-  }
-
-  void _maybeShowSearchTip(FavoritesProvider provider) {
-    if (_hasShownSearchTip || _isTourActive || !provider.shouldShowSearch) {
+    // Nothing to demonstrate on an empty list, so this does not count as a
+    // visit at all — spending one of the two arrivals on a blank screen
+    // would fire the hint on the first list the user ever sees, which is the
+    // interruption being removed.
+    if (context.read<FavoritesProvider>().isEmpty) {
+      _swipeHintResolved = false;
       return;
     }
 
-    final route = ModalRoute.of(context);
-    if (route == null || !route.isCurrent) return;
+    final visit = await CoachMarkService.recordVisit();
+    if (!mounted) return;
 
-    _isTourActive = true;
-    _hasShownSearchTip = true;
+    if (!CoachMarkService.shouldShowOnVisit(
+      visit: visit,
+      alreadySeen: false,
+      hasAnyFavourite: true,
+    )) {
+      return;
+    }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+    setState(() => _swipeHintCardIndex = 0);
+  }
 
-      final targets = CoachMarkTargets.buildSearchTipTargets(
-        searchIconKey: _searchIconKey,
-      );
-
-      TutorialCoachMark(
-        targets: targets,
-        colorShadow: CupertinoColors.black,
-        opacityShadow: 0.9,
-        hideSkip: true,
-        onFinish: () {
-          CoachMarkService.completeSearchTip();
-          _isTourActive = false;
-          if (mounted) setState(() {});
-        },
-        onSkip: () {
-          CoachMarkService.completeSearchTip();
-          _isTourActive = false;
-          if (mounted) setState(() {});
-          return true;
-        },
-      ).show(context: context);
-    });
+  void _onSwipeHintComplete() {
+    CoachMarkService.completeSwipeHint();
+    if (mounted) setState(() => _swipeHintCardIndex = null);
   }
 
   // Event handlers

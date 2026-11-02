@@ -262,6 +262,35 @@ banner; an unverified account is fully usable. `isAuthenticated` means
 recovered, so the button would silently destroy their rivers. They get
 "Delete my data" instead, which needs no password.
 
+### Onboarding is ONE hint on the favourites list (ADR 0015)
+
+**The four-panel `tutorial_coach_mark` tour is gone and the package is
+removed.** It fired the moment a user saved their first river, blacked the
+screen to 90%, and shipped with `hideSkip: true` — no way out but tapping
+through all four panels. Three of them explained pull-to-refresh, a nav-bar
+menu and search, which phone users already know.
+
+What replaced it is a single hint that **performs the gesture on the real
+card**: the first card slides left, holds its real action buttons visible for
+~1.1 s, and slides back. Nothing is modal — it drives the same
+`AnimationController` the user's own drag uses, so grabbing the card mid-hint
+just takes over.
+
+**It fires on the SECOND arrival at the list, never the first**, and an empty
+list does not count as an arrival at all. Both rules matter: the first arrival
+is the moment someone wants to look at the river they just saved, and
+counting an empty list would spend the one chance on a blank screen. "Arrival"
+is an app launch onto the page *after the rivers load* (at first frame the
+list is always empty) or a `didPopNext` return to it — the page is not rebuilt
+on a pop, so that override is the only place the second visit can be seen.
+State: `has_seen_swipe_hint` and `favorites_visit_count` in
+`SharedPreferences`.
+
+**Any widget or integration harness that pumps the favourites list must seed
+`has_seen_swipe_hint: true`.** Otherwise the hint slides the first card open
+for a second and a half and any assertion that taps a card goes flaky.
+`test/integration_test/helpers/test_app.dart` does this.
+
 ### Key Patterns
 
 - **Layer-first structure:** `models/` (entities + use cases) → `services/` (contracts + coordinators + datasources + infrastructure + DI) → `ui/` (state + presentation)
