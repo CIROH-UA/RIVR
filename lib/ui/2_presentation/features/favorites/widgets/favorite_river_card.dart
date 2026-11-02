@@ -445,6 +445,21 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
                   final revealed =
                       SlideActionConstants.totalActionWidth *
                           _slideController.value;
+                  // The card's RIGHT corners square off as it opens.
+                  //
+                  // They are rounded because the card is a card — but once
+                  // the row is open that rounding sits against the flat left
+                  // edge of the blue button, and the page shows through as
+                  // two white notches. Flush is what makes the card and the
+                  // actions read as one object instead of two things
+                  // overlapping.
+                  //
+                  // Eased over the first 16 px of travel rather than snapped
+                  // at the first pixel: a 12 px corner appearing in one frame
+                  // is its own pop, which is the thing this change set exists
+                  // to remove.
+                  final rightRadius =
+                      _cardRadius * (1 - (revealed / 16).clamp(0.0, 1.0));
                   return Stack(
                     children: [
                       // The buttons are UNCOVERED by the card, never faded or
@@ -459,7 +474,10 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
                       // SlideActionConstants.
                       Transform.translate(
                         offset: Offset(-revealed, 0),
-                        child: _buildCardContent(isRefreshing),
+                        child: _buildCardContent(
+                          isRefreshing,
+                          rightRadius: rightRadius,
+                        ),
                       ),
                     ],
                   );
@@ -472,13 +490,26 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
   }
 
-  Widget _buildCardContent(bool isRefreshing) {
+  /// The card's own corner radius. The action strip's outer edge matches it.
+  static const double _cardRadius = 12.0;
+
+  Widget _buildCardContent(
+    bool isRefreshing, {
+    double rightRadius = _cardRadius,
+  }) {
+    final shape = BorderRadius.only(
+      topLeft: const Radius.circular(_cardRadius),
+      bottomLeft: const Radius.circular(_cardRadius),
+      topRight: Radius.circular(rightRadius),
+      bottomRight: Radius.circular(rightRadius),
+    );
+
     return Container(
       width: double.infinity,
       height: 120,
       decoration: BoxDecoration(
         color: CupertinoColors.systemBackground,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: shape,
         boxShadow: [
           BoxShadow(
             color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
@@ -488,7 +519,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: shape,
         child: Stack(
           children: [
             // Background: either custom image OR video (not both)
