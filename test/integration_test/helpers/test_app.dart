@@ -334,12 +334,13 @@ Widget buildTestApp({
   // that always reports "online" so it doesn't throw MissingPluginException.
   ConnectivityPlatform.instance = _FakeConnectivityPlatform();
 
-  // Mark the coach-mark tours as already seen. Otherwise FavoritesPage attaches
-  // its tour GlobalKeys to widgets AND the coach-mark overlay reuses the same
-  // keys -> "Multiple widgets used the same GlobalKey" during navigation.
+  // Mark the swipe hint as already seen. The four-panel coach-mark tour it
+  // replaced used to crash these tests outright (its overlay reused the
+  // page's anchor GlobalKeys); the hint cannot do that, but it DOES slide the
+  // first card open for a second and a half on the second arrival at the
+  // list, which would make any assertion that taps a card flaky.
   SharedPreferences.setMockInitialValues({
-    'has_seen_favorites_tour': true,
-    'has_seen_search_tip': true,
+    'has_seen_swipe_hint': true,
   });
 
   final auth = authProvider ?? createAuthProvider(services);
