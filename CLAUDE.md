@@ -1,5 +1,15 @@
 # RIVR
 
+> **Open operational task — needs Cloudflare access to `hydromap.com` (Dan).**
+> All email from `hydromap.com` is being quarantined: the SPF record points at
+> a host that no longer exists, Workspace DKIM was never published, and DMARC
+> says `p=quarantine`. RIVR is live on both stores, so account holders cannot
+> complete a password reset. **No code change is involved** — two DNS records.
+> Full detail, evidence and verification steps: **issue #38**. Until it is
+> fixed, a locked-out user can be unblocked with an admin-generated reset link
+> (command in the issue).
+
+
 River flow monitoring and flood risk assessment mobile app. Democratizes access to the NOAA National Water Model, providing real-time river flow data, flood risk analysis via return period thresholds, and multi-range forecasting (short, medium, long range).
 
 ## Tech Stack
