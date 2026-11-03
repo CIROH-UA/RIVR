@@ -400,8 +400,21 @@ was available. Every app-side timing here is a DEBUG UPPER BOUND.
 ## F17 — NOT COMPLETED: touch -> sheet content.
 A drive test (`drive_tap_sheet_test.dart`) that starts the clock on a real
 `tester.tapAt` gesture and presents the production `ReachDetailsBottomSheet`
-exactly as `MapPage._onReachSelected` does was written and passed analysis, but
-its run did not return inside the window. NO NUMBERS, THEREFORE NO CLAIM.
+exactly as `MapPage._onReachSelected` does was written and passed `flutter
+analyze`. Its run was **KILLED by the host for low memory** before it emitted a
+single line — the captured output is 2 lines, zero `RESULT` records. So it is
+not "ran and was inconclusive": it never produced an observation at all.
+NO NUMBERS, THEREFORE NO CLAIM.
+The file was deleted in the cleanup pass (scratch tests were removed to leave
+the repo as found), so reproducing this means rewriting it. The recipe: mount a
+`CupertinoApp` whose home has one tap target; in `onTap` start a Stopwatch and
+call `showCupertinoModalPopup` with `ReachDetailsBottomSheet(selectedReach:
+SelectedReach(...))`; register `IFlowUnitPreferenceService`,
+`IGeocodingService`, `IRiverDataRepository`, `IForecastService` and
+`INoaaApiService` in GetIt (the page resolves them in `initState`); drive with
+`tester.tapAt`, then `tester.pump()` in a loop — NOT `pumpAndSettle` — checking
+`find.byType(ReachDetailsBottomSheet)` and the value/category text each frame.
+Run it alone, with nothing else competing for memory, which is what killed it.
 Specifically still unmeasured: the two `queryRenderedFeatures` platform-channel
 calls in `MapReachSelectionService._queryReachAtPoint` (one over the stream
 layers, one over the flood layer, sequential), and the sheet's own first-frame
