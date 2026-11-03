@@ -101,6 +101,9 @@ FavoritesProvider _buildProvider() {
 }
 
 void main() {
+  /// Where the card content sits when closed, captured on first read.
+  double? restingLeft;
+
   setUp(() {
     GetIt.I.registerSingleton<IRiverDataCache>(_StubCache());
     GetIt.I.registerSingleton<IFlowUnitPreferenceService>(_StubUnit());
@@ -119,6 +122,7 @@ void main() {
 
   Future<void> pumpCard(WidgetTester tester,
       {required bool runHint, VoidCallback? onComplete}) async {
+    restingLeft = null;
     await tester.pumpWidget(CupertinoApp(
       home: ChangeNotifierProvider<FavoritesProvider>.value(
         value: _buildProvider(),
@@ -146,17 +150,21 @@ void main() {
     }
   }
 
-  /// The card's offset within its own slide transition. 0 = closed.
+  /// Where the card content sits relative to where it rests closed, in
+  /// logical pixels. Negative means it has slid left.
   ///
-  /// Scoped to the card on purpose: `CupertinoApp` wraps the page in slide
-  /// transitions of its own, and reading the outermost one reports a card
-  /// that never moves no matter what the hint does.
+  /// Measured from geometry rather than read off a widget: the card is
+  /// translated by an exact pixel count now (ADR 0016), and geometry is what
+  /// the user actually sees.
   double slideDx(WidgetTester tester) {
-    final t = tester.widget<SlideTransition>(find.descendant(
-      of: find.byType(FavoriteRiverCard),
-      matching: find.byType(SlideTransition),
-    ));
-    return t.position.value.dx;
+    final left = tester
+        .getTopLeft(find.descendant(
+          of: find.byType(FavoriteRiverCard),
+          matching: find.byType(ClipRRect),
+        ))
+        .dx;
+    restingLeft ??= left;
+    return left - restingLeft!;
   }
 
   testWidgets('without the hint the card never moves', (tester) async {

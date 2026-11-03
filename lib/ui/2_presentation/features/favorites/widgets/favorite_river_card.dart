@@ -39,6 +39,18 @@ class FavoriteRiverCard extends StatefulWidget {
   /// Called once the hint has finished playing, so the page can record it.
   final VoidCallback? onSwipeHintComplete;
 
+  /// The reach id of the row that is currently open, or null.
+  ///
+  /// A card cannot see its siblings, and opening a second row while the
+  /// first stayed open left two sets of buttons on screen — iOS closes the
+  /// previous one. This is the smallest thing that coordinates them: every
+  /// card watches it, the opener sets it, and the favourites page clears it
+  /// when the list is scrolled.
+  ///
+  /// Static, and deliberately not cleaned up: the value is only a reach id,
+  /// and a card that is no longer mounted simply does not react to it.
+  static final ValueNotifier<String?> openRow = ValueNotifier<String?>(null);
+
   const FavoriteRiverCard({
     super.key,
     required this.favorite,
@@ -61,7 +73,6 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   bool _isPressed = false;
   bool _isSliding = false;
   late AnimationController _slideController;
-  late Animation<Offset> _slideAnimation;
   double _dragStartX = 0.0;
   bool _wasOpenBeforeDrag = false;
 
@@ -86,6 +97,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
     _initializeVideoBackground();
     _resolvePlaceLabel();
+    FavoriteRiverCard.openRow.addListener(_onOpenRowChanged);
     if (widget.runSwipeHint) _playSwipeHint();
   }
 
@@ -224,8 +236,16 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     }
   }
 
+  /// Another row opened, or the list was scrolled. Close.
+  void _onOpenRowChanged() {
+    if (!mounted || !_isSliding) return;
+    if (FavoriteRiverCard.openRow.value == widget.favorite.reachId) return;
+    _animateClosed();
+  }
+
   @override
   void dispose() {
+    FavoriteRiverCard.openRow.removeListener(_onOpenRowChanged);
     _slideController.dispose();
     _removePlaybackListener();
     _videoController?.dispose();
@@ -397,16 +417,6 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
 
   @override
   Widget build(BuildContext context) {
-    // Calculate slide offset based on screen width
-    final screenWidth = MediaQuery.of(context).size.width;
-    final slideOffset = SlideActionConstants.getSlideOffset(screenWidth);
-
-    // Set up slide animation with calculated offset
-    _slideAnimation =
-        Tween<Offset>(begin: Offset.zero, end: Offset(slideOffset, 0)).animate(
-          _slideController,
-        );
-
     return Consumer<FavoritesProvider>(
       builder: (context, favoritesProvider, child) {
         final isRefreshing = favoritesProvider.isRefreshing(
@@ -429,25 +439,70 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         return Container(
           margin: const EdgeInsets.symmetric(horizontal: 19, vertical: 6),
           child: GestureDetector(
-            onTap: _isSliding ? null : widget.onTap,
+            // A tap on an OPEN row closes it. It used to be swallowed
+            // (`_isSliding ? null : onTap`), which is indistinguishable from
+            // the app having frozen.
+            onTap: _isSliding ? _closeSlide : widget.onTap,
             onLongPress: widget.isReorderable ? null : _handleLongPress,
-            onPanStart: _handlePanStart,
-            onPanUpdate: _handlePanUpdate,
-            onPanEnd: _handlePanEnd,
+            // HORIZONTAL, not pan. A pan recogniser claims both axes, so it
+            // entered the gesture arena against the list's vertical scroll
+            // and the reorder drag, and it is accepted only after `kPanSlop`
+            // (36 logical px) instead of `kTouchSlop` (18). Those first
+            // ~40 px were not slow — they were DISCARDED, because
+            // `_dragStartX` is captured at acceptance. Measured in ADR 0016.
+            onHorizontalDragStart: _handleDragStart,
+            onHorizontalDragUpdate: _handleDragUpdate,
+            onHorizontalDragEnd: _handleDragEnd,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
+              // Pressed is now ONLY the long-press grab. It used to be set on
+              // drag start too, so the whole row — buttons included — shrank
+              // 2% as you took hold of it and sprang back as you let go, on
+              // top of the slide.
               transform: Matrix4.identity()..scaleByDouble(_isPressed ? 0.98 : 1.0, _isPressed ? 0.98 : 1.0, 1.0, 1.0),
-              child: Stack(
-                children: [
-                  // Action buttons (show when sliding)
-                  if (_isSliding) _buildActionButtons(favoritesProvider),
+              child: AnimatedBuilder(
+                animation: _slideController,
+                builder: (context, _) {
+                  final revealed =
+                      SlideActionConstants.totalActionWidth *
+                          _slideController.value;
+                  // The card's RIGHT corners square off as it opens.
+                  //
+                  // They are rounded because the card is a card — but once
+                  // the row is open that rounding sits against the flat left
+                  // edge of the blue button, and the page shows through as
+                  // two white notches. Flush is what makes the card and the
+                  // actions read as one object instead of two things
+                  // overlapping.
+                  //
+                  // Eased over the first 16 px of travel rather than snapped
+                  // at the first pixel: a 12 px corner appearing in one frame
+                  // is its own pop, which is the thing this change set exists
+                  // to remove.
+                  final rightRadius =
+                      _cardRadius * (1 - (revealed / 16).clamp(0.0, 1.0));
+                  return Stack(
+                    children: [
+                      // The buttons are UNCOVERED by the card, never faded or
+                      // popped in: they exist from the first pixel of
+                      // movement and the card simply stops hiding them. They
+                      // used to be mounted and unmounted on `_isSliding`, so
+                      // three full-colour buttons appeared in one frame.
+                      if (_slideController.value > 0)
+                        _buildActionButtons(favoritesProvider),
 
-                  // Main card content
-                  SlideTransition(
-                    position: _slideAnimation,
-                    child: _buildCardContent(isRefreshing),
-                  ),
-                ],
+                      // PIXELS, not a fraction of the child. See
+                      // SlideActionConstants.
+                      Transform.translate(
+                        offset: Offset(-revealed, 0),
+                        child: _buildCardContent(
+                          isRefreshing,
+                          rightRadius: rightRadius,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -456,13 +511,26 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
   }
 
-  Widget _buildCardContent(bool isRefreshing) {
+  /// The card's own corner radius. The action strip's outer edge matches it.
+  static const double _cardRadius = 12.0;
+
+  Widget _buildCardContent(
+    bool isRefreshing, {
+    double rightRadius = _cardRadius,
+  }) {
+    final shape = BorderRadius.only(
+      topLeft: const Radius.circular(_cardRadius),
+      bottomLeft: const Radius.circular(_cardRadius),
+      topRight: Radius.circular(rightRadius),
+      bottomRight: Radius.circular(rightRadius),
+    );
+
     return Container(
       width: double.infinity,
       height: 120,
       decoration: BoxDecoration(
         color: CupertinoColors.systemBackground,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: shape,
         boxShadow: [
           BoxShadow(
             color: CupertinoColors.systemGrey.withValues(alpha: 0.1),
@@ -472,7 +540,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: shape,
         child: Stack(
           children: [
             // Background: either custom image OR video (not both)
@@ -766,70 +834,62 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   // Gesture handling for slide actions
-  void _handlePanStart(DragStartDetails details) {
+  void _handleDragStart(DragStartDetails details) {
     _dragStartX = details.globalPosition.dx;
-    _wasOpenBeforeDrag = _isSliding;
-    setState(() {
-      _isPressed = true;
-    });
+    _wasOpenBeforeDrag = _slideController.value > 0;
   }
 
-  void _handlePanUpdate(DragUpdateDetails details) {
-    final horizontalDelta = details.delta.dx.abs();
-    final verticalDelta = details.delta.dy.abs();
+  void _handleDragUpdate(DragUpdateDetails details) {
+    // The axis filter that used to live here is gone: a horizontal drag
+    // recogniser only ever reports horizontal movement.
+    final dragged = _dragStartX - details.globalPosition.dx;
+    final fromOpen = _wasOpenBeforeDrag
+        ? SlideActionConstants.totalActionWidth
+        : 0.0;
 
-    if (horizontalDelta > verticalDelta) {
-      final dragDistance = _dragStartX - details.globalPosition.dx;
+    final newValue = ((fromOpen + dragged) /
+            SlideActionConstants.totalActionWidth)
+        .clamp(0.0, 1.0);
 
-      double newValue;
-      if (_wasOpenBeforeDrag) {
-        // Dragging right from open state closes proportionally
-        newValue = 1.0 - (-dragDistance / SlideActionConstants.totalActionWidth);
-      } else {
-        newValue = dragDistance / SlideActionConstants.totalActionWidth;
-      }
-      newValue = newValue.clamp(0.0, 1.0);
-
-      if (!_isSliding && newValue > 0.0) {
-        setState(() {
-          _isSliding = true;
-        });
-      }
-
-      _slideController.value = newValue;
+    if (!_isSliding && newValue > 0.0) {
+      setState(() => _isSliding = true);
     }
+
+    _slideController.value = newValue;
   }
 
-  void _handlePanEnd(DragEndDetails details) {
-    setState(() {
-      _isPressed = false;
-    });
-
+  void _handleDragEnd(DragEndDetails details) {
     if (!_isSliding) return;
 
     final velocity = details.velocity.pixelsPerSecond.dx;
+    final shouldOpen = velocity.abs() > 300
+        ? velocity < 0
+        : _slideController.value > 0.3;
 
-    if (velocity.abs() > 300) {
-      // Fast swipe: animate in the direction of velocity
-      if (velocity < 0) {
-        // Swiping left — open
-        _slideController.animateTo(1.0, curve: Curves.easeOut);
-      } else {
-        // Swiping right — close
-        _slideController.animateTo(0.0, curve: Curves.easeOut).then((_) {
-          if (mounted) setState(() => _isSliding = false);
-        });
-      }
+    if (shouldOpen) {
+      // A row that latches open gives the same small knock iOS gives its own
+      // swipe actions. The only haptic on this card used to be the
+      // long-press.
+      if (!_wasOpenBeforeDrag) HapticFeedback.lightImpact();
+      FavoriteRiverCard.openRow.value = widget.favorite.reachId;
+      _slideController.animateTo(1.0, curve: Curves.easeOut);
     } else {
-      // Slow drag: settle based on position
-      if (_slideController.value > 0.3) {
-        _slideController.animateTo(1.0, curve: Curves.easeOut);
-      } else {
-        _slideController.animateTo(0.0, curve: Curves.easeOut).then((_) {
-          if (mounted) setState(() => _isSliding = false);
-        });
-      }
+      _animateClosed();
     }
+  }
+
+  /// Close, and only then stop treating the row as open.
+  ///
+  /// `_closeSlide` used to clear `_isSliding` FIRST, so tapping an action
+  /// made the buttons vanish and the card glide back over empty space —
+  /// a different close from the one you get by dragging.
+  Future<void> _animateClosed() async {
+    try {
+      await _slideController.animateTo(0.0, curve: Curves.easeIn);
+    } on TickerCanceled {
+      // Widget went away mid-animation.
+    }
+    if (mounted) setState(() => _isSliding = false);
   }
 
   void _handleLongPress() {
@@ -852,11 +912,6 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   }
 
   void _closeSlide() {
-    if (_isSliding) {
-      setState(() {
-        _isSliding = false;
-      });
-      _slideController.reverse();
-    }
+    if (_isSliding) _animateClosed();
   }
 }

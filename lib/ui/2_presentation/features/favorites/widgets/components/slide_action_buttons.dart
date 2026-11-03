@@ -5,12 +5,24 @@ import 'package:rivr/models/1_domain/shared/favorite_river.dart';
 import 'package:rivr/ui/1_state/features/favorites/favorites_provider.dart';
 import 'package:rivr/ui/2_presentation/features/favorites/widgets/components/slide_action_constants.dart';
 
+/// The three actions revealed when a favourite card is swiped left.
+///
+/// Rewritten 2026-11-02 (ADR 0016). The previous version stacked three
+/// different widths with 12 pt overlaps, gave each a different set of corner
+/// radii, nudged every icon with its own left padding and faked the label
+/// alignment with literal leading spaces. Equal widths in a row need none of
+/// that, survive a larger text size, and read as one control instead of three
+/// pasted-on rectangles.
 class SlideActionButtons extends StatelessWidget {
   final FavoriteRiver favorite;
   final VoidCallback? onChangeImage;
   final VoidCallback? onRename;
   final VoidCallback onCloseSlide;
   final FavoritesProvider favoritesProvider;
+
+  /// Matches the card it sits behind.
+  static const double height = 120.0;
+  static const double _cardRadius = 12.0;
 
   const SlideActionButtons({
     super.key,
@@ -24,137 +36,80 @@ class SlideActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 120, // Match the card height
-      child: _buildOverlappingButtons(context),
-    );
-  }
-
-  Widget _buildOverlappingButtons(BuildContext context) {
-    return SizedBox(
       width: SlideActionConstants.totalActionWidth,
-      height: double.infinity,
-      child: Stack(
-        clipBehavior:
-            Clip.none, // Allow buttons to extend beyond bounds if needed
+      height: height,
+      child: Row(
         children: [
-          // Delete button (bottom layer - rightmost)
-          Positioned(
-            left:
-                SlideActionConstants.totalActionWidth -
-                SlideActionConstants.buttonWidth, // Rightmost position
-            top: 0,
-            child: _buildActionButton(
-              width: SlideActionConstants.buttonWidth,
-              color: CupertinoColors.systemRed,
-              icon: CupertinoIcons.trash,
-              iconPadding: const EdgeInsets.only(left: 20),
-              label: '   Delete',
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(12),
-                bottomRight: Radius.circular(12),
-                topLeft: Radius.circular(6),
-                bottomLeft: Radius.circular(6),
-              ),
-              onPressed: () => _handleDelete(context),
-            ),
+          _action(
+            color: CupertinoColors.systemBlue,
+            icon: CupertinoIcons.photo,
+            label: 'Background',
+            onPressed: () {
+              onCloseSlide();
+              onChangeImage?.call();
+            },
           ),
-
-          // Rename button (middle layer)
-          Positioned(
-            left:
-                SlideActionConstants.buttonWidth -
-                SlideActionConstants.overlap, // Middle position
-            top: 0,
-            child: _buildActionButton(
-              width: SlideActionConstants.buttonWidth + 10,
-              color: CupertinoColors.systemOrange,
-              icon: CupertinoIcons.pencil_ellipsis_rectangle,
-              iconPadding: const EdgeInsets.only(left: 30),
-              label: '     Rename',
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(12),
-                bottomRight: Radius.circular(12),
-              ),
-              onPressed: () {
-                onCloseSlide();
-                onRename?.call();
-              },
-            ),
+          _action(
+            color: CupertinoColors.systemOrange,
+            icon: CupertinoIcons.pencil,
+            label: 'Rename',
+            onPressed: () {
+              onCloseSlide();
+              onRename?.call();
+            },
           ),
-
-          // Image button (top layer - leftmost, appears on top)
-          Positioned(
-            left: 0, // Leftmost position
-            top: 0,
-            child: _buildActionButton(
-              width: SlideActionConstants.buttonWidth + 15,
-              color: CupertinoColors.systemBlue,
-              icon: CupertinoIcons.photo,
-              iconPadding: const EdgeInsets.only(left: 15),
-              label: '  Background',
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(12),
-                bottomRight: Radius.circular(12),
-              ),
-              onPressed: () {
-                onCloseSlide();
-                onChangeImage?.call();
-              },
+          _action(
+            color: CupertinoColors.systemRed,
+            icon: CupertinoIcons.trash,
+            label: 'Delete',
+            // Only the outer edge is rounded — the other two butt against
+            // their neighbours, and the left edge is uncovered by the card.
+            borderRadius: const BorderRadius.only(
+              topRight: Radius.circular(_cardRadius),
+              bottomRight: Radius.circular(_cardRadius),
             ),
+            onPressed: () => _handleDelete(context),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildActionButton({
-    required double width,
+  Widget _action({
     required Color color,
     required IconData icon,
     required String label,
-    required BorderRadius borderRadius,
     required VoidCallback onPressed,
-    EdgeInsets iconPadding = const EdgeInsets.only(
-      left: 15.0,
-    ), // Add this parameter
+    BorderRadius borderRadius = BorderRadius.zero,
   }) {
     return SizedBox(
-      width: width,
-      height: 120,
+      width: SlideActionConstants.buttonWidth,
+      height: height,
       child: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: onPressed,
         child: Container(
-          width: width,
-          height: double.infinity,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: borderRadius,
-            boxShadow: [
-              BoxShadow(
-                color: CupertinoColors.black.withValues(alpha: 0.1),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
+          decoration: BoxDecoration(color: color, borderRadius: borderRadius),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Padding(
-                padding: iconPadding, // Use the parameter
-                child: Icon(icon, color: CupertinoColors.white, size: 22, semanticLabel: label),
+              // The label already says this; a semantic label on the icon
+              // would make VoiceOver read the action twice.
+              ExcludeSemantics(
+                child: Icon(icon, color: CupertinoColors.white, size: 22),
               ),
               const SizedBox(height: 6),
-              Padding(
-                padding: const EdgeInsets.only(left: 12.0),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: CupertinoColors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: CupertinoColors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -169,7 +124,9 @@ class SlideActionButtons extends StatelessWidget {
     showCupertinoDialog(
       context: context,
       builder: (context) => CupertinoAlertDialog(
-        title: const Text('Remove Favorite'),
+        // The button says Delete, so the dialog says Delete. It used to open
+        // "Remove Favorite" with a "Remove" action — one action, two verbs.
+        title: const Text('Delete Favorite'),
         content: Text('Remove "${favorite.displayName}" from your favorites?'),
         actions: [
           CupertinoDialogAction(
@@ -182,7 +139,7 @@ class SlideActionButtons extends StatelessWidget {
               Navigator.pop(context);
               await favoritesProvider.removeFavorite(favorite.reachId);
             },
-            child: const Text('Remove'),
+            child: const Text('Delete'),
           ),
         ],
       ),
