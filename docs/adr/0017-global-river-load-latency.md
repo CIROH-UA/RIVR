@@ -55,6 +55,14 @@
 > Parsing is ~3 ms (n=40) and is a dead end. Latency tracks round trips,
 > not payload (n=48, TTFB == total).
 >
+> **One segment nobody measured, in any of the three investigations:** the
+> finger-to-sheet portion of a map tap — the two `queryRenderedFeatures`
+> platform calls and the sheet's first frame. The client auditor's run was
+> killed for low memory and produced zero observations; it corrected its own
+> write-up from "did not return in the window" to that, because the first
+> phrasing implied it had run. Inferred to be tens of milliseconds against a
+> 400 ms US total or a 9,000 ms cold global one, but inferred is all it is.
+>
 > Do not act on the recommendations at the bottom of this document without
 > reading the audit first.
 
