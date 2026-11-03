@@ -42,6 +42,33 @@ import {isRunNewer} from "./store-document.js";
 import {WorkList, WorkListEntry} from "./store-work-list.js";
 
 /** What a source returned for one (reach, product). */
+/**
+ * How many consecutive reaches may come back with an empty section before the
+ * run stops asking for that product.
+ *
+ * Three, not one: the section is a per-request lottery as well as a window,
+ * so one empty answer proves nothing. Three in a row inside an open window is
+ * unlikely enough to be worth acting on, and cheap enough to pay when wrong
+ * (the reaches are retried next cycle either way).
+ */
+export const WINDOW_PROBE_REACHES = 3;
+
+/**
+ * Whether a thrown value is store-upstream's empty-section failure.
+ *
+ * Checked by NAME rather than with `instanceof`: the fetcher is injected
+ * through `StoreRunDeps`, tests substitute their own, and an `instanceof`
+ * against the concrete class would quietly stop matching the moment the
+ * dependency is faked — which is exactly the kind of wiring break this
+ * repository keeps finding.
+ *
+ * @param {unknown} error - The thrown value.
+ * @return {boolean} True when it is an empty-section failure.
+ */
+export function isEmptySectionError(error: unknown): boolean {
+  return error instanceof Error && error.name === "EmptySectionError";
+}
+
 export interface FetchedProduct {
   payload: Record<string, unknown>;
   /** The NATIVE upstream unit. */
@@ -284,13 +311,47 @@ export async function runStoreUpdate(
   // unknown state. Guard 12 is literally "kill the fetch mid-run and confirm
   // the count assertion fires"; this is what makes that true.
   let fatal: unknown = null;
+
+  // Circuit breaker for a shut upstream window.
+  //
+  // `mediumRange` and `longRange` are not reliably served: measured
+  // 2026-11-03, 0 full responses out of 700 across all 35 production reaches
+  // once the daily window had closed, against 3 of 14 for one reach inside
+  // five seconds while it was open. The fetcher now retries that case, which
+  // is right while the window is open and pure waste when it is shut — 35
+  // reaches x 6 attempts of nothing.
+  //
+  // So: if the first WINDOW_PROBE_REACHES reaches of a product all come back
+  // with an empty section, treat the window as shut, stop asking for that
+  // product this run, and say so. The remaining reaches are recorded as
+  // failed exactly as they would have been, and retried next cycle.
+  const emptyStreak = new Map<ForecastProductId, number>();
+  const windowShut = new Set<ForecastProductId>();
+
   try {
     for (const plan of planned) {
       const {entry, product, documentId} = plan;
       try {
+        if (windowShut.has(product)) {
+          // Not fetched on purpose. Counted as failed so the totals still
+          // reconcile and the reach is retried, but no request is made.
+          report.failed++;
+          retry.add(entry.reachId);
+          report.results.push({
+            documentId,
+            reachId: entry.reachId,
+            source: entry.source,
+            product,
+            outcome: "failed",
+            error: "skipped: upstream window shut for this product this run",
+          });
+          continue;
+        }
+
         report.fetches++;
         const fetched = await deps.fetchProduct(
           entry.source, entry.reachId, product);
+        emptyStreak.set(product, 0);
 
         const doc = buildStoreDocument({
           source: entry.source,
@@ -350,6 +411,21 @@ export async function runStoreUpdate(
       // Not this reach's problem: the run itself is over. Rethrow so the loop
       // wrapper catches it and the count assertion fires.
         if (error instanceof FatalRunError) throw error;
+
+        // An empty section is upstream declining to serve, not a transport
+        // fault. Count the streak; once it is long enough the window is
+        // treated as shut for this product.
+        if (isEmptySectionError(error)) {
+          const streak = (emptyStreak.get(product) ?? 0) + 1;
+          emptyStreak.set(product, streak);
+          if (streak >= WINDOW_PROBE_REACHES) {
+            windowShut.add(product);
+            logger.warn("🚪 store run: upstream window shut, skipping product", {
+              product,
+              afterReaches: streak,
+            });
+          }
+        }
 
         // Guard 4: the previous record is left intact — nothing was written —
         // and the reach is retried next cycle.

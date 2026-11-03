@@ -18,9 +18,11 @@ import {resolve} from "node:path";
 
 import {
   CAN_FETCH,
+  EMPTY_SECTION_ATTEMPTS,
   SERIES_BY_PRODUCT,
   canFetch,
   canonicalUnit,
+  fetchProductFromUpstream,
 } from "./store-upstream.js";
 import {SECTION_BY_PRODUCT} from "./store-keys.js";
 import {PRODUCTS_BY_SOURCE} from "./store-run.js";
@@ -246,4 +248,116 @@ describe("the Dart contract has not drifted", () => {
       "if currentFlow learns to read analysis_assimilation, the server may " +
       "store that series again — until then it must not");
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The empty-section retry, added 2026-11-03 (ADR 0017 audit).
+//
+// CLAUDE.md says the store's fetchers never retry, and that rule still holds
+// everywhere else in this file. This is the one measured exception: NOAA
+// answers 200 for `medium_range` and `long_range` with the section simply
+// absent, roughly nine times in ten, and "retried next cycle" never arrives
+// because the cycle is an hour and the window is narrower. Six weeks of
+// expired documents came out of that.
+//
+// `globalThis.fetch` is stubbed rather than the module faked, so these
+// exercise the real loop in fetchProductFromUpstream.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("an empty NOAA section is retried, and only that", () => {
+  const realFetch = globalThis.fetch;
+
+  /** A NOAA body with every section present, the named one filled or not. */
+  function body(section: string, filled: boolean): string {
+    const sections: Record<string, unknown> = {
+      analysisAssimilation: {}, shortRange: {}, mediumRange: {},
+      longRange: {}, mediumRangeBlend: {},
+    };
+    sections[section] = filled ?
+      {
+        series: {
+          units: "ft3/s",
+          referenceTime: "2026-11-03T06:00:00Z",
+          data: [{validTime: "2026-11-03T07:00:00Z", flow: 12.5}],
+        },
+      } :
+      {};
+    return JSON.stringify(sections);
+  }
+
+  /** Replaces fetch with one that answers empty N times, then full. */
+  function stubFetch(emptyTimes: number, section: string): () => number {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      const filled = calls > emptyTimes;
+      return new Response(body(section, filled), {status: 200});
+    }) as typeof fetch;
+    return () => calls;
+  }
+
+  test("it succeeds on a later attempt instead of giving up at the first",
+    async () => {
+      const calls = stubFetch(3, "mediumRange");
+      try {
+        const got = await fetchProductFromUpstream(
+          "nwm", "10092062", "mediumRange");
+        assert.equal(calls(), 4,
+          "three empties then a full one: the old code stopped at the first " +
+          "and wrote nothing for six weeks");
+        assert.equal(got.referenceTime, "2026-11-03T06:00:00Z");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("it gives up after the budget and says how many times it asked",
+    async () => {
+      const calls = stubFetch(Number.MAX_SAFE_INTEGER, "longRange");
+      try {
+        await assert.rejects(
+          () => fetchProductFromUpstream("nwm", "10092062", "longRange"),
+          (e: Error) => {
+            assert.equal(e.name, "EmptySectionError",
+              "the run's circuit breaker matches on this name; rename it " +
+              "and the breaker silently stops working");
+            assert.match(e.message, /after 6 attempts/);
+            return true;
+          },
+        );
+        assert.equal(calls(), EMPTY_SECTION_ATTEMPTS);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("a section that is there first time costs exactly one request",
+    async () => {
+      const calls = stubFetch(0, "shortRange");
+      try {
+        await fetchProductFromUpstream("nwm", "10092062", "shortRange");
+        assert.equal(calls(), 1,
+          "the retry must not cost anything when upstream is behaving");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+  test("an HTTP error is NOT retried — the old rule still holds there",
+    async () => {
+      let calls = 0;
+      globalThis.fetch = (async () => {
+        calls++;
+        return new Response("nope", {status: 504});
+      }) as typeof fetch;
+      try {
+        await assert.rejects(
+          () => fetchProductFromUpstream("nwm", "10092062", "mediumRange"));
+        assert.equal(calls, 1,
+          "hammering something already failing is what CLAUDE.md forbids, " +
+          "and this change does not relax it");
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
 });
