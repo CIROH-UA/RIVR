@@ -342,15 +342,74 @@ Guarded both ways — the test asserts the right corners are rounded when
 closed and square when open, and both mutations (always rounded, always
 square) are caught.
 
+### Second pass: the background picker (finding 14)
+
+| Was | Now |
+|---|---|
+| Opened on "Custom Images", empty for anyone who has never uploaded one | Opens on the first category that has pictures in it |
+| Changing category set `_selectedImagePath = null` | The selection survives; only the grid changes |
+| `Save` built only when a selection existed, so it came and went from the navigation bar | Always present, disabled until there is a change to save |
+| Nothing showed which background the river already used | The applied one carries an **In use** badge, is preselected, and the picker opens on its category |
+| Grid `padding: all(16)` under floating buttons at `bottom: 20` | 96 pt of bottom padding, so the last row clears them |
+| Delete badge: 16 pt icon in 6 pt padding = **28 pt** target, and hidden once the tile was selected | 16 pt icon centred in a **44 pt** target, shown whether or not the tile is selected |
+| Five segments, each an icon plus a **10 pt** label | Labels only, **12 pt**; "Large" is now "Big Water" |
+| A header repeating the category name and icon two rows under the tab | Gone; only the Custom tab keeps a one-line count |
+| Blue and green filled pills as equal primaries; "Flow animation" never said it removes the photo | One blue primary ("Upload your own image") over a plain "Remove photo, use flow animation" |
+| 3 pt selection border appearing on tap, shifting the image | Border always present, transparent when unselected |
+| A 40 pt black gradient dimming every unselected thumbnail "for contrast", over tiles that carry no text | Gone |
+
+Four guards, four mutations, all caught: open on Custom again, clear the
+selection on category change, hide Save until something is picked, drop the
+In-use badge.
+
+### Third pass: the rename dialog (finding 13)
+
+| Was | Now |
+|---|---|
+| Field seeded from `customName`, which is null until you have renamed once — so every FIRST rename opened an empty box | Seeded with the name on the card, and selected, so typing replaces it |
+| Title "Rename River", on top of the card that was the only thing saying which river | Title names the river |
+| Save not `isDefaultAction` — not bold | Bold, and it is what the return key triggers |
+| Return key did nothing (`onSubmitted` unwired) | Submits, when there is something to submit |
+| An empty field accepted the tap and silently did nothing | Save is disabled until the name differs from the one on the card |
+| `TextEditingController` never disposed | Disposed when the dialog closes |
+
+The "no change" comparison is against the name **on the card**, not against
+`customName`. Comparing against `customName` let an untouched dialog save
+"Provo River" as a custom name identical to the river's real one — which
+then grew a "Restore to Provo River" button that restores nothing.
+
+Three guards, four mutations, all caught: seed from `customName` again,
+generic title, Save not default, accept an empty name.
+
+### Fourth pass: the page itself (findings 12 and 15)
+
+* **Only one row is open at a time, and scrolling closes it.** Coordinated
+  through `FavoriteRiverCard.openRow`, a single `ValueNotifier<String?>`
+  holding the reach id of the open row: every card watches it, the opener
+  sets it, and the list clears it on a user-driven scroll. A card cannot see
+  its siblings, which is why this needed something outside the card. Static
+  and deliberately never cleaned up — the value is only a reach id, and an
+  unmounted card simply does not react.
+* **The navigation bar has a title.** It had none: an empty strip with two
+  unlabelled icons, while a 45 pt "RIVR" wordmark sat in the body and spent
+  ~77 pt of every screenful saying the same thing. The name moved up, the
+  wordmark is gone, and the search toggle moved into the bar with it.
+* **A one-character typo fixed.** The empty state's description read
+  `CupertinoColors.systemGrey2..resolveFrom(context)` — a cascade, so the
+  resolved colour was thrown away and the dynamic colour never resolved for
+  dark mode.
+
+Two guards, two mutations, both caught: stop the cards listening to each
+other, and stop the scroll clearing the open row.
+
 ### Not done, deliberately
 
-* **Opening one row does not close another, and scrolling does not close an
-  open row** (part of finding 12). Both need a shared notifier across cards
-  rather than a change inside one, and that is a different kind of edit from
-  everything above. Left for its own change so this one stays reviewable.
-* Everything in the rename dialog (finding 13) and the background picker
-  (findings 14, 15) — a separate pass.
-* The navigation bar having no title, and the 45 pt body wordmark.
+* **The add button stays a floating circle.** It is listed above as a
+  Material pattern in a Cupertino app, and it is — but it is also the
+  affordance the empty state points at by name ("Tap the + button below"),
+  and the three navigation-bar slots are now full. Moving it would make
+  adding a river harder to find in exchange for idiom. Judgement call,
+  recorded rather than silently skipped.
 
 ### Verification
 

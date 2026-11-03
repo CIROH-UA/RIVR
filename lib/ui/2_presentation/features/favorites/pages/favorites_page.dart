@@ -347,6 +347,10 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   CupertinoNavigationBar _buildNavigationBar() {
     return CupertinoNavigationBar(
+      // The bar used to have no title at all, just two unlabelled icons,
+      // while a 45 pt "RIVR" wordmark sat in the body and spent ~77 pt of
+      // every screenful saying the same thing. The name belongs here.
+      middle: const Text('RIVR'),
       // "This Week" outlook entry point
       leading: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -356,13 +360,39 @@ class _FavoritesPageState extends State<FavoritesPage>
           semanticLabel: "This week's outlook",
         ),
       ),
-      trailing: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: _showSettingsMenu,
-        child: const Icon(
-          CupertinoIcons.ellipsis,
-          semanticLabel: 'Settings menu',
-        ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Search came up from the body header with the wordmark. It still
+          // only appears once there are enough rivers to be worth searching.
+          Consumer<FavoritesProvider>(
+            builder: (context, favoritesProvider, child) {
+              if (!favoritesProvider.shouldShowSearch ||
+                  favoritesProvider.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: _toggleSearch,
+                child: Icon(
+                  _showSearch
+                      ? CupertinoIcons.xmark_circle_fill
+                      : CupertinoIcons.search,
+                  semanticLabel:
+                      _showSearch ? 'Close search' : 'Search favorites',
+                ),
+              );
+            },
+          ),
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            onPressed: _showSettingsMenu,
+            child: const Icon(
+              CupertinoIcons.ellipsis,
+              semanticLabel: 'Settings menu',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -456,9 +486,6 @@ class _FavoritesPageState extends State<FavoritesPage>
     return SafeArea(
       child: Column(
         children: [
-          // App title header
-          _buildAppHeader(),
-
           // Empty state content — offset upward to balance whitespace
           Expanded(
             child: Padding(
@@ -502,7 +529,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                     'Tap the + button below to explore the map and add your first river.',
                     style: TextStyle(
                       fontSize: 16,
-                      color: CupertinoColors.systemGrey2..resolveFrom(context),
+                      color: CupertinoColors.systemGrey2.resolveFrom(context),
                       height: 1.4,
                     ),
                     textAlign: TextAlign.center,
@@ -525,9 +552,6 @@ class _FavoritesPageState extends State<FavoritesPage>
       top: true,
       child: Column(
         children: [
-          // App header
-          _buildAppHeader(),
-
           // Search bar (using custom FavoritesSearchBar)
           Consumer<FavoritesProvider>(
             builder: (context, favoritesProvider, child) {
@@ -562,7 +586,17 @@ class _FavoritesPageState extends State<FavoritesPage>
 
           // Favorites list
           Expanded(
-            child: CustomScrollView(
+            // Scrolling closes an open row, the way it does on iOS. Without
+            // it a row could be left open and scrolled off screen, and come
+            // back open much later with no memory of having opened it.
+            child: NotificationListener<ScrollStartNotification>(
+              onNotification: (n) {
+                if (n.dragDetails != null) {
+                  FavoriteRiverCard.openRow.value = null;
+                }
+                return false;
+              },
+              child: CustomScrollView(
               slivers: [
                 // Pull-to-refresh
                 CupertinoSliverRefreshControl(
@@ -630,51 +664,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                 const SliverToBoxAdapter(child: SizedBox(height: 100)),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAppHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 16, 32, 16),
-      child: Row(
-        children: [
-          // App title with theme-aware color
-          Text(
-            ' RIVR',
-            style: TextStyle(
-              fontSize: 45,
-              fontWeight: FontWeight.bold,
-              color: CupertinoTheme.of(context).textTheme.textStyle.color,
             ),
-          ),
-
-          const Spacer(),
-
-          // Search toggle button (only when 4+ favorites and not empty state)
-          Consumer<FavoritesProvider>(
-            builder: (context, favoritesProvider, child) {
-              if (favoritesProvider.shouldShowSearch &&
-                  !favoritesProvider.isEmpty) {
-                return CupertinoButton(
-                  padding: EdgeInsets.zero,
-                  onPressed: _toggleSearch,
-                  child: Icon(
-                    _showSearch
-                        ? CupertinoIcons.xmark_circle_fill
-                        : CupertinoIcons.search,
-                    color: CupertinoColors.systemBlue,
-                    semanticLabel: _showSearch
-                        ? 'Close search'
-                        : 'Search favorites',
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
-            },
           ),
         ],
       ),
@@ -1263,7 +1253,18 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   void _showRenameDialog(FavoriteRiver favorite) {
-    final controller = TextEditingController(text: favorite.customName);
+    // Seeded with what the card SHOWS, not with `customName` alone.
+    //
+    // `customName` is null until the river has already been renamed once, so
+    // the first rename opened an empty box: the existing name could not be
+    // edited, only retyped from memory, while the dialog covered the card it
+    // was on. The text is selected, so typing replaces it the way a rename
+    // is expected to.
+    final controller = TextEditingController(text: favorite.displayName)
+      ..selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: favorite.displayName.length,
+      );
 
     // What this rename can be undone TO.
     //
@@ -1278,13 +1279,11 @@ class _FavoritesPageState extends State<FavoritesPage>
     // which this page cannot see, so the card publishes it to the provider.
     // It can still be null — geocoding is async and may never succeed — and
     // null correctly means no button, exactly as an NWM reach with no name
-    // gets none. A button that restores to nothing would be worse than its
-    // absence.
-    // The whole decision, including "is it already the default?", lives in
-    // `restoreTargetFor` so it can be tested without a widget harness. It was
-    // inline here, and a dead button — "Restore to Pitumarca, Peru" on a
-    // river already called Pitumarca, Peru — shipped past source-level guards
-    // because of it.
+    // gets none. The whole decision, including "is it already the default?",
+    // lives in `restoreTargetFor` so it can be tested without a widget
+    // harness. It was inline here, and a dead button — "Restore to
+    // Pitumarca, Peru" on a river already called Pitumarca, Peru — shipped
+    // past source-level guards because of it.
     final restoreTarget = restoreTargetFor(
       customName: favorite.customName,
       riverName: favorite.riverName,
@@ -1292,78 +1291,107 @@ class _FavoritesPageState extends State<FavoritesPage>
           context.read<FavoritesProvider>().getPlaceLabel(favorite.reachId),
     );
 
-    showCupertinoDialog(
+    // Rebuilt as the field changes, so Save can be disabled on an empty name
+    // instead of accepting the tap and silently doing nothing.
+    showCupertinoDialog<void>(
       context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: const Text('Rename River'),
-        content: Column(
-          children: [
-            const SizedBox(height: 16),
-            CupertinoTextField(
-              controller: controller,
-              placeholder: 'Enter new name',
-              textAlign: TextAlign.center,
-              autofocus: true,
-            ),
-            if (restoreTarget != null) ...[
-              const SizedBox(height: 12),
-              CupertinoButton(
-                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                onPressed: () {
-                  controller.text = restoreTarget;
-                },
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      CupertinoIcons.refresh_circled,
-                      size: 16,
-                      color: CupertinoColors.systemBlue,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Restore to "$restoreTarget"',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: CupertinoColors.systemBlue,
-                      ),
-                    ),
-                  ],
+      builder: (dialogContext) => ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (context, value, _) {
+          final trimmed = value.text.trim();
+          // Compared against what the field was SEEDED with, which is the
+          // name on the card. Comparing against `customName` alone let an
+          // untouched dialog save "Provo River" as a custom name identical
+          // to the river's real one — which then grew a "Restore to Provo
+          // River" button that restores nothing.
+          final canSave =
+              trimmed.isNotEmpty && trimmed != favorite.displayName;
+
+          void save() {
+            Navigator.pop(dialogContext);
+            _commitRename(favorite, trimmed);
+          }
+
+          return CupertinoAlertDialog(
+            // Says WHICH river. The title was the generic "Rename River"
+            // while the dialog covered the card that would have told you.
+            title: Text('Rename ${favorite.displayName}'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 16),
+                CupertinoTextField(
+                  controller: controller,
+                  placeholder: 'Enter new name',
+                  textAlign: TextAlign.center,
+                  autofocus: true,
+                  maxLength: 60,
+                  textInputAction: TextInputAction.done,
+                  // The keyboard's return key used to do nothing at all.
+                  onSubmitted: canSave ? (_) => save() : null,
                 ),
+                if (restoreTarget != null) ...[
+                  const SizedBox(height: 12),
+                  CupertinoButton(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    onPressed: () => controller.text = restoreTarget,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          CupertinoIcons.refresh_circled,
+                          size: 16,
+                          color: CupertinoColors.systemBlue,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'Restore to "$restoreTarget"',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: CupertinoColors.systemBlue,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              CupertinoDialogAction(
+                // Bold, and what the return key triggers.
+                isDefaultAction: true,
+                onPressed: canSave ? save : null,
+                child: const Text('Save'),
               ),
             ],
-          ],
-        ),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            onPressed: () async {
-              final newName = controller.text.trim();
-              Navigator.pop(context);
-
-              if (newName.isNotEmpty && newName != favorite.customName) {
-                final provider = context.read<FavoritesProvider>();
-                await provider.updateFavorite(
-                  favorite.reachId,
-                  customName: newName,
-                );
-                // Push the name to the server too, so a flood alert can use
-                // it. Custom names live only in device SharedPreferences, so
-                // until now a notification said NOAA's official name — and
-                // that name is the first thing a user reads on a lock screen.
-                // Written HERE, on rename, rather than only when the Weekly
-                // Outlook page is next opened: renaming a river and never
-                // visiting that page meant the server never heard about it.
-                await _syncFavoriteLabel(favorite, newName);
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
+          );
+        },
       ),
-    );
+      // The controller outlived every dialog that ever opened.
+    ).whenComplete(controller.dispose);
   }
+
+  Future<void> _commitRename(FavoriteRiver favorite, String newName) async {
+    final provider = context.read<FavoritesProvider>();
+    await provider.updateFavorite(favorite.reachId, customName: newName);
+    // Push the name to the server too, so a flood alert can use it. Custom
+    // names live only in device SharedPreferences, so until now a
+    // notification said NOAA's official name — and that name is the first
+    // thing a user reads on a lock screen. Written HERE, on rename, rather
+    // than only when the Weekly Outlook page is next opened: renaming a
+    // river and never visiting that page meant the server never heard about
+    // it.
+    await _syncFavoriteLabel(favorite, newName);
+  }
+
 }

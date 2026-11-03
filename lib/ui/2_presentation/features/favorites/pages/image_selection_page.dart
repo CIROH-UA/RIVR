@@ -23,7 +23,13 @@ class ImageSelectionPage extends StatefulWidget {
 }
 
 class _ImageSelectionPageState extends State<ImageSelectionPage> {
-  int _selectedCategoryIndex = 0;
+  /// Index 0 is "Custom Images", which is empty for everybody who has never
+  /// uploaded one — so opening there showed a new user an empty screen with
+  /// two dozen bundled backgrounds hidden one tap away. Open on the first
+  /// category that actually has pictures in it.
+  int _selectedCategoryIndex = _firstStockCategory;
+  static const int _customCategory = 0;
+  static const int _firstStockCategory = 1;
   String? _selectedImagePath;
   bool _isUpdating = false;
   bool _isUploading = false;
@@ -35,11 +41,42 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
   // Image categories with custom images as first category
   late final List<ImageCategory> _categories;
 
+  /// The background this river is using right now, if any. Shown as a badge
+  /// and preselected, because the picker used to give no clue which of the
+  /// two dozen images you already had.
+  String? _appliedImagePath;
+
   @override
   void initState() {
     super.initState();
     _initializeCategories();
     _loadCustomImages();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _readAppliedImage());
+  }
+
+  void _readAppliedImage() {
+    if (!mounted) return;
+    final applied = context
+        .read<FavoritesProvider>()
+        .favorites
+        .where((f) => f.reachId == widget.reachId)
+        .firstOrNull
+        ?.customImageAsset;
+    if (applied == null) return;
+
+    setState(() {
+      _appliedImagePath = applied;
+      _selectedImagePath = applied;
+      for (var i = 0; i < _categories.length; i++) {
+        if (_categories[i].images.contains(applied)) {
+          _selectedCategoryIndex = i;
+          return;
+        }
+      }
+      if (_customImages.contains(applied)) {
+        _selectedCategoryIndex = _customCategory;
+      }
+    });
   }
 
   void _initializeCategories() {
@@ -129,15 +166,20 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
           onPressed: _isUpdating ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        trailing: _selectedImagePath != null
-            ? CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: _isUpdating ? null : _saveSelection,
-                child: _isUpdating
-                    ? const CupertinoActivityIndicator(radius: 8)
-                    : const Text('Save'),
-              )
-            : null,
+        // Always present, disabled when there is nothing new to save. It
+        // used to be built only when a selection existed, so it appeared and
+        // disappeared from the navigation bar as you tapped around.
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: (_isUpdating ||
+                  _selectedImagePath == null ||
+                  _selectedImagePath == _appliedImagePath)
+              ? null
+              : _saveSelection,
+          child: _isUpdating
+              ? const CupertinoActivityIndicator(radius: 8)
+              : const Text('Save'),
+        ),
       ),
       child: SafeArea(
         child: Stack(
@@ -178,79 +220,26 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
     );
   }
 
+  /// One primary, one secondary.
+  ///
+  /// These used to be two filled pills side by side — blue "Flow animation"
+  /// next to green "Upload image" — reading as two equally important
+  /// actions, in a colour iOS does not use for a primary. And "Flow
+  /// animation" never said what it actually does, which is take the photo
+  /// off and put the animated water back.
   Widget _buildButtonRow() {
-    return Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // Use flow animation button
-        Expanded(
-          child: CupertinoButton(
-            onPressed: _isUpdating ? null : _resetToDefault,
-            borderRadius: BorderRadius.circular(25),
-            color: CupertinoColors.systemBlue,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  CupertinoIcons.play_circle,
-                  color: CupertinoColors.white,
-                  size: 18,
-                ),
-                const SizedBox(width: 6),
-                const Flexible(
-                  child: Text(
-                    'Flow animation',
-                    style: TextStyle(
-                      color: CupertinoColors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (_isUpdating) ...[
-                  const SizedBox(width: 8),
-                  const CupertinoActivityIndicator(
-                    radius: 6,
-                    color: CupertinoColors.white,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Upload button
-        Expanded(
-          child: CupertinoButton(
-            onPressed: _isUploading ? null : _uploadCustomImage,
-            borderRadius: BorderRadius.circular(25),
-            color: CupertinoColors.systemGreen,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  CupertinoIcons.camera,
-                  color: CupertinoColors.white,
-                  size: 18,
-                ),
-                const SizedBox(width: 6),
-                const Flexible(
-                  child: Text(
-                    'Upload image',
-                    style: TextStyle(
-                      color: CupertinoColors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (_isUploading) ...[
-                  const SizedBox(width: 8),
-                  const CupertinoActivityIndicator(
-                    radius: 6,
-                    color: CupertinoColors.white,
-                  ),
-                ],
-              ],
+        _uploadButton(),
+        const SizedBox(height: 4),
+        CupertinoButton(
+          onPressed: _isUpdating ? null : _resetToDefault,
+          child: Text(
+            'Remove photo, use flow animation',
+            style: TextStyle(
+              fontSize: 14,
+              color: CupertinoColors.systemBlue.resolveFrom(context),
             ),
           ),
         ),
@@ -258,39 +247,39 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
     );
   }
 
-  Widget _buildUploadButton() {
-    return Center(
-      child: CupertinoButton(
-        onPressed: _isUploading ? null : _uploadCustomImage,
-        borderRadius: BorderRadius.circular(25),
-        color: CupertinoColors.systemGreen,
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              CupertinoIcons.camera,
+  Widget _buildUploadButton() => Center(child: _uploadButton());
+
+  Widget _uploadButton() {
+    return CupertinoButton(
+      onPressed: _isUploading ? null : _uploadCustomImage,
+      borderRadius: BorderRadius.circular(25),
+      color: CupertinoColors.systemBlue,
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            CupertinoIcons.camera,
+            color: CupertinoColors.white,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Upload your own image',
+            style: TextStyle(
               color: CupertinoColors.white,
-              size: 20,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(width: 8),
-            const Text(
-              'Upload your own image',
-              style: TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+          ),
+          if (_isUploading) ...[
+            const SizedBox(width: 12),
+            const CupertinoActivityIndicator(
+              radius: 8,
+              color: CupertinoColors.white,
             ),
-            if (_isUploading) ...[
-              const SizedBox(width: 12),
-              const CupertinoActivityIndicator(
-                radius: 8,
-                color: CupertinoColors.white,
-              ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -313,45 +302,34 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
           groupValue: _selectedCategoryIndex,
           onValueChanged: (value) {
             if (value != null && !_isUpdating) {
-              setState(() {
-                _selectedCategoryIndex = value;
-                _selectedImagePath =
-                    null; // Clear selection when switching categories
-              });
+              // The selection SURVIVES a category change. Clearing it meant
+              // glancing at another category threw away the image you had
+              // picked, and took the Save button with it.
+              setState(() => _selectedCategoryIndex = value);
             }
           },
           backgroundColor: CupertinoColors.systemGrey6.resolveFrom(context),
           thumbColor: CupertinoColors.systemBackground.resolveFrom(context),
           children: {
+            // No icons. Five segments with an icon each forced the label to
+            // 10 pt, below the size iOS treats as legible and fixed against
+            // Dynamic Type. The label alone says it.
             for (int i = 0; i < _categories.length; i++)
               i: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _categories[i].icon,
-                      size: 14,
-                      color: _selectedCategoryIndex == i
-                          ? CupertinoColors.activeBlue.resolveFrom(context)
-                          : CupertinoColors.secondaryLabel.resolveFrom(context),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      _categories[i].shortName,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: _selectedCategoryIndex == i
-                            ? FontWeight.w600
-                            : FontWeight.w500,
-                        color: _selectedCategoryIndex == i
-                            ? CupertinoColors.activeBlue.resolveFrom(context)
-                            : CupertinoColors.secondaryLabel.resolveFrom(
-                                context,
-                              ),
-                      ),
-                    ),
-                  ],
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: Text(
+                  _categories[i].shortName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: _selectedCategoryIndex == i
+                        ? FontWeight.w600
+                        : FontWeight.w500,
+                    color: _selectedCategoryIndex == i
+                        ? CupertinoColors.label.resolveFrom(context)
+                        : CupertinoColors.secondaryLabel.resolveFrom(context),
+                  ),
                 ),
               ),
           },
@@ -374,35 +352,26 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Category header
-          Row(
-            children: [
-              Icon(category.icon, color: CupertinoColors.activeBlue, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                category.name,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
+          // The segmented control above already names the category; a header
+          // repeating it with the same icon two rows down cost ~44 pt of
+          // grid and said nothing new.
+          if (isCustomCategory && _customImages.isNotEmpty) ...[
+            Text(
+              '${_customImages.length} of your own image${_customImages.length == 1 ? '' : 's'}',
+              style: TextStyle(
+                fontSize: 13,
+                color: CupertinoColors.secondaryLabel.resolveFrom(context),
               ),
-              if (isCustomCategory && _customImages.isNotEmpty) ...[
-                const Spacer(),
-                Text(
-                  '${_customImages.length} image${_customImages.length == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: CupertinoColors.secondaryLabel,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 16),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // Image grid
           Expanded(
             child: GridView.builder(
+              // Room for the floating buttons, which otherwise sit on top of
+              // the last row of images permanently.
+              padding: const EdgeInsets.only(bottom: 96),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
                 crossAxisSpacing: 12,
@@ -466,15 +435,23 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
     bool isSelected,
     bool isCustomImage,
   ) {
+    final isApplied = imagePath == _appliedImagePath;
+
     return GestureDetector(
       onTap: _isUpdating ? null : () => _selectImage(imagePath),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: isSelected
-              ? Border.all(color: CupertinoColors.activeBlue, width: 3)
-              : null,
+          // The border is always 3 pt wide, transparent when unselected.
+          // Adding it only on selection changed the box and shifted the
+          // picture by 3 pt as you tapped.
+          border: Border.all(
+            color: isSelected
+                ? CupertinoColors.activeBlue
+                : const Color(0x00000000),
+            width: 3,
+          ),
           boxShadow: [
             BoxShadow(
               color: CupertinoColors.systemGrey.withValues(alpha: 0.2),
@@ -484,36 +461,30 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(9),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Image
               isCustomImage
                   ? Image.file(
                       File(imagePath),
                       fit: BoxFit.cover,
                       semanticLabel: 'Custom river background image',
-                      errorBuilder: (context, error, stackTrace) {
-                        return _buildImageError();
-                      },
+                      errorBuilder: (context, error, stackTrace) =>
+                          _buildImageError(),
                     )
                   : Image.asset(
                       imagePath,
                       fit: BoxFit.cover,
                       semanticLabel: 'River background image',
-                      errorBuilder: (context, error, stackTrace) {
-                        return _buildImageError();
-                      },
+                      errorBuilder: (context, error, stackTrace) =>
+                          _buildImageError(),
                     ),
 
               // Selection overlay
               if (isSelected)
                 Container(
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.activeBlue.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  color: CupertinoColors.activeBlue.withValues(alpha: 0.3),
                   child: const Center(
                     child: Icon(
                       CupertinoIcons.checkmark_circle_fill,
@@ -523,61 +494,79 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
                   ),
                 ),
 
-              // Delete button for custom images (top-right)
-              if (isCustomImage && !isSelected)
+              // Which one you are already using. Without it the picker gave
+              // no way to tell your current background from the other 23.
+              if (isApplied)
                 Positioned(
-                  top: 8,
-                  right: 8,
-                  child: GestureDetector(
-                    onTap: () => _showDeleteConfirmation(imagePath),
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: CupertinoColors.systemBackground.withValues(
-                          alpha: 0.9,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: CupertinoColors.black.withValues(alpha: 0.3),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        CupertinoIcons.trash_fill,
-                        size: 16,
-                        color: CupertinoColors.systemRed,
+                  left: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'In use',
+                      style: TextStyle(
+                        color: CupertinoColors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
 
-              // Gradient overlay for better contrast
-              if (!isSelected)
+              // Delete, on your own images only.
+              //
+              // It is shown whether or not the tile is selected — it used to
+              // vanish the moment you tapped the picture, so the one you had
+              // just looked at was the one you could not remove. The icon is
+              // 16 pt inside a 44 pt target, which is Apple's minimum; it
+              // used to be a 28 pt target.
+              if (isCustomImage)
                 Positioned(
-                  bottom: 0,
-                  left: 0,
+                  top: 0,
                   right: 0,
-                  child: Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          CupertinoColors.black.withValues(alpha: 0.0),
-                          CupertinoColors.black.withValues(alpha: 0.3),
-                        ],
-                      ),
-                      borderRadius: const BorderRadius.only(
-                        bottomLeft: Radius.circular(12),
-                        bottomRight: Radius.circular(12),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _showDeleteConfirmation(imagePath),
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: CupertinoColors.systemBackground
+                                .withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    CupertinoColors.black.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(
+                            CupertinoIcons.trash_fill,
+                            size: 16,
+                            color: CupertinoColors.systemRed,
+                            semanticLabel: 'Delete this image',
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
+
+              // The 40 pt black gradient that used to sit along the bottom of
+              // every unselected tile is gone. It was there "for better
+              // contrast", but nothing is written on a tile — so it only
+              // darkened the picture the user is trying to judge.
             ],
           ),
         ),
@@ -705,7 +694,7 @@ class _ImageSelectionPageState extends State<ImageSelectionPage> {
 
         // Switch to custom category and select the new image
         setState(() {
-          _selectedCategoryIndex = 0;
+          _selectedCategoryIndex = _customCategory;
           _selectedImagePath = result.imagePath;
         });
 
@@ -823,7 +812,7 @@ class ImageCategory {
       case 'Desert Rivers':
         return 'Desert';
       case 'Big Water':
-        return 'Large';
+        return 'Big Water';
       default:
         return name;
     }
