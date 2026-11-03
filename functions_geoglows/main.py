@@ -21,6 +21,7 @@ import json
 import math
 import os
 import threading
+import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -92,11 +93,35 @@ _JSON_HEADERS = {
 }
 
 
+# When the daily run actually lands, measured from S3 Last-Modified on two
+# consecutive days and recorded in this repo: 10:15-10:30 UTC. It is why the
+# flood builder is scheduled at 11:00 and why the store fetches at 11:30.
+_PUBLISHED_BY_UTC_HOUR = 11
+
+
 def _candidate_dates():
-    # Forecasts publish daily at 00Z (UTC); today's may not be up early, so
-    # fall back to yesterday. NEVER omit the date (that triggers a ~35s S3 glob).
-    today = datetime.now(timezone.utc).date()
-    return [today.strftime("%Y%m%d"), (today - timedelta(days=1)).strftime("%Y%m%d")]
+    """The runs worth asking for, newest first.
+
+    NEVER omit the date (that triggers a ~35s S3 glob).
+
+    This used to always offer TODAY first, on the comment's assumption that
+    forecasts "publish daily at 00Z". They are STAMPED 00Z but do not appear
+    until 10:15-10:30 UTC, which this repository had already measured. So for
+    the first eleven hours of every UTC day every request spent a whole
+    attempt on a group that cannot exist yet — measured at 2.7-11.6 s of
+    pure waste per request, before the real fetch had even started
+    (ADR 0017).
+    """
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    yesterday = today - timedelta(days=1)
+
+    # Before the run can plausibly have landed, do not ask for it at all.
+    if now.hour < _PUBLISHED_BY_UTC_HOUR:
+        order = [yesterday, today - timedelta(days=2)]
+    else:
+        order = [today, yesterday]
+    return [d.strftime("%Y%m%d") for d in order]
 
 
 def _iso(index):
@@ -110,6 +135,22 @@ def _col(df, name):
     return out
 
 
+@lru_cache(maxsize=4096)
+def _return_periods(river_id: int) -> dict:
+    """This river's return periods, fetched at most once per instance.
+
+    Keyed on the river ALONE: unlike the forecast, this does not vary by day,
+    so including a date in the key — which is what fetching it inside the
+    per-date loop amounted to — bought nothing and cost a second S3 read on
+    every request that fell back to yesterday's run.
+    """
+    import geoglows  # deferred: see note at top of file
+
+    rp = geoglows.data.return_periods(river_id=river_id, distribution="gumbel")
+    rp_series = rp[river_id] if river_id in rp.columns else rp.iloc[:, 0]
+    return {str(int(k)): round(float(v), 3) for k, v in rp_series.items()}
+
+
 @lru_cache(maxsize=1024)
 def _build_payload(river_id: int, forecast_date: str) -> str:
     """Fetch + shape one river for a specific date. Cached per (river, date) so
@@ -118,18 +159,63 @@ def _build_payload(river_id: int, forecast_date: str) -> str:
     The three S3 reads (forecast, stats, return periods) are independent, so run
     them in parallel — they are I/O-bound (network), so threads release the GIL
     and overlap. This cuts a ~3x-sequential wait down to ~1x the slowest read."""
+    # TIMING, added 2026-11-02 for ADR 0017.
+    #
+    # A warm instance takes 9-17 s for a river it has not fetched before,
+    # while a repeat of the same river takes 1.9 s off the lru_cache below.
+    # Measured, but nothing said WHERE those seconds go. There are three
+    # independent S3 reads here and a deferred import; this times each so one
+    # cold request answers it. Keep the lines cheap and keep them: the next
+    # person to ask this question should not have to deploy again.
+    t_enter = time.monotonic()
+
     with ThreadPoolExecutor(max_workers=3) as pool:
-        import geoglows  # deferred: ~12s import, see note at top of file
+        t0 = time.monotonic()
+        import geoglows  # deferred: see note at top of file
+        t_import = time.monotonic() - t0
 
-        fc_future = pool.submit(geoglows.data.forecast, river_id=river_id, date=forecast_date)
-        fs_future = pool.submit(geoglows.data.forecast_stats, river_id=river_id, date=forecast_date)
-        rp_future = pool.submit(geoglows.data.return_periods, river_id=river_id, distribution="gumbel")
-        fc = fc_future.result()
-        fs = fs_future.result()
-        rp = rp_future.result()
+        def timed(label, fn, **kw):
+            start = time.monotonic()
+            try:
+                return fn(**kw), time.monotonic() - start, None
+            except Exception as e:  # timed even when it fails
+                return None, time.monotonic() - start, type(e).__name__
 
-    rp_series = rp[river_id] if river_id in rp.columns else rp.iloc[:, 0]
-    return_periods = {str(int(k)): round(float(v), 3) for k, v in rp_series.items()}
+        fc_future = pool.submit(timed, "forecast", geoglows.data.forecast,
+                                river_id=river_id, date=forecast_date)
+        fs_future = pool.submit(timed, "forecast_stats", geoglows.data.forecast_stats,
+                                river_id=river_id, date=forecast_date)
+        # Return periods are a long-term statistic of the river. They do not
+        # depend on the forecast date and they barely change year to year —
+        # yet they were refetched on every request, and TWICE whenever the
+        # first date attempt failed, at 2.2-6.3 s a time. Routed through a
+        # cache keyed on the river alone. Still submitted to the pool so a
+        # genuine miss still overlaps the other two reads.
+        rp_future = pool.submit(timed, "return_periods", _return_periods,
+                                river_id=river_id)
+        fc, fc_s, fc_err = fc_future.result()
+        fs, fs_s, fs_err = fs_future.result()
+        rp, rp_s, rp_err = rp_future.result()
+
+    print(
+        f"ADR0017 river={river_id} date={forecast_date} "
+        f"import={t_import:.2f}s "
+        f"forecast={fc_s:.2f}s{'/' + fc_err if fc_err else ''} "
+        f"forecast_stats={fs_s:.2f}s{'/' + fs_err if fs_err else ''} "
+        f"return_periods={rp_s:.2f}s{'/' + rp_err if rp_err else ''} "
+        f"in_build_payload={time.monotonic() - t_enter:.2f}s",
+        flush=True,
+    )
+
+    # The three reads were previously awaited bare; re-raise the same way so
+    # behaviour is unchanged for a river or date that is not published.
+    for value, err, what in ((fc, fc_err, "forecast"),
+                             (fs, fs_err, "forecast_stats"),
+                             (rp, rp_err, "return_periods")):
+        if err is not None:
+            raise RuntimeError(f"{what} failed: {err}")
+
+    return_periods = rp
 
     payload = {
         "river_id": river_id,
