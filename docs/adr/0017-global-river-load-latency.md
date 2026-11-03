@@ -1,6 +1,6 @@
 # ADR 0017 — Why a global river takes so long to open
 
-**Status:** Accepted — instrumented, two causes removed, a third measured and still open
+**Status:** Accepted — root cause found overnight 2026-11-02/03 and measured; the fix is specified and prototyped but NOT yet built
 **Date:** 2026-11-02
 **Trigger:** Jerson: *"one of the things that bothered me the most about this
 app is how long it takes for some river to load… at this point it looks like
@@ -263,3 +263,125 @@ None of these is chosen yet.
 **The order that follows from the measurements** is: instrument first, then
 the shared per-river cache, and treat the cold-start levers as the small
 remainder they are — not the other way round.
+
+
+---
+
+# Overnight investigation, 2026-11-02 05:20Z to 2026-11-03 10:45Z
+
+Jerson: *"every time you come to me with different values and wrong/false
+findings. What causes that uncertainty? Is the nature of the app itself and
+how it depends on servers we do not control?"*
+
+A background sampler took a full reading every 12 minutes (28 rounds) while
+nine targeted experiments ran every 30 minutes.
+
+## First, the honest answer to the question asked
+
+**The uncertainty was mine, not the servers'.** Four claims made during this
+investigation were wrong, and every one failed the same way — a conclusion
+drawn from too few samples under conditions I had not controlled:
+
+| Claim | Why it was wrong |
+|---|---|
+| "The warm path is 1.9 s, so it is all cold start" | Measured the same river three times against a per-river in-process cache |
+| "The `geoglows` import costs 1.6 s, the repo's 12 s is wrong" | Timed it on a Mac with many cores; on the container it is 6.6-7.8 s |
+| "NOAA may be having an outage" | Three of the reach ids were ones I had invented for test fixtures |
+| "Our zarr route is 3x slower than the REST API, so switch" | The zarr route is FASTER; the environment differs, not the route |
+
+The servers we do not control were the steadiest part of the system.
+
+## What the night measured
+
+| Dependency | n | min | median | max | failures |
+|---|---|---|---|---|---|
+| NOAA metadata | 28 | 0.27 s | 0.43 s | 1.66 s | 0 |
+| NOAA streamflow series | 28 | 0.26 s | 0.29 s | 1.61 s | 0 |
+| GEOGLOWS upstream forecast | 28 | 0.71 s | 3.03 s | 4.80 s | 4 |
+| GEOGLOWS upstream stats | 28 | 0.62 s | 3.19 s | 4.85 s | 4 |
+| GEOGLOWS upstream return periods | 28 | — | — | — | **28 — always 500** |
+| **our proxy, real fetch** | 4 | **8.69 s** | **17.93 s** | **22.21 s** | 0 |
+| our proxy, cache hit | 24 | 0.12 s | 0.15 s | 0.26 s | 0 |
+
+## The root cause, measured
+
+**One river costs 80 S3 round trips** — 40 `head_object` plus 40
+`get_object`, median 43 ms each — to produce a 22 KB answer. The function
+makes three such reads per tap, so **about 240 round trips per river
+tapped**.
+
+**And 97% of those trips are identical from one river to the next.** Two
+different rivers touched 38 distinct keys each; 37 were the same keys. The
+only thing that differed was a single data chunk. Everything else is the
+dataset's metadata and its river-id index, re-downloaded every time.
+
+That one fact explains every earlier observation:
+
+* time is flat per river (8.10-8.63 s, n=4, 6% spread) because the trip
+  count is fixed and the payload is not the variable;
+* this Mac is 6x faster than the container on identical code because the
+  same 80 trips cost more from GCP us-west1 to AWS us-west-2;
+* three concurrent taps killed the container — 720 round trips and
+  2,075 MiB against a 2,048 MiB limit;
+* a repeat of the same river is instant because the `lru_cache` skips all 80.
+
+**It is not CPU.** CPU is 27-32% of a read's wall time (0.39-0.45 s of
+~1.44 s, n=3), and threading gives 1.46-1.73x, not 3x.
+
+## The fix, prototyped and proven
+
+Open the dataset once per container and hold the handle. Measured, n=4:
+
+| | S3 round trips | time |
+|---|---|---|
+| today, per river | 80 | 8.1-8.6 s on the container |
+| with a held handle | **2** | 0.37 s, 0.38 s, 0.49 s, 2.45 s locally |
+
+Proven for the forecast read. The ensemble-stats and return-period legs are
+separate datasets and need the same treatment — **not yet proven**.
+
+## Three smaller things the night found
+
+1. **A wrong river id costs 15 seconds and reports a server error.** Ours:
+   14.39 / 15.12 / 15.16 s, HTTP 502 (n=3). Upstream, same id: 0.68 / 0.74 /
+   1.03 s, HTTP 400 (n=3). Failing is slower than succeeding, because the
+   80-trip load runs for each candidate date before giving up. With the
+   index held in memory, validating an id is a dictionary lookup.
+
+2. **The publication hour I hard-coded is wrong in both directions.**
+   Measured `.zmetadata` LastModified over 8 days: 09:41, 09:42, 09:45,
+   09:51, 09:51, 09:51, 10:08, 11:59Z — median 09:51, not the 10:15-10:30
+   this repo records. My `_PUBLISHED_BY_UTC_HOUR = 11` serves yesterday's
+   data for an hour after today's is ready, and on a late day still pays the
+   doomed attempt. Ask S3 whether the key exists (~40 ms) instead of
+   guessing an hour.
+
+3. **The upstream's return-period endpoint is permanently broken** — 28 of
+   28 attempts returned HTTP 500 across 5.4 hours. This is why the proxy
+   exists at all, and it is the one thing it genuinely cannot avoid.
+
+## A correction to finding 4, from more data
+
+Experiment 4 called the upstream "the most dependable thing in the chain"
+on n=21 taken in one burst. Across the full 28 rounds it failed 4 times —
+and all four were consecutive, from 10:08Z onward, inside the daily
+publication window, when today's run was still uploading. So the upstream
+is fast and steady **except while it is publishing**, which is exactly when
+our own date guard happened to protect us: our proxy returned 200 on all 28
+rounds because it was still serving yesterday's run.
+
+## What is still unverified
+
+* Per-round-trip latency **from the container** to AWS S3. The 43 ms median
+  is from this Mac. The 6x gap is consistent with a higher per-trip cost
+  from GCP, but that number has not been measured at the source.
+* Whether holding the handle survives the way Cloud Functions recycles
+  instances, and what it costs in idle memory.
+* Whether the ensemble-stats and return-period reads amortise the same way.
+
+## Recommended order of work
+
+1. Hold the dataset handle per container — the whole root cause, prototyped.
+2. Validate the river id from the in-memory index; return 404, not 502.
+3. Replace the hard-coded publication hour with an existence check.
+4. Re-run experiments 2, 3 and 9 and compare against the tables above.
