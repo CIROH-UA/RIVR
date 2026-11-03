@@ -452,3 +452,52 @@ rounds because it was still serving yesterday's run.
 2. Validate the river id from the in-memory index; return 404, not 502.
 3. Replace the hard-coded publication hour with an existence check.
 4. Re-run experiments 2, 3 and 9 and compare against the tables above.
+
+
+---
+
+# Fix 1 deployed and verified, 2026-11-03
+
+`storeRefreshHourly`, deployed 20:56Z. Schedule :20 → :05; an empty NOAA
+section retried 6 times (`EMPTY_SECTION_ATTEMPTS`); the fan-out stopped
+after 3 consecutive empty reaches (`WINDOW_PROBE_REACHES`).
+
+## Measured over three hourly runs
+
+| | currentFlow | shortRange | mediumRange | longRange |
+|---|---|---|---|---|
+| 20:57Z baseline | 35 fresh | 35 fresh | **0 / 34 exp** | **1 / 26 exp** |
+| 21:17Z | 35 | 35 | 0 / 34 | 1 / 26 |
+| 22:17Z | 35 | 35 | 0 / 34 | **35 / 0** |
+| 23:17Z | 35 | 35 | 0 / 34 | 35 / 0 |
+
+`longRange` had been pinned to a run from **2026-09-21**. The 22:05 run
+moved it to that day's 12:00Z run: `planned 105, written 105, failed 0`.
+The hourly `store windows past their hold cap` ERROR fell from `count: 60`
+to `count: 34` — now only `mediumRange`.
+
+## What this does and does not prove
+
+**Proven:** moving the decision from :20 to :05 recovers `longRange`. The
+gap between the probe's evidence and the fetch was real and was costing a
+whole product.
+
+**NOT proven, and must not be claimed:** the retry and the circuit breaker.
+Across three runs the retry succeeded **0 times** and the breaker tripped
+**0 times** — every `longRange` fetch landed first attempt. They are
+deployed, unit-tested, mutation-checked, and unexercised in production.
+
+**Unfixed:** `mediumRange`, 0 fresh of 34 throughout. Every run skipped it
+with `"probe reported no run this hour"`, so nothing downstream of the
+trigger decision could help it. `publish-cadence-probe.ts` takes exactly one
+sample per endpoint by design — *"a retry would hide exactly the failure
+rate being measured"* — which is correct for an instrument and wrong for a
+trigger. The probe loses the same lottery the fetcher does, and when it
+loses the product is skipped for the hour.
+
+## Next
+
+Separate the instrument from the trigger. Keep the probe's single honest
+sample for the cadence record; let the refresh establish its own evidence
+for `mediumRange` and `longRange` at fetch time, where the retry it already
+has can work on it.
