@@ -7,6 +7,29 @@ Deployment history for RIVR Cloud Functions. Update this file whenever you deplo
 | Date | Commit | Files Changed | Summary |
 |------|--------|---------------|---------|
 | 2026-03-06 | 77b0cec | noaa-client.ts, notification-service.ts | Fix NOAA API response handling, improve error handling and return period cache fallback, fix unit conversion (CFS→CMS) in threshold comparison |
+
+## 2026-11-02 — `geoglows_forecast` deployed twice (ADR 0017)
+
+**Deploy 1: instrumentation.** Four timing lines inside `_build_payload`,
+around the deferred `geoglows` import and each of the three S3 reads. They
+are permanent — they print one line per request at INFO, prefixed `ADR0017`.
+
+**Deploy 2: two fixes the instrumentation exposed.**
+
+* `_candidate_dates()` no longer offers a run that cannot have published.
+  The daily GEOGLOWS run lands 10:15-10:30 UTC, not 00Z, so for eleven hours
+  of every day every request wasted a whole attempt — 2.7-11.6 s each.
+* `_return_periods()` is now its own `lru_cache` keyed on the river alone.
+  Return periods do not vary by date, but living inside the per-date loop
+  meant refetching them on every attempt at 2.2-6.3 s a time.
+
+Measured after: repeat of the same river 2.3 s -> 0.11 s; first fetch of a
+new river 11.2 s -> 8-10.6 s; cold container 20.5 s -> 18.2 s.
+
+Still open: `geoglows.data.forecast` and `forecast_stats` each take 8-11 s
+for a river, in parallel, and that is now the entire remaining cost.
+
+Deployed by: jersondevs@gmail.com. `firebase deploy --only functions:geoglows:geoglows_forecast`.
 | 2026-03-27 | 031b3fa | .env | Rotate NWM API key after accidental exposure; new key provided by Ben Lee (CIROH) |
 | 2026-07-11 | 26fd923 | package-lock.json | Security patch: `npm audit fix` on transitive deps (protobufjs 7.5.8→7.6.5 critical RCE/DoS, @grpc/grpc-js 1.14.3→1.14.4 two highs, form-data 2.5.5→2.5.6, qs, js-yaml). No source/behavior change; redeployed all 7 functions to run the patched deps. |
 | 2026-07-15 | 56b01c0 | notification-service.ts, geoglows-client.ts (new) | Add GEOGLOWS flood alerts. Notification service now reads `users/{uid}.favoriteSources`, keys pre-fetched data by source+reachId (comid/linkno can collide), and branches NWM vs GEOGLOWS per favorite. New geoglows-client fetches the GEOGLOWS proxy once for forecast + gumbel return periods, converting median CMS→CFS so the shared evaluator works unchanged; `source` added to the FCM data payload so taps open the right forecast API. Redeployed all 7 default-codebase functions under jersondevs@gmail.com. Requires the `users` composite index (deployed via `firebase deploy --only firestore:indexes`). |

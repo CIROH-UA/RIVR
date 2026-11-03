@@ -1,6 +1,6 @@
 # ADR 0017 — Why a global river takes so long to open
 
-**Status:** Proposed — measurement only, no change made
+**Status:** Accepted — instrumented, two causes removed, a third measured and still open
 **Date:** 2026-11-02
 **Trigger:** Jerson: *"one of the things that bothered me the most about this
 app is how long it takes for some river to load… at this point it looks like
@@ -137,7 +137,84 @@ because a warm instance pays no import at all and is still slow.
 
 ---
 
+## Measured, after instrumenting (2026-11-02)
+
+Four timing lines were added to `_build_payload` and the function deployed.
+One cold request answered the question.
+
+### 8. Two of the three costs were waste, and both are now gone
+
+A 20.5 s cold request, from the log:
+
+| Attempt | What happened |
+|---|---|
+| `date=20261103` (today) | `import=7.78s`, forecast `1.94s/GroupNotFoundError`, stats `1.90s/GroupNotFoundError`, **`return_periods=3.81s`**, total **11.59 s** |
+| `date=20261102` (yesterday) | forecast `8.74s`, stats `8.71s`, **`return_periods=6.32s`**, total **8.74 s** |
+
+Two things fall straight out of that:
+
+* **Today's run did not exist, and could not have.** `_candidate_dates()`
+  always offered today first, on a comment that said forecasts "publish
+  daily at 00Z". They are *stamped* 00Z but do not land until **10:15-10:30
+  UTC** — a number this repository had already measured and acts on
+  elsewhere (the flood builder runs at 11:00 because of it). So for the
+  first eleven hours of every UTC day, every request spent a whole attempt
+  on a group that cannot exist: **2.7-11.6 s of pure waste**.
+* **Return periods were fetched on BOTH attempts.** They are a long-term
+  statistic of the river and do not vary by date, yet they sat inside the
+  per-date loop and cost 2.2-6.3 s each time.
+
+**Fixes applied:** `_candidate_dates()` does not offer a run before it can
+plausibly have published; `_return_periods()` is its own `lru_cache` keyed
+on the river alone, still submitted to the thread pool so a genuine miss
+still overlaps the other two reads.
+
+### 9. Before and after, same four requests
+
+| | Before | After |
+|---|---|---|
+| cold container, river never fetched | 20.5 s | **18.2 s** |
+| warm, a river never fetched | 11.2 s | **10.6 s** |
+| warm, another river never fetched | — | **8.2 s** |
+| repeat of the same river | 2.3 s | **0.11 s** |
+
+The logs confirm the doomed attempt is gone: every request since the deploy
+shows a single `date=20261102` line where there used to be two.
+
+**Be honest about the size of this.** The win on a repeat is enormous and
+the waste removed was real, but *the number that matters — the first tap of
+a river nobody has opened — moved from about 11 s to about 8-10 s.* It did
+not transform.
+
+### 10. What is actually left, and it is the whole remainder
+
+| Read | Time |
+|---|---|
+| `geoglows.data.forecast` | 8.0 s, 9.1 s, 11.4 s |
+| `geoglows.data.forecast_stats` | 7.4 s, 10.4 s, 9.1 s |
+| deferred `geoglows` import, cold container only | 6.6-7.8 s |
+
+They run in parallel, so the floor for a new river is the slower of the two:
+**8-10.5 s**. That is now the entire problem.
+
+Note also that the import really does cost 6.6-7.8 s on the container, where
+it measured 1.6 s locally — finding 7 was measured on the wrong machine and
+the in-repo "~12 s" note was closer to right than I was.
+
+---
+
 ## Unverified
+
+**Why one river's forecast takes 8-11 s to read.** Both reads go through
+`geoglows.data.*`, which may re-open the zarr store on each call rather than
+holding it; if so, a module-level handle opened once per instance would make
+every river after the first on that instance much cheaper. The variance
+across three similar rivers (8.0 / 9.1 / 11.4 s) has the shape of repeated
+object-store round trips rather than data volume — the payload is 22 KB.
+
+*Cheapest test:* time `geoglows.data.forecast` twice for two different
+rivers in one process against a hand-rolled `xarray.open_zarr` with a cached
+handle, locally, against the same bucket. No deploy needed.
 
 **Where the 9-17 s actually goes inside a warm request.** The shape points
 at reading the river's slice out of the GEOGLOWS zarr on S3 — opening a
@@ -145,10 +222,9 @@ zarr group over object storage is many small HTTP round trips, and the
 function reads across two daily groups when the first is missing. But
 nothing in the function logs timings, so this is inference, not measurement.
 
-*Cheapest test:* add four timing log lines to `geoglows_forecast` — around
-the deferred `import geoglows`, around the S3 filesystem open, around the
-zarr group open, and around the slice read — deploy, request one river the
-instance has never seen, and read the single log. One deploy answers it.
+**ANSWERED — see findings 8-10 above.** The timing lines are deployed and
+stay deployed: the next person to ask this question should not have to
+deploy again.
 
 **Whether the zarr carries consolidated metadata.** If it does not, opening
 the group costs one request per array. This is the single most common cause
