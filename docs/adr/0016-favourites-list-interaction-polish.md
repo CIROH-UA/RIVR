@@ -342,15 +342,32 @@ Guarded both ways — the test asserts the right corners are rounded when
 closed and square when open, and both mutations (always rounded, always
 square) are caught.
 
+### Second pass: the background picker (finding 14)
+
+| Was | Now |
+|---|---|
+| Opened on "Custom Images", empty for anyone who has never uploaded one | Opens on the first category that has pictures in it |
+| Changing category set `_selectedImagePath = null` | The selection survives; only the grid changes |
+| `Save` built only when a selection existed, so it came and went from the navigation bar | Always present, disabled until there is a change to save |
+| Nothing showed which background the river already used | The applied one carries an **In use** badge, is preselected, and the picker opens on its category |
+| Grid `padding: all(16)` under floating buttons at `bottom: 20` | 96 pt of bottom padding, so the last row clears them |
+| Delete badge: 16 pt icon in 6 pt padding = **28 pt** target, and hidden once the tile was selected | 16 pt icon centred in a **44 pt** target, shown whether or not the tile is selected |
+| Five segments, each an icon plus a **10 pt** label | Labels only, **12 pt**; "Large" is now "Big Water" |
+| A header repeating the category name and icon two rows under the tab | Gone; only the Custom tab keeps a one-line count |
+| Blue and green filled pills as equal primaries; "Flow animation" never said it removes the photo | One blue primary ("Upload your own image") over a plain "Remove photo, use flow animation" |
+| 3 pt selection border appearing on tap, shifting the image | Border always present, transparent when unselected |
+| A 40 pt black gradient dimming every unselected thumbnail "for contrast", over tiles that carry no text | Gone |
+
+Four guards, four mutations, all caught: open on Custom again, clear the
+selection on category change, hide Save until something is picked, drop the
+In-use badge.
+
 ### Not done, deliberately
 
 * **Opening one row does not close another, and scrolling does not close an
   open row** (part of finding 12). Both need a shared notifier across cards
   rather than a change inside one, and that is a different kind of edit from
   everything above. Left for its own change so this one stays reviewable.
-* Everything in the rename dialog (finding 13) and the background picker
-  (findings 14, 15) — a separate pass.
-* The navigation bar having no title, and the 45 pt body wordmark.
 
 ### Verification
 
