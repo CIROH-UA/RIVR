@@ -859,9 +859,40 @@ it every hourly run aborts on FAILED_PRECONDITION. Declared in
 **"No new run means zero fetches" is the whole point.** If upstream has not
 published, the run does nothing — verified through a real five-hour NOAA stall.
 
-**Never add retries to the store's fetchers.** A transient failure is recorded
-per reach and retried next cycle. Retrying inside a run hides the failure rate
-the Phase 0 probe exists to measure, and hammers whatever is already failing.
+**Never add retries to the store's fetchers — with ONE measured exception.**
+A transient failure is recorded per reach and retried next cycle. Retrying
+inside a run hides the failure rate the Phase 0 probe exists to measure, and
+hammers whatever is already failing. That still holds for every HTTP error,
+and a test pins it (`an HTTP error is NOT retried`).
+
+**The exception is a 200 carrying an empty section**, and it is why the store
+wrote nothing usable for `mediumRange` or `longRange` for six weeks. NOAA
+answers 200 with the requested section simply absent, as a per-request
+lottery inside a daily window: measured 2026-11-03, 3 full responses of 14
+for one reach inside five seconds while the window was open, 17 of 158
+pooled, and **0 of 700** across all 35 production reaches once it had shut.
+"Retried next cycle" never arrives, because the cycle is an hour and the
+window is narrower. Every `mediumRange` (34) and `longRange` (27) document
+was expired, `longRange` by a median of 43 days, while `storeHealth` returned
+503 "down" and an hourly ERROR log read `count: 61` that nobody was reading.
+
+`EMPTY_SECTION_ATTEMPTS = 6` in `store-upstream.ts` and the circuit breaker
+in `store-run.ts` (`WINDOW_PROBE_REACHES = 3`) are the two halves: retry into
+an open window, and stop paying for a shut one after three consecutive empty
+reaches. The failure rate stays visible — a retry that succeeds logs which
+attempt it was, and exhausting the budget throws `EmptySectionError` carrying
+the count.
+
+**`storeRefreshHourly` runs at :05, not :20.** The probe samples at :00-:01
+and the run must act while that evidence is still true. At :20 it was not:
+caught live on 2026-11-03, the 09:00 probe saw a run and the 09:20 fetch
+failed 25 of 25; the 10:00 probe saw one and 10:20 failed 35 of 35.
+
+**The data was there the whole time.** `noaa-nwm-pds` held the complete t00z
+and t06z `medium_range_mem1` runs (640 files, 26 GB) and the t00z
+`long_range_mem1` run while the API served nothing — and the NWPS API offers
+no `reference_time` parameter, so there is no way to ask for a run by name.
+This is worth raising with NOAA rather than only working around.
 
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
 **Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.

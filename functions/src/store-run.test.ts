@@ -25,6 +25,7 @@ import {
   planWrites,
   runStoreUpdate,
   writtenDocumentIds,
+  WINDOW_PROBE_REACHES,
 } from "./store-run.js";
 import {StoreDocument, buildStoreDocument} from "./store-document.js";
 import {ForecastProductId} from "./store-keys.js";
@@ -476,5 +477,138 @@ describe("guard 3 — lagging is measured against the PROBE, not the store", () 
       {shortRange: null});
     assert.equal(report.skippedLagging, 0);
     assert.deepEqual(report.reachesToRetry, []);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The upstream window, added 2026-11-03 (ADR 0017 audit).
+//
+// NOAA answers 200 for `medium_range` and `long_range` with the section
+// missing. Measured that day: 0 full responses out of 700 across all 35
+// production reaches once the daily window had shut, against 3 of 14 for one
+// reach inside five seconds while it was open. The store had therefore
+// written nothing usable for either product in six weeks — every document
+// expired, `longRange` by a median of 43 days.
+//
+// Two behaviours answer that, and both are guarded here: the fetcher retries
+// an empty section (store-upstream), and the RUN stops asking for a product
+// once enough consecutive reaches come back empty, so a shut window costs a
+// few requests instead of 35 x 6.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The failure store-upstream throws; matched by name, not by class. */
+function emptySection(reachId: string, product: string): Error {
+  const e = new Error(`${reachId}/${product}: 200 with no section`);
+  e.name = "EmptySectionError";
+  return e;
+}
+
+describe("a shut upstream window stops the fan-out", () => {
+  test("after three empty reaches the product is not fetched again", async () => {
+    const fetched: string[] = [];
+    const d = deps({
+      async fetchProduct(source, reachId, product) {
+        fetched.push(`${reachId}:${product}`);
+        throw emptySection(reachId, product);
+      },
+    });
+
+    const report = await runStoreUpdate(
+      workListOf({favoriteReachIds: ["1", "2", "3", "4", "5", "6", "7", "8"]}),
+      ["mediumRange"],
+      d.deps,
+    );
+
+    assert.equal(fetched.length, WINDOW_PROBE_REACHES,
+      "the run must stop asking once the window is judged shut; it used to " +
+      "ask all eight, and in production all thirty-five");
+    assert.equal(report.planned, 8, "every reach is still planned");
+    assert.equal(report.failed, 8,
+      "and every reach is still reported failed and retried, so the totals " +
+      "reconcile and nothing is silently dropped");
+    assert.equal(report.reachesToRetry.length, 8);
+  });
+
+  test("the breaker is per product, so a healthy one is unaffected", async () => {
+    const fetched: string[] = [];
+    const d = deps({
+      async fetchProduct(source, reachId, product) {
+        fetched.push(`${reachId}:${product}`);
+        if (product === "mediumRange") throw emptySection(reachId, product);
+        return {
+          payload: {series: {data: [1]}},
+          unit: "CFS",
+          referenceTime: "2026-08-24T12:00:00Z",
+        };
+      },
+    });
+
+    const report = await runStoreUpdate(
+      workListOf({favoriteReachIds: ["1", "2", "3", "4", "5"]}),
+      ["mediumRange", "shortRange"],
+      d.deps,
+    );
+
+    const medium = fetched.filter((f) => f.endsWith("mediumRange"));
+    const short = fetched.filter((f) => f.endsWith("shortRange"));
+    assert.equal(medium.length, WINDOW_PROBE_REACHES);
+    assert.equal(short.length, 5,
+      "shortRange is served reliably and must not be collateral damage");
+    assert.equal(report.written, 5);
+  });
+
+  test("a normal failure does NOT trip the breaker", async () => {
+    const fetched: string[] = [];
+    const d = deps({
+      async fetchProduct(source, reachId, product) {
+        fetched.push(`${reachId}:${product}`);
+        throw new Error(`upstream 504 for ${reachId}`);
+      },
+    });
+
+    await runStoreUpdate(
+      workListOf({favoriteReachIds: ["1", "2", "3", "4", "5", "6"]}),
+      ["mediumRange"],
+      d.deps,
+    );
+
+    assert.equal(fetched.length, 6,
+      "a transport failure is a different thing from upstream declining to " +
+      "serve; every reach must still be tried");
+  });
+
+  test("scattered empties do not shut the window — the streak resets", async () => {
+    // THREE empty reaches, deliberately NOT consecutive. Three is the
+    // breaker's threshold, so a streak counter that never resets on success
+    // trips here while a correct one never does. An earlier version of this
+    // test used two empties and passed either way — it proved nothing, and
+    // the mutation run is what exposed it.
+    const fetched: string[] = [];
+    const empty = new Set(["2", "4", "6"]);
+    const d = deps({
+      async fetchProduct(source, reachId, product) {
+        fetched.push(`${reachId}:${product}`);
+        if (empty.has(reachId)) throw emptySection(reachId, product);
+        return {
+          payload: {series: {data: [1]}},
+          unit: "CFS",
+          referenceTime: "2026-08-24T12:00:00Z",
+        };
+      },
+    });
+
+    const report = await runStoreUpdate(
+      workListOf({
+        favoriteReachIds: ["1", "2", "3", "4", "5", "6", "7", "8"],
+      }),
+      ["mediumRange"],
+      d.deps,
+    );
+
+    assert.equal(fetched.length, 8,
+      "the streak must RESET on a success — scattered empties are the " +
+      "per-request lottery, not a shut window, and reaches 7 and 8 must " +
+      "still be asked for");
+    assert.equal(report.written, 5);
   });
 });

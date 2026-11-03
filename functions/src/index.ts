@@ -407,12 +407,25 @@ export {probePublishCadence} from "./publish-cadence-probe.js";
  * Hourly refresh. Reads the Phase 0 probe, refreshes ONLY the products whose
  * upstream run advanced, and does nothing at all otherwise (guard 1).
  *
- * Runs at :20 past, deliberately after the probe's top-of-hour sample so it
- * decides on this hour's evidence rather than last hour's.
+ * Runs at :05, close behind the probe's top-of-hour sample, so it decides on
+ * this hour's evidence rather than last hour's AND acts while that evidence
+ * is still true.
+ *
+ * It was :20, which satisfied the first half and quietly broke the second.
+ * Caught in production 2026-11-03: the probe at 09:00:50 saw `medium_range`
+ * carrying a run, the fetch at 09:20 found the section gone, and all 25
+ * reaches failed. At 10:00:50 the same for `long_range` — `planned 35,
+ * written 0, failed 35`. NOAA serves those two sections for a window
+ * narrower than twenty minutes, so the run was reliably deciding on evidence
+ * that had expired before it acted. Both products had been unwritable for
+ * six weeks because of it.
+ *
+ * Five minutes rather than one: the probe writes its sample at :00-:01, and
+ * reading it before it lands would be the same bug with a smaller number.
  */
 export const storeRefreshHourly = functions
   .runWith({memory: "1GB", timeoutSeconds: 540})
-  .pubsub.schedule("20 * * * *")
+  .pubsub.schedule("5 * * * *")
   .timeZone("UTC")
   .onRun(async () => {
     const outcome = await runStoreRefresh({

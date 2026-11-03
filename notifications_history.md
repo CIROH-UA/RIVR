@@ -6,6 +6,39 @@ Deployment history for RIVR Cloud Functions. Update this file whenever you deplo
 
 | Date | Commit | Files Changed | Summary |
 |------|--------|---------------|---------|
+## 2026-11-03 20:56Z — `storeRefreshHourly` (ADR 0017 audit)
+
+Deployed `functions:default:storeRefreshHourly` as `jersondevs@gmail.com`.
+Verified after: Cloud Scheduler reads `5 * * * *` (was `20 * * * *`) and the
+function is ACTIVE at 2026-11-03T20:56:30Z.
+
+**Why.** The store had written nothing usable for `mediumRange` or
+`longRange` in six weeks. Two causes, both measured in production that day:
+the run decided on probe evidence from :00 and acted at :20, by which time
+NOAA had stopped serving the section (09:00 probe saw a run, 09:20 failed
+25/25; 10:00 saw one, 10:20 failed 35/35); and the section is a per-request
+lottery even inside its window (3 of 14 for one reach in five seconds, 0 of
+700 across all 35 reaches once shut).
+
+**What changed.** Schedule :20 → :05. `EMPTY_SECTION_ATTEMPTS = 6` retries
+that one failure only — HTTP errors are still never retried, and a test
+pins it. `WINDOW_PROBE_REACHES = 3` stops the fan-out paying for a shut
+window, resetting on any success.
+
+**Baseline immediately before the first :05 run, 20:57Z** — to be compared
+against, not taken on trust:
+
+| product | n | fresh | expired |
+|---|---|---|---|
+| currentFlow | 35 | 35 | 0 |
+| shortRange | 35 | 35 | 0 |
+| mediumRange | 34 | **0** | **34** |
+| longRange | 27 | 1 | **26** |
+
+**NOT yet verified as fixed.** Being watched hourly. If `mediumRange` and
+`longRange` do not start writing, six attempts is not enough against this
+upstream and the next lever is a longer window probe, not more retries.
+
 | 2026-03-06 | 77b0cec | noaa-client.ts, notification-service.ts | Fix NOAA API response handling, improve error handling and return period cache fallback, fix unit conversion (CFS→CMS) in threshold comparison |
 
 ## 2026-11-02 — `geoglows_forecast` deployed twice (ADR 0017)

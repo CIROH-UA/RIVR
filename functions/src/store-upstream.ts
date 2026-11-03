@@ -222,6 +222,80 @@ async function getJson(url: string): Promise<Record<string, unknown>> {
 }
 
 /**
+ * How many times to ask for a streamflow section that came back empty.
+ *
+ * **This is a deliberate, evidence-backed exception to the rule in CLAUDE.md
+ * that the store's fetchers never retry.** That rule stands everywhere else,
+ * and its reasons still hold: a retry hides the failure rate the Phase 0
+ * probe exists to measure, and it hammers whatever is already failing.
+ *
+ * Neither reason survives contact with THIS failure, measured 2026-11-03:
+ *
+ *   - It is not a transient error to be retried next cycle. NOAA answers 200
+ *     and the section is simply absent, and whether it is absent is close to
+ *     a coin toss per request: 3 full responses out of 14 for one reach
+ *     inside five seconds, 17 of 158 pooled, and 0 of 700 across all 35
+ *     production reaches once the daily window had shut.
+ *   - "Retried next cycle" never arrives. The cycle is an hour; the window is
+ *     narrower than that, so the store has fetched nothing usable for
+ *     `mediumRange` or `longRange` in six weeks. Every one of those documents
+ *     is expired — `longRange` by a median of 43 days.
+ *   - The failure rate stays visible rather than hidden: every retry that
+ *     succeeds logs the attempt it succeeded on, and exhausting the budget
+ *     throws `EmptySectionError`, which carries the count.
+ *
+ * Six attempts against an ~11% per-request rate is roughly a one-in-two
+ * chance inside an open window, and the circuit breaker in store-run stops
+ * the fan-out paying for it when the window is shut.
+ */
+export const EMPTY_SECTION_ATTEMPTS = 6;
+
+/** Breathing room between attempts. The responses are 718 bytes. */
+export const EMPTY_SECTION_BACKOFF_MS = 400;
+
+/**
+ * NOAA answered 200 but the requested section was not in it, every time we
+ * asked. Distinct from a transport failure so the caller can tell "upstream
+ * is not serving this right now" from "upstream is broken".
+ */
+export class EmptySectionError extends Error {
+  readonly reachId: string;
+  readonly product: ForecastProductId;
+  readonly attempts: number;
+
+  /**
+   * @param {string} reachId - The reach asked for.
+   * @param {ForecastProductId} product - The product asked for.
+   * @param {string} section - The NOAA section name that was empty.
+   * @param {number} attempts - How many times it was asked for.
+   */
+  constructor(
+    reachId: string,
+    product: ForecastProductId,
+    section: string,
+    attempts: number
+  ) {
+    super(
+      `${reachId}/${product}: 200 with no ${section} section after ` +
+      `${attempts} attempts — treating as a failed fetch rather than ` +
+      "storing an empty forecast"
+    );
+    this.name = "EmptySectionError";
+    this.reachId = reachId;
+    this.product = product;
+    this.attempts = attempts;
+  }
+}
+
+/**
+ * @param {number} ms - Milliseconds to wait.
+ * @return {Promise<void>} Resolves after the wait.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Fetch one product for one reach.
  *
  * Deliberately does NOT retry. A transient failure is recorded per reach and
@@ -259,7 +333,6 @@ export async function fetchProductFromUpstream(
 
   const url = `${NOAA_CONFIG.noaaReachesBaseUrl}/reaches/${reachId}` +
     `/streamflow?series=${series}`;
-  const body = await getJson(url);
 
   // A 200 carrying an EMPTY series is a real NOAA failure mode — observed live
   // on 2026-08-22 and the reason the probe counts it as a failure rather than
@@ -269,16 +342,34 @@ export async function fetchProductFromUpstream(
   // five section keys in every response, with the unrequested (and the failed)
   // ones as `{}`. Round 3, B4 — the comment described a mechanism the code did
   // not have.
-  const sectionBody = body[section];
-  const sectionIsEmpty = sectionBody === undefined || sectionBody === null ||
-    (typeof sectionBody === "object" && !Array.isArray(sectionBody) &&
-      Object.keys(sectionBody as Record<string, unknown>).length === 0);
-  if (sectionIsEmpty) {
-    throw new Error(
-      `${reachId}/${product}: 200 with no ${section} section — treating as a ` +
-      "failed fetch rather than storing an empty forecast"
-    );
+  //
+  // RETRIED, since 2026-11-03, and ONLY for this one failure. See
+  // EMPTY_SECTION_ATTEMPTS for why the "never retry" rule does not hold here.
+  let body: Record<string, unknown> = {};
+  let emptyAttempts = 0;
+  for (let attempt = 1; attempt <= EMPTY_SECTION_ATTEMPTS; attempt++) {
+    body = await getJson(url);
+
+    const sectionBody = body[section];
+    const sectionIsEmpty = sectionBody === undefined || sectionBody === null ||
+      (typeof sectionBody === "object" && !Array.isArray(sectionBody) &&
+        Object.keys(sectionBody as Record<string, unknown>).length === 0);
+    if (!sectionIsEmpty) {
+      if (attempt > 1) {
+        logger.info("🎲 store-upstream: section arrived on a retry", {
+          reachId, product, attempt,
+        });
+      }
+      break;
+    }
+
+    emptyAttempts = attempt;
+    if (attempt === EMPTY_SECTION_ATTEMPTS) {
+      throw new EmptySectionError(reachId, product, section, attempt);
+    }
+    await delay(EMPTY_SECTION_BACKOFF_MS);
   }
+  void emptyAttempts;
 
   const unit = canonicalUnit(unitOf(body, section));
   if (!unit) {
