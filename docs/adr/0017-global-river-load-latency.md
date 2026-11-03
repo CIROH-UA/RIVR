@@ -1,5 +1,64 @@
 # ADR 0017 — Why a global river takes so long to open
 
+> ## ⚠️ READ THIS FIRST — independently audited 2026-11-03, and partly WRONG
+>
+> Two agents re-measured this system for five hours, blind to these
+> conclusions. Their work is in `docs/adr/0017-audit/`. What they found:
+>
+> **The headline distribution in this document is not users.** "126 real
+> invocations, p50 7.9 s" was never segregated by caller. Split: 123 were
+> this investigation's own `curl` probing, 116 were the ADR 0011 store's
+> node client, and **10 were the app**. The app's own figure is
+> **p50 24.3 s, 100% over 8 s** — and of those ten, **zero were cache hits**.
+>
+> **That inverts the recommended order of work.** A per-container handle
+> only pays from the second request onward on one container; it has never
+> once helped a real user in 30 days. It ranked first because the author's
+> curl loop is exactly the traffic pattern it optimises.
+>
+> **"US rivers are not the problem" (finding 1) is FALSE.** It rests on
+> three requests to one reach, and never issued a single `medium_range` or
+> `long_range` call — the two products that are actually broken. Measured
+> independently: **0 full responses out of 700** across all 35 production
+> reaches, 50-53% empty across 1,751 hourly samples, p50 32.2 s when they
+> do answer.
+>
+> **Favourites were excluded from scope on a stale fact.** The 969 ms figure
+> cited is from 2026-08-30 and measures the favourites LIST. The forecast
+> PAGE for a favourite falls through to live NOAA, because `mediumRange`
+> (34) and `longRange` (27) store documents are ALL expired — longRange by a
+> median of 43 days — and `storeHealth` returns 503 "down" on exactly those
+> two products.
+>
+> **Cold start is 14.5 s, not "about six seconds"** (cold p50 22.47 s n=45
+> against warm-new 7.99 s n=86). The six-second figure was n=1, and this
+> document contains the numbers that contradict it.
+>
+> **What SURVIVED, confirmed by a different instrument:** the 80 round trips
+> per read and 37-of-38 identical keys (corroborated at 117 GETs / 86 MB,
+> 62% of it the river index fetched three times); the 6.6-7.8 s deferred
+> import; ~15 s and a 502 for an unknown river; and the 2 GiB OOM — the
+> `2075 MiB` event in today's logs is literally experiment 2 below.
+>
+> **What BOTH this document and its author missed entirely:** the stale
+> store; the refresher's probe-at-:00 / fetch-at-:20 blind spot, caught in
+> the act at 25/25 and 35/35 failures; an hourly ERROR log reading
+> `count: 61` that matches the expired-document count by an independent
+> route; the fact that the forecast data is sitting complete on
+> `noaa-nwm-pds` the whole time with no `reference_time` parameter to ask
+> for it; and that `publish_cadence_log` already held 1,751 samples
+> answering "how reliable is upstream", unread.
+>
+> **And the client half was never measured at all.** The GEOGLOWS branch is
+> one awaited read that clears `_loading` only at the end, so the proxy's
+> 8-10 s is a **blank page**. Even a perfect server fix leaves that.
+> Parsing is ~3 ms (n=40) and is a dead end. Latency tracks round trips,
+> not payload (n=48, TTFB == total).
+>
+> Do not act on the recommendations at the bottom of this document without
+> reading the audit first.
+
+
 **Status:** Accepted — root cause found overnight 2026-11-02/03 and measured; the fix is specified and prototyped but NOT yet built
 **Date:** 2026-11-02
 **Trigger:** Jerson: *"one of the things that bothered me the most about this
