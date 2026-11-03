@@ -346,11 +346,10 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   CupertinoNavigationBar _buildNavigationBar() {
+    // No title here on purpose: the 45 pt "RIVR" wordmark in the body IS the
+    // title, and Jerson asked for it back at that size (2026-11-02). Putting
+    // the name in both places would say it twice.
     return CupertinoNavigationBar(
-      // The bar used to have no title at all, just two unlabelled icons,
-      // while a 45 pt "RIVR" wordmark sat in the body and spent ~77 pt of
-      // every screenful saying the same thing. The name belongs here.
-      middle: const Text('RIVR'),
       // "This Week" outlook entry point
       leading: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -360,39 +359,13 @@ class _FavoritesPageState extends State<FavoritesPage>
           semanticLabel: "This week's outlook",
         ),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Search came up from the body header with the wordmark. It still
-          // only appears once there are enough rivers to be worth searching.
-          Consumer<FavoritesProvider>(
-            builder: (context, favoritesProvider, child) {
-              if (!favoritesProvider.shouldShowSearch ||
-                  favoritesProvider.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              return CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: _toggleSearch,
-                child: Icon(
-                  _showSearch
-                      ? CupertinoIcons.xmark_circle_fill
-                      : CupertinoIcons.search,
-                  semanticLabel:
-                      _showSearch ? 'Close search' : 'Search favorites',
-                ),
-              );
-            },
-          ),
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            onPressed: _showSettingsMenu,
-            child: const Icon(
-              CupertinoIcons.ellipsis,
-              semanticLabel: 'Settings menu',
-            ),
-          ),
-        ],
+      trailing: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: _showSettingsMenu,
+        child: const Icon(
+          CupertinoIcons.ellipsis,
+          semanticLabel: 'Settings menu',
+        ),
       ),
     );
   }
@@ -486,6 +459,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     return SafeArea(
       child: Column(
         children: [
+          // App title header
+          _buildAppHeader(),
+
           // Empty state content — offset upward to balance whitespace
           Expanded(
             child: Padding(
@@ -552,6 +528,9 @@ class _FavoritesPageState extends State<FavoritesPage>
       top: true,
       child: Column(
         children: [
+          // App header
+          _buildAppHeader(),
+
           // Search bar (using custom FavoritesSearchBar)
           Consumer<FavoritesProvider>(
             builder: (context, favoritesProvider, child) {
@@ -665,6 +644,57 @@ class _FavoritesPageState extends State<FavoritesPage>
               ],
             ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The app's wordmark, at the size it has always been.
+  ///
+  /// It was briefly moved into the navigation bar as a small title, to buy
+  /// back the ~77 pt it occupies on every screenful. Jerson's call,
+  /// 2026-11-02: put it back, same size. The search toggle lives here with
+  /// it, as it did before.
+  Widget _buildAppHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 16, 32, 16),
+      child: Row(
+        children: [
+          // App title with theme-aware color
+          Text(
+            ' RIVR',
+            style: TextStyle(
+              fontSize: 45,
+              fontWeight: FontWeight.bold,
+              color: CupertinoTheme.of(context).textTheme.textStyle.color,
+            ),
+          ),
+
+          const Spacer(),
+
+          // Search toggle button (only when 4+ favorites and not empty state)
+          Consumer<FavoritesProvider>(
+            builder: (context, favoritesProvider, child) {
+              if (favoritesProvider.shouldShowSearch &&
+                  !favoritesProvider.isEmpty) {
+                return CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: _toggleSearch,
+                  child: Icon(
+                    _showSearch
+                        ? CupertinoIcons.xmark_circle_fill
+                        : CupertinoIcons.search,
+                    color: CupertinoColors.systemBlue,
+                    semanticLabel: _showSearch
+                        ? 'Close search'
+                        : 'Search favorites',
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
           ),
         ],
       ),

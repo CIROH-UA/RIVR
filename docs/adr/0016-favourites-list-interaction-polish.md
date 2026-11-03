@@ -404,6 +404,11 @@ other, and stop the scroll clearing the open row.
 
 ### Not done, deliberately
 
+* **The 45 pt wordmark stays in the body.** It was moved into the navigation
+  bar as a small title to buy back the ~77 pt it occupies on every
+  screenful; Jerson asked for it back at that size the same day, and the
+  navigation bar's title was removed again so the name is not printed twice.
+  The space cost is accepted knowingly.
 * **The add button stays a floating circle.** It is listed above as a
   Material pattern in a Cupertino app, and it is — but it is also the
   affordance the empty state points at by name ("Tap the + button below"),

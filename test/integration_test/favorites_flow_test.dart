@@ -144,9 +144,7 @@ void main() {
       await pumpFavoritesReady(tester);
 
       // App header visible
-      // The wordmark moved from a 45 pt body header into the navigation
-      // bar (ADR 0016), where it costs nothing on every screenful.
-      expect(find.text('RIVR'), findsOneWidget);
+      expect(find.text(' RIVR'), findsOneWidget);
     });
   });
 
