@@ -381,12 +381,35 @@ then grew a "Restore to Provo River" button that restores nothing.
 Three guards, four mutations, all caught: seed from `customName` again,
 generic title, Save not default, accept an empty name.
 
+### Fourth pass: the page itself (findings 12 and 15)
+
+* **Only one row is open at a time, and scrolling closes it.** Coordinated
+  through `FavoriteRiverCard.openRow`, a single `ValueNotifier<String?>`
+  holding the reach id of the open row: every card watches it, the opener
+  sets it, and the list clears it on a user-driven scroll. A card cannot see
+  its siblings, which is why this needed something outside the card. Static
+  and deliberately never cleaned up — the value is only a reach id, and an
+  unmounted card simply does not react.
+* **The navigation bar has a title.** It had none: an empty strip with two
+  unlabelled icons, while a 45 pt "RIVR" wordmark sat in the body and spent
+  ~77 pt of every screenful saying the same thing. The name moved up, the
+  wordmark is gone, and the search toggle moved into the bar with it.
+* **A one-character typo fixed.** The empty state's description read
+  `CupertinoColors.systemGrey2..resolveFrom(context)` — a cascade, so the
+  resolved colour was thrown away and the dynamic colour never resolved for
+  dark mode.
+
+Two guards, two mutations, both caught: stop the cards listening to each
+other, and stop the scroll clearing the open row.
+
 ### Not done, deliberately
 
-* **Opening one row does not close another, and scrolling does not close an
-  open row** (part of finding 12). Both need a shared notifier across cards
-  rather than a change inside one, and that is a different kind of edit from
-  everything above. Left for its own change so this one stays reviewable.
+* **The add button stays a floating circle.** It is listed above as a
+  Material pattern in a Cupertino app, and it is — but it is also the
+  affordance the empty state points at by name ("Tap the + button below"),
+  and the three navigation-bar slots are now full. Moving it would make
+  adding a river harder to find in exchange for idiom. Judgement call,
+  recorded rather than silently skipped.
 
 ### Verification
 

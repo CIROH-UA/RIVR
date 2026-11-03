@@ -39,6 +39,18 @@ class FavoriteRiverCard extends StatefulWidget {
   /// Called once the hint has finished playing, so the page can record it.
   final VoidCallback? onSwipeHintComplete;
 
+  /// The reach id of the row that is currently open, or null.
+  ///
+  /// A card cannot see its siblings, and opening a second row while the
+  /// first stayed open left two sets of buttons on screen — iOS closes the
+  /// previous one. This is the smallest thing that coordinates them: every
+  /// card watches it, the opener sets it, and the favourites page clears it
+  /// when the list is scrolled.
+  ///
+  /// Static, and deliberately not cleaned up: the value is only a reach id,
+  /// and a card that is no longer mounted simply does not react to it.
+  static final ValueNotifier<String?> openRow = ValueNotifier<String?>(null);
+
   const FavoriteRiverCard({
     super.key,
     required this.favorite,
@@ -85,6 +97,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     );
     _initializeVideoBackground();
     _resolvePlaceLabel();
+    FavoriteRiverCard.openRow.addListener(_onOpenRowChanged);
     if (widget.runSwipeHint) _playSwipeHint();
   }
 
@@ -223,8 +236,16 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
     }
   }
 
+  /// Another row opened, or the list was scrolled. Close.
+  void _onOpenRowChanged() {
+    if (!mounted || !_isSliding) return;
+    if (FavoriteRiverCard.openRow.value == widget.favorite.reachId) return;
+    _animateClosed();
+  }
+
   @override
   void dispose() {
+    FavoriteRiverCard.openRow.removeListener(_onOpenRowChanged);
     _slideController.dispose();
     _removePlaybackListener();
     _videoController?.dispose();
@@ -850,6 +871,7 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
       // swipe actions. The only haptic on this card used to be the
       // long-press.
       if (!_wasOpenBeforeDrag) HapticFeedback.lightImpact();
+      FavoriteRiverCard.openRow.value = widget.favorite.reachId;
       _slideController.animateTo(1.0, curve: Curves.easeOut);
     } else {
       _animateClosed();

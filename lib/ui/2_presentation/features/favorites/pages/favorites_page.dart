@@ -347,6 +347,10 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   CupertinoNavigationBar _buildNavigationBar() {
     return CupertinoNavigationBar(
+      // The bar used to have no title at all, just two unlabelled icons,
+      // while a 45 pt "RIVR" wordmark sat in the body and spent ~77 pt of
+      // every screenful saying the same thing. The name belongs here.
+      middle: const Text('RIVR'),
       // "This Week" outlook entry point
       leading: CupertinoButton(
         padding: EdgeInsets.zero,
@@ -356,13 +360,39 @@ class _FavoritesPageState extends State<FavoritesPage>
           semanticLabel: "This week's outlook",
         ),
       ),
-      trailing: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: _showSettingsMenu,
-        child: const Icon(
-          CupertinoIcons.ellipsis,
-          semanticLabel: 'Settings menu',
-        ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Search came up from the body header with the wordmark. It still
+          // only appears once there are enough rivers to be worth searching.
+          Consumer<FavoritesProvider>(
+            builder: (context, favoritesProvider, child) {
+              if (!favoritesProvider.shouldShowSearch ||
+                  favoritesProvider.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: _toggleSearch,
+                child: Icon(
+                  _showSearch
+                      ? CupertinoIcons.xmark_circle_fill
+                      : CupertinoIcons.search,
+                  semanticLabel:
+                      _showSearch ? 'Close search' : 'Search favorites',
+                ),
+              );
+            },
+          ),
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            onPressed: _showSettingsMenu,
+            child: const Icon(
+              CupertinoIcons.ellipsis,
+              semanticLabel: 'Settings menu',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -456,9 +486,6 @@ class _FavoritesPageState extends State<FavoritesPage>
     return SafeArea(
       child: Column(
         children: [
-          // App title header
-          _buildAppHeader(),
-
           // Empty state content — offset upward to balance whitespace
           Expanded(
             child: Padding(
@@ -502,7 +529,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                     'Tap the + button below to explore the map and add your first river.',
                     style: TextStyle(
                       fontSize: 16,
-                      color: CupertinoColors.systemGrey2..resolveFrom(context),
+                      color: CupertinoColors.systemGrey2.resolveFrom(context),
                       height: 1.4,
                     ),
                     textAlign: TextAlign.center,
@@ -525,9 +552,6 @@ class _FavoritesPageState extends State<FavoritesPage>
       top: true,
       child: Column(
         children: [
-          // App header
-          _buildAppHeader(),
-
           // Search bar (using custom FavoritesSearchBar)
           Consumer<FavoritesProvider>(
             builder: (context, favoritesProvider, child) {
@@ -562,7 +586,17 @@ class _FavoritesPageState extends State<FavoritesPage>
 
           // Favorites list
           Expanded(
-            child: CustomScrollView(
+            // Scrolling closes an open row, the way it does on iOS. Without
+            // it a row could be left open and scrolled off screen, and come
+            // back open much later with no memory of having opened it.
+            child: NotificationListener<ScrollStartNotification>(
+              onNotification: (n) {
+                if (n.dragDetails != null) {
+                  FavoriteRiverCard.openRow.value = null;
+                }
+                return false;
+              },
+              child: CustomScrollView(
               slivers: [
                 // Pull-to-refresh
                 CupertinoSliverRefreshControl(
@@ -630,51 +664,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                 const SliverToBoxAdapter(child: SizedBox(height: 100)),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAppHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 16, 32, 16),
-      child: Row(
-        children: [
-          // App title with theme-aware color
-          Text(
-            ' RIVR',
-            style: TextStyle(
-              fontSize: 45,
-              fontWeight: FontWeight.bold,
-              color: CupertinoTheme.of(context).textTheme.textStyle.color,
             ),
-          ),
-
-          const Spacer(),
-
-          // Search toggle button (only when 4+ favorites and not empty state)
-          Consumer<FavoritesProvider>(
-            builder: (context, favoritesProvider, child) {
-              if (favoritesProvider.shouldShowSearch &&
-                  !favoritesProvider.isEmpty) {
-                return CupertinoButton(
-                  padding: EdgeInsets.zero,
-                  onPressed: _toggleSearch,
-                  child: Icon(
-                    _showSearch
-                        ? CupertinoIcons.xmark_circle_fill
-                        : CupertinoIcons.search,
-                    color: CupertinoColors.systemBlue,
-                    semanticLabel: _showSearch
-                        ? 'Close search'
-                        : 'Search favorites',
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
-            },
           ),
         ],
       ),
