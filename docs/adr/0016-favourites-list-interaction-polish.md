@@ -362,6 +362,25 @@ Four guards, four mutations, all caught: open on Custom again, clear the
 selection on category change, hide Save until something is picked, drop the
 In-use badge.
 
+### Third pass: the rename dialog (finding 13)
+
+| Was | Now |
+|---|---|
+| Field seeded from `customName`, which is null until you have renamed once — so every FIRST rename opened an empty box | Seeded with the name on the card, and selected, so typing replaces it |
+| Title "Rename River", on top of the card that was the only thing saying which river | Title names the river |
+| Save not `isDefaultAction` — not bold | Bold, and it is what the return key triggers |
+| Return key did nothing (`onSubmitted` unwired) | Submits, when there is something to submit |
+| An empty field accepted the tap and silently did nothing | Save is disabled until the name differs from the one on the card |
+| `TextEditingController` never disposed | Disposed when the dialog closes |
+
+The "no change" comparison is against the name **on the card**, not against
+`customName`. Comparing against `customName` let an untouched dialog save
+"Provo River" as a custom name identical to the river's real one — which
+then grew a "Restore to Provo River" button that restores nothing.
+
+Three guards, four mutations, all caught: seed from `customName` again,
+generic title, Save not default, accept an empty name.
+
 ### Not done, deliberately
 
 * **Opening one row does not close another, and scrolling does not close an
