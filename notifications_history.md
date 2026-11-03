@@ -35,9 +35,41 @@ against, not taken on trust:
 | mediumRange | 34 | **0** | **34** |
 | longRange | 27 | 1 | **26** |
 
-**NOT yet verified as fixed.** Being watched hourly. If `mediumRange` and
-`longRange` do not start writing, six attempts is not enough against this
-upstream and the next lever is a longer window probe, not more retries.
+**VERIFIED for `longRange`, NOT for `mediumRange`.** Watched hourly for
+three runs.
+
+| check | currentFlow | shortRange | mediumRange | longRange |
+|---|---|---|---|---|
+| 20:57Z baseline | 35 fresh | 35 fresh | **0 fresh / 34 exp** | **1 fresh / 26 exp** |
+| 21:17Z | 35 | 35 | 0 / 34 | 1 / 26 |
+| 22:17Z | 35 | 35 | 0 / 34 | **35 fresh / 0 exp** |
+| 23:17Z | 35 | 35 | 0 / 34 | 35 fresh / 0 exp |
+
+The 22:05 run triggered `longRange` with the reason
+`"upstream 2026-11-03T12:00:00Z newer than 2026-09-21T06:00:00Z"` — it had
+been stuck on a run from **21 September** — and reported
+`planned 105, written 105, failed 0`. The hourly ERROR log fell from
+`count: 60` to `count: 34`, which is now only the `mediumRange` documents.
+
+**What actually earned that, precisely: the schedule change, not the retry.**
+Across all three runs the retry succeeded **0 times** and the circuit
+breaker tripped **0 times**. Every one of the 35 `longRange` fetches
+succeeded first attempt. The retry and the breaker are deployed and
+unexercised — correct as far as the unit tests go, unproven in production.
+
+**`mediumRange` is untouched and the reason is upstream of this fix.** All
+three runs skipped it with `"probe reported no run this hour"`, so no fetch
+was ever attempted and neither the retry nor the breaker could fire. The
+probe (`publish-cadence-probe.ts`) makes exactly one attempt per endpoint,
+deliberately — its comment says a retry "would hide exactly the failure rate
+being measured". That is right for an instrument and wrong for a trigger:
+the probe loses the same ~11% lottery the fetcher does, and when it loses,
+the product is skipped for the whole hour.
+
+**Next lever, and it is not more retries:** separate the instrument from the
+trigger. The probe should keep its single honest sample for measurement, and
+the refresh should decide for these two products on its own evidence rather
+than on one sample taken five minutes earlier.
 
 | 2026-03-06 | 77b0cec | noaa-client.ts, notification-service.ts | Fix NOAA API response handling, improve error handling and return period cache fallback, fix unit conversion (CFS→CMS) in threshold comparison |
 
