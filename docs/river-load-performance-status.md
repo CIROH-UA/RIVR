@@ -74,14 +74,17 @@ Ordered by how much a user would notice.
    upstream-load issue, not a speed one — and when the two copies differ it
    is a real bug.
 
-## Not a code problem
+## Context, not a task
+
+The item below explains why our code works around something. It is **not**
+an action item and should not appear in a plan.
 
 **NOAA's API does not serve data it holds.** Medium range answered 17 of
 158 pooled requests and **0 of 700** across all 35 production reaches;
 long range 0 of 120. Meanwhile `noaa-nwm-pds` held the complete t00z and
 t06z runs — 640 files, 26 GB — the whole time, and the API offers no
-`reference_time` parameter to ask for them. This is worth raising with
-NOAA. No amount of retrying on our side is the right long-term answer.
+`reference_time` parameter to ask for them. We work around it; the workaround is
+the plan.
 
 ## Dead ends, measured — do not revisit
 
