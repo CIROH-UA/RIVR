@@ -851,3 +851,50 @@ it cannot be confirmed without deploying and watching. Recorded as unproven.
 
 501 functions tests, tsc clean.
 
+## Item 17 — the deployed flood-builder image was missing the guard that exists in source
+
+**FIXED IN SOURCE, IMAGE NOT REBUILT.** The source lives outside this repo at
+`~/Developer/rivr-tiles/`, which is not a git repository, so there is nothing
+to commit there; what is committed here is the record and the build
+instruction. **The running image is still the old one.**
+
+**Broken, and confirmed exactly as the backlog described it.**
+`cloudrun/build_flooded.py` is a COPY of `daily/build_flooded.py`, because
+Docker's `COPY` cannot reach outside the build context and the context is
+that directory. The copy was taken 2026-08-19 at 16:13 and the maintained
+script gained its guard at 19:10 the same day. The copy never caught up.
+
+Diffed the two: the difference was **exactly and only** the 28-line guard
+block, nothing else. So the deployed image reached
+`restricted = bool(args.only or args.vpu)`, logged "both-networks and
+plausibility gates relaxed", and then published anyway. That is the precise
+sequence that once uploaded East Africa's 2 flooded reaches over the live
+100,220-feature tileset and pointed every app at 40 KB of Tanzania.
+
+The daily schedule passes no arguments, so `restricted` is false for it and
+the exposure was only ever the manual
+`gcloud run jobs execute ... --args=...`. That is the command a person runs
+while testing, which is when the guard matters most.
+
+**Changed.** Copied the maintained script forward, so the two are now
+byte-identical (verified by `diff -q` and an md5 of the backup first). Copying
+rather than hand-porting removes any chance of transcribing the guard wrongly,
+and the diff proved it was safe: there were no container-specific adaptations
+to preserve.
+
+**And a check so the drift is noticed next time**, because the stale copy was
+the real defect and it would simply recur. `cloudrun/check_in_sync.sh` diffs
+the two files and exits 1 when they differ. Both the Dockerfile and this
+repo's CLAUDE.md now say to run it before `gcloud builds submit`.
+
+**Break-it review.** The check was tested against the real historical drift,
+in both directions: restoring the pre-fix copy (the actual stale file, from
+the backup) makes it exit 1 and print the missing guard; with the files in
+sync it exits 0. That is a mutation using the genuine defect rather than an
+invented one.
+
+**Q3, unproven and important:** that the deployed image now carries the
+guard. It does not. Nothing was rebuilt and nothing was deployed, so the
+exposure on the manual command is unchanged until
+`gcloud builds submit` is run. Recorded rather than implied.
+
