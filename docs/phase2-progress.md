@@ -1,3 +1,111 @@
+# Phase 2 remediation progress
+
+One entry per backlog item, in the order the work happened. Every entry says
+what was broken, what changed, and which mutations were tried and what
+survived.
+
+**Items 7, 1, 2 and 5 were completed before this file existed.** Their
+entries below are reconstructed from their commit messages
+(`622a8a6`, `acf9145`, `9994f82`, `71050db`) rather than written at the time,
+so they are shorter than the rest. Nothing in them is recalled: anything not
+in those commits is not claimed here.
+
+## Item 7 — nothing watched production (`622a8a6`)
+
+**Broken.** No alert policies, no notification channels, no log-based
+metrics, no log export. A store product was broken for six weeks while
+logging 611 errors, and the function reported 721 invocations with zero
+failures, because that failure is caught, logged, and returns success. The
+built-in "function failed" alert could never have fired.
+
+**Changed.** 6 log-based metrics and 13 alert policies, covering every
+scheduled job stopping, out-of-memory kills, the destructive-delete guards
+tripping, push delivery failing, and the three paths where the flood builder
+exits 0 while shipping degraded data.
+
+Plus the part alerting could not substitute for: the expired-window error is
+LAGGING, because by the time a window passes its hold cap the data has been
+stale for hours. `storeRefreshHourly` now logs at ERROR in the hour a run
+tries and writes nothing, which is the leading indicator.
+
+**Deliberately not done:** an uptime check on `storeHealth`. It returns 200
+for `degraded`, and was measured reporting `healthy` on a day the heartbeat
+logged degraded.
+
+## Item 1 — a failed read could destroy a returning user's saved rivers (`acf9145`)
+
+**Broken.** The guest-to-account merge read the account document through a
+helper that returned null for two different facts: "this account has no
+document" and "the read failed". It defaulted null to an empty map, so one
+timeout made a returning user's account look brand new, the merge wrote the
+guest's single river as the whole list, and it was recorded as a success. Six
+saved rivers replaced by one, with nothing surfacing an error. The 832
+incident reached by a different route.
+
+**Changed.** A failed read now aborts the merge. The guest's rivers are not
+merged, which is a real loss and is logged loudly, but the account's own
+rivers are untouched, which is the loss that matters. The rule this repo
+learned from 832 applied literally: nothing is written until the operation
+has succeeded, and a read that threw has not succeeded.
+
+**Break-it review.** Both mutations caught: reverting to the swallowing read,
+and giving the new read the same swallow under a different name. The test
+implements sealed Firestore types, suppressed for that file with the reason
+written down, because `fake_cloud_firestore` cannot make a read fail and a
+fake that cannot fail cannot test a failure.
+
+## Item 2 — a unit toggle rewrote the whole user document (`9994f82`)
+
+**Broken.** Tapping the flow-unit toggle did not write a setting. It rewrote
+all 22 fields of the user document from whatever that device last read, which
+dropped a river added on another phone, resurrected an FCM token the server
+had pruned so every flood alert to that device kept failing silently, and
+rewound a server-owned counter.
+
+**Changed**, three causes and all three needed. The write was a whole-document
+`set` with no merge, so any field the Dart DTO does not model was deleted
+outright; it merges now. The payload carried server-owned fields, and merge
+alone does not help there because a merge still writes the keys you give it,
+so `fcmTokens`, `weeklyDigestsSinceOpen` and `accountPromptShown` are
+stripped. And every mutation here is a read-modify-write whose base came from
+an in-memory cache with no expiry that no server write invalidates, so eight
+call sites now read fresh.
+
+**Break-it review, and it found a gap.** Two mutations caught immediately.
+The third, removing the server-owned stripping, **SURVIVED**: the fresh read
+alone made those tests pass, so that mechanism was unguarded. Rather than
+keep unproven code or drop a real protection, a test was added for the race
+it actually closes, a server write landing between the client's read and its
+write. With that test the mutation is caught.
+
+## Item 5 — one failed request removed flood risk for thirty days (`71050db`)
+
+**Broken.** `fetchReturnPeriods` returned an empty list for a 404, for every
+other non-200, and from a catch-all that swallowed timeouts, socket errors
+and malformed bodies alike. "Upstream says this reach has no thresholds" and
+"we could not find out" were the same answer.
+
+That empty list travelled on as an ordinary success and took the near-static
+thirty-day window this product carries. `maxHold` is 32 days and the product
+has no `maxRunAge` entry, so nothing marked it stale and no later read
+retried. One transient timeout removed flood risk from a river for a month:
+the category read NoData, the badge and card animation went flat, the gauge
+lost its zones, and the sync banner stayed silent because the entry looked
+current. In a flood app.
+
+**Changed.** A 404 still returns empty, because that is a real answer and
+caching it is correct. Everything else throws. The repository already handled
+a throwing fetch properly, caching nothing and marking the key unconfirmed.
+
+**Break-it review, and it caught the author.** The first THREE mutations all
+survived: the repository test drives a fake `NoaaApiService`, so reverting
+the catch, gutting the non-200 throw with `if (false)`, and throwing on a
+genuine 404 all left it green. The same defect an audit had measured in this
+suite the week before, a guard testing a reimplementation instead of
+production code. A companion test now drives the real service over a stubbed
+transport, with a control that a genuine 404 is still cacheable so "throw on
+everything" cannot pass. All three mutations caught.
+
 ## Item 4 — a metric user could see a flow 35x wrong, with the flood category inverted
 
 **Broken.** One invariant, three ways: the stored entry's unit tag did not
