@@ -368,6 +368,24 @@ git merge development
 git push origin main
 ```
 
+### Break-it review — required before anything ships
+
+**Invoke the `break-it-review` skill before every push that changes
+behaviour, and again before any store build.** Three questions, answered in
+writing: can you make the test pass while the feature is broken; can you
+reproduce the measurement that justified the change; what did the author
+claim without proving. A surviving mutation blocks the change.
+
+It is reviewed by someone who did not build it — in practice a fresh agent
+given the diff and the claim but NOT the author's reasoning. Auditors kept
+from the prior conclusions on 2026-11-03 found a six-week outage and four
+wrong claims; auditors shown them would have confirmed them.
+
+Everything else was already in place and did not work: the guest-mode chain
+that destroyed saved rivers, blocked every new user and deleted a real
+account went through correct branches, `--no-ff` merges and a green suite,
+across five builds.
+
 ### Commits
 - Imperative mood, concise (e.g., "Add notification frequency picker", "Fix forecast unit conversion")
 - One logical change per commit

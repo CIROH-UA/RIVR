@@ -77,6 +77,31 @@ android/key.properties
 
 ## Before Every Push — Pre-Push Checklist
 
+### Step 0: Break-It Review (MANDATORY for any behaviour change)
+
+**Invoke the `break-it-review` skill and record its verdict.** Skip it only
+for changes that cannot alter behaviour: documentation, comments, release
+notes.
+
+The short version, if you need it inline:
+1. **Mutate the code so the feature is broken and run the test.** If the test
+   stays green, the guard is worthless and the push is BLOCKED. For any
+   grep-style guard, the mutation must be `if (false)`, not deletion —
+   deletion is the one mutation those guards do catch.
+2. **Re-take any measurement being claimed.** n, min/median/max, who
+   generated the traffic, which of the four caches answered, which of the
+   two data paths. Do not quote a number you did not take.
+3. **Name anything claimed without proof** in the commit message or the
+   comments, and either prove it or mark it unproven.
+
+A surviving mutation blocks the push. It is not a note for later.
+
+Why this is step 0 and not advice: the guest-mode chain that destroyed saved
+rivers, blocked every new user and deleted a real account went through
+correct branches, `--no-ff` merges and a green suite, five builds running.
+An audit measured 22% of this test suite as vacuous. Reading the diff caught
+none of it.
+
 ### Step 1: Run Flutter Analyze
 ```bash
 flutter analyze
