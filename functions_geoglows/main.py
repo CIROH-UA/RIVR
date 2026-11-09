@@ -291,6 +291,17 @@ def _lookup_coords(river_id: int):
 @https_fn.on_request(
     region="us-west1",  # next to the GEOGLOWS S3 buckets (us-west-2) to cut read latency
     memory=options.MemoryOption.GB_2,  # ~1.1 GB transient parse peak; ~164 MB resident index
+    # One request per instance, for the same reason as `geoglows_forecast`
+    # and by arithmetic rather than by an observed crash: the peak documented
+    # on the line above is more than half the limit, so two concurrent cold
+    # parses cannot both fit, and the default concurrency is eighty.
+    #
+    # It has never OOMed (checked over 60 days of logs, zero memory-limit
+    # kills) and the reason is traffic, not safety: the app resolves a
+    # reach's coordinates once and persists them, so two cold parses at the
+    # same moment are rare. That is luck, and it is cheaper to remove the
+    # exposure than to keep relying on it.
+    concurrency=1,
     timeout_sec=90,
     # Scale to zero. First call per instance downloads + parses the ~138 MB
     # metadata parquet (~5s) then caches a sorted in-memory index; later calls
@@ -440,6 +451,16 @@ def _conditions_for_vpu(vpu: str, date: str) -> str:
 @https_fn.on_request(
     region="us-west1",  # next to the GEOGLOWS S3 buckets (us-west-2)
     memory=options.MemoryOption.GB_4,  # blockwise read keeps well under this
+    # One request per instance. These two are the RETIRED conditions
+    # functions: `geoglows_stream_conditions` is still deployed but has
+    # logged no invocations since 2026-08-18, and `nwm_stream_conditions` is
+    # not deployed at all. Nothing operational changes by setting this, and
+    # it is the correct value if either is ever revived, which is why it is
+    # set rather than excused: a 4 GiB memory-bound function that shares an
+    # instance is the defect `geoglows_forecast` was just fixed for, and
+    # `geoglows_conditions_worker` reached the same conclusion at the same
+    # memory limit.
+    concurrency=1,
     timeout_sec=180,
     # Scale to zero. First call per (vpu, date) reads ~1-3 GB of forecast from S3
     # (~15-30s) then caches the tiny elevated-reach blob; later calls are
@@ -599,6 +620,16 @@ def _classify_nwm(feature_ids):
 @https_fn.on_request(
     region="us-east1",  # next to the NOAA NWM Open Data bucket (us-east-1)
     memory=options.MemoryOption.GB_4,  # holds the 2.78M-reach peak array
+    # One request per instance. These two are the RETIRED conditions
+    # functions: `geoglows_stream_conditions` is still deployed but has
+    # logged no invocations since 2026-08-18, and `nwm_stream_conditions` is
+    # not deployed at all. Nothing operational changes by setting this, and
+    # it is the correct value if either is ever revived, which is why it is
+    # set rather than excused: a 4 GiB memory-bound function that shares an
+    # instance is the defect `geoglows_forecast` was just fixed for, and
+    # `geoglows_conditions_worker` reached the same conclusion at the same
+    # memory limit.
+    concurrency=1,
     timeout_sec=300,
 )
 def nwm_stream_conditions(req: https_fn.Request) -> https_fn.Response:
@@ -649,6 +680,28 @@ def nwm_stream_conditions(req: https_fn.Request) -> https_fn.Response:
     # documents a "~1.1 GB transient parse peak" for the same xarray/zarr
     # machinery — this function was simply the one left at the lower ceiling.
     memory=options.MemoryOption.GB_2,
+    # ONE REQUEST PER INSTANCE. Raising the limit to GB_2 above fixed the
+    # single-request peak and left the real cause untouched: Cloud Run packs
+    # concurrent requests onto one instance and the default for a function is
+    # EIGHTY, while a single in-flight request holds ~1.03 GB of xarray/zarr
+    # machinery. Two at once cannot fit in 2 GiB, so the second request kills
+    # the instance that is serving the first.
+    #
+    # Measured in production, three kills on 2026-11-03 at 2056, 2071 and
+    # 2075 MiB against the 2048 limit, each overshooting by only 8 to 27 MiB
+    # — which is exactly what a second request arriving part-way through a
+    # first one looks like, not a leak. The deployed service was still
+    # carrying containerConcurrency 80 when this was written.
+    #
+    # The sibling `geoglows_conditions_worker` already documents this same
+    # conclusion at GB_4: "the work is memory-bound, not IO-bound, so there
+    # is nothing to gain from sharing an instance anyway." That applies here
+    # word for word.
+    #
+    # No `max_instances` to go with it: concurrency is what fixes the OOM,
+    # and capping instances would trade a crash for a queue with no measured
+    # need. Traffic is one reach per interactive tap.
+    concurrency=1,
     timeout_sec=120,
     # min_instances=0 (scale to zero) — no idle cost. First tap after the
     # function sleeps eats a ~10-30s cold start (heavy geoglows/xarray/zarr
