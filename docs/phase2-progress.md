@@ -317,3 +317,47 @@ nobody proposes it twice.
 `data_sources_test.dart`), and the other ~80 audited claims. Left for a
 dedicated pass rather than edited while an independent review held the suite.
 
+## Item 9 — a wall-clock assertion that could go vacuous
+
+**The backlog's own claim about this one was wrong, so start there.** It said
+the 40 ms assertion in `river_data_repository_test.dart` was "measured green
+on an idle machine and red (43 ms) under load". ⏱ MEASURED 2026-11-09 · n=12
+(6 idle, 6 with 8 saturated cores) · printing the elapsed value: **every run
+22-23 ms, idle and loaded alike.** Five full runs of the old assertion under
+that load were green 5 of 5. The flake is not reproducible on this machine
+and the claim is recorded as disproven rather than quietly inherited.
+
+**The real defect is the mirror image, and this one IS measured.** The
+threshold silently encodes the fake cache's 20 ms read delay:
+
+| | elapsed |
+|---|---|
+| correct, two keys in parallel | 22-23 ms (n=4) |
+| broken, fully serialised | 45-47 ms (n=4) |
+| the threshold | 40 ms |
+
+So it discriminated, with 17 ms of margin on the pass side and 5-7 ms on the
+fail side. Then shorten the fake's delay from 20 ms to 12 ms, which is an
+innocent tidy-up nothing would flag: a **fully serialised** implementation
+comes in at 30 ms and the assertion PASSES. The guard is vacuous and nothing
+says so. That is this repo's single most common defect shape, arrived at from
+a direction the audit did not consider.
+
+**Changed.** The fake counts in-flight `get` calls and records the peak. Two
+different keys must overlap (peak 2); the same key must not (peak 1), which
+also names the mechanism the existing supersession test only tested the
+symptom of. No clock, no margin, and immune to the delay change above:
+verified red at 12 ms where the old one went green.
+
+**Break-it review.** 5 mutations caught: the chain becomes global rather than
+per key; no chain at all; `if (false)` on the line that stores the chain so no
+successor ever waits; and two that attack the GUARD itself rather than the
+code, freezing the concurrency counter and the call counter, because a
+counter stuck at 1 would satisfy the same-key assertion by accident. One
+mutation discarded for not compiling, which proves nothing.
+
+Q2 re-measured above, and it contradicted the claim that justified the item.
+Q3: nothing claimed beyond what is tabled here.
+
+1,494 tests, analyze clean.
+

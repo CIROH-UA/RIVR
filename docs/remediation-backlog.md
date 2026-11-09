@@ -82,12 +82,25 @@ free tier.*
 - **no `FavoritesPage` or `FavoriteRiverCard` widget test exists at all**,
   which alone causes four of the findings.
 
-### 9. A wall-clock assertion makes "one red line" normal · PARALLEL-SAFE
-`river_data_repository_test.dart` asserts under 40 ms. Measured green
-(1458/1458) on an idle machine and red (43 ms) under load. It is the fourth
-version of a timing assertion the Phase 8 reviews caught three times. This
-is exactly how the guest-mode regression's 27 new failures were read as
-expected noise.
+### 9. A wall-clock assertion can go vacuous · DONE 2026-11-09 · PARALLEL-SAFE
+`river_data_repository_test.dart` asserted under 40 ms.
+
+**The flakiness claim here was WRONG and is corrected.** It said "measured
+green on an idle machine and red (43 ms) under load". Re-measured 2026-11-09,
+n=12 (6 idle, 6 with 8 saturated cores): **every run 22-23 ms**, idle and
+loaded alike. The threshold had 17 ms of margin, not none.
+
+**The real defect is the opposite failure, and it is measured.** The 40 ms
+threshold silently encodes the fake cache's 20 ms read delay. Correct
+(parallel) runs at 22-23 ms, fully serialised at 45-47 ms, so the guard did
+discriminate. But shorten the fake's delay to 12 ms, which is an innocent
+tidy-up, and a FULLY SERIALISED implementation comes in at 30 ms and the
+assertion PASSES. The guard goes vacuous with no warning. The structural
+replacement, which asserts peak concurrency inside `get`, stays red under
+that same change.
+
+Fixed by asserting concurrency rather than elapsed time. 5 mutations caught,
+1 discarded for not compiling.
 
 ### 10. CI is a notification, not a gate · PARALLEL-SAFE
 No branch protection; merges land a median of **2 seconds** after the branch
