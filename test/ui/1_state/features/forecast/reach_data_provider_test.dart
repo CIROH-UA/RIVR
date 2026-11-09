@@ -68,9 +68,18 @@ class _Repo implements IRiverDataRepository {
   // real regression.
   @override
   final ValueListenable<bool> outOfSync = ValueNotifier<bool>(false);
-  _Repo({this.failProducts = const {}, this.delay});
+  _Repo({
+    this.failProducts = const {},
+    this.emptyProducts = const {},
+    this.delay,
+  });
 
   final Set<ForecastProduct> failProducts;
+
+  /// Products whose entry decodes to a section with NO points — what the NWM
+  /// source now stores when upstream answers 200 with the section absent,
+  /// held on a short retry window rather than its publish window.
+  final Set<ForecastProduct> emptyProducts;
   final Duration? delay;
 
   final List<ForecastProduct> reads = [];
@@ -170,6 +179,14 @@ class _Repo implements IRiverDataRepository {
       default:
         payload = const {};
     }
+    if (emptyProducts.contains(p)) {
+      // Keep the reach block, drop the section's points. This is the real
+      // stored shape for an empty answer, not an invented one: the source
+      // trims the payload to the requested section and that section is `{}`.
+      payload = {
+        if (payload['reach'] != null) 'reach': payload['reach'],
+      };
+    }
     return RiverDataEntry(
       key: RiverDataKey(
           source: ForecastSource.nwm, reachId: '123', product: p),
@@ -224,6 +241,70 @@ Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 20));
 
 void main() {
+  group('upstream having no data is not an app error', () {
+    // REGRESSION GUARD, found by an independent break-it review of the
+    // 2026-11-09 empty-section work and MEASURED by it: every CONUS river's
+    // daily and extended panel read as a red app error.
+    //
+    // NOAA answers 200 with medium and long range absent for every CONUS
+    // reach that responds right now (10 of 10, measured 2026-11-09). The
+    // first version of the fix made the data source THROW on such an answer.
+    // `_loadSectionParallel` catches everything into
+    // `SectionLoadState.error`, which renders RED, "Unable to Load Forecast /
+    // Something went wrong loading the medium range forecast. Pull down to
+    // retry."
+    //
+    // Nothing went wrong in the app and pulling down cannot help: this
+    // repo's own measurements say the data has been absent for weeks. The
+    // honest state already exists — `empty` renders orange, "temporarily
+    // unavailable, this usually resolves on its own" — and it is what an
+    // empty section must reach.
+
+    test('an empty section reads as empty, not as an error', () async {
+      final repo = _Repo(emptyProducts: {
+        ForecastProduct.mediumRange,
+        ForecastProduct.longRange,
+      });
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
+
+      await p.loadAllData('123');
+      await _settle();
+
+      expect(p.dailyState, SectionLoadState.empty,
+          reason: 'orange "temporarily unavailable", not red "something went '
+              'wrong" — the app did not fail, upstream has no data');
+      expect(p.extendedState, SectionLoadState.empty);
+      expect(p.dailyState.isError, isFalse);
+      expect(p.extendedState.isError, isFalse);
+    });
+
+    test('the short range the page awaits is no different', () async {
+      final repo = _Repo(emptyProducts: {ForecastProduct.shortRange});
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
+
+      await p.loadAllData('123');
+      await _settle();
+
+      expect(p.hourlyState.isError, isFalse,
+          reason: 'short range is the product loadAllData AWAITS as the '
+              'overview, so getting this one wrong colours the whole page');
+    });
+
+    test('a real failure STILL reads as an error', () async {
+      // The positive control. Without it the guard above could be satisfied
+      // by a provider that never reports an error at all, which would hide
+      // genuine network failures behind the same reassuring orange copy.
+      final repo = _Repo(failProducts: {ForecastProduct.mediumRange});
+      final p = ReachDataProvider(repository: repo, unitService: _Unit('CFS'));
+
+      await p.loadAllData('123');
+      await _settle();
+
+      expect(p.dailyState, SectionLoadState.error,
+          reason: 'a thrown read is a real failure and must still say so');
+    });
+  });
+
   group('loadAllData — overview first, then parallel', () {
     test('returns true with reach + hourly data when short range lands',
         () async {
