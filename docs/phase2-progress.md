@@ -665,3 +665,61 @@ effect can only be confirmed by deploying and watching a night of
 
 496 functions tests, tsc clean.
 
+## Item 10 — CI's non-admin half: it now runs what it claims to
+
+The branch-protection half needs a CIROH-UA owner and is untouched. The rest
+needed nobody's permission.
+
+**Broken 1: CI excluded `test/integration_test/` on a premise this repo had
+already retracted.** The comment said "~27 long-standing pre-existing
+failures and needs a device". Both halves are false. CLAUDE.md retracted the
+27 figure on 2026-09-22 after measuring 0 failures on a clean tree, and
+recorded that the wrong note had been MASKING real regressions: a guest-mode
+change produced exactly 27 new failures and they were read as expected noise.
+And they need no device.
+
+⏱ MEASURED 2026-11-09 in a fresh worktree carrying only the CI stub config,
+which is that job's exact starting state: **43 tests, 0 failures.** Until now
+those 43 ran nowhere in CI, including the behavioural guard for the ADR 0015
+onboarding hint added the same day, which is the only test that can tell
+whether that feature is alive.
+
+CI now runs bare `flutter test`. No allow-list and no exclusions: an
+enumerated list is a promise someone will remember to update it, and this
+repo has now been bitten by that twice (`test/docs/` ran nowhere for the same
+reason).
+
+**Broken 2: CI had never built an artefact.** Nothing between a push and a
+store exercised the Android build, so a Gradle, manifest, plugin or resource
+change that stops it compiling was invisible to `flutter analyze` and
+`flutter test` alike.
+
+There is now a debug-APK job that reads the artefact back rather than
+trusting the exit code, per this repo's own rule that its pipelines have
+exited 0 while producing wrong or partial data five separate times.
+
+**This one did not work first time, and the honest version is better for
+it.** The first attempt claimed to be verified locally. It was not: the build
+FAILED in the worktree, because `android/app/google-services.json` is
+gitignored and the Google Services plugin refuses to run without it, before
+compiling anything. So there is now a committed
+`android/app/google-services.ci.json` placeholder, the same pattern the repo
+already uses for `firebase_options.ci.dart`. Re-measured after adding it: the
+APK builds and carries 16 mipmap entries, which is what the read-back checks.
+
+**Broken 3, honestly scoped.** CI builds against `config.template.dart`,
+whose secrets are the literal `INSERT-THE-KEY`, so it is structurally
+incapable of catching the missing-token defect that shipped AAB 800. That
+does not change: there is no real token in CI to check, and the real guard
+for it is `make verify-aab` (item 11). What CI can check is the inverse,
+which is worth having: that nobody has committed a REAL credential into any
+of the four committed stub files. Verified both ways locally, including that
+the scan does fire on the real `config.dart`.
+
+**No break-it mutations here**, and that is a gap worth naming rather than
+papering over: a GitHub Actions workflow cannot be mutation-tested from this
+machine. Every claim above was instead verified by running the exact commands
+the workflow runs, in a worktree with no gitignored files, which is the
+closest reachable thing to the job's real environment. The first run of that
+exercise is what caught the google-services failure.
+
