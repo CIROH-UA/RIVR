@@ -46,7 +46,12 @@ class _SlowReadCache extends _MemoryCache {
     if (_inFlight > peakConcurrentGets) peakConcurrentGets = _inFlight;
     try {
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      return super.get(key);
+      // `await`ed deliberately, and `unawaited_return_in_try_block` is what
+      // caught it: returning the future bare lets `finally` decrement before
+      // the read has finished, so the counter this guard depends on would
+      // under-report overlap. A lint on a test fake, pointing at a real bug
+      // in the measurement.
+      return await super.get(key);
     } finally {
       _inFlight--;
     }
