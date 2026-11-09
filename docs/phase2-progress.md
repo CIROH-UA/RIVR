@@ -783,3 +783,71 @@ is free to read: run the suite and copy the number. Do not compute a figure
 that a command will tell you.
 
 
+## Item 16 — the global forecast function was still being killed for memory
+
+**WRITTEN AND TESTED, NOT DEPLOYED.** Same standing as item 6: this is server
+configuration and takes effect only on
+`firebase deploy --only functions:geoglows`. Nothing about the running
+system has changed, and the deployed `containerConcurrency` is still 80.
+
+**Broken.** `geoglows_forecast` was recorded as fixed in August. It was not.
+
+⏱ MEASURED 2026-11-09 from production logs (`gcloud logging read`, 30-day
+window, as `jersondevs@gmail.com`): **three memory-limit kills, all on
+2026-11-03**, at 2056, 2071 and 2075 MiB against the 2048 limit. n=3,
+min 2056, median 2071, max 2075. Overshoot 8 to 27 MiB. Plus one "container
+instance was found to be using too much memory and was terminated".
+
+**The August change raised the ceiling and left the cause alone.** It went
+from GB_1 to GB_2, which fixed the single-request peak. But Cloud Run packs
+concurrent requests onto one instance and **the default for a Firebase
+function is eighty**, while one in-flight request holds ~1.03 GB of
+xarray/zarr machinery. Two cannot fit in 2 GiB, so the second request kills
+the instance serving the first. Every overshoot being 8 to 27 MiB is the
+signature of that rather than of a leak: a leak does not stop politely just
+over the line. Confirmed against the live service, which was still carrying
+`containerConcurrency: 80`.
+
+The conclusion was already written down in the same file.
+`geoglows_conditions_worker` sets `concurrency=1` at GB_4 and explains why:
+"the work is memory-bound, not IO-bound, so there is nothing to gain from
+sharing an instance anyway." That applies here word for word.
+
+**Changed.** `concurrency=1` on all four GB-scale HTTP endpoints:
+
+| Function | Basis |
+|---|---|
+| `geoglows_forecast` | the measured defect above |
+| `geoglows_reach_coords` | arithmetic, not a crash: its own comment documents a ~1.1 GB transient parse peak against the same 2 GiB limit, so two concurrent cold parses cannot both fit. **Zero memory-limit kills in 60 days of logs**, and the reason is traffic rather than safety, because the app resolves a reach's coordinates once and persists them. That is luck, and removing the exposure is cheaper than relying on it. |
+| `geoglows_stream_conditions`, `nwm_stream_conditions` | retired conditions functions; the first is deployed but has logged nothing since 2026-08-18 and the second is not deployed at all. Nothing operational changes, and it is the correct value if either is revived. Set rather than excused, so the guard needs no allow-list. |
+
+No `max_instances` added: concurrency is what fixes the OOM, and capping
+instances would trade a crash for a queue with no measured need.
+
+The three MB_512 endpoints keep the default on purpose. They serve a cached
+blob and pinning them would cost scaling for nothing; a test asserts that
+too, because "everything declares concurrency" would otherwise be satisfiable
+by pinning the whole file.
+
+**Break-it review.** Seven mutations, all caught: `geoglows_forecast` losing
+the setting, and set to 2 rather than 1; `geoglows_reach_coords` losing it;
+each of the two GB_4 functions losing it; a light endpoint needlessly pinned
+to 1; and `geoglows_forecast` renamed, which would leave the guard reading
+nothing. Two earlier mutation attempts were invalid rather than survivors:
+one inserted a comment instead of removing the setting, and one had an anchor
+matching three places. Both are recorded because an invalid mutation reported
+as a survivor is how a real gap gets missed.
+
+`functions_geoglows/` is Python with no test infrastructure at all, so the
+guard lives in the TypeScript suite and reads `main.py` off disk. That is
+already how this project pins cross-language contracts
+(`hold-policy-drift.test.ts` reads the Dart freshness tables). It is
+source-level and says so: it checks the DECLARATION, not the deployed
+service.
+
+**Q3, unproven:** that `concurrency=1` ends the kills. It follows from the
+arithmetic and from the sibling function's measured experience at GB_4, and
+it cannot be confirmed without deploying and watching. Recorded as unproven.
+
+501 functions tests, tsc clean.
+
