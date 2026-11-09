@@ -898,3 +898,64 @@ guard. It does not. Nothing was rebuilt and nothing was deployed, so the
 exposure on the manual command is unchanged until
 `gcloud builds submit` is run. Recorded rather than implied.
 
+## Item 15 — Firestore had no backup, no PITR and no delete protection
+
+⏱ MEASURED 2026-11-09, read back from the live project as
+`jersondevs@gmail.com`:
+
+| | Before |
+|---|---|
+| `deleteProtectionState` | `DELETE_PROTECTION_DISABLED` |
+| `pointInTimeRecoveryEnablement` | `POINT_IN_TIME_RECOVERY_DISABLED` |
+| backup schedules | `Listed 0 items.` |
+| existing backups | `Listed 0 items.` |
+
+All three, exactly as the backlog said. Together they mean an accidental
+deletion of the production database today has **no recovery path at all**,
+for an app that is live on both stores.
+
+**DONE: delete protection is now ENABLED**, verified by read-back
+(`DELETE_PROTECTION_ENABLED`). This is the one mitigation of the three that
+is free, so there is no trade to weigh: it makes
+`gcloud firestore databases delete` refuse until someone explicitly turns the
+flag off again. It changes nothing about reads, writes, latency or cost, and
+it is reversible with one command. Recorded here as the reason, per the rule
+about not changing cloud resources without one.
+
+The reason it was worth doing unprompted rather than queued: with PITR and
+backups both off, deletion is unrecoverable, and this project's own history
+is of destructive accidents rather than hypothetical ones. A `--vpu 101` test
+replaced the live tileset with two reaches in Tanzania; `User.delete()` on a
+stale reference destroyed a real account of eight months; a merge deleted a
+tester's saved rivers. The pattern is consistent and the protection is free.
+
+**NOT DONE, because both bill and that needs Jerson's yes:**
+
+```bash
+# Point-in-time recovery (raises version retention from 1 hour to 7 days)
+gcloud firestore databases update --database="(default)" \
+  --enable-pitr --project=ciroh-rivr-app
+
+# A daily backup kept for a week
+gcloud firestore backups schedules create --database="(default)" \
+  --recurrence=daily --retention=7d --project=ciroh-rivr-app
+```
+
+**The cost is unquantified and deliberately not guessed.** Both are billed on
+stored volume. The database is small — the only collection that was ever
+unbounded is `publish_cadence_log`, now TTL-capped at 90 days of hourly
+~2 KB samples, and `river_data` holds roughly 35 reaches times 7 products,
+overwritten in place — so the bill is very likely trivial. **That is an
+estimate from collection shapes, not a measurement**: the
+`firestore.googleapis.com/document/count` metric does not exist for this
+project, so there is no figure to read, and quoting unit prices from memory
+is the thing this phase has spent its time correcting. Worth a minute in the
+console before saying yes, not because the answer is in doubt but because the
+number should come from somewhere.
+
+**Break-it review.** No mutation applies: this is a one-bit state on a cloud
+resource, not code. What stands in for it is the read-back, which is the rule
+this repo already has for its pipelines (five operations have exited 0 while
+producing wrong or partial data). The `update` command's own output was not
+trusted; the state was re-read with `describe` and confirmed changed.
+
