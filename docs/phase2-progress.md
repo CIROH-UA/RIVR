@@ -37,3 +37,283 @@ mapping and run identity are untouched.
 
 1,480 tests, analyze clean.
 
+## Item 3 — the app could cache an EMPTY forecast over a full one
+
+**Broken.** NOAA's `?series=` filter is honoured only some of the time.
+⏱ MEASURED 2026-11-09 16:56 UTC, n=10 CONUS reaches taken from this repo's
+own tests and docs (6 more returned 503 and are discarded):
+`?series=medium_range` comes back HTTP 200 with **all five sections `{}`**,
+10 of 10. The app then refetches the UNFILTERED body, which for the same
+reaches at the same moment carries `analysisAssimilation` 47 points and
+`shortRange` 18 points with medium and long range empty, 10 of 10.
+
+That whole body was handed back to the caller. The caller is a cache keyed by
+PRODUCT, so a medium-range read stored a full copy of SHORT range inside the
+medium-range entry, on medium range's 6-hour window.
+
+* `ReachDataProvider._mergeForecastData` lets whichever section load lands
+  LAST win, so the hourly chart and the gauge could be driven by that copy
+  instead of by the dedicated short-range entry on its 1-hour window, and
+  differ between two opens of the same page.
+* It defeated the empty-section check, which asks "is anything readable
+  here" of the payload as a whole, on purpose, because naming a section per
+  product would duplicate the decoder's mapping. A smuggled short range
+  answered the question.
+
+**Changed.** `fetchForecast` trims its answer to the section it was asked
+for, keeping the reach block and the unit stamp, with the section always
+present as `{}` when upstream sent nothing. The unfiltered body is still
+cached whole for 30 seconds so a second product's fallback shares the one
+request, and the trim COPIES rather than editing that shared map.
+
+### The first version of this shipped a worse bug than it fixed
+
+The first version refused an empty answer by THROWING, so that nothing was
+cached and nothing claimed to be current. An independent break-it agent
+measured what that did on screen and returned FAIL. It was right.
+
+`ReachDataProvider` turns any exception from a section read into
+`SectionLoadState.error`, which renders RED: "Unable to Load Forecast /
+Something went wrong loading the medium range forecast. Pull down to retry."
+Nothing had gone wrong in the app, pulling down could not help, and since
+medium and long range are empty for every CONUS reach that answers, that was
+the NORMAL case rather than an edge. It also raised `outOfSync`, putting the
+app-wide stale banner over the favourites page for half an hour after any
+reach page was opened, and made every read refetch: the agent measured the
+call count climbing 2, 3, 4 across three reads of one product.
+
+Worse, `FavoritesProvider._refreshSingleFavorite` reads the name, the flow
+and the thresholds in one `Future.wait` inside one `try`, so a throw from
+`currentFlow` would have discarded the river's NAME and its FLOOD THRESHOLDS
+as well. The code anticipates null entries there; it does not anticipate a
+throw.
+
+**The honest half of the fix was the WINDOW, not the refusal.** An empty
+answer is now cached with a 15-minute retry window instead of its product's
+publish window. It decodes to a section with no points, which lands the panel
+on `SectionLoadState.empty` — orange, "temporarily unavailable, this usually
+resolves on its own", which is true — with no app-wide banner and no refetch
+on every read. The defect being fixed was never "it was cached"; it was
+"it was cached for six hours as a confirmed current value with no later
+attempt".
+
+Fifteen minutes is a judgement, not a measurement, and it is recorded as one.
+It sits between two failures that have both happened here: hold the empty
+answer for six hours and one unlucky request means an empty 10-day panel all
+morning; hold it for nothing and one page open becomes a climbing count of
+calls against an endpoint that is already failing.
+
+### Two claims of mine the review disproved
+
+**"Nothing shipped with it: the bug needed this trim to become reachable" is
+DISPROVEN.** The agent measured that on `d40ddf1`, already merged to
+`development`, a POPULATED filtered `?series=medium_range` response — one
+call, no fallback, no trim involved — was refused outright, because the
+usable-series check looked under `series` only and medium and long range are
+ensembles keyed `mean`/`memberN`. So `development` today throws away every
+real medium- and long-range forecast NOAA serves. This branch is the fix for
+something already merged, not a precaution, and my claim understated it.
+
+**The fixture provenance comment was wrong.** It attributed the
+populated-shortRange shape to the filtered endpoint. The filtered endpoint
+returns all five sections empty; that shape is the UNFILTERED body. The
+fixtures now serve a different body per URL, which is both accurate and a
+stronger test.
+
+### Break-it review
+
+Round 1, by me: eight mutations, all caught. **The independent agent then
+wrote twelve of its own and four survived**, which is the whole argument for
+the rule. Round 2 re-ran its four plus eight new ones:
+
+| Mutation | Round 1 | Now |
+|---|---|---|
+| fallback trims the CACHED map in place, poisoning the shared body | SURVIVED | caught |
+| drop the line that keeps the requested section present | SURVIVED | caught |
+| `shortRange` skips the window check | SURVIVED | caught |
+| `currentFlow` skips the window check | SURVIVED | caught |
+| an empty answer gets its full publish window again | — | caught |
+| the usable-series check always says yes | — | caught |
+| ensemble members ignored again | — | caught |
+| the provider calls an empty section an error | — | caught |
+| `if (false)` the trim, call site intact | — | caught |
+| medium range answers with short range instead | — | caught |
+| the empty window is 6 hours, not 15 minutes | — | caught |
+| `_runIdOf` first-found across sections, two forms | — | caught |
+
+**Discarded as equivalent mutants, with the reasoning:** two weaker
+`_runIdOf` forms that fall back only when the requested section is ABSENT.
+That branch is unreachable, because the section is always present — in the
+trimmed production payload and in the test fake alike. The stronger
+fixed-order first-found forms are caught by `data_sources_test`.
+
+**Why round 1's eight were not enough, which is the lesson worth keeping:**
+every one of them attacked the defect. None asked whether the FEATURE still
+worked, and none went near the call sites the change did not touch. Three of
+the agent's four survivors were untested call sites of a function I had just
+written a guard for. That is now written into the break-it skill as a
+required second half of question 1.
+
+1,494 tests, analyze clean.
+
+## Item 14 — storeHealth announced a schedule that no longer existed
+
+**Broken.** `healthCheck` serves human-readable prose about when things run,
+hand-written next to machine-read cron strings. It had drifted twice: it
+advertised four Mountain-Time slots for functions deleted in ADR 0011 Phase
+6, and after the refresh moved to `:05` it kept announcing `:20` — six lines
+below a comment warning against exactly that. The string itself was corrected
+on 2026-11-03; nothing stopped it drifting a third time.
+
+**Changed.** `health-schedule-drift.test.ts` reads the cron expressions and
+timezones out of `index.ts` and fails when the prose and the schedule
+disagree, in EITHER direction. It also fails when the prose names a function
+that is no longer exported, which is the first drift.
+
+Honest about its strength: this is a source-level guard, like
+`store-health-wiring.test.ts`. It cannot tell whether the cron is the right
+cron, only whether the sentence an operator reads still describes it. That is
+the failure that actually happened, twice.
+
+**Break-it review.** Seven mutations, all caught, both directions: cron moves
+and prose stays; prose reverts and cron stays; the GEOGLOWS hour slips; the
+GEOGLOWS timezone changes under the prose; the weekly outlook moves to
+Monday; the prose advertises a deleted function; the schedule block is
+dropped from the endpoint entirely.
+
+480 functions tests.
+
+## Item 12 — the banner at the top of CLAUDE.md pointed at a closed incident
+
+**Broken.** The most-read paragraph in the repo described the hydromap.com
+email quarantine as an open operational task needing Dan's Cloudflare access.
+Issue #38 closed 2026-11-09 at 03:23Z.
+
+**Verified before removing it** — ⏱ MEASURED 2026-11-09 · n=1
+`dig +short TXT` per record:
+
+| Record | Value |
+|---|---|
+| `hydromap.com` | `v=spf1 include:_spf.google.com ~all` |
+| `_spf.google.com` | resolves to a real policy — this was the broken half |
+| `google._domainkey.hydromap.com` | `v=DKIM1; k=rsa; p=MIIBIjANBgkq…` |
+| `_dmarc.hydromap.com` | `p=quarantine`, correct now that both pass |
+
+**Not measured:** that a reset email reaches an inbox. The records
+authenticate; delivery was not re-tested end to end. And RIVR's own reset
+mail goes out from the default Firebase sender, not from hydromap.com, so it
+was never the part that depended on these records. Said so in both places
+rather than letting "fixed" imply more than was checked.
+
+**Changed.** Banner removed. A dated record with the measurements kept lower
+in the file, next to release tracking, including the lesson that an
+operational banner needs a closing check or it keeps sending readers after a
+solved problem. The memory memo and its index entry were corrected the same
+way — the memo's original diagnosis is kept, relabelled as disproven as a
+current state rather than deleted.
+
+## Item 11 — the release path had no guards where it had already failed
+
+**Broken.** `make release-android` and `make release-ios` checked nothing:
+not the branch, not the tree, not the gitignored config, and above all not
+the artefact. That matters more here than in most projects, because every
+RIVR release is built on one laptop — nothing between `main` and a store
+passes through CI. The Makefile IS the primary control, and it needed
+nobody's permission to exist, so it was done first regardless of the branch
+protection question in item 10.
+
+**Changed.** A `preflight` target that refuses to build, and two targets that
+read the finished artefact back. Every check comes from an incident:
+
+| Check | The incident |
+|---|---|
+| map token in `android/local.properties` | AAB 800 reached Play with a map that never loaded; the build exited 0 with the literal placeholder compiled in |
+| `MAPBOX_ACCESS_TOKEN` in `ios/Flutter/Secrets.xcconfig` | `Release.xcconfig` includes it with `#include?` — the `?` makes it OPTIONAL, so a missing file ships an empty token and a dead map. The iOS twin of the above, unguarded until now |
+| every gitignored config file present | merging development into main deletes them from disk (Apr 2026) |
+| clean tree | an artefact that matches no commit cannot be traced from a crash report |
+| branch is `main` | releases are stamped there; `ALLOW_BRANCH=1` for a test build |
+| `verify-aab` reads the bundle | the token out of the manifest, and versionCode+versionName against pubspec |
+| `verify-ipa` reads the IPA | `aps-environment`, the map token, and the build number |
+
+The repo's own rule for these pipelines is that they fail SILENTLY — five
+separate operations have exited 0 while producing wrong or partial data, and
+exit status has never caught any of them. So both verify targets end by
+reading the artefact, and `verify-ipa` reads the IPA rather than the archive,
+because `flutter build ipa` re-signs on export.
+
+**Proven, not assumed** — ⏱ MEASURED 2026-11-09 against the real artefacts
+still on disk from the 2026-11-02 build:
+
+| Case | Result |
+|---|---|
+| real AAB | passes: `2026.2.5+917`, token present |
+| real IPA | passes: `2026.2.5+917`, `aps-environment production`, token present |
+| the ARCHIVE's app repacked as an IPA | **FAILS** with `aps-environment is 'development'` — this is the six-month push outage signal, reproduced from a real artefact on this machine rather than a hypothetical |
+| IPA with `MBXAccessToken` reset to the unexpanded variable | **FAILS** |
+| IPA with `CFBundleVersion` set to 900 | **FAILS** against pubspec's 917 |
+| missing artefact, either platform | **FAILS** with "build it first" |
+| wrong branch | **FAILS**, and prints the `ALLOW_BRANCH=1` escape |
+| dirty tree | **FAILS**, and lists what is dirty |
+
+**Not yet proven:** the missing-config and missing-token refusals. They sit
+behind the clean-tree check, which this working tree does not satisfy while
+the remediation work is in flight, so they were read rather than executed.
+Saying so rather than listing them with the eight above.
+
+**Deliberately not added:** `flutter test`. A release should not be the first
+place the suite runs, and bolting 75 seconds onto every build invites people
+to work around the target.
+
+**Still open, and not ours:** branch protection on an org-owned repo needs a
+CIROH-UA owner. The iOS Release config still carries
+`CODE_SIGN_IDENTITY = "iPhone Developer"`, worked around rather than fixed —
+`verify-ipa` now catches the consequence, which is the half that was costing
+real outages.
+
+## Item 13 — the docs' numbers (started: the rule, and the worst claim)
+
+Two halves. The rule that stops new wrong numbers, and the 81 existing ones.
+
+**The rule is in.** CLAUDE.md now opens with it: a figure is only usable if
+it carries `⏱ MEASURED <date> · n=<count> · <method>`, and **an unstamped
+number may not justify a decision or close a scope.** The audit's finding is
+what justifies the rule rather than taste — of ~190 claims checked, 115 held,
+52 were stale and 29 were wrong, and the split was not about writing quality:
+**every claim resting on n ≤ 2 that could be checked came back wrong or
+stale, and every claim pinned by a test came back right, 21 for 21.** So the
+rule also says to prefer pinning a number with a drift test over stamping it,
+because a drift test is the only thing in this repo's history that has kept a
+number honest with nobody remembering to check.
+
+**The worst single claim is corrected, with a real n.** The GEOGLOWS
+publication window: documented as 10:15-10:30 UTC from **two** consecutive
+days, spread to eight places, and carrying the instruction "do not re-derive
+it; do not call it unknown".
+
+⏱ MEASURED 2026-11-09 · n=5 consecutive days · `curl -I` on
+`geoglows-v2-forecasts/<YYYYMMDD>00.zarr/.zmetadata`, reading `Last-Modified`:
+**09:39-10:09 UTC, median 09:40.** The run lands 35-50 minutes earlier than
+documented. (`.zmetadata` is zarr's consolidated metadata, written after the
+arrays, so it is a fair proxy for complete-and-readable rather than for
+write-started.)
+
+Nothing is broken by the correction and no schedule moves — the store's 11:30
+and the flood builder's 11:00 both sit after the latest observed publication,
+and the client's 10:30 constant is a finished-by upper bound with ~21 minutes
+of margin over the worst sample. **What it costs:** a device waits up to ~50
+minutes longer than necessary for a forecast already on S3. Recovering that
+means lowering a constant whose failure mode is expiring BEFORE publication,
+which would put every device into a retry loop against a run that is not
+there — so it wants a fortnight of samples, not five days. Recorded as the
+recommendation rather than done.
+
+Corrected in CLAUDE.md and ADR 0011, with the old figure kept and labelled
+rather than deleted, per the rule that a disproven claim stays visible so
+nobody proposes it twice.
+
+**Still open:** the same figure in four code comments and two test files
+(`geoglows_data_source.dart`, `store-document.ts`, `store-window.ts`,
+`functions_geoglows/main.py`, plus `store-window.test.ts` and
+`data_sources_test.dart`), and the other ~80 audited claims. Left for a
+dedicated pass rather than edited while an independent review held the suite.
+

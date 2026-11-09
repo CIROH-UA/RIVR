@@ -1,16 +1,32 @@
 # RIVR
 
-> **Open operational task — needs Cloudflare access to `hydromap.com` (Dan).**
-> All email from `hydromap.com` is being quarantined: the SPF record points at
-> a host that no longer exists, Workspace DKIM was never published, and DMARC
-> says `p=quarantine`. RIVR is live on both stores, so account holders cannot
-> complete a password reset. **No code change is involved** — two DNS records.
-> Full detail, evidence and verification steps: **issue #38**. Until it is
-> fixed, a locked-out user can be unblocked with an admin-generated reset link
-> (command in the issue).
-
-
 River flow monitoring and flood risk assessment mobile app. Democratizes access to the NOAA National Water Model, providing real-time river flow data, flood risk analysis via return period thresholds, and multi-range forecasting (short, medium, long range).
+
+## Every number in this file needs a stamp
+
+An audit on 2026-11-09 checked ~190 claims across these docs. 115 held, 52
+were stale and 29 were wrong. **The pattern was clean and it was not about
+writing quality: every claim resting on n ≤ 2 that could be checked came back
+wrong or stale, and every claim pinned by a test came back right, 21 for 21.**
+
+So a figure stated here is only usable if it says where it came from:
+
+```
+⏱ MEASURED <date> · n=<count> · <method>
+```
+
+**An unstamped number may not justify a decision or close a scope.** That is
+the rule, and it is retroactive — if you are about to rely on a bare number
+in this file, re-measure it first or mark the claim unverified. Three of the
+worst wrong turns in this project came from doing the opposite: a scope
+exclusion resting on a two-month-old figure that measured a different screen,
+a latency headline that was 95% the investigator's own probe traffic, and the
+GEOGLOWS publication window — wrong, spread to eight places, and sitting next
+to the words "do not re-derive it".
+
+Prefer pinning the number with a test over stamping it. A drift test is the
+only thing in this repo's history that has kept a number honest without
+anyone remembering to check.
 
 ## Tech Stack
 
@@ -669,10 +685,29 @@ path picked the new one up as soon as it appeared. That is Phase 5 guard 2
 (two devices, one river, identical values) failing by construction every day,
 found from a device log rather than from review.
 
-**11:30 comes from a measurement this repo already held**:
-`functions_geoglows/main.py` records the daily run publishing at **10:15-10:30
-UTC**, from S3 Last-Modified on two consecutive days, and the flood builder is
-scheduled at 11:00 because of it. Do not re-derive it; do not call it unknown.
+**11:30 is after publication, and the flood builder's 11:00 is too.**
+
+⏱ MEASURED 2026-11-09 · n=5 consecutive days · `curl -I` on
+`geoglows-v2-forecasts/<YYYYMMDD>00.zarr/.zmetadata`, reading `Last-Modified`:
+the run lands **09:39-10:09 UTC, median 09:40** (10:00:25, 10:08:37, 09:39:06,
+09:39:46, 09:40:20 for the 5th to the 9th). `.zmetadata` is zarr's
+consolidated metadata, written after the arrays, so it is a fair proxy for
+"complete and readable".
+
+**This CORRECTS a number that stood here wrong, in eight places, for months.**
+It said 10:15-10:30 UTC from **two** consecutive days, with "do not re-derive
+it" beside it — and the audit's rule held again: every claim resting on n ≤ 2
+that could be checked came back wrong or stale. Nothing is broken by the
+correction and no schedule moves; both consumers already sit after the latest
+observed publication.
+
+`GeoglowsDataSource._publishHourUtc/_publishMinuteUtc` (10:30 UTC) is the time
+the run has FINISHED by, so it stays a valid upper bound, with ~21 minutes of
+margin over the worst sample. **Leave it alone for now**: a device therefore
+waits up to ~50 minutes longer than necessary for a forecast that already
+exists, and recovering that is worth a fortnight of samples first, because the
+failure to avoid is expiring BEFORE publication and putting every device into
+a retry loop against a run that is not there. Full table and method: ADR 0011.
 
 The hour is still not trusted on its own. `runGeoglowsRefresh` probes ONE reach
 for its `forecast_date` and fans out only when that date advances, so a late
@@ -758,7 +793,9 @@ and GEOGLOWS is 42h because a stored run legitimately reaches 35.5h before our
 old also reports `degraded`. Both log at ERROR.
 
 **GEOGLOWS values expire at PUBLICATION, not midnight.** It stamps its run 00Z
-but publishes 10:15-10:30 UTC. `GeoglowsDataSource.windowFor` expires at the
+but publishes in the morning UTC (measured 09:39-10:09, n=5, 2026-11-09; the
+client's 10:30 constant is the finished-by upper bound, see above).
+`GeoglowsDataSource.windowFor` expires at the
 next publication and takes the run received into account, retrying in 30
 minutes when publication is late. The old next-midnight window let a device
 hold yesterday's forecast a full extra day.
@@ -911,6 +948,31 @@ and t06z `medium_range_mem1` runs (640 files, 26 GB) and the t00z
 `long_range_mem1` run while the API served nothing — and the NWPS API offers
 no `reference_time` parameter, so there is no way to ask for a run by name.
 This is worth raising with NOAA rather than only working around.
+
+### hydromap.com email quarantine — CLOSED 2026-11-09
+
+Recorded because the top of this file carried it as an open task for weeks
+after it was fixed, which is its own lesson: **an operational banner needs a
+closing check, or it goes on sending every reader after a solved problem.**
+
+All mail from the domain was being quarantined — the SPF include pointed at a
+host with no record (permerror), Workspace DKIM was never published, and DMARC
+says `p=quarantine`. Account holders could not complete a password reset.
+Fixed with two Cloudflare DNS records, no code. Issue #38 closed 03:23Z.
+
+⏱ MEASURED 2026-11-09 · n=1 query each · `dig +short TXT`:
+
+| Record | Value |
+|---|---|
+| `hydromap.com` | `v=spf1 include:_spf.google.com ~all` |
+| `_spf.google.com` | resolves to a real policy — this is the half that was broken |
+| `google._domainkey.hydromap.com` | `v=DKIM1; k=rsa; p=MIIBIjANBgkq…` published |
+| `_dmarc.hydromap.com` | `p=quarantine` — correct now that both align |
+
+**Not measured:** that a reset email now reaches an inbox. The records
+authenticate; delivery was not re-tested end to end. Firebase Auth sends from
+the default Firebase sender, so RIVR's own reset mail was never the part that
+depended on these records.
 
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
 **Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.
