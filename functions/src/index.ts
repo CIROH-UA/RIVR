@@ -203,8 +203,11 @@ export const healthCheck = functions.https.onRequest(
       // and worse, because this is what someone queries to find out what the
       // system does.
       schedule: {
+        // The schedule moved to :05 on 2026-11-03 and this string kept
+        // announcing :20 — the exact failure the comment above warns about,
+        // repeated six lines below it. Audited 2026-11-09.
         alerts: "run-driven — evaluated whenever an upstream model publishes, " +
-          "at the end of storeRefreshHourly (:20) and storeGeoglowsDaily " +
+          "at the end of storeRefreshHourly (:05) and storeGeoglowsDaily " +
           "(11:30 UTC). No new run means no evaluation and no sends.",
         weeklyOutlook: "Fridays, 7:00 AM Mountain",
       },
@@ -431,14 +434,38 @@ export const storeRefreshHourly = functions
     const outcome = await runStoreRefresh({
       fetchProduct: fetchForStore,
     });
+    const written = outcome.report?.written ?? 0;
+    const failed = outcome.report?.failed ?? 0;
+
     logger.info("🗄️ storeRefreshHourly", {
       ran: outcome.ran,
       reason: outcome.reason,
-      written: outcome.report?.written ?? 0,
-      failed: outcome.report?.failed ?? 0,
+      written,
+      failed,
       lagging: outcome.report?.skippedLagging ?? 0,
       usage: outcome.usage,
     });
+
+    // A run that tried and wrote NOTHING is the leading indicator this system
+    // did not have.
+    //
+    // The store served a run 196 hours old for six weeks. The whole time it
+    // logged an hourly ERROR naming the expired documents, 611 of them, and
+    // reported 721 invocations with zero failures — because this exact case
+    // is caught, logged at INFO, and returns success. No built-in "function
+    // failed" alert can see that, and the expired-window ERROR is a LAGGING
+    // signal: by the time a window has passed its hold cap the data has
+    // already been stale for hours.
+    //
+    // This fires in the hour it happens. Audited 2026-11-09.
+    if (outcome.ran && written === 0 && failed > 0) {
+      logger.error("store run wrote nothing", {
+        planned: outcome.report?.planned ?? 0,
+        failed,
+        reason: outcome.reason,
+        reachesToRetry: outcome.report?.reachesToRetry?.length ?? 0,
+      });
+    }
 
     await evaluateAlertsAfterStoreRun("nwm run advanced", outcome);
   });

@@ -71,6 +71,48 @@ trigger. The probe should keep its single honest sample for measurement, and
 the refresh should decide for these two products on its own evidence rather
 than on one sample taken five minutes earlier.
 
+## 2026-11-09 — production alerting, and the leading indicator it needed
+
+**Before this, nothing watched anything.** Zero alert policies, zero
+notification channels, zero log-based metrics, no log export. A store
+product was broken for six weeks; it logged 611 ERRORs naming the affected
+documents while the function reported 721 invocations and **zero failures**,
+because that failure is caught, logged, and returns success. No built-in
+"function failed" alert could ever have fired.
+
+**Created (REST API, as `jersondevs@gmail.com`):**
+- 1 email notification channel. Dan was NOT added; that needs his consent.
+- 6 log-based counter metrics: `store_window_expired`, `store_wrote_nothing`,
+  `store_unhealthy`, `gc_refused`, `push_send_failed`,
+  `builder_shipped_warning`.
+- **13 alert policies**, all enabled: P1 expired product, P3 wrote nothing,
+  P4a-e each scheduled job stopping, P6 out of memory, P8/P9/P10 flood
+  builder failed / did not run / shipped a warning, P11 destructive guard
+  tripped, P12 push delivery failing.
+
+**Code, deployed with it:** `storeRefreshHourly` now logs at ERROR when a run
+`ran && written === 0 && failed > 0`. That is the LEADING indicator the
+six-week outage lacked; the expired-window ERROR only fires hours after the
+data has already gone stale. `storeHealth` also stopped announcing a `:20`
+schedule that moved to `:05` on 2026-11-03.
+
+**Two API limits the plan did not know, both hit and worked around:**
+absence conditions cap at 23h30m, so a daily job cannot use one; and a
+threshold condition that treats missing data as a breach is rejected with a
+zero duration. Daily jobs therefore use a 24h sum, `COMPARISON_LT 1`,
+`EVALUATION_MISSING_DATA_ACTIVE`, duration 1h.
+
+**Deliberately NOT built:** an uptime check on `storeHealth`. It returns
+HTTP 200 for `degraded` and was measured reporting `"healthy"` on a day the
+heartbeat logged degraded, so a poll would have shown green through the
+entire outage.
+
+**Expect P1 to fire within hours. That is correct**, not a false alarm:
+`mediumRange` is known to go stale nightly between 00:00 and 08:00 UTC.
+
+Cost: $0. Counter metrics are free and measured ingestion is 0.030 GB/30d
+against a 50 GB allowance.
+
 | 2026-03-06 | 77b0cec | noaa-client.ts, notification-service.ts | Fix NOAA API response handling, improve error handling and return period cache fallback, fix unit conversion (CFS→CMS) in threshold comparison |
 
 ## 2026-11-02 — `geoglows_forecast` deployed twice (ADR 0017)
