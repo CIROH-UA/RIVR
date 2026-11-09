@@ -183,7 +183,19 @@ class NwmDataSource implements IRiverDataSource {
       final section = payload[name];
       if (section is! Map<String, dynamic>) continue;
 
-      for (final candidate in [section['series'], section]) {
+      // EVERY sub-map, not just `series`. Short range and analysis
+      // assimilation are deterministic and keep their points under `series`;
+      // medium and long range are ENSEMBLES and keep theirs under `mean`,
+      // `member1`, `member2` and so on. The first version of this guard
+      // looked at `series` and at the section itself, which meant no medium
+      // or long range payload could ever satisfy it — and with the payload
+      // trimmed to one product (backlog item 3) that would have refused
+      // every daily and extended forecast the app has. It only looked
+      // correct because an untrimmed payload always carried a deterministic
+      // short range for it to find instead.
+      final candidates = <dynamic>[section['series'], section, ...section.values];
+
+      for (final candidate in candidates) {
         if (candidate is! Map<String, dynamic>) continue;
         if (candidate['data'] is! List) continue;
         try {
