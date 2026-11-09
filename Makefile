@@ -2,9 +2,12 @@
 #
 # Usage:
 #   make version           — stamps pubspec version as <year>.<major>.<minor>+<commits>
-#   make release-android   — builds signed release AAB with obfuscation
-#   make release-ios       — builds release IPA with obfuscation
+#   make release-android   — preflight, builds signed release AAB, verifies it
+#   make release-ios       — preflight, builds release IPA, verifies it
 #   make upload-symbols    — uploads iOS dSYMs to Crashlytics (run after release-ios)
+#   make preflight         — the pre-build refusals on their own
+#   make verify-aab        — reads the built AAB back (also: make verify-aab AAB=path)
+#   make verify-ipa        — reads the built IPA back (also: make verify-ipa IPA=path)
 #   make analyze           — runs flutter analyze
 #   make test              — runs unit + widget tests
 #
@@ -33,7 +36,156 @@
 
 DEBUG_INFO_DIR := build/debug-info
 
-.PHONY: version release-android release-ios upload-symbols analyze test clean
+.PHONY: version release-android release-ios upload-symbols analyze test clean \
+        preflight verify-aab verify-ipa
+
+# Release guards — every one of these is a failure that already happened
+# ---------------------------------------------------------------------------
+# Until 2026-11-09 these two targets checked NOTHING: not the branch, not the
+# tree, not the secret files, and above all not the artefact. That matters
+# more here than in most projects, because every RIVR release is built on this
+# laptop — nothing between `main` and a store passes through CI. The Makefile
+# IS the primary control, and it needs nobody's permission to exist.
+#
+# The repo's own rule for these pipelines: "they fail SILENTLY — five separate
+# operations have exited 0 while producing wrong or partial data. Exit status
+# and done messages have never caught any of them." So each target below ends
+# by READING THE ARTEFACT BACK, not by trusting the build.
+#
+# What is being prevented, with the incident each check comes from:
+#
+#   AAB 800 reached Play as a draft with a map that never loaded, because
+#   android/local.properties had no mapbox token and the build exited 0 with
+#   the literal placeholder compiled in. Only an emulator run caught it.
+#   Gradle now refuses a release without a `pk.` token; CLAUDE.md says the
+#   check that MATTERS is reading the token out of the bundle you are about
+#   to upload, and that is verify-aab.
+#
+#   Push notifications were dead for six months partly because the archive
+#   reports aps-environment: development even when the shipped IPA is correct
+#   — `flutter build ipa` re-signs during export. Proven on this machine
+#   2026-11-09: the Nov-2 archive reads `development` and the IPA it exported
+#   reads `production`. So verify-ipa inspects the IPA, never the archive.
+#
+#   iOS gets its map token through `#include? "Secrets.xcconfig"` in
+#   Release.xcconfig. The `?` makes it OPTIONAL: with the file missing the
+#   build succeeds and ships an EMPTY MBXAccessToken — the exact iOS twin of
+#   the Android defect above, still unguarded until now.
+#
+#   Merging development into main DELETES the gitignored secret files from
+#   disk (happened Apr 2026). A release built in that window compiles against
+#   whatever is left.
+#
+# Deliberately NOT here: `flutter test`. A release should not be the first
+# place the suite runs, and bolting 75 seconds onto every build invites
+# people to work around the target. Run `make test` yourself, or fix CI.
+
+SECRET_FILES := lib/services/0_config/shared/config.dart \
+                lib/firebase_options.dart \
+                android/app/google-services.json \
+                ios/Runner/GoogleService-Info.plist \
+                ios/Flutter/Secrets.xcconfig
+
+AAB ?= build/app/outputs/bundle/release/app-release.aab
+IPA ?= build/ios/ipa/RIVR.ipa
+
+# Set ALLOW_BRANCH=1 to build a store artefact from somewhere other than main.
+# It exists because a test build off a feature branch is a reasonable thing to
+# want; it is a flag rather than a silence so the refusal still reads as the
+# default.
+preflight:
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$BRANCH" != "main" ] && [ -z "$(ALLOW_BRANCH)" ]; then \
+		echo "refusing to build a release artefact from '$$BRANCH'."; \
+		echo "releases are stamped and built on main. for a test build:"; \
+		echo "    make $(MAKECMDGOALS) ALLOW_BRANCH=1"; exit 1; \
+	fi; \
+	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
+		echo "refusing to build from a dirty tree — the artefact would not"; \
+		echo "correspond to any commit, so a crash report could not be"; \
+		echo "traced back to source. commit or stash first:"; \
+		git status --short --untracked-files=no; exit 1; \
+	fi
+	@MISSING=""; for f in $(SECRET_FILES); do \
+		[ -f "$$f" ] || MISSING="$$MISSING $$f"; \
+	done; \
+	if [ -n "$$MISSING" ]; then \
+		echo "missing gitignored config, the app cannot build correctly:"; \
+		for f in $$MISSING; do echo "    $$f"; done; \
+		echo "a merge into main deletes these from disk — restore them from"; \
+		echo "git history or the templates before releasing."; exit 1; \
+	fi
+	@if ! grep -q '^mapbox.token=pk\.' android/local.properties 2>/dev/null; then \
+		echo "android/local.properties has no 'mapbox.token=pk....' — this is"; \
+		echo "how AAB 800 shipped to Play with a map that never loaded."; exit 1; \
+	fi
+	@if ! grep -q '^MAPBOX_ACCESS_TOKEN *= *pk\.' ios/Flutter/Secrets.xcconfig 2>/dev/null; then \
+		echo "ios/Flutter/Secrets.xcconfig has no 'MAPBOX_ACCESS_TOKEN = pk....'"; \
+		echo "Release.xcconfig includes it with '#include?', so a missing or"; \
+		echo "empty value builds fine and ships a dead map."; exit 1; \
+	fi
+	@flutter analyze
+	@echo "preflight ok: $$(git rev-parse --abbrev-ref HEAD) @ $$(git rev-parse --short HEAD), $$(grep '^version:' pubspec.yaml | awk '{print $$2}')"
+
+# Read the AAB back. Never trust the build's exit status.
+verify-aab:
+	@test -f "$(AAB)" || { echo "no bundle at $(AAB) — build it first."; exit 1; }
+	@command -v bundletool >/dev/null || { \
+		echo "bundletool not installed, so the bundle cannot be read back."; \
+		echo "this is the only check that caught the AAB 800 defect:"; \
+		echo "    brew install bundletool"; exit 1; }
+	@MANIFEST=$$(bundletool dump manifest --bundle="$(AAB)"); \
+	TOKEN=$$(printf '%s' "$$MANIFEST" | grep -o 'com.mapbox.token" android:value="[^"]*"' | sed 's/.*value="//;s/"$$//'); \
+	case "$$TOKEN" in \
+		pk.*) ;; \
+		"") echo "FAIL: $(AAB) carries no com.mapbox.token at all."; exit 1 ;; \
+		*) echo "FAIL: $(AAB) mapbox token is '$$TOKEN', not a pk. key."; \
+		   echo "this is build 800 happening again."; exit 1 ;; \
+	esac; \
+	CODE=$$(printf '%s' "$$MANIFEST" | grep -o 'versionCode="[0-9]*"' | sed 's/[^0-9]//g'); \
+	NAME=$$(printf '%s' "$$MANIFEST" | grep -o 'versionName="[^"]*"' | sed 's/.*="//;s/"$$//'); \
+	WANT=$$(grep '^version:' pubspec.yaml | awk '{print $$2}'); \
+	if [ "$$NAME+$$CODE" != "$$WANT" ]; then \
+		echo "FAIL: bundle is $$NAME+$$CODE but pubspec says $$WANT."; \
+		echo "a stale artefact, or 'make version' was not run. both stores"; \
+		echo "reject a repeated build number outright."; exit 1; \
+	fi; \
+	echo "verify-aab ok: $$NAME+$$CODE, map token present"
+
+# Read the IPA back — the IPA, not the archive. `flutter build ipa` re-signs
+# on export, so the archive's entitlements describe a different artefact.
+verify-ipa:
+	@test -f "$(IPA)" || { echo "no IPA at $(IPA) — build it first."; exit 1; }
+	@WORK=$$(mktemp -d); trap 'rm -rf "$$WORK"' EXIT; \
+	unzip -q "$(IPA)" -d "$$WORK" || { echo "FAIL: $(IPA) is not readable as a zip."; exit 1; }; \
+	APP=$$(ls -d "$$WORK"/Payload/*.app 2>/dev/null | head -1); \
+	[ -n "$$APP" ] || { echo "FAIL: no Payload/*.app inside $(IPA)."; exit 1; }; \
+	APS=$$(codesign -d --entitlements :- "$$APP" 2>/dev/null \
+	      | plutil -convert xml1 -o - - \
+	      | grep -A1 aps-environment | tail -1 \
+	      | sed 's/.*<string>//;s|</string>.*||'); \
+	if [ "$$APS" != "production" ]; then \
+		echo "FAIL: aps-environment is '$$APS', expected 'production'."; \
+		echo "Xcode picked a development provisioning profile, usually"; \
+		echo "because no Apple Distribution certificate exists for HydroMap"; \
+		echo "LLC. Push notifications will be dead in this build."; exit 1; \
+	fi; \
+	TOKEN=$$(plutil -extract MBXAccessToken raw -o - "$$APP/Info.plist" 2>/dev/null); \
+	case "$$TOKEN" in \
+		pk.*) ;; \
+		*) echo "FAIL: MBXAccessToken is '$$TOKEN', not a pk. key."; \
+		   echo "Secrets.xcconfig is included with '#include?', so this"; \
+		   echo "ships a dead map without failing the build."; exit 1 ;; \
+	esac; \
+	BUILD=$$(plutil -extract CFBundleVersion raw -o - "$$APP/Info.plist"); \
+	SHORT=$$(plutil -extract CFBundleShortVersionString raw -o - "$$APP/Info.plist"); \
+	WANT=$$(grep '^version:' pubspec.yaml | awk '{print $$2}'); \
+	if [ "$$SHORT+$$BUILD" != "$$WANT" ]; then \
+		echo "FAIL: IPA is $$SHORT+$$BUILD but pubspec says $$WANT."; \
+		echo "a stale artefact, or 'make version' was not run."; exit 1; \
+	fi; \
+	echo "verify-ipa ok: $$SHORT+$$BUILD, aps-environment production, map token present"
+
 
 # Version scheme
 # --------------
@@ -86,15 +238,18 @@ version:
 	echo "now: commit pubspec.yaml + app_releases.md, then make release-ios"
 
 
-release-android:
+release-android: preflight
 	flutter build appbundle --release \
 		--obfuscate \
 		--split-debug-info=$(DEBUG_INFO_DIR)/android
+	@$(MAKE) --no-print-directory verify-aab
 
-release-ios:
+release-ios: preflight
 	flutter build ipa --release \
 		--obfuscate \
 		--split-debug-info=$(DEBUG_INFO_DIR)/ios
+	@$(MAKE) --no-print-directory verify-ipa
+	@echo "next: make upload-symbols (needs build/ios/, so before any clean)"
 
 analyze:
 	flutter analyze
