@@ -180,7 +180,28 @@ gcloud logging read 'resource.type=cloud_run_job' --limit=30 --freshness=2h
 ```
 
 Container source is `~/Developer/rivr-tiles/cloudrun/` (not in this repo).
-Rebuild with `gcloud builds submit --tag us-west1-docker.pkg.dev/ciroh-rivr-app/rivr/flood-builder:latest`.
+**Rebuild needs TWO commands, and the first one is not optional:**
+
+```bash
+cd ~/Developer/rivr-tiles/cloudrun && ./check_in_sync.sh   # then:
+gcloud builds submit --tag us-west1-docker.pkg.dev/ciroh-rivr-app/rivr/flood-builder:latest
+```
+
+`cloudrun/build_flooded.py` is a COPY of `daily/build_flooded.py`, because
+Docker's `COPY` cannot reach outside the build context. **That copy went stale
+for months and it mattered.** It was taken 2026-08-19 at 16:13; the
+maintained script gained its "a restricted run must never publish" guard at
+19:10 the same day, and the copy never caught up. So the DEPLOYED image
+relaxed the plausibility gate for a `--vpu`/`--only` run and then published
+anyway, which is exactly the sequence that once replaced the live tileset
+with two reaches in Tanzania. The daily schedule passes no arguments, so the
+exposure was only ever the manual `gcloud run jobs execute --args=...`
+command, which is the command a person runs while testing.
+
+⏱ Copied forward and verified identical 2026-11-09. **The running image is
+still the old one** until someone rebuilds; nothing was deployed.
+`check_in_sync.sh` exits 1 when the two files differ (verified both ways
+against the real historical drift).
 
 **The job publishes Firebase Remote Config** as its last step, after Mapbox
 confirms processing:
