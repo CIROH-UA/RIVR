@@ -361,3 +361,49 @@ Q3: nothing claimed beyond what is tabled here.
 
 1,494 tests, analyze clean.
 
+## Item 8a — the guard protecting a real account proved nothing
+
+**Broken.** ADR 0014 rule 2 is the refusal that stops `User.delete()` acting
+on a stale reference. `User.delete()` deletes the current SESSION, not the
+reference it is called through, so in build 843 it destroyed a real account
+of eight months while the anonymous guest it was meant to remove survived.
+
+Reproduced the audit's finding before touching anything: **delete that
+refusal from the production datasource and all 1,494 tests stay green.**
+
+The cause is the second of this repo's three vacuity mechanisms. The guards
+that look like they cover it, in `guest_mode_test.dart` and
+`guest_merge_destroy_test.dart`, drive a `_FakeDatasource` whose own
+`deleteUser` reimplements the refusal. One of them said so in a comment,
+"Mirrors the real datasource's refusal", which is the tell. They prove the
+FAKE refuses.
+
+**Changed.** A new test drives the REAL `AuthFirebaseDatasource` over
+`MockFirebaseAuth`, in the exact shape of build 843: an account signed in, a
+stale guest reference still in hand. It asserts the refusal, that neither
+user was deleted, that the session is intact, that deleting the CURRENT user
+still goes through, that a null session also refuses, and that the message
+names both uids — because this failure is silent by nature and whatever
+reaches the log is the only witness.
+
+`MockUser.delete()` is a no-op, so the "it does go through" half is recorded
+through a subclass that logs the call. Without that, the positive control
+would have been vacuous in the same way as the thing it replaces.
+
+The fake's comment is corrected rather than its behaviour: it SHOULD model
+the real contract, or the `AuthService` tests around it would be
+unrealistic. It now says explicitly that it does not test the refusal, and
+points at the file that does.
+
+**Break-it review.** Six mutations, all caught, including the audit's
+original survivor: delete the refusal; `if (false)` it with the code intact;
+drop the null-session half; `==` for `!=` so it refuses the right user and
+allows the wrong one; throw for everyone, which would break account deletion
+entirely and that is itself an App Store 5.1.1(v) requirement; and stop
+naming the uids in the message.
+
+Q2: no measurement claimed beyond reproducing the survivor, which is above.
+Q3: nothing asserted that is not tabled here.
+
+1,498 tests, analyze clean.
+

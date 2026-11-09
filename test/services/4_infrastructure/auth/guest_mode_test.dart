@@ -95,8 +95,16 @@ class _FakeDatasource extends AuthFirebaseDatasource {
 
   @override
   Future<void> deleteUser(fb.User user) async {
-    // Mirrors the real datasource's refusal: deleting anyone but the current
-    // user is always a bug, because User.delete() acts on the session.
+    // Models the real datasource's refusal so the AuthService behaviour
+    // around it is exercised realistically.
+    //
+    // IT DOES NOT TEST THAT REFUSAL, and a 2026-11-09 mutation audit proved
+    // it: deleting the refusal from the production datasource left all 1,494
+    // tests green, because this fake kept refusing on its behalf. The real
+    // guard now lives in
+    // test/services/3_datasources/features/auth/auth_firebase_datasource_delete_test.dart
+    // and must stay there. Mirroring a production rule inside a fake is one
+    // of this repo's three known ways to write a test that proves nothing.
     if (this.user == null || this.user!.uid != user.uid) {
       throw StateError('refusing to delete a non-current user');
     }
