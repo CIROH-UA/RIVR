@@ -11,6 +11,8 @@ import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
+import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart'
+    show ForecastSeriesDto;
 
 /// [IRiverDataSource] for the NOAA National Water Model (US). A thin adapter
 /// over the NWM stack: each raw forecast product maps to one [INoaaApiService]
@@ -138,6 +140,73 @@ class NwmDataSource implements IRiverDataSource {
     return null;
   }
 
+  /// The unit a converted forecast payload actually carries.
+  ///
+  /// Prefers the stamp the converter wrote. Falls back to the live
+  /// preference only for payloads that carry no flow series at all, where
+  /// the tag is not load-bearing.
+  ///
+  /// Reading the preference here used to be the ONLY source, captured before
+  /// the await while the conversion read it again after. See
+  /// `kConvertedUnitKey`.
+  /// Throws when a forecast payload carries nothing the app can render.
+  ///
+  /// A payload with no readable points anywhere is not a successful fetch.
+  /// It used to be stored as one: the entry got its normal window, was
+  /// judged confirmed, and `outOfSync` stayed false — so the reach showed
+  /// "No data" while the app positively claimed that nothing was current,
+  /// and no later read retried.
+  ///
+  /// Two ways to arrive there, both real. NOAA serves a 200 with the
+  /// requested section absent for medium and long range most of the time.
+  /// And a single unreadable point used to discard the whole series around
+  /// it (fixed in `ForecastSeriesDto._pointsOf`), which can still empty a
+  /// series outright when every point is malformed.
+  ///
+  /// Deliberately asks "is there anything here at all" rather than naming a
+  /// section per product. Which section answers a product is
+  /// `ForecastValues`' decision, and a copy of that mapping here would be a
+  /// reimplementation drifting out of step with the one the decoder uses.
+  ///
+  /// Phase 7 made silence a positive claim that the value on screen is
+  /// current. This is what keeps that claim honest.
+  void _requireUsableSeries(Map<String, dynamic> payload, RiverDataKey key) {
+    const sections = [
+      'analysisAssimilation',
+      'shortRange',
+      'mediumRange',
+      'mediumRangeBlend',
+      'longRange',
+    ];
+
+    for (final name in sections) {
+      final section = payload[name];
+      if (section is! Map<String, dynamic>) continue;
+
+      for (final candidate in [section['series'], section]) {
+        if (candidate is! Map<String, dynamic>) continue;
+        if (candidate['data'] is! List) continue;
+        try {
+          // The REAL parser, not a count of raw entries. A section can be
+          // structurally present and still decode to nothing: NOAA sends
+          // points with a null flow, and those are dropped. Counting the raw
+          // list would call that a success and cache an empty forecast as
+          // current, which is the defect this guard exists for.
+          if (ForecastSeriesDto.fromJson(candidate).toEntity().isNotEmpty) {
+            return;
+          }
+        } catch (_) {
+          // Unreadable shape. Try the next candidate, then the next section.
+        }
+      }
+    }
+
+    throw EmptyForecastSection(key.reachId, key.product.name);
+  }
+
+  String _unitOf(Map<String, dynamic> payload) =>
+      (payload[kConvertedUnitKey] as String?) ?? _unitService.currentFlowUnit;
+
   @override
   Future<SourceFetchResult> fetch(RiverDataKey key) async {
     final unit = _unitService.currentFlowUnit;
@@ -172,9 +241,10 @@ class NwmDataSource implements IRiverDataSource {
         );
       case ForecastProduct.currentFlow:
         final aaPayload = await _api.fetchCurrentFlowOnly(key.reachId);
+        _requireUsableSeries(aaPayload, key);
         return SourceFetchResult(
           payload: aaPayload,
-          unit: unit,
+          unit: _unitOf(aaPayload),
           // Current flow is derived from the short_range series
           // (fetchCurrentFlowOnly fetches exactly that), so its run IS that
           // section's run.
@@ -185,9 +255,10 @@ class NwmDataSource implements IRiverDataSource {
           key.reachId,
           'short_range',
         );
+        _requireUsableSeries(shortPayload, key);
         return SourceFetchResult(
           payload: shortPayload,
-          unit: unit,
+          unit: _unitOf(shortPayload),
           runId: _runIdOf(shortPayload, 'shortRange'),
         );
       case ForecastProduct.mediumRange:
@@ -195,16 +266,18 @@ class NwmDataSource implements IRiverDataSource {
           key.reachId,
           'medium_range',
         );
+        _requireUsableSeries(mediumPayload, key);
         return SourceFetchResult(
           payload: mediumPayload,
-          unit: unit,
+          unit: _unitOf(mediumPayload),
           runId: _runIdOf(mediumPayload, 'mediumRange'),
         );
       case ForecastProduct.longRange:
         final longPayload = await _api.fetchForecast(key.reachId, 'long_range');
+        _requireUsableSeries(longPayload, key);
         return SourceFetchResult(
           payload: longPayload,
-          unit: unit,
+          unit: _unitOf(longPayload),
           runId: _runIdOf(longPayload, 'longRange'),
         );
       case ForecastProduct.returnPeriods:
@@ -224,4 +297,22 @@ class NwmDataSource implements IRiverDataSource {
         throw ArgumentError('NWM does not support ${key.product}');
     }
   }
+}
+
+/// A forecast section came back with nothing renderable in it.
+///
+/// Distinct from a transport failure so logs and the sync banner can tell
+/// "upstream served nothing" from "we could not reach upstream". Both mean
+/// the same thing to the cache: do not store this and do not claim it is
+/// current.
+class EmptyForecastSection implements Exception {
+  final String reachId;
+  final String section;
+
+  EmptyForecastSection(this.reachId, this.section);
+
+  @override
+  String toString() =>
+      'EmptyForecastSection($reachId/$section): upstream returned no '
+      'readable points — not cached, will retry';
 }

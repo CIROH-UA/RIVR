@@ -261,13 +261,42 @@ class ForecastSeriesDto {
     return ForecastSeriesDto(
       referenceTime: json['referenceTime'] as String?,
       units: json['units'] as String? ?? '',
-      data: json['data'] != null
-          ? (json['data'] as List<dynamic>)
-                .map((e) =>
-                    ForecastPointDto.fromJson(e as Map<String, dynamic>))
-                .toList()
-          : [],
+      data: _pointsOf(json['data']),
     );
+  }
+
+  /// Parse the points, DROPPING any single point that cannot be read rather
+  /// than discarding the series around it.
+  ///
+  /// `ForecastPointDto.fromJson` casts `json['flow'] as num`, so one entry
+  /// with a null flow — which NOAA does send — threw, and the throw was
+  /// caught far enough up that the WHOLE series was abandoned. A 120-point
+  /// forecast with one bad reading rendered as "No data", and the empty
+  /// result was still cached as a confirmed success with a full window, so
+  /// nothing retried and the sync banner stayed silent.
+  ///
+  /// A forecast missing one hour is worth far more than no forecast. The
+  /// count of what was dropped is logged so a systematically malformed feed
+  /// is still visible rather than silently thinned.
+  static List<ForecastPointDto> _pointsOf(Object? raw) {
+    if (raw is! List) return const [];
+
+    final points = <ForecastPointDto>[];
+    var skipped = 0;
+    for (final e in raw) {
+      try {
+        points.add(ForecastPointDto.fromJson(e as Map<String, dynamic>));
+      } catch (_) {
+        skipped++;
+      }
+    }
+    if (skipped > 0) {
+      AppLogger.warning(
+        'ReachDataDto',
+        'dropped $skipped unreadable forecast point(s), kept ${points.length}',
+      );
+    }
+    return points;
   }
 
   Map<String, dynamic> toJson() {
