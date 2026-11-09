@@ -328,6 +328,7 @@ Widget buildTestApp({
   AuthProvider? authProvider,
   FavoritesProvider? favoritesProvider,
   ReachDataProvider? reachDataProvider,
+  bool seedSwipeHintSeen = true,
 }) {
   // ConnectivityProvider (below) drives connectivity_plus, whose platform
   // channel isn't available under the test harness. Swap in a fake platform
@@ -339,9 +340,18 @@ Widget buildTestApp({
   // page's anchor GlobalKeys); the hint cannot do that, but it DOES slide the
   // first card open for a second and a half on the second arrival at the
   // list, which would make any assertion that taps a card flaky.
-  SharedPreferences.setMockInitialValues({
-    'has_seen_swipe_hint': true,
-  });
+  //
+  // IT OVERWRITES WHATEVER THE TEST SEEDED, and that is a trap worth naming:
+  // a test that seeds `has_seen_swipe_hint: false` in `setUp` and then calls
+  // this gets `true` anyway, so a hint test written that way watches a hint
+  // that was never going to play and passes for the wrong reason. Found
+  // exactly that way on 2026-11-09, inside the first behavioural guard for
+  // the hint. Pass `seedSwipeHintSeen: false` to keep your own seed.
+  if (seedSwipeHintSeen) {
+    SharedPreferences.setMockInitialValues({
+      'has_seen_swipe_hint': true,
+    });
+  }
 
   final auth = authProvider ?? createAuthProvider(services);
   final favs = favoritesProvider ?? createFavoritesProvider(services);

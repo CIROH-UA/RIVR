@@ -407,3 +407,66 @@ Q3: nothing asserted that is not tabled here.
 
 1,498 tests, analyze clean.
 
+## Item 8b — the onboarding feature could be dead with every guard green
+
+**Broken.** ADR 0015's hint is carried by three connections between the page
+and the card, and all three were guarded only by
+`swipe_hint_wiring_test.dart`, which greps the page's SOURCE for
+`runSwipeHint:`, `_resolveSwipeHint()` and
+`CoachMarkService.completeSwipeHint()`.
+
+Reproduced the audit's finding first. ⏱ MEASURED 2026-11-09: wrap either
+`setState(() => _swipeHintCardIndex = 0)` or
+`CoachMarkService.completeSwipeHint()` in `if (false)` and all three
+pre-existing guards stay green — `swipe_hint_wiring_test.dart`,
+`swipe_hint_test.dart` and `coach_mark_service_test.dart`. The string being
+grepped for is still on the line. This is the mechanism the audit called the
+largest single source of vacuous tests in the suite, and it named these
+guards specifically as ones written the week before by someone who believed
+they were careful.
+
+**Changed.** `test/integration_test/swipe_hint_plays_test.dart` pumps the
+real `FavoritesPage` with real cards and watches the first card MOVE: 19 →
+-197 logical pixels, which is exactly the 216pt action strip, and back. It
+reads geometry, not widget properties, because a translation that never
+reaches the screen is the failure being guarded against. Four scenarios: the
+second arrival plays and returns to rest; it is marked seen so it never
+plays twice; the FIRST arrival does not move the card and does not spend the
+one chance; and a user who has already seen it is left alone.
+
+The audit's claim that "no FavoritesPage widget test exists" was true of
+`test/ui/`, but `test/integration_test/` already had a full harness that
+pumps the page with real cards, and those 39 tests run and pass under
+`flutter test`. **So the related claim in item 10, that all 10 integration
+test files are skipped, is also wrong.** Recorded here rather than acted on.
+
+### Two things this cost, both worth keeping
+
+**The harness silently overwrote the test's own preferences.**
+`buildTestApp` called `SharedPreferences.setMockInitialValues({'has_seen_swipe_hint': true})`
+unconditionally, deliberately, so the hint cannot make other tests flaky.
+A test that seeds `false` in `setUp` therefore got `true` anyway — so two of
+these four tests PASSED for the wrong reason on the first run, watching a
+hint that was never going to play. That is the same vacuity this file exists
+to remove, reproduced inside the fix for it. `buildTestApp` now takes
+`seedSwipeHintSeen`, defaulting to the old behaviour so no existing test
+changes, and the trap is written down at the call site.
+
+**Async setup inside `testWidgets` hangs rather than fails.** The first
+version did the harness setup in the test body. The body runs in Flutter's
+fake-async zone, where a real platform-channel future never completes, so
+the file hung for over ten minutes with no output instead of failing. Every
+other favourites test does its setup in `setUp` for exactly this reason;
+each scenario is now its own group. Noted in the file.
+
+**Break-it review.** Six mutations, all caught, including the two the
+pre-existing guards let through: `if (false)` on the hint index; the page
+passing `runSwipeHint: false`; `if (false)` on persisting "seen"; removing
+the second-arrival rule so it fires on the first; ignoring "already seen" so
+it replays for everyone; and the card never reporting completion.
+
+The old grep guard is kept, with its header corrected to say it is a
+deletion tripwire and not coverage, and to point at the behavioural file.
+
+1,502 tests, analyze clean.
+
