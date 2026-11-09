@@ -13,6 +13,22 @@ import 'package:rivr/services/4_infrastructure/shared/service_result.dart';
 /// Service for fetching data from NOAA APIs
 /// Integrates with existing AppConfig and ErrorService
 /// With selective loading for better performance
+/// Thrown when we could not find out whether a reach has return periods.
+///
+/// Deliberately distinct from an empty result. Empty means upstream answered
+/// and the reach has no thresholds; this means it did not answer. Collapsing
+/// the two is what let a timeout remove flood risk from a river for 30 days.
+class ReturnPeriodsUnavailable implements Exception {
+  final String reachId;
+  final String cause;
+
+  ReturnPeriodsUnavailable(this.reachId, this.cause);
+
+  @override
+  String toString() =>
+      'ReturnPeriodsUnavailable($reachId): $cause — not cached, will retry';
+}
+
 class NoaaApiService implements INoaaApiService {
   final http.Client _client;
   final IFlowUnitPreferenceService _unitService;
@@ -231,17 +247,38 @@ class NoaaApiService implements INoaaApiService {
           return [];
         }
       } else if (response.statusCode == 404) {
+        // A real answer: upstream knows this reach and has no thresholds for
+        // it. Empty is the truth, and caching it is correct.
         AppLogger.debug('NoaaApi', 'No return periods found for reach: $reachId');
-        return []; // Return empty list instead of throwing
+        return [];
       } else {
-        AppLogger.debug('NoaaApi', 'Return period API error: ${response.statusCode}');
-        return []; // Return empty list for non-critical data
+        // NOT an answer. We did not find out.
+        throw ReturnPeriodsUnavailable(reachId, 'HTTP ${response.statusCode}');
       }
+    } on ReturnPeriodsUnavailable {
+      rethrow;
     } catch (e) {
+      // A timeout, a socket error, a malformed body. Also not an answer.
+      //
+      // This used to return `[]` for all of it, with the comment "they're
+      // supplementary data, don't throw so reach loading doesn't fail". The
+      // intent was right and the mechanism was not: `[]` travels on as an
+      // ordinary SUCCESS, gets the near-static THIRTY-DAY window that
+      // returnPeriods carries, and is cached and judged confirmed — maxHold
+      // is 32 days and the product has no maxRunAge entry, so nothing marks
+      // it stale and no later read retries.
+      //
+      // One transient failure therefore removed flood risk from a river for
+      // a month: the category read NoData, the badge and the card animation
+      // went flat, the gauge lost its zones, and the sync banner stayed
+      // silent the whole time because the entry looked current. In a flood
+      // app. Audited 2026-11-09.
+      //
+      // Throwing keeps the original intent — callers still treat return
+      // periods as optional — while making sure a failure is never mistaken
+      // for a fact and never cached as one.
       AppLogger.error('NoaaApi', 'Error fetching return periods', e);
-      // Don't throw for return periods - they're supplementary data
-      // Just return empty list so reach loading doesn't fail
-      return [];
+      throw ReturnPeriodsUnavailable(reachId, e.toString());
     }
   }
 
