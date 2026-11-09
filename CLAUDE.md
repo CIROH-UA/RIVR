@@ -667,7 +667,7 @@ fetching its own. All seven are deployed as of 2026-08-25 (verified by count,
 
 | Function | Cadence |
 |---|---|
-| `storeRefreshHourly` | :20 past — refreshes ONLY products whose upstream run advanced |
+| `storeRefreshHourly` | :05 past — refreshes ONLY products whose upstream run advanced |
 | `storeGeoglowsDaily` | 11:30 UTC — probes ONE reach for `forecast_date`, fans out only when the day's run advances |
 | `storeStaticDaily` | 02:30 UTC — river names + flood thresholds, only when missing or within 7 days of expiring |
 | `storeGcDaily` | 03:40 UTC — 7-day grace, refuses a bulk delete |

@@ -11,15 +11,15 @@ import 'package:rivr/services/4_infrastructure/river_data/geoglows_forecast_payl
 /// [IRiverDataSource] for GEOGLOWS (global, non-US rivers). A thin adapter over
 /// the existing [IGeoglowsApiService] proxy client.
 ///
-/// **GEOGLOWS stamps its run 00Z but PUBLISHES at 10:15-10:30 UTC**, and this
+/// **GEOGLOWS stamps its run 00Z but PUBLISHES at 09:39-10:09 UTC**, and this
 /// file used to conflate the two: the window ran to the next midnight, so a
 /// device that fetched at 00:20 held the previous day's run for a further
-/// 24 hours while a newer one had existed since 10:15. Nothing surfaced it
+/// 24 hours while a newer one had existed since mid-morning. Nothing surfaced it
 /// until Phase 7 gave the app a run-age check, which then warned — correctly —
 /// for about six hours a day on the live path.
 ///
 /// The measurement is not new. `functions_geoglows/main.py` records the daily
-/// run publishing at 10:15-10:30 UTC from S3 Last-Modified on two consecutive
+/// run publishing at 09:39-10:09 UTC from S3 Last-Modified on five consecutive
 /// days, and the flood builder is scheduled at 11:00 because of it. This file
 /// simply never used it.
 class GeoglowsDataSource implements IRiverDataSource {

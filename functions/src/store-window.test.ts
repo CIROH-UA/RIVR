@@ -66,7 +66,7 @@ describe("refresh schedule arithmetic", () => {
 
   test("the next GEOGLOWS refresh is the next 11:30 UTC", () => {
     // Was 01:30 until 2026-08-29, when it turned out the day's run has never
-    // published by that hour; 11:30 sits an hour past the measured 10:15-10:30
+    // published by that hour; 11:30 sits well past the measured 09:39-10:09
     // publication window.
     assert.equal(
       nextGeoglowsRefresh(new Date("2026-08-28T00:15:00Z")).toISOString(),

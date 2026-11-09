@@ -178,7 +178,7 @@ export interface StoredWindowSample {
  *   155 samples would have fired, with maxima of 13.0 h and 21.0 h. The 12Z
  *   run landing at 21:20Z (2026-08-28) is a ~15 h worst case, inside both.
  * - **42 h** for GEOGLOWS, not 36 h. The run is stamped 00Z and published
- *   10:15-10:30 UTC, but what matters is when WE fetch it, and
+ *   09:39-10:09 UTC, but what matters is when WE fetch it, and
  *   `storeGeoglowsDaily` runs at 11:30 UTC with no retry — so a stored run
  *   legitimately reaches **35.5 h** just before replacement, leaving 36 h
  *   about twenty-five minutes of margin. MEASURED, not derived: the run check

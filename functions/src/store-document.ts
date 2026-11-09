@@ -162,7 +162,9 @@ export const REFRESH_MINUTE = 20;
  *
  * 11:30 is chosen against a measurement this repo already had and an earlier
  * pass of mine failed to look up: `functions_geoglows/main.py` records the
- * daily run publishing at **10:15-10:30 UTC**, from S3 Last-Modified on two
+ * daily run publishing at **09:39-10:09 UTC** (measured 2026-11-09, n=5; the
+ * earlier **10:15-10:30** figure rested on n=2 and was wrong), from S3
+ * Last-Modified on five
  * consecutive days, and the flood builder is scheduled at 11:00 on the strength
  * of it. An hour past that window is margin without being another guess.
  *

@@ -532,3 +532,47 @@ decision and the geometry constants are too.
 
 1,510 tests, analyze clean.
 
+## Item 13 continued — the stale cadence row, and the GEOGLOWS figure everywhere
+
+**Broken, and found by the test written for it.** CLAUDE.md's cloud-store
+table announced `storeRefreshHourly` at `:20`. The cron has been `5 * * * *`
+since 2026-11-03. That is the same drift item 14 fixed in the health
+endpoint, sitting in the most-read document in the repo instead. The other
+four rows checked out.
+
+**Changed.** The row is corrected, and `claude_md_schedule_drift_test.dart`
+now reads the cron expressions and timezones out of `functions/src/index.ts`
+and fails when the table and the schedule disagree in either direction. It
+also fails when the table names a function `index.ts` no longer exports,
+which is how four deleted conditions functions stayed advertised for weeks.
+
+This is the durable half of item 13 and the reason it is a test rather than a
+careful re-read: of ~190 audited claims, every one resting on n <= 2 that
+could be checked came back wrong or stale, and every one pinned by a test
+came back right, 21 for 21.
+
+**The corrected GEOGLOWS window is now in the code too.** The wrong
+10:15-10:30 figure had spread to eleven comments across six files:
+`index.ts`, `store-document.ts`, `store-window.ts`, `store-trigger.test.ts`,
+`store-window.test.ts`, `functions_geoglows/main.py`,
+`geoglows_data_source.dart` and `data_sources_test.dart`. All now say
+09:39-10:09 UTC with the n=5 measurement, and three keep the old figure
+beside it labelled as the n=2 claim that was wrong, so nobody re-derives it.
+
+**No behaviour changed.** `GeoglowsDataSource._publishHourUtc/_publishMinuteUtc`
+stays at 10:30 UTC, which remains a valid finished-by upper bound with about
+21 minutes of margin over the worst sample. Moving it needs a fortnight of
+samples, because its failure mode is expiring BEFORE publication and putting
+every device into a retry loop.
+
+**Break-it review.** Seven mutations, all caught, both directions: the doc
+reverting to `:20`; the cron moving while the doc stays; the GEOGLOWS hour
+slipping; the GC minute changing; a timezone changing under the doc; the
+heartbeat becoming 3-hourly; and the table naming a deleted function.
+
+1,518 tests, 480 functions tests, analyze clean.
+
+**Still open on item 13:** the remaining audited claims that are prose rather
+than numbers. They are not enumerable from here without redoing the audit,
+and the stamp rule plus these two drift tests are what stop new ones.
+

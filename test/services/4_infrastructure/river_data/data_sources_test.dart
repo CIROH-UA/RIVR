@@ -496,12 +496,12 @@ void main() {
       expect(geoglows.supportedProducts, {ForecastProduct.geoglowsForecast});
     });
 
-    // GEOGLOWS stamps its run 00Z but PUBLISHES at 10:15-10:30 UTC — measured
+    // GEOGLOWS stamps its run 00Z but PUBLISHES at 09:39-10:09 UTC, measured
     // from S3 Last-Modified on two consecutive days, and the reason the flood
     // builder is scheduled at 11:00. This window used to run to the next
     // MIDNIGHT, conflating the two: a device fetching at 00:20 held the
     // previous day's run for another 24 hours while a newer one had existed
-    // since 10:15. Nothing surfaced it until Phase 7's run-age check started
+    // since mid-morning. Nothing surfaced it until Phase 7's run-age check started
     // warning, correctly, for about six hours a day on the live path.
     group('validUntil follows PUBLICATION, not the run stamp', () {
       test('after publication, waits for tomorrow\'s', () {
