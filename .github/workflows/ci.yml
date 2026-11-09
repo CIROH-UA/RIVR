@@ -35,26 +35,29 @@ jobs:
         # errors fatal, but don't fail the build on infos.
         run: flutter analyze --no-fatal-infos
 
-      # Everything under test/ EXCEPT integration_test, which has ~27
-      # long-standing pre-existing failures and needs a device.
+      # EVERYTHING under test/, integration_test included.
       #
-      # Enumerated by exclusion rather than by an allow-list, because the
-      # allow-list silently dropped a whole directory. `test/docs/` was added
-      # in ADR 0011 Phase 9 and ran nowhere: the guard written so that
-      # CLAUDE.md's path-rot "no longer needs a human" was itself enforced
-      # only by a human remembering to run bare `flutter test`. Found by the
-      # Phase 9 review.
+      # It used to exclude test/integration_test on the grounds that it "has
+      # ~27 long-standing pre-existing failures and needs a device". Both
+      # halves of that are false. CLAUDE.md retracted the 27 figure on
+      # 2026-09-22 (measured 0 failures on a clean tree) and recorded that
+      # the wrong note had been MASKING real regressions: a guest-mode change
+      # produced exactly 27 new failures and they were read as the expected
+      # noise. And these tests do not need a device; they run under
+      # `flutter test` against mocked services.
       #
-      # This is the SECOND time CI's coverage was narrower than everyone
-      # believed — see the note below about the functions suite. An allow-list
-      # of directories is a promise that someone will remember to update it.
-      - name: Test (unit & widget only)
-        run: |
-          dirs=$(find test -maxdepth 1 -mindepth 1 -type d \
-                   ! -name integration_test | sort | tr '\n' ' ')
-          echo "Running: $dirs"
-          test -n "$dirs" || { echo "No test directories found"; exit 1; }
-          flutter test $dirs
+      # Re-measured 2026-11-09 in a fresh worktree carrying only the CI stub
+      # config, which is this job's exact starting state: 43 tests, 0
+      # failures. Until this change those 43 ran nowhere in CI, including the
+      # behavioural guard for the ADR 0015 onboarding hint added the same
+      # day — the only test that can tell whether that feature is alive.
+      #
+      # No allow-list, and no exclusions now. `test/docs/` was added in ADR
+      # 0011 Phase 9 and ran nowhere for the same reason: an enumerated list
+      # is a promise that someone will remember to update it. `flutter test`
+      # with no argument walks the whole tree and needs no maintenance.
+      - name: Test (everything under test/)
+        run: flutter test
 
       # The Cloud Functions suite was never run by CI, which made a claim in
       # several files false: comments in flow-classification.ts, CLAUDE.md and
@@ -76,3 +79,93 @@ jobs:
 
       - name: Test Cloud Functions (includes the cross-language drift guards)
         run: npm --prefix functions test
+
+      # CI builds against `config.template.dart`, whose secrets are the
+      # literal `INSERT-THE-KEY`. That is deliberate and it is also why CI
+      # could never have caught the defect that shipped AAB 800: there is no
+      # real token here to check. What CI CAN check is the inverse, which is
+      # worth more: that nobody has committed a REAL credential into the
+      # template or the CI stub.
+      - name: The committed stubs must hold no real credentials
+        run: |
+          set -e
+          for f in lib/services/0_config/shared/config.template.dart \
+                   lib/firebase_options.ci.dart \
+                   android/app/google-services.ci.json \
+                   android/local.properties.template; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+            if grep -qE "pk\.ey|sk_live|AIza[0-9A-Za-z_-]{30,}" "$f"; then
+              echo "FAIL: $f looks like it carries a real credential."
+              echo "These files are committed; secrets belong in the"
+              echo "gitignored originals only."
+              exit 1
+            fi
+          done
+          echo "stubs carry placeholders only"
+
+  # CI had never built an artefact, so nothing between a push and a store
+  # exercised the Android build at all. A release build needs the keystore and
+  # a real token and cannot run here, but a DEBUG build can: Gradle only warns
+  # about a missing mapbox token for debug and refuses only for release.
+  #
+  # This catches the class of breakage that is invisible to `flutter analyze`
+  # and `flutter test`: a Gradle, manifest, plugin or resource change that
+  # stops the Android half compiling. Verified locally 2026-11-09 in a fresh
+  # worktree with no android/local.properties, which is this job's exact
+  # starting state.
+  android-debug-build:
+    name: Android debug build
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # google-services.json is gitignored, and the Google Services Gradle
+      # plugin refuses to run without it: the build fails before compiling
+      # anything. A committed placeholder is the same pattern this repo
+      # already uses for firebase_options.ci.dart, and it carries no real
+      # credentials (the step above enforces that).
+      - name: Create CI stub files
+        run: |
+          cp lib/firebase_options.ci.dart lib/firebase_options.dart
+          cp lib/services/0_config/shared/config.template.dart lib/services/0_config/shared/config.dart
+          cp android/app/google-services.ci.json android/app/google-services.json
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # No android/local.properties here, so there is no mapbox token.
+      # Gradle only WARNS for debug and refuses only for release, which is
+      # what makes this job possible. Verified 2026-11-09 in a fresh worktree
+      # with no gitignored files: the build failed on the missing
+      # google-services.json, passed once the stub was added, and the
+      # read-back below found 16 mipmap entries.
+      - name: Build the debug APK
+        run: flutter build apk --debug
+
+      # Read the artefact back rather than trusting the exit code. This repo's
+      # own rule for its pipelines: five separate operations have exited 0
+      # while producing wrong or partial data, and exit status has never
+      # caught any of them. The launcher icons are the cheapest thing in the
+      # APK that proves assets were really packaged.
+      - name: Read the APK back
+        run: |
+          set -e
+          apk=build/app/outputs/flutter-apk/app-debug.apk
+          test -f "$apk" || { echo "no APK at $apk"; exit 1; }
+          icons=$(unzip -l "$apk" | grep -c 'res/mipmap' || true)
+          echo "mipmap entries: $icons"
+          test "$icons" -gt 0 || { echo "FAIL: APK carries no launcher icons"; exit 1; }
+          echo "APK present and carrying packaged resources"
