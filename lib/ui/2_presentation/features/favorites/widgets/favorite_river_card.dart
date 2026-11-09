@@ -51,6 +51,45 @@ class FavoriteRiverCard extends StatefulWidget {
   /// and a card that is no longer mounted simply does not react to it.
   static final ValueNotifier<String?> openRow = ValueNotifier<String?>(null);
 
+  /// Fling speed, in logical pixels per second, above which the DIRECTION of
+  /// the gesture decides and the distance travelled stops mattering.
+  static const double flingVelocity = 300.0;
+
+  /// Past this fraction of the action strip, releasing latches the row open.
+  /// Below it the row springs back, so a short accidental nudge is not read
+  /// as an instruction.
+  static const double openThreshold = 0.3;
+
+  /// Whether releasing here should latch the row OPEN.
+  ///
+  /// A fast flick decides by direction; anything slower decides by how far
+  /// the row has actually travelled. Negative [velocity] is leftward, which
+  /// is the direction that reveals the actions.
+  ///
+  /// EXTRACTED AS A PURE FUNCTION so it can be tested at all. It lived inline
+  /// in `_handleDragEnd`, and a 2026-11-09 mutation sweep found that
+  /// inverting the direction test — a flick left closing the row and a flick
+  /// right opening it — left all 1,502 tests green. It then turned out no
+  /// widget test CAN reach that branch: measured 2026-11-09 across
+  /// `tester.fling` at four distances and hand-built gestures at three
+  /// sample rates, `DragEndDetails.velocity` reads effectively zero under
+  /// `flutter test`, so every synthetic release falls through to the distance
+  /// test. `tester.fling` was also non-monotonic, opening the row at 50 px
+  /// and not at 40, 60 or 80, so it is not a usable instrument here either.
+  ///
+  /// The branch is real on a device and unreachable in the harness. Making
+  /// the decision a value-in, value-out function is what makes it checkable
+  /// without pretending the gesture layer can be driven.
+  @visibleForTesting
+  static bool shouldLatchOpen({
+    required double velocity,
+    required double revealed,
+  }) =>
+      velocity.abs() > flingVelocity
+          ? velocity < 0
+          : revealed > openThreshold;
+
+
   const FavoriteRiverCard({
     super.key,
     required this.favorite,
@@ -847,6 +886,14 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
         ? SlideActionConstants.totalActionWidth
         : 0.0;
 
+    // The `.clamp` is belt and braces, not the thing that stops the card
+    // sliding off the screen: `AnimationController.value` clamps to
+    // [lowerBound, upperBound] in `_internalSetValue`, and this controller
+    // uses the default 0..1. A mutation removing it is behaviourally
+    // invisible for that reason, so do not read it as load-bearing. What
+    // IS guarded is the user-visible result, in
+    // favorite_river_card_swipe_test.dart: the reveal stops at the strip
+    // however far you drag.
     final newValue = ((fromOpen + dragged) /
             SlideActionConstants.totalActionWidth)
         .clamp(0.0, 1.0);
@@ -861,10 +908,10 @@ class _FavoriteRiverCardState extends State<FavoriteRiverCard>
   void _handleDragEnd(DragEndDetails details) {
     if (!_isSliding) return;
 
-    final velocity = details.velocity.pixelsPerSecond.dx;
-    final shouldOpen = velocity.abs() > 300
-        ? velocity < 0
-        : _slideController.value > 0.3;
+    final shouldOpen = FavoriteRiverCard.shouldLatchOpen(
+      velocity: details.velocity.pixelsPerSecond.dx,
+      revealed: _slideController.value,
+    );
 
     if (shouldOpen) {
       // A row that latches open gives the same small knock iOS gives its own
