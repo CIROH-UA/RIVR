@@ -16,6 +16,7 @@
 import {ForecastProductId} from "./store-keys.js";
 import {isRunNewer} from "./store-document.js";
 import {
+  MAX_RUN_AGE_MS,
   StoredWindowSample,
   maxHoldMs,
   maxRunAgeMs,
@@ -27,6 +28,21 @@ export interface ProbeRuns {
   referenceTimes: Record<string, string | null>;
   /** When the probe sampled. Used to detect a stalled probe. */
   sampledAt: Date;
+  /**
+   * Probe key -> whether upstream ANSWERED, regardless of whether the answer
+   * carried a run.
+   *
+   * This is what separates the two reasons a `referenceTime` can be null.
+   * NOAA serves medium and long range as a per-request lottery, so a 200 with
+   * the section empty is upstream working and us being unlucky. A timeout or
+   * a 5xx is upstream being down. They look identical in `referenceTimes` and
+   * must not be treated the same: see `staleEnoughToRetryBlind`.
+   *
+   * Optional, and absent means "assume it did NOT answer". A probe sample
+   * written before this field existed therefore keeps the old, conservative
+   * behaviour rather than silently enabling blind retries on old data.
+   */
+  answered?: Record<string, boolean>;
 }
 
 /**
@@ -59,6 +75,69 @@ export function probeRunFor(
 ): string | null {
   const key = PROBE_KEY_BY_PRODUCT[product] ?? product;
   return probe.referenceTimes[key] ?? null;
+}
+
+/**
+ * Fraction of a product's run-age cap after which a null probe reading stops
+ * being a reason to do nothing.
+ *
+ * Half, so there is a full half-cap of runway left to recover in before the
+ * value would be served as too old.
+ */
+export const BLIND_RETRY_FRACTION = 0.5;
+
+/**
+ * Whether to attempt a product even though the probe reported no run.
+ *
+ * THE DEFECT THIS EXISTS FOR. `mediumRange` went stale every night between
+ * 00:00 and 08:00 UTC, peaking at a stored run 32 hours old against a
+ * 24-hour cap. The 2026-11-03 schedule move cut it by about 80% and not to
+ * zero, and the reason is here rather than in the schedule: NOAA serves the
+ * medium and long range sections as a per-request LOTTERY inside a daily
+ * window, and the probe takes exactly ONE sample per product per hour. Lose
+ * the lottery and `probeRunFor` is null, which reads as "upstream failed
+ * this hour, do nothing" - hour after hour, while the stored run ages past
+ * its cap.
+ *
+ * The retry budget to fix it already exists downstream:
+ * `EMPTY_SECTION_ATTEMPTS` in store-upstream, bounded per run by
+ * `WINDOW_PROBE_REACHES` in store-run. All that was missing was a reason to
+ * spend it. So once the stored run is half way to its cap, a null probe
+ * reading stops vetoing the attempt and the fetchers get to try properly.
+ *
+ * **The probe is deliberately NOT given retries instead**, which was the
+ * first idea. The probe exists to measure the per-request success rate, and
+ * this repo's own rule says retrying inside it hides the failure rate it
+ * exists to measure. Retrying where the data is actually wanted keeps the
+ * measurement honest.
+ *
+ * TWO conditions, and the second one matters as much as the first. Upstream
+ * must have ANSWERED: a 200 whose section was empty is a lost lottery, while
+ * a timeout or a 5xx is an outage, and retrying through an outage is the
+ * fan-out the null guard was written to prevent. And something must already
+ * be stored, so a cold start does not fan out either.
+ *
+ * @param {ForecastProductId} product - The product being decided.
+ * @param {string|null} held - The run currently stored, if any.
+ * @param {number} nowMs - Current time in epoch ms.
+ * @return {boolean} True when the attempt is worth making blind.
+ */
+export function staleEnoughToRetryBlind(
+  product: ForecastProductId,
+  held: string | null,
+  nowMs: number,
+  upstreamAnswered: boolean
+): boolean {
+  // A transport failure is NOT a lost lottery. Retrying through it is the
+  // fan-out-on-every-outage behaviour the null guard exists to prevent, and
+  // it would also hammer whatever is already failing.
+  if (!upstreamAnswered) return false;
+  if (held === null) return false;
+  const cap = MAX_RUN_AGE_MS[product];
+  if (cap === undefined) return false; // no run identity, no ageing
+  const runAt = Date.parse(held);
+  if (Number.isNaN(runAt)) return false;
+  return nowMs - runAt >= cap * BLIND_RETRY_FRACTION;
 }
 
 /** What the store currently holds, per product. */
@@ -130,7 +209,8 @@ export function oldestLiveRun(
 export function decideTriggers(
   probe: ProbeRuns,
   stored: StoredRuns,
-  candidates: readonly ForecastProductId[]
+  candidates: readonly ForecastProductId[],
+  nowMs: number = Date.now()
 ): TriggerDecision {
   const decision: TriggerDecision = {triggered: [], reasons: {}};
 
@@ -140,9 +220,25 @@ export function decideTriggers(
     const held = stored[product] ?? null;
 
     if (upstream === null) {
-      // The probe deliberately does not retry, so a null here is a real
-      // upstream failure this hour. Refetching everything on it would turn
-      // every outage into a full fan-out.
+      // The probe deliberately does not retry, so a null here is EITHER a
+      // real upstream failure this hour or a lost section lottery.
+      // Refetching everything on it would turn every outage into a full
+      // fan-out, so by default this does nothing.
+      //
+      // Unless what we are holding is already ageing out, in which case
+      // doing nothing is how medium range went stale every night. See
+      // staleEnoughToRetryBlind.
+      const key = PROBE_KEY_BY_PRODUCT[product] ?? product;
+      const answered = probe.answered?.[key] ?? false;
+      if (staleEnoughToRetryBlind(product, held, nowMs, answered)) {
+        const ageH = ((nowMs - Date.parse(held as string)) / 3600_000)
+          .toFixed(1);
+        decision.triggered.push(product);
+        decision.reasons[product] =
+          `upstream answered with no run, and stored ${held} is ${ageH}h ` +
+          "old, past half its cap; attempting anyway";
+        continue;
+      }
       decision.reasons[product] = "probe reported no run this hour";
       continue;
     }

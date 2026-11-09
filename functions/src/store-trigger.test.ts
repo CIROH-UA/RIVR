@@ -25,9 +25,11 @@ import {
   decideTriggers,
   probeRunFor,
   quotaUsage,
+  staleEnoughToRetryBlind,
 } from "./store-trigger.js";
 import {ForecastProductId} from "./store-keys.js";
 import {
+  MAX_RUN_AGE_MS,
   StoredWindowSample,
   maxHoldMs,
   maxRunAgeMs,
@@ -814,5 +816,134 @@ describe("the oldest stored run ignores documents no run can update", () => {
 
   test("an empty collection reads as an empty store", () => {
     assert.equal(oldestLiveRun([], live), null);
+  });
+});
+
+describe("item 6 — a lost section lottery must not freeze a product", () => {
+  // `mediumRange` went stale every night between 00:00 and 08:00 UTC, peaking
+  // at a stored run 32 hours old against a 24-hour cap. The 2026-11-03
+  // schedule move cut it by about 80% and not to zero, and the remaining
+  // cause is here rather than in the schedule.
+  //
+  // NOAA serves the medium and long range sections as a per-request LOTTERY
+  // inside a daily window (measured 2026-11-03: 3 full responses of 14 for
+  // one reach within five seconds while the window was open, 0 of 700 once it
+  // had shut). The probe takes exactly ONE sample per product per hour. Lose
+  // the lottery and `probeRunFor` is null, which read as "upstream failed,
+  // do nothing" hour after hour while the stored run aged out.
+  //
+  // The retry budget to fix it already existed downstream
+  // (EMPTY_SECTION_ATTEMPTS, bounded by WINDOW_PROBE_REACHES). All that was
+  // missing was a reason to spend it.
+
+  const CAP_H = MAX_RUN_AGE_MS.mediumRange / 3600_000; // 24
+  const now = Date.parse("2026-11-09T04:00:00.000Z");
+  const ageHoursAgo = (h: number) =>
+    new Date(now - h * 3600_000).toISOString();
+
+  /** A probe whose medium-range call ANSWERED but carried no run. */
+  function lottery(): ProbeRuns {
+    return {
+      referenceTimes: {mediumRange: null},
+      sampledAt: new Date(now),
+      answered: {mediumRange: true},
+    };
+  }
+
+  test("an answer with no run still triggers once the stored run is ageing",
+    () => {
+      const held = ageHoursAgo(CAP_H * 0.75); // 18h: past half, under the cap
+      const d = decideTriggers(
+        lottery(), {mediumRange: held}, ["mediumRange"], now);
+
+      assert.deepEqual(d.triggered, ["mediumRange"],
+        "this is the whole defect: doing nothing here is how a 10-day " +
+        "panel went stale every night");
+      assert.match(d.reasons.mediumRange, /past half its cap/);
+    });
+
+  test("a fresh stored run is still left alone", () => {
+    // The positive control. Without it the fix would be "always fetch", which
+    // destroys guard 1 (no new run means zero fetches) and the whole reason
+    // the store exists.
+    const held = ageHoursAgo(1);
+    const d = decideTriggers(
+      lottery(), {mediumRange: held}, ["mediumRange"], now);
+
+    assert.deepEqual(d.triggered, [],
+      "one unlucky sample on a fresh value is not a reason to fetch");
+  });
+
+  test("an upstream OUTAGE is still left alone, however stale", () => {
+    // The distinction that makes this safe. A timeout or a 5xx is not a lost
+    // lottery, and retrying through it is the fan-out-on-every-outage
+    // behaviour the null guard was written to prevent, as well as hammering
+    // whatever is already failing.
+    const held = ageHoursAgo(CAP_H * 2);
+    const d = decideTriggers(
+      {
+        referenceTimes: {mediumRange: null},
+        sampledAt: new Date(now),
+        answered: {mediumRange: false},
+      },
+      {mediumRange: held}, ["mediumRange"], now);
+
+    assert.deepEqual(d.triggered, [],
+      "an outage must not turn into a full fan-out every hour");
+  });
+
+  test("a probe sample written before `answered` existed stays conservative",
+    () => {
+      // Old documents in publish_cadence_log have no `endpoints.ok` crossed
+      // into `answered`. Absent must mean "did not answer", so deploying this
+      // cannot start blind retries against ninety days of historical samples.
+      const held = ageHoursAgo(CAP_H * 2);
+      const d = decideTriggers(
+        {referenceTimes: {mediumRange: null}, sampledAt: new Date(now)},
+        {mediumRange: held}, ["mediumRange"], now);
+
+      assert.deepEqual(d.triggered, []);
+    });
+
+  test("nothing stored plus no run is still a no-op", () => {
+    const d = decideTriggers(
+      {
+        referenceTimes: {mediumRange: null},
+        sampledAt: new Date(now),
+        answered: {mediumRange: true},
+      },
+      {}, ["mediumRange"], now);
+
+    assert.deepEqual(d.triggered, [],
+      "a cold start must not fan out on an answer that carried nothing");
+  });
+
+  test("the threshold is half the product's own cap, not a global number", () => {
+    // shortRange and mediumRange have different caps, so the same stored age
+    // must decide differently for each.
+    const twelveHours = ageHoursAgo(12);
+    const shortCapH = MAX_RUN_AGE_MS.shortRange / 3600_000;
+
+    assert.equal(
+      staleEnoughToRetryBlind("mediumRange", twelveHours, now, true),
+      12 >= CAP_H / 2,
+      `medium range's cap is ${CAP_H}h`);
+    assert.equal(
+      staleEnoughToRetryBlind("shortRange", twelveHours, now, true),
+      12 >= shortCapH / 2,
+      "short range's cap is shorter, so the same age decides differently");
+  });
+
+  test("a product with no run identity never qualifies", () => {
+    // returnPeriods and reachMetadata carry no run, so there is no age to
+    // compare and `runTooOld` returns false for them by design.
+    assert.equal(
+      staleEnoughToRetryBlind("returnPeriods", ageHoursAgo(1000), now, true),
+      false);
+  });
+
+  test("an unparseable stored run does not qualify", () => {
+    assert.equal(
+      staleEnoughToRetryBlind("mediumRange", "not-a-date", now, true), false);
   });
 });
