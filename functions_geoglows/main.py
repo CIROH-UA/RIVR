@@ -94,7 +94,8 @@ _JSON_HEADERS = {
 
 
 # When the daily run actually lands, measured from S3 Last-Modified on two
-# consecutive days and recorded in this repo: 10:15-10:30 UTC. It is why the
+# consecutive days and recorded in this repo: 09:39-10:09 UTC (measured
+# 2026-11-09 over n=5; the earlier 10:15-10:30 rested on n=2). It is why the
 # flood builder is scheduled at 11:00 and why the store fetches at 11:30.
 _PUBLISHED_BY_UTC_HOUR = 11
 
@@ -106,7 +107,7 @@ def _candidate_dates():
 
     This used to always offer TODAY first, on the comment's assumption that
     forecasts "publish daily at 00Z". They are STAMPED 00Z but do not appear
-    until 10:15-10:30 UTC, which this repository had already measured. So for
+    until 09:39-10:09 UTC, which this repository has measured (n=5). So for
     the first eleven hours of every UTC day every request spent a whole
     attempt on a group that cannot exist yet — measured at 2.7-11.6 s of
     pure waste per request, before the real fetch had even started
@@ -712,7 +713,7 @@ def _write_blob(path: str, payload: str) -> None:
 
 
 @scheduler_fn.on_schedule(
-    # GEOGLOWS publishes the daily run around 10:15-10:30 UTC (measured from S3
+    # GEOGLOWS publishes the daily run around 09:39-10:09 UTC (measured from S3
     # Last-Modified on two consecutive days). 11:00 leaves margin without
     # letting the data go stale into the user's morning.
     schedule="0 11 * * *",

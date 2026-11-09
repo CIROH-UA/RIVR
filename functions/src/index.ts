@@ -568,7 +568,8 @@ export const storeWriteThroughOnFavourite = functions
  *
  * 11:30 comes from a measurement this repo already held and an earlier pass of
  * mine did not look up: functions_geoglows/main.py records the daily run
- * publishing at 10:15-10:30 UTC, from S3 Last-Modified on two consecutive days,
+ * publishing at 09:39-10:09 UTC (measured 2026-11-09, n=5 consecutive days,
+ * S3 Last-Modified; the earlier 10:15-10:30 figure rested on n=2 and was wrong),
  * and the flood builder is scheduled at 11:00 because of it.
  *
  * **The schedule is not trusted on its own.** runGeoglowsRefresh probes ONE

@@ -421,10 +421,11 @@ describe("run currency — the failure write recency cannot see", () => {
     assert.equal(h.status, "healthy", h.problems.join("; "));
   });
 
-  // GEOGLOWS stamps its run at the day's 00Z and publishes 10:15-10:30 UTC, so
+  // GEOGLOWS stamps its run at the day's 00Z and publishes 09:39-10:09 UTC
+  // (measured 2026-11-09, n=5; 10:15-10:30 was an n=2 figure and wrong), so
   // the oldest a legitimate run gets is ~34.5h just before the next lands.
   // The margin that a 36h cap did not leave. What matters is not when
-  // GEOGLOWS publishes (10:15-10:30Z) but when WE fetch it:
+  // GEOGLOWS publishes (09:39-10:09Z) but when WE fetch it:
   // storeGeoglowsDaily runs at 11:30Z with no retry, so a stored run reaches
   // 35.5h just before replacement. A 36h cap left ~25 minutes, and any
   // publication later than 11:30 — the case the schedule is explicitly not
