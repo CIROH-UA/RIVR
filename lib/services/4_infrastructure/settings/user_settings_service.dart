@@ -42,12 +42,27 @@ class UserSettingsService implements IUserSettingsService {
 
   /// Get UserSettings for a user
   @override
-  Future<UserSettings?> getUserSettings(String userId) async {
+  /// [forceRefresh] skips the in-memory cache.
+  ///
+  /// **Every read-modify-write MUST pass it.** This service's mutations are
+  /// read-modify-write over the whole settings object, and the cache has no
+  /// expiry and is not invalidated by anything the server writes. So a
+  /// mutation based on a cached read silently reverts whatever changed on the
+  /// document since this device last looked: a river added on another phone,
+  /// a flag a Cloud Function set, anything.
+  ///
+  /// Measured 2026-11-09: tapping the ft³/s ↔ m³/s toggle dropped a river
+  /// added on another device, because the toggle's base was a cached copy
+  /// taken before that river existed.
+  Future<UserSettings?> getUserSettings(
+    String userId, {
+    bool forceRefresh = false,
+  }) async {
     try {
       AppLogger.debug('UserSettingsService', 'Getting settings for user: $userId');
 
       // Return cached settings if available for this user
-      if (_cachedSettings != null && _cachedUserId == userId) {
+      if (!forceRefresh && _cachedSettings != null && _cachedUserId == userId) {
         AppLogger.debug('UserSettingsService', 'Returning cached settings');
         return _cachedSettings;
       }
@@ -128,7 +143,7 @@ class UserSettingsService implements IUserSettingsService {
         'Adding custom background for user: $userId',
       );
 
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       final updatedSettings = settings.addCustomBackground(imagePath);
@@ -154,7 +169,7 @@ class UserSettingsService implements IUserSettingsService {
         'Removing custom background for user: $userId',
       );
 
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       final updatedSettings = settings.removeCustomBackground(imagePath);
@@ -192,7 +207,7 @@ class UserSettingsService implements IUserSettingsService {
         'Validating custom backgrounds for user: $userId',
       );
 
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null || !settings.hasCustomBackgrounds) {
         return settings;
       }
@@ -241,7 +256,7 @@ class UserSettingsService implements IUserSettingsService {
         'Clearing all custom backgrounds for user: $userId',
       );
 
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       for (final imagePath in settings.customBackgroundImagePaths) {
@@ -320,7 +335,7 @@ class UserSettingsService implements IUserSettingsService {
       // `isGuest: true` and no email.
       invalidateCache();
 
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) {
         AppLogger.warning('UserSettingsService', 'No settings found during sync');
         return null;
@@ -352,7 +367,7 @@ class UserSettingsService implements IUserSettingsService {
   @override
   Future<UserSettings?> addFavoriteReach(String userId, String reachId) async {
     try {
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       final updatedSettings = settings.addFavorite(reachId);
@@ -372,7 +387,7 @@ class UserSettingsService implements IUserSettingsService {
     String reachId,
   ) async {
     try {
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       final updatedSettings = settings.removeFavorite(reachId);
@@ -389,7 +404,7 @@ class UserSettingsService implements IUserSettingsService {
   @override
   Future<UserSettings?> updateFlowUnit(String userId, FlowUnit flowUnit) async {
     try {
-      final settings = await getUserSettings(userId);
+      final settings = await getUserSettings(userId, forceRefresh: true);
       if (settings == null) return null;
 
       final updatedSettings = settings.copyWith(preferredFlowUnit: flowUnit);
