@@ -773,5 +773,13 @@ describes the system. The stamp rule at the top of CLAUDE.md is what governs
 new ones, and these three guards are what hold the checkable ones. That is
 the end of what this item can be taken to without a fresh audit.
 
-1,518 tests, analyze clean.
+1,522 tests, analyze clean.
+
+**A rule for myself, written down because I broke it twice today.** Both
+times I stated a test count by ARITHMETIC — previous total plus however many
+tests I thought I had added — and both times it was wrong by four, because a
+directory run reports the directory's total and not my additions. The count
+is free to read: run the suite and copy the number. Do not compute a figure
+that a command will tell you.
+
 
