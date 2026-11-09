@@ -470,3 +470,65 @@ deletion tripwire and not coverage, and to point at the behavioural file.
 
 1,502 tests, analyze clean.
 
+## Item 8c — the card's swipe mechanics had four unguarded behaviours
+
+**Broken.** The audit reported "no `FavoritesPage` or `FavoriteRiverCard`
+widget test exists at all, which alone causes four of the findings". I
+re-derived the gaps by mutating the card and running the whole suite for
+each change rather than trusting the list. Five of nine mutations were
+caught. **Four survived all 1,502 tests:**
+
+| Survivor | What a user would see |
+|---|---|
+| the drag origin ignores that a row was already open | dragging an open row back snaps it shut on the first pixel instead of following the finger |
+| the fling DIRECTION inverts | a flick left closes and a flick right opens: the gesture runs backwards |
+| the strip behind the card is a different width than the card travels | a button left clipped under the card, which is the exact defect ADR 0016 was written to fix |
+| the reveal is not clamped | nothing, as it turns out: see below |
+
+`swipe_hint_test.dart` does pump this card, but only ever drives the HINT,
+never a finger, which is why the drag maths was untouched.
+
+**Changed.** A widget test that drives real gestures at the real card: the
+reveal stops at the strip however far you drag; dragging an open row back
+follows the finger; a short slow drag springs back; the strip is exactly as
+wide as the card travels; and the strip is three buttons at the ADR's width.
+
+### The fling branch cannot be tested through the gesture layer
+
+⏱ MEASURED 2026-11-09. `DragEndDetails.velocity` reads effectively zero under
+`flutter test` for every synthetic release I could build: `tester.fling` at
+40, 50, 60 and 80 px, and hand-built gestures at 3, 6 and 10 samples. All of
+them fall through to the distance test. `tester.fling` was also
+non-monotonic, opening the row at 50 px but not at 40, 60 or 80, so it is not
+a usable instrument for this at all.
+
+So the decision is now a pure function, `FavoriteRiverCard.shouldLatchOpen`,
+with the two thresholds named, and it is tested as a value function. That is
+the honest way to reach a branch the harness cannot drive, rather than
+writing a gesture test that passes for a reason unrelated to what it claims.
+
+### Two things measured against myself
+
+**The clamp survivor is an equivalent mutant, and the code now says so.**
+`AnimationController.value` clamps to `[lowerBound, upperBound]` in
+`_internalSetValue`, read from Flutter's own source, and this controller uses
+the default 0..1. The explicit `.clamp(0.0, 1.0)` in `_handleDragUpdate` is
+therefore behaviourally invisible. The user-visible result is still guarded;
+it is just enforced one layer down. Noted in the card so nobody reads that
+line as load-bearing.
+
+**Two of my own assertions were wrong before they were right.** A single
+large `moveBy` straight after touch-down is not picked up by the horizontal
+drag recogniser, so the card never moved and the clamp assertion passed for
+the wrong reason until the gesture was split with a pump between moves. And
+the recogniser absorbs the first ~30 px as touch slop, so the open-row drag
+lands near 146 rather than 116; that assertion is now a range, because the
+exact figure is a property of the framework's slop and not of this card.
+
+**Break-it review.** Nine mutations, eight caught, one discarded as an
+equivalent mutant with Flutter's source quoted as the reason. The four
+original survivors are all caught, and five new ones on the extracted
+decision and the geometry constants are too.
+
+1,510 tests, analyze clean.
+
