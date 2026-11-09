@@ -570,7 +570,14 @@ reverting to `:20`; the cron moving while the doc stays; the GEOGLOWS hour
 slipping; the GC minute changing; a timezone changing under the doc; the
 heartbeat becoming 3-hourly; and the table naming a deleted function.
 
-1,518 tests, 480 functions tests, analyze clean.
+1,514 tests, 480 functions tests, analyze clean.
+
+**Correction, same day:** the commit for this change says 1,518. The real
+figure is 1,514. I read the `+8` from running `flutter test test/docs/` as
+eight NEW tests when it was the whole directory's total, four of which
+already existed. Recorded rather than amended, because the commit is already
+on `development` and the log is the durable record. It is a small number and
+exactly the kind this phase has been correcting in other people's work.
 
 **Still open on item 13:** the remaining audited claims that are prose rather
 than numbers. They are not enumerable from here without redoing the audit,
