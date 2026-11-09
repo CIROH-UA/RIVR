@@ -611,6 +611,22 @@ class NoaaApiService implements INoaaApiService {
       final convertedResponse = Map<String, dynamic>.from(rawResponse);
       final targetUnit = _unitService.currentFlowUnit;
 
+      // Stamp the payload with the unit it was ACTUALLY converted to.
+      //
+      // The caller used to tag the stored entry by reading the preference
+      // itself, before the await, while this conversion read it again after.
+      // A unit toggle in that window — and the favourites page flips it
+      // without cancelling in-flight reads — tagged CMS data as CFS. The
+      // decoder trusts the tag alone, so it re-converted, producing a number
+      // 35.3x too low, which was then classified against correct thresholds
+      // and made EVERY river read Normal. That is the shape of the
+      // 2026-08-30 card defect, reached by a race instead of a double
+      // conversion. In a flood app.
+      //
+      // With the stamp, the tag describes the payload by construction and
+      // no amount of toggling in between can separate them.
+      convertedResponse[kConvertedUnitKey] = targetUnit;
+
       AppLogger.debug('NoaaApi', 'Starting forecast conversion to $targetUnit');
 
       // Convert all forecast sections that contain series data

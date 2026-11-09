@@ -37,27 +37,41 @@ class _FakeNoaa implements INoaaApiService {
     // section — the shape the unfiltered fallback actually returns. Round 6
     // proved a single-section fake structurally blind to the extraction
     // stamping mediumRange with shortRange's run.
+    //
+    // Each section carries ONE point. It used to carry none, which is not a
+    // response NOAA ever sends successfully: a section with a referenceTime
+    // and zero points is the failure mode `_requireUsableSeries` now
+    // refuses, added 2026-11-09 because storing it made a reach show
+    // "No data" while the app claimed that was current. The point is inert
+    // here — every assertion below is about which endpoint was called and
+    // which referenceTime was recorded, and neither reads it.
     return {
       'reach': {'reachId': reachId},
       'shortRange': {
         'series': {
           'referenceTime': '2026-08-23T12:00:00',
           'units': 'ft³/s',
-          'data': <dynamic>[],
+          'data': <dynamic>[
+            {'validTime': '2026-08-23T13:00:00Z', 'flow': 100.0},
+          ],
         },
       },
       'mediumRange': {
         'member1': {
           'referenceTime': '2026-08-23T06:00:00',
           'units': 'ft³/s',
-          'data': <dynamic>[],
+          'data': <dynamic>[
+            {'validTime': '2026-08-23T13:00:00Z', 'flow': 100.0},
+          ],
         },
       },
       'longRange': {
         'member1': {
           'referenceTime': '2026-08-23T00:00:00',
           'units': 'ft³/s',
-          'data': <dynamic>[],
+          'data': <dynamic>[
+            {'validTime': '2026-08-23T13:00:00Z', 'flow': 100.0},
+          ],
         },
       },
     };
