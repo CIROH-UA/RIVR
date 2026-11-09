@@ -91,6 +91,14 @@ rivr-secrets.zip
 # tracking them.
 !.claude/skills/git-guard/
 
+# Tracked for the same reason, added 2026-11-09: break-it-review is a
+# required step, referenced by CLAUDE.md and invoked as step 0 of git-guard.
+# Both of those are tracked, so leaving the skill itself on one laptop would
+# ship a repository whose instructions point at something a fresh clone does
+# not have. This is the git-guard category — a discipline every contributor
+# follows — not the plan-week category of personal working style.
+!.claude/skills/break-it-review/
+
 # Internal team docs (local-only, never commit)
 docs/internal/
 functions_geoglows/.env
