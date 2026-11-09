@@ -13,6 +13,7 @@
 // transaction, re-reading under lock.
 
 import * as admin from "firebase-admin";
+import {ENDPOINTS} from "./publish-cadence-probe.js";
 import * as logger from "firebase-functions/logger";
 
 import {StoreDocument, shouldWrite} from "./store-document.js";
@@ -71,6 +72,56 @@ export async function readAllUsers(
  * @param {FirestoreUsage} usage - Counters to increment.
  * @return {Promise<ProbeRuns | null>} Latest sample, or null when none exists.
  */
+/**
+ * Turn one `publish_cadence_log` document into a {@link ProbeRuns}.
+ *
+ * SEPARATED FROM THE FIRESTORE READ ON PURPOSE. A 2026-11-09 mutation sweep
+ * found three mutations of this mapping that the whole suite missed: marking
+ * every endpoint as answered, marking none, and dropping `answered` from the
+ * result entirely. All three change what the hourly run decides to fetch, and
+ * none of them could be caught while the logic lived inside a function that
+ * talks to Firestore. This is the refactor `store-health-wiring.test.ts` says
+ * `checkStoreHealth` still needs, done here because the cost of getting it
+ * wrong is a product that silently stops refreshing.
+ *
+ * @param {Record<string, unknown>} data - The raw document data.
+ * @return {ProbeRuns | null} The sample, or null when it is unusable.
+ */
+export function probeRunsFromDocument(
+  data: Record<string, unknown>
+): ProbeRuns | null {
+  const rawSampledAt = data.sampledAt as {toDate?: () => Date} | undefined;
+  const sampledAt = rawSampledAt?.toDate?.();
+  if (!(sampledAt instanceof Date)) return null;
+
+  // Which endpoints ANSWERED, keyed the way `referenceTimes` is.
+  //
+  // The probe stores one result per endpoint NAME (`medium_range`) while the
+  // runs are keyed by SECTION (`mediumRange`), so the two are crossed here
+  // through the probe's own ENDPOINTS table rather than by guessing at the
+  // mapping. `decideTriggers` needs this to tell a lost section lottery from
+  // an upstream outage; see `staleEnoughToRetryBlind`.
+  //
+  // `ok` OR a 200: `ok` is the probe's own summary and a 200 is the fact
+  // underneath it. Either is enough to say upstream was reachable, which is
+  // the only question being asked here.
+  const rawEndpoints = (data.endpoints ?? {}) as Record<
+    string, {ok?: boolean; httpStatus?: number | null}>;
+  const answered: Record<string, boolean> = {};
+  for (const e of ENDPOINTS) {
+    if (e.key === null) continue;
+    const r = rawEndpoints[e.name];
+    answered[e.key] = r?.ok === true || r?.httpStatus === 200;
+  }
+
+  return {
+    referenceTimes: (data.referenceTimes ?? {}) as Record<string,
+      string | null>,
+    sampledAt,
+    answered,
+  };
+}
+
 export async function readLatestProbe(
   usage: FirestoreUsage
 ): Promise<ProbeRuns | null> {
@@ -79,14 +130,7 @@ export async function readLatestProbe(
   usage.reads += snap.size;
   if (snap.empty) return null;
 
-  const data = snap.docs[0].data();
-  const sampledAt = data.sampledAt?.toDate?.();
-  if (!(sampledAt instanceof Date)) return null;
-  return {
-    referenceTimes: (data.referenceTimes ?? {}) as Record<string,
-      string | null>,
-    sampledAt,
-  };
+  return probeRunsFromDocument(snap.docs[0].data());
 }
 
 

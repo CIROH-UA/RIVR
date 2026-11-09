@@ -583,3 +583,85 @@ exactly the kind this phase has been correcting in other people's work.
 than numbers. They are not enumerable from here without redoing the audit,
 and the stamp rule plus these two drift tests are what stop new ones.
 
+## Item 6 — medium range went stale every night, and why the schedule fix was not enough
+
+**WRITTEN AND TESTED, NOT DEPLOYED.** This is server code and takes effect
+only on `firebase deploy --only functions:default`. Jerson's standing
+instruction is not to deploy without a recorded reason, so it is on
+`development` waiting for his word. Nothing about the running system has
+changed.
+
+**Broken.** `mediumRange` went stale between 00:00 and 08:00 UTC daily,
+peaking at a stored run 32 hours old against a 24-hour cap. The 2026-11-03
+schedule move cut that by about 80% and not to zero, and the remaining cause
+is not the schedule.
+
+NOAA serves the medium and long range sections as a per-request LOTTERY
+inside a daily window (measured 2026-11-03: 3 full responses of 14 for one
+reach within five seconds while the window was open, and 0 of 700 across
+every production reach once it had shut). **The probe takes exactly one
+sample per product per hour.** Lose the lottery and `probeRunFor` returns
+null, which `decideTriggers` read as "upstream failed this hour, do nothing".
+Hour after hour, while the stored run aged past its cap.
+
+The retry budget to fix it already existed downstream:
+`EMPTY_SECTION_ATTEMPTS` in `store-upstream.ts`, bounded per run by
+`WINDOW_PROBE_REACHES` in `store-run.ts`. All that was missing was a reason
+to spend it.
+
+**Changed.** Once the stored run is half way to its product's own run-age
+cap, a null probe reading stops vetoing the attempt and the fetchers get to
+try properly. Two conditions, and the second matters as much as the first:
+
+* **Upstream must have ANSWERED.** A 200 whose section was empty is a lost
+  lottery; a timeout or a 5xx is an outage, and retrying through an outage is
+  the fan-out-every-hour behaviour the null guard was written to prevent, as
+  well as hammering whatever is already failing. The probe already records
+  per-endpoint `ok` and `httpStatus`; `readLatestProbe` was throwing them
+  away.
+* **Something must already be stored**, so a cold start does not fan out
+  either.
+
+**The probe is deliberately NOT given retries**, which was the first idea.
+The probe exists to measure the per-request success rate, and this repo's own
+rule is that retrying inside it hides the failure rate it exists to measure.
+Retrying where the data is actually wanted keeps the measurement honest.
+
+**An existing guard failed, correctly, and changed the design.** "A probe
+reporting NO run does not trigger" went red on the first version, which
+rescued on any null. It was right: that version reintroduced the fan-out on
+every upstream outage. The answered/not-answered split is the result.
+
+### A second gap found on the way
+
+Three mutations of the probe-document mapping passed the entire 488-test
+suite: marking every endpoint answered, marking none, and dropping
+`answered` from the result altogether. Each changes what the store fetches
+and all three are silent. None could be caught while the logic sat inside
+`readLatestProbe`, which talks to Firestore and cannot be unit-driven.
+
+So the mapping is now `probeRunsFromDocument`, a pure function, with its own
+test file. This is the refactor `store-health-wiring.test.ts` says
+`checkStoreHealth` still needs; done here because the cost of getting it
+wrong is a product that silently stops refreshing.
+
+**Break-it review.** Ten mutations, all caught: the rescue removed; rescuing
+through an outage; rescuing a fresh run; the threshold at the full cap
+instead of half; a cold start fanning out; products with no run identity
+qualifying; `answered` defaulting to true for historical samples; and the
+three mapping mutations above. One earlier form did not compile and proves
+nothing.
+
+Q2: the lottery figures are the 2026-11-03 measurements already in CLAUDE.md,
+not new claims. The 00:00-08:00 staleness window and the 32-hour peak are the
+audit's, and I did NOT re-measure them: doing so needs production logs over a
+night, so they stay the audit's figures rather than mine.
+
+Q3: **unproven, and it is the central claim.** That this actually fixes the
+nightly staleness is reasoned from the mechanism, not demonstrated against
+production. The mechanism is certain, the tests pin the decision, and the
+effect can only be confirmed by deploying and watching a night of
+`storeHealth` and the run logs. Recorded as unproven rather than claimed.
+
+496 functions tests, tsc clean.
+
