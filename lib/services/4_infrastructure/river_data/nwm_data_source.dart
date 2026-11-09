@@ -10,6 +10,7 @@ import 'package:rivr/services/1_contracts/shared/i_forecast_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_geocoding_service.dart';
 import 'package:rivr/services/1_contracts/shared/i_noaa_api_service.dart';
 import 'package:rivr/services/1_contracts/shared/river_data/i_river_data_source.dart';
+import 'package:rivr/services/4_infrastructure/logging/app_logger.dart';
 import 'package:rivr/services/4_infrastructure/river_data/reach_metadata_payload.dart';
 import 'package:rivr/services/3_datasources/shared/dtos/reach_data_dto.dart'
     show ForecastSeriesDto;
@@ -26,7 +27,9 @@ class NwmDataSource implements IRiverDataSource {
     required IForecastService forecastService,
     required IFlowUnitPreferenceService unitService,
     required IGeocodingService geocoder,
-  }) : _api = api,
+    DateTime Function()? clock,
+  }) : _now = clock ?? DateTime.now,
+       _api = api,
        _forecastService = forecastService,
        _unitService = unitService,
        // Injected but deliberately UNUSED: `reachMetadata` must not geocode.
@@ -37,6 +40,7 @@ class NwmDataSource implements IRiverDataSource {
        // ignore: unused_field
        _geocoder = geocoder;
 
+  final DateTime Function() _now;
   final INoaaApiService _api;
   final IForecastService _forecastService;
   final IFlowUnitPreferenceService _unitService;
@@ -149,28 +153,45 @@ class NwmDataSource implements IRiverDataSource {
   /// Reading the preference here used to be the ONLY source, captured before
   /// the await while the conversion read it again after. See
   /// `kConvertedUnitKey`.
-  /// Throws when a forecast payload carries nothing the app can render.
+  /// How long an answer carrying no readable points is held before we ask
+  /// upstream again.
   ///
-  /// A payload with no readable points anywhere is not a successful fetch.
-  /// It used to be stored as one: the entry got its normal window, was
-  /// judged confirmed, and `outOfSync` stayed false — so the reach showed
-  /// "No data" while the app positively claimed that nothing was current,
-  /// and no later read retried.
+  /// A JUDGEMENT, not a measurement, and the reasoning is the point. NOAA
+  /// answers 200 with the requested section absent as a per-request lottery
+  /// inside a daily window: 3 full responses of 14 for one reach within five
+  /// seconds while the window was open, and 0 of 700 across every production
+  /// reach once it had shut (2026-11-03). So asking again soon is worth
+  /// something, and asking again immediately is not.
   ///
-  /// Two ways to arrive there, both real. NOAA serves a 200 with the
-  /// requested section absent for medium and long range most of the time.
-  /// And a single unreadable point used to discard the whole series around
-  /// it (fixed in `ForecastSeriesDto._pointsOf`), which can still empty a
-  /// series outright when every point is malformed.
+  /// The number has to sit between two failures that have both happened here:
+  ///
+  /// * Hold the empty answer for the product's full window (6 hours for
+  ///   medium and long range) and one unlucky request means an empty 10-day
+  ///   panel all morning with no further attempt. That was the defect.
+  /// * Hold it for nothing at all and every read refetches. Reads are not a
+  ///   poll, but the forecast page alone reads each product more than once
+  ///   per open (load, watch, and a re-decode on a unit change), so "cache
+  ///   nothing" turned one page open into a climbing count of calls against
+  ///   an endpoint that is already failing.
+  ///
+  /// Fifteen minutes stops the within-session repeat and still asks four
+  /// times an hour while a user has the app open.
+  static const Duration emptySectionRetry = Duration(minutes: 15);
+
+  /// Whether a forecast payload carries anything the app can render.
+  ///
+  /// Phase 7 made silence a positive claim that the value on screen is
+  /// current, so this is what decides whether an answer gets its product's
+  /// full window or the short one above. Two ways to arrive at nothing, both
+  /// real: NOAA serves a 200 with the requested section absent for medium and
+  /// long range most of the time, and a single unreadable point used to
+  /// discard the whole series around it.
   ///
   /// Deliberately asks "is there anything here at all" rather than naming a
   /// section per product. Which section answers a product is
   /// `ForecastValues`' decision, and a copy of that mapping here would be a
   /// reimplementation drifting out of step with the one the decoder uses.
-  ///
-  /// Phase 7 made silence a positive claim that the value on screen is
-  /// current. This is what keeps that claim honest.
-  void _requireUsableSeries(Map<String, dynamic> payload, RiverDataKey key) {
+  static bool _hasUsableSeries(Map<String, dynamic> payload) {
     const sections = [
       'analysisAssimilation',
       'shortRange',
@@ -183,17 +204,24 @@ class NwmDataSource implements IRiverDataSource {
       final section = payload[name];
       if (section is! Map<String, dynamic>) continue;
 
-      for (final candidate in [section['series'], section]) {
+      // EVERY sub-map. Short range and analysis assimilation are
+      // deterministic and keep their points under `series`; medium and long
+      // range are ENSEMBLES and keep theirs under `mean`, `member1` and so
+      // on. An earlier version looked under `series` alone, which meant no
+      // medium or long range payload could ever satisfy it — it only looked
+      // correct because an untrimmed payload always carried a deterministic
+      // short range for it to find instead.
+      //
+      // `section` itself is included because a malformed payload can put the
+      // points one level up; `section['series']` is NOT listed separately,
+      // because `section.values` already covers it and an independent review
+      // identified that term as dead.
+      for (final candidate in [section, ...section.values]) {
         if (candidate is! Map<String, dynamic>) continue;
         if (candidate['data'] is! List) continue;
         try {
-          // The REAL parser, not a count of raw entries. A section can be
-          // structurally present and still decode to nothing: NOAA sends
-          // points with a null flow, and those are dropped. Counting the raw
-          // list would call that a success and cache an empty forecast as
-          // current, which is the defect this guard exists for.
           if (ForecastSeriesDto.fromJson(candidate).toEntity().isNotEmpty) {
-            return;
+            return true;
           }
         } catch (_) {
           // Unreadable shape. Try the next candidate, then the next section.
@@ -201,7 +229,39 @@ class NwmDataSource implements IRiverDataSource {
       }
     }
 
-    throw EmptyForecastSection(key.reachId, key.product.name);
+    return false;
+  }
+
+  /// The window an answer for [key] deserves: the product's publish schedule
+  /// when it carries data, [emptySectionRetry] when it does not.
+  ///
+  /// Returning a window rather than throwing is a correction. The first
+  /// version of this refused an empty answer by throwing, so that nothing
+  /// was cached and nothing claimed to be current — and an independent review
+  /// measured what that actually did on screen. `ReachDataProvider` turns any
+  /// exception from a section read into `SectionLoadState.error`, which
+  /// renders RED, "Something went wrong loading the medium range forecast.
+  /// Pull down to retry." Nothing had gone wrong in the app, pulling down
+  /// could not help, and `outOfSync` put the app-wide stale banner over the
+  /// favourites page for half an hour. Measured on every CONUS reach that
+  /// answered: medium and long range are empty 10 of 10 right now, so that
+  /// was the normal case, not an edge.
+  ///
+  /// `SectionLoadState.empty` already exists for exactly this and renders
+  /// orange, "temporarily unavailable, this usually resolves on its own" —
+  /// which is true. Caching the empty answer briefly gets that state for
+  /// free, because the entry decodes to a section with no points, and keeps
+  /// the honest half of the original fix: the answer expires in minutes
+  /// instead of being held for six hours as a confirmed current value.
+  DateTime? _windowFor(RiverDataKey key, Map<String, dynamic> payload) {
+    if (_hasUsableSeries(payload)) return null; // repository's own schedule
+    AppLogger.warning(
+      'NwmDataSource',
+      'upstream served no readable points for ${key.reachId}/'
+          '${key.product.name} — holding the empty answer '
+          '${emptySectionRetry.inMinutes} min, not its publish window',
+    );
+    return _now().toUtc().add(emptySectionRetry);
   }
 
   String _unitOf(Map<String, dynamic> payload) =>
@@ -241,7 +301,6 @@ class NwmDataSource implements IRiverDataSource {
         );
       case ForecastProduct.currentFlow:
         final aaPayload = await _api.fetchCurrentFlowOnly(key.reachId);
-        _requireUsableSeries(aaPayload, key);
         return SourceFetchResult(
           payload: aaPayload,
           unit: _unitOf(aaPayload),
@@ -249,36 +308,37 @@ class NwmDataSource implements IRiverDataSource {
           // (fetchCurrentFlowOnly fetches exactly that), so its run IS that
           // section's run.
           runId: _runIdOf(aaPayload, 'shortRange'),
+          validUntil: _windowFor(key, aaPayload),
         );
       case ForecastProduct.shortRange:
         final shortPayload = await _api.fetchForecast(
           key.reachId,
           'short_range',
         );
-        _requireUsableSeries(shortPayload, key);
         return SourceFetchResult(
           payload: shortPayload,
           unit: _unitOf(shortPayload),
           runId: _runIdOf(shortPayload, 'shortRange'),
+          validUntil: _windowFor(key, shortPayload),
         );
       case ForecastProduct.mediumRange:
         final mediumPayload = await _api.fetchForecast(
           key.reachId,
           'medium_range',
         );
-        _requireUsableSeries(mediumPayload, key);
         return SourceFetchResult(
           payload: mediumPayload,
           unit: _unitOf(mediumPayload),
           runId: _runIdOf(mediumPayload, 'mediumRange'),
+          validUntil: _windowFor(key, mediumPayload),
         );
       case ForecastProduct.longRange:
         final longPayload = await _api.fetchForecast(key.reachId, 'long_range');
-        _requireUsableSeries(longPayload, key);
         return SourceFetchResult(
           payload: longPayload,
           unit: _unitOf(longPayload),
           runId: _runIdOf(longPayload, 'longRange'),
+          validUntil: _windowFor(key, longPayload),
         );
       case ForecastProduct.returnPeriods:
         return SourceFetchResult(
@@ -297,22 +357,4 @@ class NwmDataSource implements IRiverDataSource {
         throw ArgumentError('NWM does not support ${key.product}');
     }
   }
-}
-
-/// A forecast section came back with nothing renderable in it.
-///
-/// Distinct from a transport failure so logs and the sync banner can tell
-/// "upstream served nothing" from "we could not reach upstream". Both mean
-/// the same thing to the cache: do not store this and do not claim it is
-/// current.
-class EmptyForecastSection implements Exception {
-  final String reachId;
-  final String section;
-
-  EmptyForecastSection(this.reachId, this.section);
-
-  @override
-  String toString() =>
-      'EmptyForecastSection($reachId/$section): upstream returned no '
-      'readable points — not cached, will retry';
 }

@@ -335,7 +335,9 @@ class NoaaApiService implements INoaaApiService {
           'NoaaApi',
           'Successfully fetched and converted $series forecast to ${_unitService.currentFlowUnit}',
         );
-        return convertedData;
+        return sectionKey == null
+            ? convertedData
+            : _onlyRequestedSection(convertedData, sectionKey);
       } else if (response.statusCode == 404) {
         throw Exception('$series forecast not available for reach: $reachId');
       } else {
@@ -363,6 +365,64 @@ class NoaaApiService implements INoaaApiService {
       default:
         return null;
     }
+  }
+
+  /// Every forecast section NOAA can put in a streamflow body.
+  ///
+  /// Listed here rather than derived from [_seriesToSectionKey], which maps
+  /// only the three sections a caller may ASK for. `analysisAssimilation` and
+  /// `mediumRangeBlend` have no `?series=` value and no product of their own,
+  /// so they are nobody's answer and must still be removed from everybody
+  /// else's.
+  static const Set<String> _forecastSections = {
+    'analysisAssimilation',
+    'shortRange',
+    'mediumRange',
+    'mediumRangeBlend',
+    'longRange',
+  };
+
+  /// Reduce a NOAA streamflow body to the ONE section that was asked for,
+  /// keeping everything that is not a forecast section (`reach`, and the unit
+  /// stamp this service writes).
+  ///
+  /// `?series=` is a filter upstream honours only sometimes. When the filtered
+  /// call comes back with the requested section empty we refetch the
+  /// UNFILTERED body, which carries every section — and that whole body used
+  /// to be returned to the caller. The caller is a cache keyed by PRODUCT, so
+  /// a `mediumRange` request that fell back stored a full copy of short range
+  /// inside the medium-range entry, on medium range's 6-hour window.
+  ///
+  /// Two things went wrong with that, both observed:
+  ///
+  /// * `ReachDataProvider._mergeForecastData` lets whichever section load
+  ///   lands LAST win, so the hourly chart and the gauge could be driven by
+  ///   that stale copy instead of by the dedicated short-range entry on its
+  ///   1-hour window — differing between two opens of the same page for no
+  ///   reason the user can see.
+  /// * It defeated the empty-section guard. `NwmDataSource` refuses to store
+  ///   a payload with nothing readable in it, but asks that question of the
+  ///   payload as a whole (deliberately — naming a section per product would
+  ///   duplicate the decoder's mapping). A smuggled short range answered the
+  ///   question, so an empty medium range was stored as a confirmed, current
+  ///   value and held for six hours.
+  ///
+  /// The requested section is always PRESENT in the result, `{}` when upstream
+  /// sent nothing, so "asked and got nothing" stays distinguishable from
+  /// "never asked".
+  static Map<String, dynamic> _onlyRequestedSection(
+    Map<String, dynamic> response,
+    String sectionKey,
+  ) {
+    final trimmed = <String, dynamic>{};
+    for (final entry in response.entries) {
+      if (_forecastSections.contains(entry.key) && entry.key != sectionKey) {
+        continue;
+      }
+      trimmed[entry.key] = entry.value;
+    }
+    trimmed.putIfAbsent(sectionKey, () => <String, dynamic>{});
+    return trimmed;
   }
 
   /// Returns `true` when the given section exists but all its data arrays
@@ -415,9 +475,10 @@ class NoaaApiService implements INoaaApiService {
     }
   }
 
-  /// Attempt the unfiltered endpoint and return the full response (which
-  /// includes all sections). If the unfiltered response also has empty data
-  /// for the requested section, return it as-is (genuine no-data).
+  /// Attempt the unfiltered endpoint and return the REQUESTED SECTION of it.
+  /// If the unfiltered response also has that section empty, the empty
+  /// section is returned as-is (genuine no-data) — never silently replaced by
+  /// a sibling section that happens to carry data.
   Future<Map<String, dynamic>> _fetchWithUnfilteredFallback(
     String reachId,
     String sectionKey,
@@ -437,7 +498,7 @@ class NoaaApiService implements INoaaApiService {
         );
       }
 
-      return unfilteredData;
+      return _onlyRequestedSection(unfilteredData, sectionKey);
     } catch (e) {
       AppLogger.error('NoaaApi', 'Unfiltered fallback also failed', e);
       rethrow;

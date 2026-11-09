@@ -197,24 +197,43 @@ void main() {
       cache: cache,
       registry: SourceRegistry([sourceOver(client, unit)]),
     );
-    // The read FAILS rather than returning an entry with nothing in it.
+    // An answer with nothing readable in it is held for MINUTES, not for the
+    // product's publish window.
     //
-    // The baseline expected an entry back and then checked the freshness
-    // claim, because at the time an unreadable series was stored as an
-    // ordinary success. It is now refused at the source, which satisfies the
-    // same requirement more directly: there is nothing to cache and nothing
-    // to vouch for.
-    await expectLater(
-      repo.read(_currentFlowKey),
-      throwsA(isA<EmptyForecastSection>()),
-      reason: 'a payload whose only point has a null flow decodes to no '
-          'series at all. Storing that as a success is what made a reach '
-          'show "No data" while the app claimed it was current',
-    );
+    // This assertion has been round the houses twice and the history is
+    // worth keeping. The baseline expected an entry back and then checked
+    // the freshness claim, because an unreadable series was stored as an
+    // ordinary success. It was then changed to expect a THROW, on the
+    // reasoning that there is nothing to cache and nothing to vouch for —
+    // and an independent review measured what that did on screen:
+    // `ReachDataProvider` turns any exception from a section read into
+    // `SectionLoadState.error`, which renders RED "Something went wrong …
+    // Pull down to retry" for the normal case of upstream having no data.
+    // Worse, `FavoritesProvider` reads name, flow and thresholds in one
+    // `Future.wait` inside one `try`, so the throw took the river's NAME and
+    // its FLOOD THRESHOLDS down with the flow.
+    //
+    // So the answer is cached, briefly. The honest half of the fix is the
+    // WINDOW, not the refusal.
+    final entry = await repo.read(_currentFlowKey);
 
-    expect(repo.outOfSync.value, isTrue,
-        reason: 'Phase 7 made silence a claim that the number on screen is '
-            'current; there is no number, and nothing says so');
+    expect(entry, isNotNull,
+        reason: 'refusing to cache it made every read refetch, and took the '
+            "river's name and thresholds with it on the favourites path");
+    expect(
+      entry!.window.validUntil.difference(entry.window.fetchedAt).inMinutes,
+      NwmDataSource.emptySectionRetry.inMinutes,
+      reason: 'a payload whose only point has a null flow decodes to no '
+          'series at all. Holding that for the product\'s full window is '
+          'what made a reach show "No data" while the app claimed it was '
+          'current, with no later read retrying',
+    );
+    expect(CurrentFlowPayload.decode(entry, unit), isNull,
+        reason: 'and there is genuinely no number to show');
+    expect(repo.outOfSync.value, isFalse,
+        reason: 'outOfSync means "we served a value we cannot vouch for". '
+            'Reporting accurately that upstream has nothing is not that, and '
+            'raising it here lit the app-wide banner on every CONUS river');
   });
 
   test('D4: the 30-second unfiltered-fallback cache must not serve a payload '
