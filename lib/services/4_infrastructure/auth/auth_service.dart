@@ -291,6 +291,25 @@ class AuthService implements IAuthService {
     }
   }
 
+  /// The same read, but it REFUSES to answer "no document" when it does not
+  /// know.
+  ///
+  /// `_readUserDoc` collapses two different facts into one `null`: "this
+  /// account has no document" and "the read failed". For most callers that is
+  /// harmless. For the guest merge it is destruction: a timeout made a
+  /// returning user's account look empty, the merge treated the guest's one
+  /// river as the whole list, and it was written as a SUCCESS, so nothing
+  /// surfaced an error. Six saved rivers for one, silently.
+  ///
+  /// That is the 832 incident reached by a different route, and the rule this
+  /// repository learned from it is absolute: nothing is written until the
+  /// operation has succeeded. A read that threw has not succeeded.
+  Future<Map<String, dynamic>?> _readUserDocOrThrow(String uid) async {
+    final snap =
+        await _users.doc(uid).get().timeout(const Duration(seconds: 10));
+    return snap.exists ? snap.data() : null;
+  }
+
   Future<void> _updateUserDoc(String uid, Map<String, dynamic> fields) =>
       _users
           .doc(uid)
@@ -303,7 +322,11 @@ class AuthService implements IAuthService {
   Future<void> _mergeGuestIntoAccount(
       String accountUid, Map<String, dynamic> guest) async {
     try {
-      final account = await _readUserDoc(accountUid) ?? <String, dynamic>{};
+      // Throws rather than defaulting to {}. See _readUserDocOrThrow: an
+      // empty map here means "merge the guest's list in as the whole list",
+      // which is correct for a genuinely new account and catastrophic for a
+      // read that merely failed.
+      final account = await _readUserDocOrThrow(accountUid) ?? <String, dynamic>{};
       List<String> ids(Map<String, dynamic> d) =>
           List<String>.from(d['favoriteReachIds'] as List? ?? const []);
       Map<String, String> strMap(Map<String, dynamic> d, String k) =>
@@ -332,8 +355,10 @@ class AuthService implements IAuthService {
       AppLogger.info(
           'AuthService', 'Merged $added guest river(s) into $accountUid');
     } catch (e) {
-      // The guest doc was neutralised, so nothing keeps firing; the rivers
-      // are what is lost if this fails, and that is logged loudly.
+      // Nothing was written. The guest's rivers are not merged, which is a
+      // real loss and is logged loudly — but the account's own rivers are
+      // untouched, which is the loss that matters and the one that used to
+      // happen.
       AppLogger.error('AuthService', 'guest merge into $accountUid failed: $e', e);
     }
   }
