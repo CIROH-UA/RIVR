@@ -28,10 +28,28 @@ import 'package:rivr/services/4_infrastructure/river_data/source_registry.dart';
 /// A synchronous fake cannot express that: the interleave needs `get` to
 /// yield.
 class _SlowReadCache extends _MemoryCache {
+  /// How many `get` calls are in flight right now, and the most there have
+  /// ever been at once.
+  ///
+  /// This is how the "different keys are not serialised" guard is expressed
+  /// without a clock. Two ingests for different keys either overlap inside
+  /// `get` — peak 2 — or they do not — peak 1. The answer is the same on an
+  /// idle laptop and on a loaded one.
+  int gets = 0;
+  int _inFlight = 0;
+  int peakConcurrentGets = 0;
+
   @override
   Future<RiverDataEntry?> get(RiverDataKey key) async {
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-    return super.get(key);
+    gets++;
+    _inFlight++;
+    if (_inFlight > peakConcurrentGets) peakConcurrentGets = _inFlight;
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      return super.get(key);
+    } finally {
+      _inFlight--;
+    }
   }
 }
 
@@ -1087,6 +1105,12 @@ void ingestSerialisationTests() {
         repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'newer')),
       ]);
 
+      expect(cache.peakConcurrentGets, 1,
+          reason: 'same key: the second ingest must not read until the first '
+              'has written, or both see the old value and the OLDER run can '
+              'land last, walking the value backwards past the supersession '
+              'check that exists to stop exactly that');
+
       final got = await cache.get(key);
       expect(got!.runId, '2026-07-10T12:00:00Z');
     });
@@ -1110,7 +1134,15 @@ void ingestSerialisationTests() {
         reachId: '99999999',
         product: ForecastProduct.shortRange,
       );
-      final started = DateTime.now();
+      //
+      // Asserted on CONCURRENCY, not on elapsed time. This was
+      // `elapsed.inMilliseconds < 40` against a cache whose `get` sleeps
+      // 20 ms, so the pass threshold sat exactly on the boundary between
+      // parallel (~20 ms) and serialised (~40 ms): green on an idle machine,
+      // red at 43 ms under load. It was the FOURTH version of a timing
+      // assertion the Phase 8 reviews caught three times, and a test that is
+      // red for no reason is how the guest-mode regression's 27 real failures
+      // got read as expected noise.
       await Future.wait([
         repo.ingest(entryWith(runId: '2026-07-10T12:00:00Z', tag: 'one')),
         repo.ingest(RiverDataEntry(
@@ -1124,10 +1156,14 @@ void ingestSerialisationTests() {
           payload: const {'from': 'two'},
         )),
       ]);
-      final elapsed = DateTime.now().difference(started);
-      expect(elapsed.inMilliseconds, lessThan(40),
-          reason: 'two different keys ran back-to-back instead of in '
-              'parallel — the chain is meant to be per key');
+
+      expect(cache.gets, 2,
+          reason: 'both ingests must actually have read the cache, or the '
+              'concurrency below would be measuring nothing');
+      expect(cache.peakConcurrentGets, 2,
+          reason: 'two different keys overlapped inside get, so the chain is '
+              'per key. Serialising everything would make one slow reach '
+              'hold up every other reach in a snapshot');
     });
   });
 }
