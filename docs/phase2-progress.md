@@ -723,3 +723,55 @@ the workflow runs, in a worktree with no gitignored files, which is the
 closest reachable thing to the job's real environment. The first run of that
 exercise is what caught the google-services failure.
 
+## Item 13 finished as far as it can be: the numbers are pinned
+
+The audit found 52 stale and 29 wrong claims of ~190 checked, and its own
+conclusion was that the split had nothing to do with writing quality: **every
+claim resting on n <= 2 that could be checked came back wrong or stale, and
+every claim pinned by a test came back right, 21 for 21.** So the remaining
+work on this item was to move claims from the first category into the second,
+not to re-read prose more carefully.
+
+Three guards now cover CLAUDE.md's falsifiable content:
+
+| Guard | Pins |
+|---|---|
+| `claude_md_accuracy_test.dart` (existing) | every `lib/` and server PATH it names |
+| `claude_md_schedule_drift_test.dart` (item 13, earlier today) | the cron SCHEDULES, both directions |
+| `claude_md_constants_test.dart` (this change) | the code CONSTANTS it quotes |
+
+Pinned here: `EMPTY_SECTION_ATTEMPTS`, `WINDOW_PROBE_REACHES`, both ends of
+the island COMID band, the island short-range cycle, GEOGLOWS's run-age cap,
+the four run-age caps stated as `16/16/24/36h`, and the island hold and
+run-age caps. **All were already correct when checked**, which makes this
+prevention rather than correction, and that is the point: the claims that
+stayed true are the ones something was checking.
+
+**MY OWN GUARD WAS WRONG BEFORE THE DOCUMENT WAS.** The first version
+reported CLAUDE.md's GEOGLOWS cap as wrong, 42h against 48h. CLAUDE.md was
+right: `hold_policy.dart` lists `geoglowsForecast` in BOTH `maxHold` (48h)
+and `maxRunAge` (42h), and the unscoped pattern matched the first table it
+found. A guard that reads the wrong number is worse than no guard, because it
+teaches you to distrust the document. Claims can now name the declaration
+they belong to, and the reason is written at the field.
+
+**Deliberately not pinned, and said so in the file:** the flood tileset's
+zoom range, retention and tile-size percentages. They describe a Mapbox
+artefact built by a script outside this repo, so there is no source of truth
+on disk and a test would only restate the prose back to itself.
+
+**Break-it review.** Eight mutations, all caught, both directions: the doc's
+number drifting; the code's number drifting; a run-age cap moving under the
+doc; the island band shifting; the island cycle changing; the GEOGLOWS cap
+moving in one table only, which is the case that caught me out; the doc
+dropping a claim entirely; and the island hold cap changing.
+
+**What remains open on item 13, precisely.** The audited claims that are
+prose rather than numbers or paths. They cannot be enumerated from here
+without redoing the audit, and no test can check whether a paragraph still
+describes the system. The stamp rule at the top of CLAUDE.md is what governs
+new ones, and these three guards are what hold the checkable ones. That is
+the end of what this item can be taken to without a fresh audit.
+
+1,518 tests, analyze clean.
+
