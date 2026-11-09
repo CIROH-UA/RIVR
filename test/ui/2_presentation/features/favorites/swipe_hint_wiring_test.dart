@@ -14,9 +14,20 @@
 //                                                   is not rebuilt on a pop
 //   3. completion marks it seen                   → it replays on every visit
 //
-// **Source-level, and therefore weaker than a behavioural test.** No unit
-// test pumps FavoritesPage — it needs the full provider and GetIt graph — so
-// this is a tripwire for deletion, not coverage. Mutation-checked.
+// **Source-level, and therefore weaker than a behavioural test.** This is a
+// tripwire for DELETION, and nothing more. Measured 2026-11-09: wrap either
+// `setState(() => _swipeHintCardIndex = 0)` or
+// `CoachMarkService.completeSwipeHint()` in `if (false)` and this file, plus
+// `swipe_hint_test.dart` and `coach_mark_service_test.dart`, all stay green
+// while the feature is dead — because the string being grepped for is still
+// on the line.
+//
+// The behavioural guard that catches those is
+// `test/integration_test/swipe_hint_plays_test.dart`, which pumps the real
+// page and watches the first card move. It is the one that matters; keep
+// this file for the cheap deletion check and do not treat it as coverage.
+// (The claim here that "no unit test pumps FavoritesPage" was true when it
+// was written and is no longer.)
 //
 // Comments are stripped before matching, because a guard a comment can
 // satisfy is not a guard; this repository learned that twice in one day on
