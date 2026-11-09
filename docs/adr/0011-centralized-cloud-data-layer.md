@@ -210,10 +210,53 @@ the sweep; changing the behaviour would regress freshness.
 8. **GEOGLOWS syncs once daily at 11:30 UTC**, keyed on `forecast_date`, and
     **gated on the date rather than trusted to the hour**.
 
-    The hour is not a guess and must not be re-guessed: `functions_geoglows/
-    main.py` records the daily run publishing at **10:15-10:30 UTC**, measured
-    from S3 Last-Modified on two consecutive days, which is also why the flood
-    builder runs at 11:00.
+    The hour is not a guess: the daily run publishes in the morning UTC,
+    which is also why the flood builder runs at 11:00.
+
+    **CORRECTED 2026-11-09. The published range in this repo was wrong, and
+    it was wrong in eight places.** It said **10:15-10:30 UTC** from S3
+    Last-Modified on **two** consecutive days, with an instruction beside it
+    not to re-derive it. The 2026-11-09 documentation audit flagged it, and
+    re-measuring found the run lands 35-50 minutes EARLIER than documented:
+
+    ⏱ MEASURED 2026-11-09 · n=5 consecutive days ·
+    `curl -I` on `geoglows-v2-forecasts/<YYYYMMDD>00.zarr/.zmetadata`,
+    reading `Last-Modified`:
+
+    | Run date | Consolidated metadata written |
+    |---|---|
+    | 2026-11-05 | 10:00:25 UTC |
+    | 2026-11-06 | 10:08:37 UTC |
+    | 2026-11-07 | 09:39:06 UTC |
+    | 2026-11-08 | 09:39:46 UTC |
+    | 2026-11-09 | 09:40:20 UTC |
+
+    So: **09:39-10:09 UTC, median 09:40.** Method caveat, because it matters
+    for what the number licenses — `.zmetadata` is zarr's CONSOLIDATED
+    metadata and is written last, after the arrays, so this is a fair proxy
+    for "the store is complete and readable" and not merely for "the write
+    started". It does not prove every chunk is readable at that instant, and
+    five November days say nothing about seasonal or operational variation.
+
+    **Nothing is broken by the correction, and no schedule changes.** Both
+    consumers sit after the latest observed publication: the store fetches at
+    11:30 and the flood builder at 11:00. The client constant
+    `GeoglowsDataSource._publishHourUtc/_publishMinuteUtc` (10:30 UTC) is the
+    time the run has *finished* by, so it remains a valid upper bound — with
+    about 21 minutes of margin over the worst sample here, 10:08:37.
+
+    **What it costs, and why the constant is being LEFT ALONE:** a device
+    expires its GEOGLOWS value at 10:30 while the new run has typically been
+    on S3 since ~09:40, so users wait up to ~50 minutes longer than necessary
+    for a forecast that already exists. Lowering the constant would recover
+    that, and it is not worth doing on n=5 when two of those five samples
+    landed after 10:00. Re-measure over a fortnight before moving it; the
+    failure to avoid is expiring BEFORE publication, which puts every device
+    into a retry loop against a run that is not there.
+
+    The real lesson is the one the audit drew in general: this number rested
+    on n=2 and carried an instruction not to re-check it. Every claim in this
+    repo resting on n ≤ 2 that could be checked came back wrong or stale.
 
     It ran at 01:30 until 2026-08-29 on the assumption the 00Z run was out by
     then. It never was — 01:30 on the 28th returned the 27th's run, 01:30 on the

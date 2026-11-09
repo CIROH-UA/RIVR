@@ -53,9 +53,24 @@ Mutations that this repository has actually needed:
 | Replace a widget's effect but keep its layout size | a guard using `tester.getSize`, which is blind to transforms |
 | Flip a threshold by one | a counter guard using two failures against a threshold of three |
 | Swap the real implementation for the test's own fake | two guards found testing a reimplementation, not production |
+| **Narrow the data shape the guard inspects** | a guard that read forecast points from `series` only; medium and long range are ensembles and keep theirs under `mean`/`memberN`, so it would have refused every daily forecast in the app |
 
 **A mutation that does not compile proves nothing.** Make it compile, run it,
 record what happened.
+
+#### Question 1 has a second half: does the feature still WORK?
+
+A test suite made only of "the bug is gone" assertions will pass a fix that
+removes the feature along with the bug. This is not hypothetical — on
+2026-11-09 a change that stops a forecast payload carrying other products'
+sections passed all four of its own defect guards while silently refusing
+every medium- and long-range forecast the app has. What caught it was a
+CONTROL test asserting the opposite direction: that the fallback the change
+touches still returns a populated section when upstream sends one.
+
+So for every guard that says "the bad thing no longer happens", write the one
+that says "the good thing still does", and make sure it would fail if the
+feature were simply deleted. Then mutate THAT one too.
 
 ### 2. Can you reproduce the measurement that justified it?
 
@@ -127,6 +142,16 @@ So it is enforced by habit and by `git-guard`, which asks for it before a
 push. That is weaker than a gate and the weakness is written down here on
 purpose: twenty of the last hundred commits to `development` went in
 directly, and `git-guard` caught none of them.
+
+**One real gate exists as of 2026-11-09, on the only path that reaches a
+user.** Every release is built on one laptop, so `make release-ios` and
+`make release-android` are where a bad artefact would actually escape — and
+they now refuse a dirty tree, a non-`main` branch and missing config, then
+read the finished AAB or IPA back and fail on a wrong map token, a
+`development` push entitlement or a build number that disagrees with
+`pubspec.yaml`. That is enforcement, not habit: it cannot be forgotten,
+because it is in the command you have to run. Branch protection would still
+be better for `development`; this covers the store.
 
 If repository admin is ever granted, the thing worth spending it on is
 **required status checks**, not required pull requests. A branch name would
