@@ -995,5 +995,33 @@ authenticate; delivery was not re-tested end to end. Firebase Auth sends from
 the default Firebase sender, so RIVR's own reset mail was never the part that
 depended on these records.
 
+### Firestore protection state
+
+⏱ MEASURED 2026-11-09. **Delete protection is ENABLED** (enabled that day,
+read back as `DELETE_PROTECTION_ENABLED`). `gcloud firestore databases delete`
+will refuse until someone explicitly clears the flag.
+
+**PITR and scheduled backups are both OFF, and there are zero backups.** So
+the recovery story today is: deletion is blocked, and anything short of
+deletion (a bad bulk write, a wrong migration) is NOT recoverable. Version
+retention is the default 3600s.
+
+Both remaining options bill on stored volume, so they are Jerson's call:
+
+```bash
+gcloud firestore databases update --database="(default)" --enable-pitr \
+  --project=ciroh-rivr-app
+gcloud firestore backups schedules create --database="(default)" \
+  --recurrence=daily --retention=7d --project=ciroh-rivr-app
+```
+
+Check the state with:
+
+```bash
+gcloud firestore databases describe --database="(default)" \
+  --project=ciroh-rivr-app \
+  --format="value(deleteProtectionState,pointInTimeRecoveryEnablement)"
+```
+
 **Release tracking:** When bumping the version or build number in `pubspec.yaml`, add an entry to `app_releases.md` at the project root.
 **Cloud Functions tracking:** When deploying Cloud Functions, add an entry to `notifications_history.md` at the project root.
