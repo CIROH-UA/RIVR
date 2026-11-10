@@ -194,3 +194,56 @@ affected window is 00:00 to 08:00 UTC, so the first real evidence is the
 morning of 2026-11-11: check `storeHealth` and look for
 `store run wrote nothing` in the logs.
 
+
+## 2026-11-10 20:4x UTC — `functions:geoglows` deployed (item 16), then a side effect undone
+
+Deployed at Jerson's explicit approval ("deploy the fix for global rivers
+failing to load"). Pre-flight: `make check-account` passed, and the Python
+venv was confirmed at **3.13**, because a 3.12 venv silently migrates the
+deployed runtime.
+
+**The intended change landed and is verified.** `geoglows-forecast` and
+`geoglows-reach-coords` both read `containerConcurrency: 1`, down from 80,
+captured before and after:
+
+| Service | Before | After |
+|---|---|---|
+| `geoglows-forecast` | 80 | **1** |
+| `geoglows-reach-coords` | 80 | **1** |
+
+**AND THE DEPLOY RESURRECTED FOUR RETIRED FUNCTIONS. I caused this, and
+undid it within minutes.** `functions_geoglows/main.py` still DEFINES the
+retired conditions pipeline, and `firebase deploy` deploys every function in
+a codebase, so deploying two live proxies also created:
+
+| Function | Scheduler job created |
+|---|---|
+| `geoglows_conditions_refresh` | `0 11 * * *`, ENABLED |
+| `geoglows_conditions_publish_global` | `30 11 * * *`, ENABLED |
+| `nwm_conditions_refresh` | `45 0,6,12,18 * * *`, ENABLED |
+| `geoglows_conditions_worker` | none (Pub/Sub consumer of the above) |
+
+This mattered beyond the billing. `geoglows_conditions_refresh` fans out
+across 125 VPUs at 4 GiB each, runs at **11:00 UTC, the same minute as
+`flood-builder-daily`**, and reads the same S3 buckets. So it could have
+slowed or interfered with the pipeline the map actually depends on, roughly
+14 hours later.
+
+**How it was visible:** the deploy log said "Successful **create** operation"
+for those four and "update" for everything else. That one word is the only
+signal, and it is easy to read past.
+
+Deleted all four; verified `us-west1` now lists only `flood-builder-daily`,
+and the live functions (`geoglows_forecast`, `geoglows_reach_coords`,
+`geoglows_stream_conditions`, `geoglows_conditions_latest`) are all ACTIVE.
+
+**Prevention, since the source still defines them:** `make deploy-geoglows`
+now prunes those four after every deploy and then FAILS if any conditions
+scheduler job survived in `us-west1`. Tested against the already-clean state.
+The real fix is deleting the dead code, which is proposed separately because
+it shares helpers with live code and is not a clean cut.
+
+**Still unproven:** that one request per instance ends the out-of-memory
+kills. There were three, all on 2026-11-03, so absence of new ones is weak
+evidence for a while. The sibling function has run this way for months.
+

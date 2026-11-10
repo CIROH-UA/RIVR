@@ -343,5 +343,48 @@ deploy-functions: check-account
 	firebase deploy --only functions:default
 
 # The Python codebase: the GEOGLOWS proxies.
+#
+# THE PRUNE STEP IS NOT OPTIONAL, and it is here because this bit me on
+# 2026-11-10. functions_geoglows/main.py still DEFINES the four retired
+# conditions functions, and `firebase deploy` deploys every function in a
+# codebase. So a routine deploy of the two live proxies silently CREATED
+# them again, along with three ENABLED Cloud Scheduler jobs:
+#
+#   geoglows_conditions_refresh         0 11 * * *          fans out to 125
+#                                                           VPUs at 4 GiB each
+#   geoglows_conditions_publish_global  30 11 * * *
+#   nwm_conditions_refresh              45 0,6,12,18 * * *
+#
+# The first one collides with flood-builder-daily at 11:00 UTC and reads the
+# same S3 buckets, so beyond the cost it could interfere with the pipeline the
+# map actually depends on. The deploy log is the only place this shows up, as
+# "Successful CREATE operation" rather than "update", which is easy to miss.
+#
+# Pruning after the deploy makes "retired" mean something. `|| true` because
+# the delete correctly fails when they are already absent, which is the
+# normal case.
+#
+# If the conditions pipeline is ever revived deliberately, delete this step
+# rather than working around it.
+RETIRED_CONDITIONS := geoglows_conditions_refresh \
+                      geoglows_conditions_worker \
+                      geoglows_conditions_publish_global \
+                      nwm_conditions_refresh
+
 deploy-geoglows: check-account
 	firebase deploy --only functions:geoglows
+	@echo "pruning the retired conditions functions (see the Makefile note)."
+	@echo "An \"Error: filters do not match any existing functions\" below is the"
+	@echo "HEALTHY outcome: it means the deploy did not recreate them."
+	@firebase functions:delete $(RETIRED_CONDITIONS) --region us-west1 --force \
+		2>/dev/null || true
+	@echo "checking no conditions scheduler job survived..."
+	@jobs=$$(gcloud scheduler jobs list --location=us-west1 \
+		--format="value(name)" 2>/dev/null | grep -c conditions || true); \
+	if [ "$$jobs" != "0" ]; then \
+		echo "FAIL: $$jobs conditions scheduler job(s) still enabled in us-west1."; \
+		echo "They cost money and one collides with flood-builder-daily."; \
+		exit 1; \
+	fi; \
+	echo "ok: no retired conditions jobs are scheduled"
+
