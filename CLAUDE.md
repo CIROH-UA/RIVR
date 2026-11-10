@@ -1032,12 +1032,56 @@ make deploy-geoglows    # Python: the GEOGLOWS proxies
 top level. That changes the account Oqupa uses. Run `direnv allow` here, or
 prefix one command with `CLOUDSDK_ACTIVE_CONFIG_NAME=rivr`.
 
-⚠️ **Noticed and deliberately NOT changed, because it is Oqupa's to decide:**
-the active `default` configuration pairs `admin@oqupa.com` with the project
-`ciroh-rivr-app`. So a gcloud command run from an Oqupa directory without
-`--project` targets RIVR's project. The correctly-paired `oqupa` configuration
-exists but is not active. Fixing that means either activating `oqupa` or
-giving that repo its own `.envrc`.
+**Oqupa never reaches RIVR's project** (sorted 2026-11-10 at Jerson's
+request). Oqupa legitimately uses several of its own projects and switches
+between them freely; the rule is only that RIVR's must not be one of them.
+
+The active `default` configuration had `project = ciroh-rivr-app`, so any
+command from an Oqupa directory without `--project` hit RIVR. It is now
+`oqupa-production`. Jerson changes that as he moves between Oqupa projects,
+which is fine; what matters is that RIVR's is not the value sitting there.
+Set by editing `~/.config/gcloud/configurations/config_default` directly
+(backed up first), because `gcloud config set` refuses non-interactively
+while that account needs reauthentication.
+
+**The real guarantee is IAM, not local config.** `admin@oqupa.com` has NO
+binding on `ciroh-rivr-app`, checked 2026-11-10 with
+`gcloud projects get-iam-policy`. A wrong default can only produce a
+permission error, never a wrong write. Local config decides which commands
+fail; IAM decides which can do damage.
+
+### Application Default Credentials are RIVR's, and that is a real trade
+
+⚠️ **DISPROVEN ADVICE, recorded so it is not repeated.** On 2026-11-10 I
+wrote that `gcloud auth application-default set-quota-project oqupa-production`
+was a harmless one-command cleanup. **It is neither harmless nor correct.**
+
+ADC is a SINGLE GLOBAL SLOT: one credential and one quota project for the
+whole machine, with no per-directory equivalent. It currently holds
+`jersondevs@gmail.com` with `quota_project_id = ciroh-rivr-app`, so it is
+entirely RIVR's. And `jersondevs@gmail.com` has no permission on
+`oqupa-production` (verified: `gcloud projects describe` is denied), so
+pointing the quota project there would aim RIVR's identity at a project it
+cannot use and break ADC for both sides.
+
+What this actually means, which is milder than it sounds: an Oqupa script
+using ADC authenticates as `jersondevs@gmail.com`, has no access, and fails
+with a permission error. Oqupa is not consuming anything of RIVR's; it simply
+cannot use that slot. The warning gcloud prints about the active project not
+matching the ADC quota project is cosmetic.
+
+Two real options, and it is Jerson's call because both sides are his:
+
+1. **Leave it as RIVR's.** Needs nothing. Oqupa scripts that want ADC fail on
+   credentials. This is the current state and the recommendation unless an
+   Oqupa script is actually blocked.
+2. **Give it to Oqupa** with `gcloud auth application-default login` as
+   `admin@oqupa.com`. Oqupa scripts then work and RIVR's local scripts need
+   the same treatment when working here.
+
+RIVR's `.envrc` exports `GOOGLE_CLOUD_QUOTA_PROJECT=ciroh-rivr-app` either
+way, so the quota half is already pinned for RIVR regardless of which option
+is taken.
 
 ### Firestore protection state
 
