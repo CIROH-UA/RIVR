@@ -1113,3 +1113,47 @@ gcloud command run from an Oqupa directory without `--project` targets RIVR's
 project. The correctly-paired `oqupa` configuration exists but is not active.
 That is Oqupa's to decide, so it is recorded in CLAUDE.md rather than fixed.
 
+## Regression I introduced: a fixture that aged out overnight
+
+**CI went red on three consecutive pushes and I had reported it green.**
+Jerson saw it before I did, from the GitHub notification emails.
+
+**What broke.** `entry_unit_matches_payload_test.dart` D2b, which I rewrote
+during item 3, asserts that an unreadable series does NOT raise the sync
+banner. Its fixture hard-coded `referenceTime: '2026-11-09T12:00:00Z'`. That
+was fresh on the day it was written. By the next evening it was about 33
+hours old, past `currentFlow`'s 16-hour run-age cap, so the repository
+correctly judged the entry too old, raised `outOfSync`, and the assertion
+failed. The code was right and the test had an expiry date nobody wrote down.
+
+**This is backlog item 9's defect class, and I introduced a fresh instance of
+it while fixing item 3.** Item 9 was a wall-clock assertion in the repository
+tests; this is a wall-clock FIXTURE. Same root shape: a test that encodes
+"now" as a constant.
+
+**Fixed** with `freshRunId()`, a run identity an hour before whenever the
+test runs, and the history written at the helper so the next person does not
+re-flatten it.
+
+**Checked for others rather than assuming it was the only one.** Eleven test
+files assert on `outOfSync`. Two inject a clock and are deterministic. The
+rest either use a fake repository whose `outOfSync` is a plain notifier
+(`reach_data_provider_test`, the widget tests, `store_subscription_service_test`),
+or carry no run identity at all (`return_period_failure_test`, because
+`returnPeriods` has no run-age cap by design). `store_subscription_service_test`
+has five date literals but they never reach the freshness judgement. So this
+was the only live bomb.
+
+**Break-it review.** Two mutations, both caught, confirming the repaired test
+still guards what it was written for: giving an empty answer its full publish
+window again, and ignoring the unit stamp, which is item 4's original defect.
+
+**The process lesson, which is the valuable part.** The suite was green
+locally all evening and went red in CI about nine hours later, because the
+two runs happened on different sides of a 16-hour threshold. Local green is
+not evidence a time-dependent test is sound. Prefer a relative fixture, or an
+injected clock, and never a date literal in anything that reaches
+`heldTooLong` or `runTooOld`.
+
+1,522 tests, analyze clean.
+

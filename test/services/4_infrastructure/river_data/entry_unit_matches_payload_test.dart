@@ -69,6 +69,25 @@ const _currentFlowKey = RiverDataKey(
   product: ForecastProduct.currentFlow,
 );
 
+/// A run identity that is always FRESH, relative to now.
+///
+/// It was the literal `2026-11-09T12:00:00Z`. That was fine on the day it was
+/// written and became a time bomb the next morning: `currentFlow`'s run-age
+/// cap is 16 hours, so once real time moved past that the repository
+/// correctly judged the entry too old, raised `outOfSync`, and D2b's
+/// assertion that the banner stays quiet started failing. CI caught it about
+/// nine hours after it was written and the suite had been green locally all
+/// evening.
+///
+/// This is the same defect class as backlog item 9, which was a wall-clock
+/// assertion in the repository tests, and I introduced a fresh one while
+/// fixing item 3. A fixture that encodes "now" as a constant has an expiry
+/// date nobody writes down.
+String freshRunId() => DateTime.now()
+    .toUtc()
+    .subtract(const Duration(hours: 1))
+    .toIso8601String();
+
 String body({List<Map<String, dynamic>>? points, String units = 'ft³/s'}) =>
     jsonEncode({
       'reach': {
@@ -80,7 +99,7 @@ String body({List<Map<String, dynamic>>? points, String units = 'ft³/s'}) =>
       },
       'shortRange': {
         'series': {
-          'referenceTime': '2026-11-09T12:00:00Z',
+          'referenceTime': freshRunId(),
           'units': units,
           'data': points ??
               [
