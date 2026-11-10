@@ -155,3 +155,42 @@ Deployed by: jersondevs@gmail.com. `firebase deploy --only functions:geoglows:ge
 | 2026-08-30 | f2ea0cc, 5d97edd | store-upstream.ts, store-window.ts, store-firestore.ts, store-service.ts, store-gc.ts, store-keys.ts, notification-service.ts, stale-token-cleanup.test.ts | **Two more deploys (18:20 and 18:30 UTC), both `functions:default`, no functions added or removed — 7 store functions counted with `firebase functions:list`, `storeHealth` 200 healthy, zero store ERRORs after.** (1) **Seven findings from the Phase 9 independent review**, which PASSED all seven of the phase's claims and found only missing guards. Notification-relevant: `stale-token-cleanup.test.ts`'s APNs assertions matched raw source including comments, while its twin was hardened for exactly that reason the same day — now strips comments, and mutation-checked by satisfying the guard from a comment alone. Also: the island hold-cap wiring was untested on the SERVER (two mutations passed 446/446 — the sampler dropping `reachId` and the planner ignoring it), so the Firestore mapping was extracted to the pure `windowSampleFrom`; the client's `heldTooLong`/`runTooOld` wiring was unpinned the same way; and `canFetch` now takes a `reachId`, because **Hawaii and Puerto Rico have no medium or long range at all** and the first island favourite would otherwise have put two products per reach into permanent per-cycle fetch failure. (2) **`storeGcDaily` could never have collected the 31 documents left by the `currentFlow` rename** — a claim this file and the ADR both made and neither had checked. Running the real `selectGarbage` against production with `now` pushed 8 days forward returned `would delete: 18, retained: {still-followed: 167, unparseable-id: 31}` — zero of the renamed ones. Two independent rules each kept them: the rename made their product unknown so `parseStorageKey` returned null (retained as unparseable, by the deliberate rule that an unreadable id is never garbage), and their reaches are all still favourited. The GC now distinguishes a RETIRED product from a MALFORMED key — a well-formed id naming a product this codebase no longer has can only be something we used to write, so being followed is irrelevant, while a genuinely foreign id is still kept and the 7-day grace still applies. **Re-verified against production after the fix: 31 of 31 swept, `assertGcSane` passes at 23% of the collection, 167 live documents retained.** Deployed under jersondevs@gmail.com. |
 | 2026-09-22 | (pending deploy) | guest-gc.ts (new), index.ts | **`guestGcDaily` — a new scheduled function, NOT yet deployed.** ADR 0014 made the app open as a guest (anonymous Firebase user). An abandoned guest document keeps its favourited reaches in the store's hourly refresh cycle forever and, if alerts were turned on, keeps pushing to a phone nobody reads — so the lifecycle is owned here rather than by Firebase's anonymous auto-delete, which deletes the Auth user and LEAVES the document (exactly the wrong half, and deliberately left off). Runs 04:10 America/Denver: lists every Auth user, pairs them with `users/{uid}`, and deletes those with no sign-in provider whose newest sign of life (`lastActiveAt`, `lastLoginDate`, Auth creation time) is over 90 days old. The document is deleted BEFORE the Auth user, so a crash between the two leaves an inert identity rather than an orphaned document that still holds favourites. Three refusals, each pinned by a test: a user with ANY provider is never a candidate; a run that would delete more than 50% of anonymous users is refused (the clock-skew and date-parse failure shape); and an absolute cap of 500 per run bounds the blast radius on a day when the fraction is legitimately high. A refused run logs at ERROR and returns — it does not throw, because retrying the same inputs would only refuse again. 14 new tests, 468 total. **Deploy with `firebase deploy --only functions:default` under jersondevs@gmail.com when the app build ships; verify by COUNT (`firebase functions:list`), not by the deploy's exit status.** |
 | 2026-09-25 | fb5c556 | guest-gc.ts, index.ts | **`guestGcDaily` DEPLOYED.** Previously written and tested but never shipped — nothing reaped abandoned guests, and guests now exist in production (ADR 0014, from build 832). **Verified by COUNT, not by the deploy's exit status:** 19 functions before, 20 after, exactly one added (`guestGcDaily`) and **zero removed**; Cloud Scheduler shows `firebase-schedule-guestGcDaily-us-central1` at `10 4 * * *` ENABLED. Runs 04:10 America/Denver: lists every Auth user, pairs them with `users/{uid}`, and deletes those with no sign-in provider whose newest sign of life (`lastActiveAt`, `lastLoginDate`, Auth creation time) is over 90 days old — document first, then Auth user, so a crash between the two leaves an inert identity rather than an orphan still holding favourites. Three refusals, each pinned by a test: a user with ANY provider is never a candidate; more than 50% of anonymous users is refused (the clock-skew / date-parse failure shape); and an absolute cap of 500 per run. A refused run logs at ERROR and returns rather than throwing, since retrying the same inputs would only refuse again. **It has real work waiting**: the guest→account sign-in path deliberately leaves the guest Auth user and document behind, because every attempt to tidy them inline destroyed user data (832 emptied a guest's favourites, 843 deleted a real account). Nothing will be deleted for 90 days, so the first live deletions are not expected before late December 2026 — watch the run log then. Deployed under jersondevs@gmail.com. 468 functions tests. |
+
+## 2026-11-10 20:24 UTC — `functions:default` deployed (14 functions updated)
+
+Deployed by Claude at Jerson's explicit request ("I accept the deploy"),
+while he was travelling and unable to run it. Account verified first via
+`make check-account`: `jersondevs@gmail.com` on `ciroh-rivr-app` for both
+the Firebase CLI and gcloud.
+
+**What this ships:** backlog item 6, the fix for `mediumRange` going stale
+overnight. `decideTriggers` now attempts a product whose stored run is past
+half its run-age cap even when the probe drew a blank, provided upstream
+ANSWERED (a 200 with an empty section is a lost lottery; a timeout or 5xx is
+an outage and is still left alone). Plus the `probeRunsFromDocument`
+extraction that made the probe-document mapping testable.
+
+**The first attempt FAILED and shipped nothing.** The Firebase CLI checks a
+project's billing before deploying scheduled functions, and
+`cloudbilling.googleapis.com` had never been enabled on this project. The
+deploy aborted after packaging, before uploading. Enabled the API
+(free, read-only, reversible; `roles/editor` is enough) and retried.
+
+**Verified after, not assumed:**
+
+| Check | Result |
+|---|---|
+| `storeRefreshHourly` updateTime | `2026-11-10T20:24:53Z`, i.e. this deploy |
+| `storeHealth` `status` field | `healthy`, no problems listed |
+| functions updated | 14, all reporting successful update |
+
+`healthCheck` could not be read back: it now requires an admin API key. Its
+corrected `:05` schedule string is pinned by
+`health-schedule-drift.test.ts` instead, which is the stronger guard anyway.
+
+**STILL UNPROVEN, and this is the point of item 6.** That this actually ends
+the overnight staleness is reasoned from the mechanism, not observed. The
+affected window is 00:00 to 08:00 UTC, so the first real evidence is the
+morning of 2026-11-11: check `storeHealth` and look for
+`store run wrote nothing` in the logs.
+
