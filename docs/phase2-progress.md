@@ -1067,3 +1067,49 @@ this repo already has for its pipelines (five operations have exited 0 while
 producing wrong or partial data). The `update` command's own output was not
 trusted; the state was re-read with `describe` and confirmed changed.
 
+## Follow-up (2026-11-10) — each project gets its own cloud identity
+
+Not a backlog item. Jerson asked for RIVR to use `jersondevs@gmail.com`
+without disturbing the Oqupa work he does constantly under
+`admin@oqupa.com`.
+
+**The Firebase half needed nothing, and I had misread it.** The Firebase CLI
+already stores the account PER PROJECT DIRECTORY, keyed by path in its
+configstore, and this directory was already mapped to `jersondevs@gmail.com`.
+Proven by running `firebase login:list` from three places: RIVR answers
+`jersondevs@gmail.com`, home and `Oqupa-Platform` both answer
+`admin@oqupa.com`. Earlier in this session I reported the account as wrong
+based on `gcloud config get-value account`, which is a different tool; the
+Firebase side was never wrong.
+
+**The gcloud half was the real gap.** gcloud has no per-directory concept. It
+does have named configurations, and `CLOUDSDK_ACTIVE_CONFIG_NAME` selects one
+for the current shell. direnv was already installed and hooked into zsh, so:
+
+* created a `rivr` configuration with `--no-activate`, holding
+  `jersondevs@gmail.com` + `ciroh-rivr-app`. The `--no-activate` matters:
+  without it, creating a configuration switches to it, which is exactly the
+  disturbance to avoid.
+* added `.envrc` exporting `CLOUDSDK_ACTIVE_CONFIG_NAME=rivr`.
+
+**Verified in both directions**, which is the only thing that makes this
+trustworthy: inside RIVR both tools resolve to `jersondevs@gmail.com`; in
+`Oqupa-Platform` and in home both resolve to `admin@oqupa.com`; and the
+globally active gcloud configuration is still `default`.
+
+**And a guard, because the mechanism is invisible when it fails.** If direnv
+has not been allowed, or a shell never entered this directory, gcloud quietly
+falls back to `admin@oqupa.com` and a deploy under the wrong account is not
+something you notice afterwards. `make check-account` verifies both tools and
+refuses otherwise; `make deploy-functions` and `make deploy-geoglows` depend
+on it, so the safe path is now the easy one. Tested both ways: it passes with
+the configuration active and fails with it unset, naming the fix and
+explicitly warning against `gcloud config set account`, which would change
+what Oqupa uses.
+
+**Found and deliberately NOT changed:** the active `default` gcloud
+configuration pairs `admin@oqupa.com` with the project `ciroh-rivr-app`. So a
+gcloud command run from an Oqupa directory without `--project` targets RIVR's
+project. The correctly-paired `oqupa` configuration exists but is not active.
+That is Oqupa's to decide, so it is recorded in CLAUDE.md rather than fixed.
+

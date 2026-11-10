@@ -995,6 +995,50 @@ authenticate; delivery was not re-tested end to end. Firebase Auth sends from
 the default Firebase sender, so RIVR's own reset mail was never the part that
 depended on these records.
 
+### Each project has its own cloud identity (set up 2026-11-10)
+
+**RIVR's Firebase and GCP account is `jersondevs@gmail.com`. Oqupa's is
+`admin@oqupa.com`. Both are live at once and neither switches the other.**
+Jerson works on Oqupa constantly, so "just switch the account" was never an
+option, and getting it wrong is the kind of mistake you only notice after a
+deploy.
+
+| Tool | How it isolates |
+|---|---|
+| Firebase CLI | **Already per-directory**, nothing was configured. It keys `activeAccounts` by project path in its configstore. Verified: `firebase login:list` answers `jersondevs@gmail.com` in this directory and `admin@oqupa.com` from home and from `Oqupa-Platform`. |
+| gcloud | No per-directory concept, so it uses a named **configuration** plus direnv. `.envrc` here exports `CLOUDSDK_ACTIVE_CONFIG_NAME=rivr`, which applies to the current shell only. |
+
+Three gcloud configurations now exist. **`rivr` was created with
+`--no-activate`, so the active configuration is still `default` and Oqupa
+work was not touched:**
+
+| Config | Account | Project |
+|---|---|---|
+| `default` (active) | `admin@oqupa.com` | `ciroh-rivr-app` |
+| `oqupa` | `admin@oqupa.com` | `oqupa-production` |
+| `rivr` | `jersondevs@gmail.com` | `ciroh-rivr-app` |
+
+**Deploy through make, not firebase directly**, because the mechanism is
+invisible when it fails. If direnv has not been allowed, or the shell never
+entered this directory, gcloud quietly falls back to `admin@oqupa.com`.
+
+```bash
+make check-account      # fails loudly, naming the fix, if either tool is wrong
+make deploy-functions   # TypeScript: store refresh, alerting, notifications
+make deploy-geoglows    # Python: the GEOGLOWS proxies
+```
+
+**If the check fails, never fix it with `gcloud config set account`** at the
+top level. That changes the account Oqupa uses. Run `direnv allow` here, or
+prefix one command with `CLOUDSDK_ACTIVE_CONFIG_NAME=rivr`.
+
+⚠️ **Noticed and deliberately NOT changed, because it is Oqupa's to decide:**
+the active `default` configuration pairs `admin@oqupa.com` with the project
+`ciroh-rivr-app`. So a gcloud command run from an Oqupa directory without
+`--project` targets RIVR's project. The correctly-paired `oqupa` configuration
+exists but is not active. Fixing that means either activating `oqupa` or
+giving that repo its own `.envrc`.
+
 ### Firestore protection state
 
 ⏱ MEASURED 2026-11-09. **Delete protection is ENABLED** (enabled that day,
