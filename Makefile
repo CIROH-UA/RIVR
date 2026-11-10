@@ -37,7 +37,8 @@
 DEBUG_INFO_DIR := build/debug-info
 
 .PHONY: version release-android release-ios upload-symbols analyze test clean \
-        preflight verify-aab verify-ipa
+        preflight verify-aab verify-ipa check-account deploy-functions \
+        deploy-geoglows
 
 # Release guards — every one of these is a failure that already happened
 # ---------------------------------------------------------------------------
@@ -101,7 +102,7 @@ preflight:
 		echo "    make $(MAKECMDGOALS) ALLOW_BRANCH=1"; exit 1; \
 	fi; \
 	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
-		echo "refusing to build from a dirty tree — the artefact would not"; \
+		echo "refusing to build from a dirty tree. The artefact would not"; \
 		echo "correspond to any commit, so a crash report could not be"; \
 		echo "traced back to source. commit or stash first:"; \
 		git status --short --untracked-files=no; exit 1; \
@@ -112,11 +113,11 @@ preflight:
 	if [ -n "$$MISSING" ]; then \
 		echo "missing gitignored config, the app cannot build correctly:"; \
 		for f in $$MISSING; do echo "    $$f"; done; \
-		echo "a merge into main deletes these from disk — restore them from"; \
+		echo "a merge into main deletes these from disk. Restore them from"; \
 		echo "git history or the templates before releasing."; exit 1; \
 	fi
 	@if ! grep -q '^mapbox.token=pk\.' android/local.properties 2>/dev/null; then \
-		echo "android/local.properties has no 'mapbox.token=pk....' — this is"; \
+		echo "android/local.properties has no 'mapbox.token=pk....'. This is"; \
 		echo "how AAB 800 shipped to Play with a map that never loaded."; exit 1; \
 	fi
 	@if ! grep -q '^MAPBOX_ACCESS_TOKEN *= *pk\.' ios/Flutter/Secrets.xcconfig 2>/dev/null; then \
@@ -129,7 +130,7 @@ preflight:
 
 # Read the AAB back. Never trust the build's exit status.
 verify-aab:
-	@test -f "$(AAB)" || { echo "no bundle at $(AAB) — build it first."; exit 1; }
+	@test -f "$(AAB)" || { echo "no bundle at $(AAB). Build it first."; exit 1; }
 	@command -v bundletool >/dev/null || { \
 		echo "bundletool not installed, so the bundle cannot be read back."; \
 		echo "this is the only check that caught the AAB 800 defect:"; \
@@ -155,7 +156,7 @@ verify-aab:
 # Read the IPA back — the IPA, not the archive. `flutter build ipa` re-signs
 # on export, so the archive's entitlements describe a different artefact.
 verify-ipa:
-	@test -f "$(IPA)" || { echo "no IPA at $(IPA) — build it first."; exit 1; }
+	@test -f "$(IPA)" || { echo "no IPA at $(IPA). Build it first."; exit 1; }
 	@WORK=$$(mktemp -d); trap 'rm -rf "$$WORK"' EXIT; \
 	unzip -q "$(IPA)" -d "$$WORK" || { echo "FAIL: $(IPA) is not readable as a zip."; exit 1; }; \
 	APP=$$(ls -d "$$WORK"/Payload/*.app 2>/dev/null | head -1); \
@@ -212,11 +213,11 @@ MINOR ?= 0
 version:
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
 	if [ "$$BRANCH" != "main" ]; then \
-		echo "refusing to stamp from '$$BRANCH' — commit counts are branch-specific."; \
+		echo "refusing to stamp from '$$BRANCH'. Commit counts are branch-specific."; \
 		echo "run this on main, after merging development."; exit 1; \
 	fi; \
 	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
-		echo "refusing to stamp a dirty tree — commit or stash first."; exit 1; \
+		echo "refusing to stamp a dirty tree. Commit or stash first."; exit 1; \
 	fi; \
 	BUILD=$$(( $$(git rev-list --count HEAD) + 1 )); \
 	NEW_VER="$(YEAR).$(MAJOR).$(MINOR)"; \
@@ -230,7 +231,7 @@ version:
 	LOWEST=$$(printf '%s\n%s\n' "$$OLD_VER" "$$NEW_VER" | sort -t. -k1,1n -k2,2n -k3,3n | head -1); \
 	if [ "$$NEW_VER" != "$$OLD_VER" ] && [ "$$LOWEST" = "$$NEW_VER" ]; then \
 		echo "refusing to go backwards: $$OLD -> $$NEW"; \
-		echo "MAJOR and MINOR both default to 0 — pass both, e.g. make version MAJOR=1 MINOR=1"; \
+		echo "MAJOR and MINOR both default to 0. Pass both, e.g. make version MAJOR=1 MINOR=1"; \
 		exit 1; \
 	fi; \
 	sed -i '' "s/^version: .*/version: $$NEW/" pubspec.yaml; \
@@ -274,13 +275,73 @@ GSP            := ios/Runner/GoogleService-Info.plist
 upload-symbols:
 	@if [ ! -x "$(UPLOAD_SYMBOLS)" ]; then \
 		echo "upload-symbols not found at $(UPLOAD_SYMBOLS)"; \
-		echo "it is created by an iOS build — run 'make release-ios' first."; exit 1; \
+		echo "it is created by an iOS build. Run 'make release-ios' first."; exit 1; \
 	fi
 	@if [ ! -d "$(DSYMS_DIR)" ]; then \
-		echo "no dSYMs at $(DSYMS_DIR) — run 'make release-ios' first."; exit 1; \
+		echo "no dSYMs at $(DSYMS_DIR). Run 'make release-ios' first."; exit 1; \
 	fi
 	@if [ ! -f "$(GSP)" ]; then \
-		echo "missing $(GSP) — it is gitignored; restore it before releasing."; exit 1; \
+		echo "missing $(GSP). It is gitignored; restore it before releasing."; exit 1; \
 	fi
 	@echo "uploading $$(ls $(DSYMS_DIR) | wc -l | tr -d ' ') dSYMs to Crashlytics..."
 	@$(UPLOAD_SYMBOLS) -gsp $(GSP) -p ios $(DSYMS_DIR)
+
+# Cloud identity, and the deploys that depend on it
+# ---------------------------------------------------------------------------
+# RIVR's Firebase and GCP account is jersondevs@gmail.com. Jerson works on
+# Oqupa constantly under admin@oqupa.com, so the global accounts cannot just
+# be switched; each project needs its own.
+#
+# How it works now:
+#
+#   Firebase CLI  already per-directory. It stores `activeAccounts` keyed by
+#                 project path, and this directory maps to jersondevs@gmail.com.
+#                 Nothing to configure.
+#
+#   gcloud        has no per-directory concept, but it has named
+#                 configurations, and CLOUDSDK_ACTIVE_CONFIG_NAME picks one for
+#                 the current shell. `.envrc` exports it and direnv applies it
+#                 on entering this directory only. The `rivr` configuration
+#                 holds jersondevs@gmail.com + ciroh-rivr-app; `default` and
+#                 `oqupa` are untouched.
+#
+# This target exists because the mechanism is invisible when it fails. If
+# direnv has not been allowed, or someone runs a deploy from a shell that
+# never entered this directory, gcloud silently falls back to
+# admin@oqupa.com. A deploy under the wrong account is not something you
+# notice afterwards.
+RIVR_ACCOUNT := jersondevs@gmail.com
+RIVR_PROJECT := ciroh-rivr-app
+
+check-account:
+	@fb=$$(firebase login:list 2>/dev/null | head -1 | sed 's/.*as //'); \
+	if [ "$$fb" != "$(RIVR_ACCOUNT)" ]; then \
+		echo "Firebase CLI resolves to '$$fb', expected $(RIVR_ACCOUNT)."; \
+		echo "Fix with:  firebase login:use $(RIVR_ACCOUNT)"; \
+		echo "(run it from this directory; the setting is per directory)"; \
+		exit 1; \
+	fi; \
+	gc=$$(gcloud config get account 2>/dev/null); \
+	if [ "$$gc" != "$(RIVR_ACCOUNT)" ]; then \
+		echo "gcloud resolves to '$$gc', expected $(RIVR_ACCOUNT)."; \
+		echo "This shell is not using the 'rivr' configuration. Either:"; \
+		echo "    direnv allow            # once, in this directory"; \
+		echo "  or, for one command:"; \
+		echo "    CLOUDSDK_ACTIVE_CONFIG_NAME=rivr make $(MAKECMDGOALS)"; \
+		echo "Do NOT fix this with 'gcloud config set account'. That would"; \
+		echo "change the account Oqupa work uses."; \
+		exit 1; \
+	fi; \
+	gp=$$(gcloud config get project 2>/dev/null); \
+	if [ "$$gp" != "$(RIVR_PROJECT)" ]; then \
+		echo "gcloud project is '$$gp', expected $(RIVR_PROJECT)."; exit 1; \
+	fi; \
+	echo "account ok: $(RIVR_ACCOUNT) on $(RIVR_PROJECT) (firebase + gcloud)"
+
+# The TypeScript codebase: the store refresh, alerting and notifications.
+deploy-functions: check-account
+	firebase deploy --only functions:default
+
+# The Python codebase: the GEOGLOWS proxies.
+deploy-geoglows: check-account
+	firebase deploy --only functions:geoglows
