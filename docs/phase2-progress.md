@@ -1157,3 +1157,33 @@ injected clock, and never a date literal in anything that reaches
 
 1,522 tests, analyze clean.
 
+## Item 6 — first night after the deploy, and why it is NOT proof
+
+⏱ MEASURED 2026-11-11, the full 00:00 to 08:00 UTC window, read from
+production logs and `storeHealth` as `jersondevs@gmail.com`.
+
+| Signal | Result |
+|---|---|
+| hourly runs that fired | **8 of 8**, every hour at :05, so the window is fully covered and the queries reach real data |
+| `storeHealth` | `healthy`, `problems: []` |
+| runs that wrote nothing (item 7's leading indicator) | **none** |
+| the new blind-retry (`attempting anyway`) | **never fired** |
+
+**The window that used to go stale did not.** That is the result, and it is
+consistent with the fix working.
+
+**It is equally consistent with NOAA simply serving medium range normally all
+night, and I cannot tell those apart from one night.** The rescue firing zero
+times is exactly what both explanations look like. Recording this plainly
+because the temptation is to read a quiet night as a fixed bug, and that is
+the error this phase has spent its time correcting in other people's work.
+
+**What would actually separate them:** the rescue firing at least once, and
+the run recovering afterwards. That needs a night where upstream really does
+drop the section. The audit's figure was that it happened most nights, so if
+several more nights pass with zero firings, the honest reading shifts toward
+"upstream behaviour changed" rather than "we fixed it", and the fix would
+remain unexercised rather than proven.
+
+**Status: UNPROVEN, with one night of supporting evidence.** Not upgraded.
+
