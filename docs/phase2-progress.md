@@ -1236,3 +1236,39 @@ hourly probe keeps missing.
 because it is his inbox, and no code change is justified until the lottery
 question is settled.
 
+## ADR 0018 updated: the retry budget almost never helps
+
+Measured after Jerson asked whether the four proposals had actually been
+done. Three had not, including this one, which needed no approval and which I
+had proposed and then skipped.
+
+⏱ MEASURED 2026-11-11 · 7 days of production logs · every query
+positive-controlled against a known event before trusting any zero:
+
+| Outcome of the 6-attempt empty-section retry | Count |
+|---|---|
+| section arrived on attempt 2 | 1 |
+| section arrived on attempt 3 | 1 |
+| budget exhausted, all six empty | **59** |
+
+**The retry rescues about 3% of the fetches that use it**, costing six
+requests each time it fails. Exhaustions were `mediumRange` 39, `longRange`
+12, `shortRange` 4, `currentFlow` 4.
+
+**This disproves two things I had written the same day.** My arithmetic that
+six attempts at 35% leaves a ~7% chance of coming away empty assumed the
+attempts were independent; they are not, and the real figure is close to the
+opposite. And the "per-request lottery" framing, asserted from 3 of 14 on one
+reach in the 2026-11-03 work, does not survive: within a burst the section is
+almost always there on the first ask or absent for all six, which looks like
+a window rather than a coin flip.
+
+Both are now in ADR 0018's Disproven section, and the lottery-versus-window
+question stays Unverified with the cheapest settling test, because this
+evidence is indirect.
+
+**No code changed, deliberately.** Shrinking the budget is the obvious move
+and it rests on one week and 61 uses, and the two rescues were real forecast
+panels. What the data does settle is that MORE retrying is not the lever,
+which closes the question the 2026-11-10 deploy left open.
+
