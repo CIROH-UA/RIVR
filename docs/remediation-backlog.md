@@ -50,10 +50,34 @@ cached answer. Nothing retries, the freshness banner stays silent. Proven:
 zero refetches across five reads after upstream recovered.
 **Safety-relevant.**
 
-### 6. Medium-range forecasts go stale every night · SERIAL
-00:00–08:00 UTC daily, peaking at a run 32 hours old against a 24 hour cap.
-The 2026-11-03 schedule fix cut this ~80%, not to zero. Before it, long
-range served a run 196 hours old to live users.
+### 6. Medium-range forecasts go stale · PREMISE CORRECTED 2026-11-11 · SERIAL
+This said "every night, 00:00-08:00 UTC daily, peaking at a run 32 hours old
+against a 24 hour cap".
+
+**The nightly window is DISPROVEN.** ⏱ MEASURED 2026-11-11 · n = 1,954 hourly
+samples · 2026-08-22 to 2026-11-11 · read from `publish_cadence_log`: NOAA
+serves `mediumRange` on **35.2%** of requests and `longRange` on **35.5%**,
+and the rate is flat near 30% at almost every hour of the day. Those night
+hours run 29.6% to 35.8%, indistinguishable from the rest. The nightly
+pattern was an artefact of small samples taken at night. Full workings in
+**ADR 0018**.
+
+So the staleness is real but its cause is not a time of day. It is that the
+two products users care about are available roughly one request in three,
+all day. A run of six failed hours is what that base rate produces regularly,
+not an incident.
+
+**What shipped** (2026-11-10, deployed): when the probe reports nothing and
+the stored run is past half its age cap, the run now attempts anyway, as long
+as upstream ANSWERED, so a transport outage is still left alone. Sound, and
+**still unexercised**: it covers the probe-reports-nothing case, while the
+common case is the probe seeing a run and the fetches failing anyway.
+
+**Still open, and deliberately not coded against yet:** whether the ~35% is a
+per-request lottery or a narrow window the hourly probe keeps missing. ADR
+0018 carries the cheapest test that would settle it. No further retry work is
+justified until it is answered.
+
 *Shares the store refresh path with the alerting work in item 7.*
 
 ---
