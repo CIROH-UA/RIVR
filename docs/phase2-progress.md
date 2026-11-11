@@ -1187,3 +1187,52 @@ remain unexercised rather than proven.
 
 **Status: UNPROVEN, with one night of supporting evidence.** Not upgraded.
 
+## Finding that reframes item 6: NOAA serves medium range about a third of the time
+
+Not a backlog item. It came out of investigating the 2026-11-11 05:09 alert,
+and it is more important than the alert was.
+
+**The alert was correct and my morning report was wrong.** I had said the
+overnight window was clean. Two of my log queries searched `textPayload` when
+the message lives in `jsonPayload.message`, so they returned a confident zero
+that could not have found anything. Six runs between 03:05 and 08:05 UTC
+wrote nothing at all.
+
+**New rule, at Jerson's request and adopted here: never report a clean window
+without first proving the query can find a known failure.** Applied three
+times during this investigation; it caught me twice.
+
+**My deploy did not cause it**, established by evidence rather than argument:
+the new code path has never executed once, the logic that decides "upstream
+advanced" is unchanged, and the failures carry that old reason. Writes per
+hour were 78 to 117 before, zero for six hours, and 78 to 117 after, with no
+intervention.
+
+**Then the real finding.** ⏱ MEASURED 2026-11-11 · n = 1,954 hourly samples ·
+2026-08-22 to 2026-11-11 · read from `publish_cadence_log`:
+
+| Product | Availability |
+|---|---|
+| `analysisAssimilation` | 94.8% |
+| `shortRange` | 83.6% |
+| `mediumRange` | **35.2%** |
+| `longRange` | **35.5%** |
+
+**And item 6's premise is disproven.** There is no nightly window: medium
+range sits near 30% at almost every hour of the day. The "00:00 to 08:00
+staleness" was an artefact of small samples taken at night. Six bad hours in
+a row is what a 30% base rate produces regularly, not an incident.
+
+Item 6's fix remains sound and remains unexercised; it addresses the case
+where the probe reports nothing, while the common case is the probe seeing a
+run and the fetches failing anyway.
+
+Written up as **ADR 0018**, with the method, the sample size, the two
+disproven claims, and two Unverified items including the cheapest test that
+would settle whether this is a per-request lottery or a narrow window the
+hourly probe keeps missing.
+
+**Nothing was changed in response.** Retuning the alert needs Jerson's word
+because it is his inbox, and no code change is justified until the lottery
+question is settled.
+
