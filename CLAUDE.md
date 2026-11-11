@@ -900,9 +900,22 @@ that read the Dart source off disk — a rename on either side fails CI
 audit found this sentence had been false the whole time)
 rather than silently storing documents the app never reads.
 
-**`publish_cadence_log` is the only collection that grows without bound**, and
-since 2026-08-29 it no longer does: a Firestore TTL on `expiresAt` deletes
-samples after 90 days. The field is separate from `sampledAt` on purpose — a
+**`publish_cadence_log` grows without bound again, on purpose, since
+2026-11-11.** The Firestore TTL on `expiresAt` is DISABLED and nothing
+deletes this collection.
+
+It had a 90-day TTL from 2026-08-29, because it was the one unbounded thing
+in the database. That was reversed when the collection turned out to be the
+only record of how NOAA actually behaves: ADR 0018 measures medium and long
+range at ~35% availability over 1,954 samples, and the TTL was going to
+delete the earliest evidence for that on 2026-11-20, nine days after the ADR
+was written. Jerson's call.
+
+The size argument lost rather than being ignored: a sample is ~2 KB and the
+probe writes one an hour, so a decade is on the order of 200 MB.
+`PROBE_RETENTION_MS` still stamps `expiresAt`, now ten years out rather than
+ninety days, so re-enabling the policy cannot silently destroy the history.
+A CSV export also lives at `docs/data/` as a second copy. The field is separate from `sampledAt` on purpose — a
 TTL fires once its field is in the PAST, so pointing one at `sampledAt` would
 delete every sample the moment it was written. `river_data` never needed this;
 it is overwritten in place and swept by `storeGcDaily`.

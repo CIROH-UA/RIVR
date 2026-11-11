@@ -1272,3 +1272,41 @@ and it rests on one week and 61 uses, and the two rescues were real forecast
 panels. What the data does settle is that MORE retrying is not the lever,
 which closes the question the 2026-11-10 deploy left open.
 
+## The probe history is no longer deleted (Jerson's call, 2026-11-11)
+
+**Done: the Firestore TTL on `publish_cadence_log.expiresAt` is DISABLED**,
+verified by reading the field config back (no ACTIVE TTL remains). Nothing
+deletes that collection now.
+
+**Why it mattered this week.** The collection is the only record of how NOAA
+actually behaves. ADR 0018 measures medium and long range at ~35%
+availability over 1,954 samples, and the 90-day policy was going to delete
+the earliest evidence for that on **2026-11-20**, nine days after the ADR
+was written and days after Jerson planned to send the figure to Dr. Ames.
+
+**The original concern lost on the numbers rather than being ignored.** The
+TTL was added 2026-08-29 because this was the one unbounded collection. A
+sample is ~2 KB and the probe writes one an hour, so a decade is on the
+order of 200 MB even after the reach list grows.
+
+**Code made consistent with the decision.** `PROBE_RETENTION_MS` goes from 90
+days to ten years, so that re-enabling the policy later cannot silently
+destroy history the way it was about to. The field is still stamped, so the
+policy remains usable deliberately.
+
+**A pinned test had to change, and the replacement is better.** It asserted
+`PROBE_RETENTION_MS === 90 days` exactly. That pin is gone; what remains is
+the floor it was really protecting (Phase 0 guard 1 needs seven consecutive
+days) plus a new guard that retention stays at least a year, so nobody
+re-enables the TTL on a value that eats a season.
+
+**Break-it review.** Three mutations, all caught: retention dropping back to
+90 days; dropping below the seven-day floor; and `expiresAt` stamped in the
+past, which would make a re-enabled TTL delete each sample on write.
+
+502 functions tests, tsc clean.
+
+**Still to do, approved and not yet started:** widening the probe beyond the
+single reach it samples today (`9962444`, Dead River, eastern Georgia), so
+the availability figure is not one reach generalised to a service.
+
