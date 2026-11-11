@@ -289,13 +289,26 @@ export async function probeEndpoint(
 }
 
 /**
- * How long a probe sample is kept, enforced by a Firestore TTL policy on
- * `expiresAt` rather than by any code here.
+ * How long a probe sample is kept, if anything is enforcing it.
  *
- * Nothing in this project deleted probe samples before 2026-08-29; the
- * collection was the one unbounded thing in the database.
+ * **THE FIRESTORE TTL ON `expiresAt` IS DISABLED as of 2026-11-11.** Nothing
+ * deletes this collection now, which is deliberate: the probe log turned out
+ * to be the only record of how NOAA actually behaves, and at 90 days it was
+ * about to delete the evidence behind ADR 0018 nine days after that ADR was
+ * written. Jerson's call, 2026-11-11.
+ *
+ * It was 90 days from 2026-08-29, added because this collection was the one
+ * unbounded thing in the database. That concern was real and is now judged
+ * the lesser one: a sample is ~2 KB and the probe writes one an hour, so a
+ * decade of history is on the order of 200 MB even after the reach list
+ * grows.
+ *
+ * The field is still written, and the horizon is now ten years rather than
+ * ninety days, so that re-enabling the policy cannot silently destroy the
+ * history the way it was about to. Anyone turning the TTL back on should
+ * change this number deliberately rather than inherit it.
  */
-export const PROBE_RETENTION_MS = 90 * 24 * 3600_000;
+export const PROBE_RETENTION_MS = 10 * 365 * 24 * 3600_000;
 
 /**
  * Assemble one hour's sample from the five results.

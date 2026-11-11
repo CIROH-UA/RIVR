@@ -220,9 +220,29 @@ describe("probe samples carry their own expiry", () => {
   });
 
   test("retention comfortably clears the seven days guard 1 needs", () => {
+    // The floor is what this test is for: Phase 0 guard 1 needs seven
+    // consecutive days of publication history, so anything at or under that
+    // makes the probe log useless for the thing it exists to answer.
     assert.ok(PROBE_RETENTION_MS > 7 * 24 * 3600_000);
-    assert.equal(PROBE_RETENTION_MS, 90 * 24 * 3600_000);
   });
+
+  test("retention is long enough that re-enabling the TTL is not destructive",
+    () => {
+      // The exact value used to be pinned at 90 days. That pin was removed on
+      // 2026-11-11 along with the TTL itself, because the 90-day policy was
+      // about to delete the evidence behind ADR 0018 nine days after the ADR
+      // was written: ~35% medium and long range availability measured over
+      // 1,954 samples, which is the single most load-bearing number about
+      // this app's data supply.
+      //
+      // The Firestore TTL on `expiresAt` is now DISABLED, so nothing deletes
+      // the collection. The field is still stamped, and this guard keeps the
+      // horizon far enough out that someone turning the policy back on does
+      // not silently destroy years of history. A year is the floor; the
+      // current value is ten.
+      assert.ok(PROBE_RETENTION_MS >= 365 * 24 * 3600_000,
+        "re-enabling the TTL must not be able to delete a season of data");
+    });
 });
 
 describe("NOAA's section names are not our product ids", () => {
