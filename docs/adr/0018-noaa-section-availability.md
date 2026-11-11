@@ -25,6 +25,14 @@ dataset.
 API, counting a sample as "served" when that product's `referenceTime` is
 non-null.
 
+**The raw data is committed** at
+`docs/data/noaa-section-availability-2026-08-22-to-2026-11-11.csv`, one row
+per sample, because the live collection is on a 90-day TTL and the August
+samples are deleted on **2026-11-20**. Recomputing from that file gives the
+same percentages to one decimal place (on 1,957 rows, since the probe kept
+running between the analysis and the export). Without the export this table
+would have become unverifiable nine days after it was written.
+
 | Product | Served | Share |
 |---|---|---|
 | `analysisAssimilation` | 1853 / 1954 | **94.8%** |
